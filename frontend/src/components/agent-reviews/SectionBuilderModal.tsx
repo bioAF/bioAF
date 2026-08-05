@@ -302,8 +302,8 @@ export function SectionBuilderModal({
         </h3>
 
         <div className="mt-4">
-          <label className="text-sm font-medium text-gray-700">Prompt source</label>
-          <select
+          <label htmlFor="prompt-source" className="text-sm font-medium text-gray-700">Prompt source</label>
+          <select id="prompt-source"
             className="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm"
             value={typeof mode === "string" ? "builder" : `custom-${mode.customSavedId}`}
             onChange={(e) => {
@@ -429,7 +429,7 @@ export function SectionBuilderModal({
                     <th scope="col" className="py-1">Run</th>
                     <th scope="col" className="py-1">Status</th>
                     <th scope="col" className="py-1 w-28">
-                      <label className="inline-flex items-center gap-1">
+                      <label htmlFor="html-report" className="inline-flex items-center gap-1">
                         <input
                           type="checkbox"
                           aria-label="Include HTML report for all runs"
@@ -452,7 +452,7 @@ export function SectionBuilderModal({
                     return (
                       <tr key={r.id} className="border-b">
                         <td className="py-2">
-                          <input
+                          <input id="html-report"
                             type="checkbox"
                             checked={selectedRuns.has(r.id)}
                             disabled={isCurrent}

@@ -37,7 +37,7 @@ export function MyCustomPipelinesWidget() {
         My custom pipelines
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading pipelines...</span>
         </div>
@@ -54,7 +54,7 @@ export function MyCustomPipelinesWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No custom pipelines yet.
         </p>
       )}
@@ -68,7 +68,7 @@ export function MyCustomPipelinesWidget() {
                   className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="truncate text-sm text-gray-800">{p.name}</span>
-                  <span className="shrink-0 text-xs text-gray-400">{timeAgo(p.updated_at)}</span>
+                  <span className="shrink-0 text-xs text-gray-500">{timeAgo(p.updated_at)}</span>
                 </Link>
               </li>
             ))}

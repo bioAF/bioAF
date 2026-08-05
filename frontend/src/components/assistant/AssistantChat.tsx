@@ -298,7 +298,7 @@ export function AssistantChat() {
     <div className="flex-1 flex flex-col min-h-0">
       <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0" data-testid="assistant-transcript">
         {entries.length === 0 && (
-          <div className="text-center text-gray-400 mt-6 text-sm">
+          <div className="text-center text-gray-500 mt-6 text-sm">
             Describe your samples and goal, e.g. &quot;recommend a pipeline for my mouse RNA
             experiment.&quot;
           </div>
@@ -440,7 +440,7 @@ export function AssistantChat() {
             </div>
           )}
           {!historyLoading && conversations.length === 0 && (
-            <div className="text-center text-gray-400 text-sm mt-6">No past conversations yet.</div>
+            <div className="text-center text-gray-500 text-sm mt-6">No past conversations yet.</div>
           )}
           {conversations.map((c) => (
             <button
@@ -452,7 +452,7 @@ export function AssistantChat() {
               <div className="text-sm font-medium text-gray-900 truncate">
                 {c.title ?? c.preview ?? "New conversation"}
               </div>
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-gray-500">
                 {c.message_count} message{c.message_count === 1 ? "" : "s"}
               </div>
             </button>

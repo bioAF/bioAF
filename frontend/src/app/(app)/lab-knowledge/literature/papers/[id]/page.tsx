@@ -383,7 +383,7 @@ export default function PaperDetailPage() {
               <h2 className="font-semibold mb-2">Comments ({paper.comment_count})</h2>
               {canComment && (
                 <div className="mb-4">
-                  <textarea
+                  <textarea aria-label="Add a comment"
                     value={commentBody}
                     onChange={(e) => setCommentBody(e.target.value)}
                     rows={3}
@@ -416,7 +416,7 @@ export default function PaperDetailPage() {
                       />
                       {replyToId === c.id && (
                         <div className="ml-4 mt-2">
-                          <textarea
+                          <textarea aria-label="Reply"
                             value={replyBody}
                             onChange={(e) => setReplyBody(e.target.value)}
                             rows={2}

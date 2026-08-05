@@ -100,7 +100,7 @@ export default function PipelineRunsPage() {
       <>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Pipeline Runs</h1>
-        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
+        <select aria-label="Filter by status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
           <option value="">All statuses</option>
           <option value="running">Running</option>
           <option value="completed">Completed</option>
@@ -142,7 +142,7 @@ export default function PipelineRunsPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-400">—</span>}
+                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-500">—</span>}
                 </td>
                 <td className="px-4 py-3">
                   {r.progress ? (
@@ -152,7 +152,7 @@ export default function PipelineRunsPage() {
                       </div>
                       <span className="text-xs text-gray-500">{Math.round(r.progress.percent_complete)}%</span>
                     </div>
-                  ) : <span className="text-xs text-gray-400">—</span>}
+                  ) : <span className="text-xs text-gray-500">—</span>}
                 </td>
                 <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
                 <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>

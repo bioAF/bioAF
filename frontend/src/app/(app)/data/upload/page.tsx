@@ -329,7 +329,7 @@ export default function DataUploadPage() {
           <p className="text-gray-500 mb-2">
             Drag & drop any files here
           </p>
-          <p className="text-sm text-gray-400">or click to browse</p>
+          <p className="text-sm text-gray-500">or click to browse</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -430,7 +430,7 @@ export default function DataUploadPage() {
                 ))}
               </select>
               {scope === "sample" && !experimentId && (
-                <p className="text-xs text-gray-400 mt-1">Select an experiment first</p>
+                <p className="text-xs text-gray-500 mt-1">Select an experiment first</p>
               )}
             </div>
           </div>
@@ -482,7 +482,7 @@ export default function DataUploadPage() {
                     <span className="truncate flex-1 mr-3 font-mono text-xs">
                       {item.file.name}
                     </span>
-                    <span className="text-gray-400 mr-3 shrink-0">
+                    <span className="text-gray-500 mr-3 shrink-0">
                       {(item.file.size / 1024 / 1024).toFixed(1)} MB
                     </span>
                     <StatusLabel item={item} />
@@ -525,7 +525,7 @@ export default function DataUploadPage() {
                   )}
 
                   {item.status === "queued" && item.suggestedName && item.nameAccepted === false && (
-                    <p className="mt-1 text-xs text-gray-400">
+                    <p className="mt-1 text-xs text-gray-500">
                       Keeping original name.{" "}
                       <button
                         className="underline text-gray-500 hover:text-gray-700"
@@ -576,7 +576,7 @@ function StatusLabel({ item }: { item: FileItem }) {
       </span>
     );
   }
-  return <span className="text-xs text-gray-400 shrink-0">Queued</span>;
+  return <span className="text-xs text-gray-500 shrink-0">Queued</span>;
 }
 
 function ProgressBar({ item }: { item: FileItem }) {

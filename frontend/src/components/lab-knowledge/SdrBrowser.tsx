@@ -363,7 +363,7 @@ export function SdrDetailView({
   return (
     <div className="bg-white rounded shadow p-6 max-w-3xl">
       <div className="mb-3">
-        <span className="font-mono text-xs text-gray-400">{sdrCode(sdr.sdr_number)}</span>
+        <span className="font-mono text-xs text-gray-500">{sdrCode(sdr.sdr_number)}</span>
         <h2 className="text-xl font-bold">{sdr.title}</h2>
         <div className="mt-1">
           <StatusBadge status={sdr.status} />
@@ -386,11 +386,11 @@ export function SdrDetailView({
         ) : (
           <>
             <section className="mb-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-1">Decision</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-1">Decision</h3>
               <p className="text-sm text-gray-800 whitespace-pre-wrap">{sdr.decision}</p>
             </section>
             <section className="mb-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-1">Justification</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-1">Justification</h3>
               <p className="text-sm text-gray-800 whitespace-pre-wrap">{sdr.justification}</p>
             </section>
 
@@ -434,7 +434,7 @@ export function SdrDetailView({
             )}
 
             <section className="border-t pt-4 mt-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-2">Status History</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-2">Status History</h3>
               <ul className="space-y-2">
                 {sdr.transitions.map((t) => (
                   <li key={t.id} className="text-xs text-gray-600">
@@ -442,7 +442,7 @@ export function SdrDetailView({
                       {STATUS_LABELS[t.from_status] ?? t.from_status} -&gt;{" "}
                       {STATUS_LABELS[t.to_status] ?? t.to_status}
                     </span>{" "}
-                    <span className="text-gray-400">
+                    <span className="text-gray-500">
                       {new Date(t.transitioned_at).toLocaleString()} ·{" "}
                       {t.transitioned_by?.name ?? t.transitioned_by?.email ?? "System"}
                     </span>
@@ -1032,7 +1032,7 @@ function CategoryManagerModal({
     <ModalShell title="SDR Categories" onClose={onClose}>
       <ul className="divide-y border rounded mb-3">
         {categories.length === 0 ? (
-          <li className="p-2 text-sm text-gray-400">No categories.</li>
+          <li className="p-2 text-sm text-gray-500">No categories.</li>
         ) : (
           categories.map((c) => (
             <li key={c.id} className="p-2 flex items-center justify-between text-sm">

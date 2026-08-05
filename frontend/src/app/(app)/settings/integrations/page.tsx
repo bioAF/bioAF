@@ -76,7 +76,7 @@ export default function IntegrationsPage() {
       {activeTab === "seqera" && (
         <div className="bg-white rounded-lg shadow p-12 text-center max-w-2xl">
           <h2 className="text-lg font-semibold mb-2">Seqera Fusion</h2>
-          <p className="text-gray-400">
+          <p className="text-gray-500">
             Support for Seqera Platform access tokens and Fusion file system licensing is coming soon.
           </p>
         </div>

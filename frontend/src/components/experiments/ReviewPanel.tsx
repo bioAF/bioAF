@@ -65,7 +65,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
   }
 
   if (loading) {
-    return <p className="text-sm text-gray-400">Loading reviews...</p>;
+    return <p className="text-sm text-gray-500">Loading reviews...</p>;
   }
 
   return (
@@ -84,7 +84,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
             <p className="text-sm text-gray-500 mt-2 bg-gray-50 p-2 rounded">{activeReview.notes}</p>
           )}
           {activeReview.recommended_exclusions && activeReview.recommended_exclusions.length > 0 && (
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-gray-500 mt-2">
               Recommended exclusions: sample IDs {activeReview.recommended_exclusions.join(", ")}
             </p>
           )}
@@ -160,7 +160,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
                     </span>
                     <ReviewBadge verdict={r.verdict} />
                   </div>
-                  {r.notes && <p className="text-gray-400 text-xs mt-1">{r.notes}</p>}
+                  {r.notes && <p className="text-gray-500 text-xs mt-1">{r.notes}</p>}
                 </div>
               ))}
           </div>

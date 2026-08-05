@@ -106,7 +106,7 @@ export function CostBudgetWidget() {
         Cost vs. Budget
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading costs...</span>
         </div>
       )}
@@ -144,7 +144,7 @@ export function CostBudgetWidget() {
               <p className="text-xs text-gray-500 mt-1">{Math.round(pct)}% of monthly budget</p>
             </>
           ) : (
-            <p className="text-xs text-gray-400 mt-1" data-testid="widget-no-budget">
+            <p className="text-xs text-gray-500 mt-1" data-testid="widget-no-budget">
               No budget set.{" "}
               <Link href="/infrastructure/cost-center" className="text-bioaf-600 hover:underline">
                 Configure in Cost Center

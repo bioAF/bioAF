@@ -145,7 +145,7 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
       <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Export Data</h2>
-          <button onClick={handleClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">
+          <button onClick={handleClose} className="text-gray-500 hover:text-gray-600 text-xl leading-none">
             &times;
           </button>
         </div>

@@ -468,9 +468,9 @@ export default function InfraBackupPage() {
                         <div className="space-y-3">
                           {!settings.postgres_next_run && (
                             <div>
-                              <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                              <label htmlFor="first-backup" className="block text-xs text-gray-500 mb-1">First backup</label>
                               <div className="flex gap-2">
-                                <select
+                                <select id="first-backup"
                                   value={pgFirstRun === "now" ? "now" : "scheduled"}
                                   onChange={(e) => {
                                     if (e.target.value === "now") {
@@ -487,7 +487,7 @@ export default function InfraBackupPage() {
                                   <option value="scheduled">Pick a time</option>
                                 </select>
                                 {pgFirstRun !== "now" && (
-                                  <input
+                                  <input aria-label="Pg first run"
                                     type="datetime-local"
                                     value={pgFirstRun}
                                     onChange={(e) => setPgFirstRun(e.target.value)}
@@ -503,8 +503,8 @@ export default function InfraBackupPage() {
                             </div>
                           )}
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
-                            <input
+                            <label htmlFor="run-every-hours" className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                            <input id="run-every-hours"
                               type="number"
                               min={1}
                               value={settings.postgres_schedule_hours}
@@ -513,8 +513,8 @@ export default function InfraBackupPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
-                            <input
+                            <label htmlFor="keep-backups-for-days" className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                            <input id="keep-backups-for-days"
                               type="number"
                               min={1}
                               value={settings.postgres_retention_days}
@@ -547,9 +547,9 @@ export default function InfraBackupPage() {
                         <div className="space-y-3">
                           {!settings.config_next_run && (
                             <div>
-                              <label className="block text-xs text-gray-500 mb-1">First backup</label>
+                              <label htmlFor="first-backup-2" className="block text-xs text-gray-500 mb-1">First backup</label>
                               <div className="flex gap-2">
-                                <select
+                                <select id="first-backup-2"
                                   value={cfgFirstRun === "now" ? "now" : "scheduled"}
                                   onChange={(e) => {
                                     if (e.target.value === "now") {
@@ -566,7 +566,7 @@ export default function InfraBackupPage() {
                                   <option value="scheduled">Pick a time</option>
                                 </select>
                                 {cfgFirstRun !== "now" && (
-                                  <input
+                                  <input aria-label="First run date and time"
                                     type="datetime-local"
                                     value={cfgFirstRun}
                                     onChange={(e) => setCfgFirstRun(e.target.value)}
@@ -582,8 +582,8 @@ export default function InfraBackupPage() {
                             </div>
                           )}
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
-                            <input
+                            <label htmlFor="run-every-hours-2" className="block text-xs text-gray-500 mb-1">Run every (hours)</label>
+                            <input id="run-every-hours-2"
                               type="number"
                               min={1}
                               value={settings.config_schedule_hours}
@@ -592,8 +592,8 @@ export default function InfraBackupPage() {
                             />
                           </div>
                           <div>
-                            <label className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
-                            <input
+                            <label htmlFor="keep-backups-for-days-2" className="block text-xs text-gray-500 mb-1">Keep backups for (days)</label>
+                            <input id="keep-backups-for-days-2"
                               type="number"
                               min={1}
                               value={settings.config_retention_days}

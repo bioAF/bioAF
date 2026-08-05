@@ -77,7 +77,7 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
           {n.message && (
             <p className="text-xs text-gray-500 mt-0.5 truncate">{n.message}</p>
           )}
-          <p className="text-xs text-gray-400 mt-1">{timeAgo(n.created_at)}</p>
+          <p className="text-xs text-gray-500 mt-1">{timeAgo(n.created_at)}</p>
         </div>
         {showActions && onDelete && (
           <button
@@ -85,7 +85,7 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
               e.stopPropagation();
               onDelete();
             }}
-            className="text-gray-400 hover:text-red-500 text-xs"
+            className="text-gray-500 hover:text-red-500 text-xs"
           >
             Delete
           </button>

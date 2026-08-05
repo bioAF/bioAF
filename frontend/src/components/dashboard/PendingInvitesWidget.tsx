@@ -40,7 +40,7 @@ export function PendingInvitesWidget() {
         Pending invites
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading invites...</span>
         </div>
@@ -57,7 +57,7 @@ export function PendingInvitesWidget() {
         </div>
       )}
       {!loading && !error && invited && invited.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No pending invites.
         </p>
       )}

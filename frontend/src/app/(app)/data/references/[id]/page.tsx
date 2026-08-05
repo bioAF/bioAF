@@ -425,14 +425,14 @@ export default function DataReferenceDetailPage() {
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{file.filename}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || "—"}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
-                  <td className="px-6 py-4 text-sm text-gray-400 font-mono text-xs">
+                  <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
                     {file.md5_checksum || "—"}
                   </td>
                 </tr>
               ))}
               {reference.files.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
+                  <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
                     No files uploaded
                   </td>
                 </tr>
@@ -469,7 +469,7 @@ export default function DataReferenceDetailPage() {
                         isCurrent
                           ? "bg-bioaf-50"
                           : v.status === "deprecated"
-                            ? "text-gray-400 hover:bg-gray-50"
+                            ? "text-gray-500 hover:bg-gray-50"
                             : "hover:bg-gray-50"
                       }
                     >
@@ -509,7 +509,7 @@ export default function DataReferenceDetailPage() {
             </table>
           )}
           {!versionsLoading && versions && versions.length === 0 && (
-            <div className="px-6 py-12 text-center text-gray-400">
+            <div className="px-6 py-12 text-center text-gray-500">
               No other versions of this reference exist.
             </div>
           )}
@@ -575,13 +575,13 @@ export default function DataReferenceDetailPage() {
 
               {impact.pipeline_runs.length === 0 && (
                 <div className="bg-white rounded-lg shadow p-12 text-center">
-                  <p className="text-gray-400">No pipeline runs are using this reference dataset.</p>
+                  <p className="text-gray-500">No pipeline runs are using this reference dataset.</p>
                 </div>
               )}
             </div>
           ) : (
             <div className="bg-white rounded-lg shadow p-12 text-center">
-              <p className="text-gray-400">Unable to load impact data.</p>
+              <p className="text-gray-500">Unable to load impact data.</p>
             </div>
           )}
         </div>
@@ -661,10 +661,10 @@ export default function DataReferenceDetailPage() {
             )}
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="deprecation-note" className="block text-sm font-medium text-gray-700 mb-1">
                   Deprecation Note
                 </label>
-                <textarea
+                <textarea id="deprecation-note"
                   value={deprecationNote}
                   onChange={(e) => setDeprecationNote(e.target.value)}
                   rows={3}
@@ -673,10 +673,10 @@ export default function DataReferenceDetailPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="superseded-by-optional" className="block text-sm font-medium text-gray-700 mb-1">
                   Superseded By (optional)
                 </label>
-                <select
+                <select id="superseded-by-optional"
                   value={supersededById}
                   onChange={(e) => setSupersededById(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"

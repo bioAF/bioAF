@@ -146,7 +146,7 @@ export default function AuditLogPage() {
         </div>
 
         <div className="flex flex-wrap gap-3 mb-4">
-          <select
+          <select aria-label="Entity type"
             value={entityType}
             onChange={(e) => { setEntityType(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded px-3 py-1.5 text-sm"
@@ -156,7 +156,7 @@ export default function AuditLogPage() {
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
-          <select
+          <select aria-label="Action"
             value={action}
             onChange={(e) => { setAction(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded px-3 py-1.5 text-sm"
@@ -166,14 +166,14 @@ export default function AuditLogPage() {
               <option key={a} value={a}>{a}</option>
             ))}
           </select>
-          <input
+          <input aria-label="Start date"
             type="date"
             value={startDate}
             onChange={(e) => { setStartDate(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded px-3 py-1.5 text-sm"
             placeholder="Start date"
           />
-          <input
+          <input aria-label="End date"
             type="date"
             value={endDate}
             onChange={(e) => { setEndDate(e.target.value); setPage(1); }}
@@ -234,7 +234,7 @@ export default function AuditLogPage() {
                     </td>
                     <td className="px-4 py-2.5 text-gray-600 text-xs">
                       <span className="bg-gray-100 px-1.5 py-0.5 rounded">{entry.entity_type}</span>
-                      <span className="ml-1 font-mono text-gray-400">#{entry.entity_id}</span>
+                      <span className="ml-1 font-mono text-gray-500">#{entry.entity_id}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <span className={`text-xs px-2 py-0.5 rounded ${

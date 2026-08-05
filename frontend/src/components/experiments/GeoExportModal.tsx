@@ -67,7 +67,7 @@ function FieldStatusIcon({ status }: { status: string }) {
     case "missing_required":
       return <span className="text-red-600">X</span>;
     case "missing_recommended":
-      return <span className="text-gray-400">--</span>;
+      return <span className="text-gray-500">--</span>;
     default:
       return <span>{status}</span>;
   }
@@ -179,7 +179,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
           <h2 className="text-xl font-semibold">Export to GEO</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            className="text-gray-500 hover:text-gray-600 text-2xl leading-none"
           >
             &times;
           </button>
@@ -189,10 +189,10 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
         <div className="p-6 space-y-6">
           {/* Pipeline Run Selector */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="pipeline-run" className="block text-sm font-medium text-gray-700 mb-1">
               Pipeline Run
             </label>
-            <select
+            <select id="pipeline-run"
               value={selectedRunId}
               onChange={(e) => setSelectedRunId(e.target.value ? Number(e.target.value) : "")}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"

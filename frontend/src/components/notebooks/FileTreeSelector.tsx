@@ -317,7 +317,7 @@ export function FileTreeSelector({
   }, []);
 
   if (files.length === 0) {
-    return <div className="text-sm text-gray-400 py-4">No files available</div>;
+    return <div className="text-sm text-gray-500 py-4">No files available</div>;
   }
 
   const allSelected =
@@ -347,7 +347,7 @@ export function FileTreeSelector({
                 active
                   ? "bg-bioaf-600 text-white border-bioaf-600"
                   : muted
-                  ? "bg-gray-50 text-gray-400 border-gray-200"
+                  ? "bg-gray-50 text-gray-500 border-gray-200"
                   : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
               }`}
             >
@@ -358,7 +358,7 @@ export function FileTreeSelector({
       </div>
 
       {allVisibleFiles.length === 0 ? (
-        <div className="text-sm text-gray-400 py-4">
+        <div className="text-sm text-gray-500 py-4">
           No files match the current filters. Enable additional filters above to see more.
         </div>
       ) : (
@@ -368,7 +368,7 @@ export function FileTreeSelector({
             <button
               type="button"
               onClick={() => toggleExpand("root")}
-              className="text-xs text-gray-400 w-4"
+              className="text-xs text-gray-500 w-4"
             >
               {rootExpanded ? "▼" : "▶"}
             </button>
@@ -382,7 +382,7 @@ export function FileTreeSelector({
               aria-label="Select all files"
             />
             <span className="text-sm font-semibold">All Files</span>
-            <span className="text-xs text-gray-400">({allVisibleFiles.length} files)</span>
+            <span className="text-xs text-gray-500">({allVisibleFiles.length} files)</span>
           </div>
 
           {rootExpanded && (
@@ -401,7 +401,7 @@ export function FileTreeSelector({
                       <button
                         type="button"
                         onClick={() => toggleExpand(group.sampleId)}
-                        className="text-xs text-gray-400 w-4"
+                        className="text-xs text-gray-500 w-4"
                       >
                         {isExpanded ? "▼" : "▶"}
                       </button>
@@ -415,7 +415,7 @@ export function FileTreeSelector({
                         aria-label={group.sampleName}
                       />
                       <span className="text-sm font-medium">{group.sampleName}</span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-gray-500">
                         ({visible.length} files)
                       </span>
                     </div>
@@ -427,7 +427,7 @@ export function FileTreeSelector({
                           if (subVisible.length === 0) return null;
                           return (
                             <div key={sub.key} className="ml-1">
-                              <div className="text-xs text-gray-400 font-mono py-0.5 border-l-2 border-gray-200 pl-2 mb-0.5">
+                              <div className="text-xs text-gray-500 font-mono py-0.5 border-l-2 border-gray-200 pl-2 mb-0.5">
                                 {sub.label}
                               </div>
                               <div className="ml-3 space-y-0.5">
@@ -452,7 +452,7 @@ export function FileTreeSelector({
                                       {sourceLabel(file.source_type)}
                                     </span>
                                     {file.size_bytes != null && (
-                                      <span className="text-xs text-gray-400">
+                                      <span className="text-xs text-gray-500">
                                         ({formatBytes(file.size_bytes)})
                                       </span>
                                     )}

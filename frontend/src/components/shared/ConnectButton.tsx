@@ -77,7 +77,7 @@ export function ConnectButton({ targetType, targetId, disabled = false }: Connec
           disabled={disabled || loading}
           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
             disabled
-              ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+              ? "bg-gray-100 text-gray-500 cursor-not-allowed"
               : "bg-gray-800 text-white hover:bg-gray-700"
           }`}
           title={disabled ? "Target is not running" : "Open terminal connection"}

@@ -322,7 +322,7 @@ export function CustomPipelineLaunchDialog({
                         <span className="font-mono font-semibold">
                           v{selectedVersion.version_number}
                         </span>
-                        <span className="text-gray-400 ml-2">
+                        <span className="text-gray-500 ml-2">
                           {new Date(selectedVersion.created_at).toLocaleDateString()}
                         </span>
                       </>
@@ -343,10 +343,10 @@ export function CustomPipelineLaunchDialog({
               <section>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
+                    <label htmlFor="project-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
                       Project (optional)
                     </label>
-                    <select
+                    <select id="project-optional"
                       value={projectId ?? ""}
                       onChange={(e) =>
                         setProjectId(e.target.value ? Number(e.target.value) : null)
@@ -362,10 +362,10 @@ export function CustomPipelineLaunchDialog({
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
+                    <label htmlFor="experiment-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
                       Experiment (optional)
                     </label>
-                    <select
+                    <select id="experiment-optional"
                       value={experimentId ?? ""}
                       onChange={(e) =>
                         setExperimentId(e.target.value ? Number(e.target.value) : null)
@@ -490,12 +490,12 @@ function VariableInput({
       <label className="text-sm text-gray-700 font-mono block mb-1">
         {variable.variable_name}
         {variable.is_required && <span className="text-red-500 ml-1">*</span>}
-        <span className="text-xs text-gray-400 ml-2 font-sans">
+        <span className="text-xs text-gray-500 ml-2 font-sans">
           ({variable.variable_type})
         </span>
       </label>
       {variable.variable_type === "boolean" ? (
-        <label className="inline-flex items-center gap-2 text-sm">
+        <label htmlFor="onchange-e-target-checked-true-false" className="inline-flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={value.toLowerCase() === "true"}
@@ -504,7 +504,7 @@ function VariableInput({
           {value.toLowerCase() === "true" ? "true" : "false"}
         </label>
       ) : variable.variable_type === "number" ? (
-        <input
+        <input id="onchange-e-target-checked-true-false"
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -517,7 +517,7 @@ function VariableInput({
           onChange={onChange}
         />
       ) : (
-        <input
+        <input aria-label="Value"
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -593,7 +593,7 @@ function VersionPickerModal({
                       >
                         {change.label}
                       </span>
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs text-gray-500">
                         {new Date(version.created_at).toLocaleString()}
                       </span>
                     </div>

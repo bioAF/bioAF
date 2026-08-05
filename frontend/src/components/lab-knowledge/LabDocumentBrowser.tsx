@@ -196,7 +196,7 @@ export function LabDocumentBrowser() {
               >
                 <td className="py-2 font-medium">
                   {d.title}
-                  {d.is_archived && <span className="ml-2 text-xs text-gray-400">(archived)</span>}
+                  {d.is_archived && <span className="ml-2 text-xs text-gray-500">(archived)</span>}
                 </td>
                 <td className="text-gray-600">{d.tags.map((t) => t.name).join(", ")}</td>
                 <td>v{d.current_version}</td>
@@ -374,7 +374,7 @@ function UploadDocumentModal({
             ))}
           </div>
           {!canManageTags && tags.length === 0 && (
-            <p className="text-xs text-gray-400">No tags available.</p>
+            <p className="text-xs text-gray-500">No tags available.</p>
           )}
           {err && <div className="text-red-600 text-sm">{err}</div>}
         </div>

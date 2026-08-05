@@ -74,8 +74,8 @@ export default function LiteratureRecommendationsPage() {
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold">AI Literature Review</h1>
           <div>
-            <label className="text-xs text-gray-500 mr-2">Status</label>
-            <select
+            <label htmlFor="status" className="text-xs text-gray-500 mr-2">Status</label>
+            <select id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value as RecommendationStatus)}
               className="border border-gray-300 rounded px-3 py-2"

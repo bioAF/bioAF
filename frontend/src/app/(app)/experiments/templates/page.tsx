@@ -155,8 +155,8 @@ export default function ExperimentTemplatesPage() {
           <h2 className="text-lg font-semibold">{editingId ? "Edit Template" : "New Template"}</h2>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input
+            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input id="name"
               required
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
@@ -165,8 +165,8 @@ export default function ExperimentTemplatesPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea id="description"
               value={form.description ?? ""}
               onChange={(e) => setForm({ ...form, description: e.target.value || null })}
               rows={2}
@@ -210,20 +210,20 @@ export default function ExperimentTemplatesPage() {
 
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">Custom Fields</label>
+              <label htmlFor="custom-fields" className="block text-sm font-medium text-gray-700">Custom Fields</label>
               <button type="button" onClick={handleAddCustomField} className="text-sm text-bioaf-600 hover:text-bioaf-700">
                 + Add Field
               </button>
             </div>
             {customFields.map((cf, i) => (
               <div key={i} className="flex gap-2 mb-2">
-                <input
+                <input id="custom-fields"
                   placeholder="Field name"
                   value={cf.name}
                   onChange={(e) => handleCustomFieldChange(i, "name", e.target.value)}
                   className="border rounded px-2 py-1 text-sm flex-1"
                 />
-                <select
+                <select aria-label="Type"
                   value={cf.type}
                   onChange={(e) => handleCustomFieldChange(i, "type", e.target.value)}
                   className="border rounded px-2 py-1 text-sm"
@@ -257,7 +257,7 @@ export default function ExperimentTemplatesPage() {
         <ErrorState message={`Could not load templates. ${loadError}`} onRetry={() => loadTemplates()} />
       ) : templates.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
-          <p className="text-gray-400">No templates yet. Create one to standardize experiment registration.</p>
+          <p className="text-gray-500">No templates yet. Create one to standardize experiment registration.</p>
         </div>
       ) : (
         <div className="grid gap-4">
@@ -267,7 +267,7 @@ export default function ExperimentTemplatesPage() {
                 <div>
                   <h3 className="font-semibold">{t.name}</h3>
                   {t.description && <p className="text-sm text-gray-500">{t.description}</p>}
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     Created by {t.created_by?.name || t.created_by?.email || "—"} on {new Date(t.created_at).toLocaleDateString()}
                   </p>
                 </div>

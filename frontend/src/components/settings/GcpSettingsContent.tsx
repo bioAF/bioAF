@@ -151,7 +151,7 @@ function ProbePanel({ title, subtitle, probe }: { title: string; subtitle: strin
               {detail.permission}
             </code>
             {!detail.granted && (
-              <span className="text-gray-400">(needs {detail.recommended_role})</span>
+              <span className="text-gray-500">(needs {detail.recommended_role})</span>
             )}
           </li>
         ))}
@@ -262,7 +262,7 @@ export function GcpSettingsContent() {
           <details data-testid="recommended-roles" className="bg-white rounded-lg shadow max-w-2xl mb-6">
             <summary className="px-6 py-4 cursor-pointer text-lg font-semibold select-none">
               Recommended IAM Roles
-              <span className="ml-2 text-sm font-normal text-gray-400">
+              <span className="ml-2 text-sm font-normal text-gray-500">
                 (bioaf-bootstrap: {BOOTSTRAP_ROLES.length}, bioaf-app: {APP_ROLES.length})
               </span>
             </summary>
@@ -280,7 +280,7 @@ export function GcpSettingsContent() {
                   {BOOTSTRAP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-2 text-xs">
                       <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -294,7 +294,7 @@ export function GcpSettingsContent() {
                   {APP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-2 text-xs">
                       <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -306,8 +306,8 @@ export function GcpSettingsContent() {
           <div className="bg-white rounded-lg shadow p-6 max-w-2xl space-y-5">
             {/* GCP Project ID */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
-              <input
+              <label htmlFor="gcp-project-id" className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
+              <input id="gcp-project-id"
                 data-testid="gcp-project-id-input"
                 type="text"
                 value={projectId}
@@ -319,8 +319,8 @@ export function GcpSettingsContent() {
 
             {/* Region */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
-              <select
+              <label htmlFor="default-region" className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
+              <select id="default-region"
                 data-testid="gcp-region-select"
                 value={region}
                 onChange={(e) => {
@@ -337,8 +337,8 @@ export function GcpSettingsContent() {
 
             {/* Zone */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default Zone</label>
-              <select
+              <label htmlFor="default-zone" className="block text-sm font-medium text-gray-700 mb-1">Default Zone</label>
+              <select id="default-zone"
                 data-testid="gcp-zone-select"
                 value={zone}
                 onChange={(e) => setZone(e.target.value)}
@@ -352,11 +352,11 @@ export function GcpSettingsContent() {
 
             {/* Org Slug */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="organization-slug-3-30-chars-lowercase-h" className="block text-sm font-medium text-gray-700 mb-1">
                 Organization Slug
-                <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+                <span className="ml-1 text-gray-500 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
               </label>
-              <input
+              <input id="organization-slug-3-30-chars-lowercase-h"
                 data-testid="org-slug-input"
                 type="text"
                 value={orgSlug}
@@ -400,8 +400,8 @@ export function GcpSettingsContent() {
 
               {credentialSource === "service_account_key" && (
                 <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
-                  <textarea
+                  <label htmlFor="service-account-key-json" className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
+                  <textarea id="service-account-key-json"
                     data-testid="service-account-key-input"
                     value={serviceAccountKey}
                     onChange={(e) => setServiceAccountKey(e.target.value)}
@@ -414,11 +414,11 @@ export function GcpSettingsContent() {
 
               {credentialSource === "vm_default" && (
                 <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="service-account-email-optional-for-imper" className="block text-sm font-medium text-gray-700 mb-1">
                     Service Account Email
-                    <span className="ml-1 text-gray-400 font-normal text-xs">(optional -- for impersonation)</span>
+                    <span className="ml-1 text-gray-500 font-normal text-xs">(optional -- for impersonation)</span>
                   </label>
-                  <input
+                  <input id="service-account-email-optional-for-imper"
                     data-testid="service-account-email-input"
                     type="email"
                     value={serviceAccountEmail}
@@ -473,7 +473,7 @@ export function GcpSettingsContent() {
               <ul className="space-y-2 mb-5">
                 {validationResult.checks.map((check) => (
                   <li key={check.name} className="flex items-start gap-2 text-sm">
-                    <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-400" : "text-red-600"}`}>
+                    <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-500" : "text-red-600"}`}>
                       {check.passed ? "\u2713" : check.status === "skipped" ? "\u2013" : "\u2717"}
                     </span>
                     <div>
@@ -509,7 +509,7 @@ export function GcpSettingsContent() {
                           {detail.permission}
                         </code>
                         {!detail.granted && (
-                          <span className="text-gray-400">
+                          <span className="text-gray-500">
                             (needs {detail.recommended_role})
                           </span>
                         )}
@@ -546,7 +546,7 @@ export function GcpSettingsContent() {
                   {REQUIRED_APIS.map((a) => (
                     <li key={a.name}>
                       <code className="bg-gray-100 px-1 rounded">{a.name}</code>
-                      <span className="ml-1 text-gray-400">-- {a.description}</span>
+                      <span className="ml-1 text-gray-500">-- {a.description}</span>
                     </li>
                   ))}
                 </ul>

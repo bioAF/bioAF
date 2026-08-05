@@ -494,14 +494,14 @@ export default function WorkNodesPage() {
             {/* Add repo form */}
             {canAccess("work_nodes", "launch") && (
               <div className="flex gap-2 mb-3">
-                <input
+                <input aria-label="git@github.com:owner/repo.git"
                   type="text"
                   value={newRepoUrl}
                   onChange={(e) => setNewRepoUrl(e.target.value)}
                   placeholder="git@github.com:owner/repo.git"
                   className="flex-1 border rounded px-3 py-1.5 text-sm font-mono"
                 />
-                <input
+                <input aria-label="Display name (optional)"
                   type="text"
                   value={newRepoName}
                   onChange={(e) => setNewRepoName(e.target.value)}
@@ -520,14 +520,14 @@ export default function WorkNodesPage() {
 
             {/* Repo list */}
             {repos.length === 0 ? (
-              <p className="text-xs text-gray-400">No repos configured yet.</p>
+              <p className="text-xs text-gray-500">No repos configured yet.</p>
             ) : (
               <div className="space-y-1">
                 {repos.map((repo) => (
                   <div key={repo.id} className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded text-sm">
                     <div>
                       <span className="font-medium">{repo.display_name}</span>
-                      <span className="text-gray-400 font-mono text-xs ml-2">{repo.git_ssh_url}</span>
+                      <span className="text-gray-500 font-mono text-xs ml-2">{repo.git_ssh_url}</span>
                     </div>
                     {canAccess("work_nodes", "launch") && (
                       <button
@@ -651,7 +651,7 @@ export default function WorkNodesPage() {
           <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold">Work Node Details</h2>
-              <button onClick={() => setViewingNode(null)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+              <button onClick={() => setViewingNode(null)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
             </div>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
@@ -716,7 +716,7 @@ export default function WorkNodesPage() {
                     <code>{extractSshCommand(viewingNode.access_url)}</code>
                     <button
                       onClick={() => navigator.clipboard.writeText(extractSshCommand(viewingNode.access_url))}
-                      className="ml-2 text-gray-400 hover:text-white text-xs"
+                      className="ml-2 text-gray-500 hover:text-white text-xs"
                     >
                       Copy
                     </button>
@@ -773,7 +773,7 @@ export default function WorkNodesPage() {
                 >
                   Stop Work Node
                 </button>
-                <p className="text-xs text-gray-400 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
+                <p className="text-xs text-gray-500 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
               </div>
             )}
           </div>
@@ -792,7 +792,7 @@ export default function WorkNodesPage() {
           >
             <div className="p-6 border-b flex items-center justify-between shrink-0">
               <h2 className="text-lg font-semibold">Launch Work Node</h2>
-              <button onClick={() => setShowLaunch(false)} className="text-gray-400 hover:text-gray-600 text-xl">
+              <button onClick={() => setShowLaunch(false)} className="text-gray-500 hover:text-gray-600 text-xl">
                 &times;
               </button>
             </div>
@@ -848,7 +848,7 @@ export default function WorkNodesPage() {
                               <span className="font-semibold text-sm flex items-center gap-2">
                                 {profile.label}
                                 {!available && (
-                                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 border border-gray-300 rounded px-1.5 py-0.5">
+                                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
                                     Unavailable
                                   </span>
                                 )}
@@ -1049,7 +1049,7 @@ export default function WorkNodesPage() {
                     <section>
                       <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files</h3>
                       {experimentFiles.length === 0 ? (
-                        <p className="text-xs text-gray-400">
+                        <p className="text-xs text-gray-500">
                           No files found for this experiment.
                         </p>
                       ) : (
@@ -1070,7 +1070,7 @@ export default function WorkNodesPage() {
                       Cloned into ~/repos/ when the node boots.
                     </p>
                     {repos.length === 0 ? (
-                      <p className="text-xs text-gray-400">
+                      <p className="text-xs text-gray-500">
                         No repos configured. Add one from the GitHub Repos section below.
                       </p>
                     ) : (
@@ -1088,7 +1088,7 @@ export default function WorkNodesPage() {
                             />
                             <div>
                               <div className="text-sm font-medium">{repo.display_name}</div>
-                              <div className="text-xs text-gray-400 font-mono mt-0.5">
+                              <div className="text-xs text-gray-500 font-mono mt-0.5">
                                 {repo.git_ssh_url}
                               </div>
                             </div>

@@ -268,7 +268,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
             >
               <div className="flex items-baseline justify-between">
                 <span className="font-semibold">{t.term}</span>
-                <span className="text-xs text-gray-400">{SOURCE_LABELS[t.source] ?? t.source}</span>
+                <span className="text-xs text-gray-500">{SOURCE_LABELS[t.source] ?? t.source}</span>
               </div>
               <p className="text-sm text-gray-700 mt-0.5">{t.definition}</p>
               <div className="text-xs text-gray-500 mt-1">
@@ -391,7 +391,7 @@ function TermDetailPanel({
       >
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-xl font-bold">{term.term}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
+          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500">
             x
           </button>
         </div>
@@ -440,7 +440,7 @@ function TermDetailPanel({
             ) : null}
             {term.category ? <p className="text-xs text-gray-500 mb-1">Category: {term.category}</p> : null}
             {term.context ? <p className="text-xs text-gray-500 mb-1">Context: {term.context}</p> : null}
-            <p className="text-xs text-gray-400 mt-2">Source: {SOURCE_LABELS[term.source] ?? term.source}</p>
+            <p className="text-xs text-gray-500 mt-2">Source: {SOURCE_LABELS[term.source] ?? term.source}</p>
 
             {(canManage || canDelete) && (
               <div className="border-t pt-4 mt-4 flex items-center gap-4">
@@ -791,7 +791,7 @@ function ScanModal({
                           </span>
                         </div>
                         {(r.file_type || r.experiment_id != null) && (
-                          <div className="text-xs text-gray-400 mt-0.5">
+                          <div className="text-xs text-gray-500 mt-0.5">
                             {[r.file_type, r.experiment_id != null ? `Experiment ${r.experiment_id}` : null]
                               .filter(Boolean)
                               .join(" · ")}
@@ -803,7 +803,7 @@ function ScanModal({
                 </ul>
               )}
               {docQuery.trim() && docResults.length === 0 && (
-                <p className="text-xs text-gray-400 mt-2">No matching documents or files.</p>
+                <p className="text-xs text-gray-500 mt-2">No matching documents or files.</p>
               )}
             </div>
           )}
@@ -898,14 +898,14 @@ function ReviewPanel({
       >
         <div className="flex items-start justify-between mb-4">
           <h2 className="text-lg font-bold">Review Proposed Terms</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
+          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500">
             x
           </button>
         </div>
 
         <h3 className="font-semibold text-sm mb-2">New Terms ({data.new_terms.length})</h3>
         {data.new_terms.length === 0 ? (
-          <p className="text-sm text-gray-400 mb-4">None.</p>
+          <p className="text-sm text-gray-500 mb-4">None.</p>
         ) : (
           <ul className="divide-y border rounded mb-5">
             {data.new_terms.map((p) => (
@@ -928,7 +928,7 @@ function ReviewPanel({
                 </div>
                 <p className="text-sm text-gray-700 mt-0.5">{p.proposed_definition}</p>
                 {p.source_description && (
-                  <p className="text-xs text-gray-400 mt-1">{p.source_description}</p>
+                  <p className="text-xs text-gray-500 mt-1">{p.source_description}</p>
                 )}
               </li>
             ))}
@@ -937,7 +937,7 @@ function ReviewPanel({
 
         <h3 className="font-semibold text-sm mb-2">Changed Terms ({data.changed_terms.length})</h3>
         {data.changed_terms.length === 0 ? (
-          <p className="text-sm text-gray-400 mb-4">None.</p>
+          <p className="text-sm text-gray-500 mb-4">None.</p>
         ) : (
           <ul className="divide-y border rounded mb-5">
             {data.changed_terms.map((p) => (
@@ -962,11 +962,11 @@ function ReviewPanel({
                 </div>
                 <div className="grid grid-cols-2 gap-3 mt-1">
                   <div className="text-xs">
-                    <span className="text-gray-400">Current</span>
+                    <span className="text-gray-500">Current</span>
                     <p className="text-gray-600">{p.existing_definition}</p>
                   </div>
                   <div className="text-xs">
-                    <span className="text-gray-400">Proposed</span>
+                    <span className="text-gray-500">Proposed</span>
                     <p className="text-gray-700">{p.proposed_definition}</p>
                   </div>
                 </div>

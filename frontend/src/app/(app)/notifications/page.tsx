@@ -89,7 +89,7 @@ export default function NotificationsPage() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <select
+        <select aria-label="Filter by filter"
           value={filter}
           onChange={(e) => { setFilter(e.target.value as "all" | "unread"); setPage(1); }}
           className="border border-gray-300 rounded px-3 py-1.5 text-sm"
@@ -97,7 +97,7 @@ export default function NotificationsPage() {
           <option value="all">All</option>
           <option value="unread">Unread</option>
         </select>
-        <select
+        <select aria-label="Filter by severity"
           value={severityFilter}
           onChange={(e) => { setSeverityFilter(e.target.value); setPage(1); }}
           className="border border-gray-300 rounded px-3 py-1.5 text-sm"

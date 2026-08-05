@@ -259,7 +259,7 @@ export default function ProjectDetailPage() {
         {activeTab === "experiments" && (
           <div>
             {project.experiments.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
                 No experiments linked to this project.
               </div>
             ) : (
@@ -311,7 +311,7 @@ export default function ProjectDetailPage() {
               </div>
             )}
             {project.samples.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
                 No samples added yet. Click &quot;Add Samples&quot; to get started.
               </div>
             ) : (
@@ -403,7 +403,7 @@ export default function ProjectDetailPage() {
         {activeTab === "runs" && (
           <div>
             {project.pipeline_runs.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
                 No pipeline runs yet.
               </div>
             ) : (
@@ -466,7 +466,7 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
             ) : (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
                 No provenance data available.
               </div>
             )}
@@ -503,7 +503,7 @@ export default function ProjectDetailPage() {
           <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
             <div className="p-4 border-b">
               <h2 className="text-lg font-bold">Add Samples to Project</h2>
-              <input
+              <input aria-label="Search by sample ID, experiment, or organism"
                 type="text"
                 placeholder="Search by sample ID, experiment, or organism..."
                 value={sampleSearch}
@@ -513,7 +513,7 @@ export default function ProjectDetailPage() {
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {filteredAvailable.length === 0 ? (
-                <p className="text-gray-400 text-center py-8">No matching samples available.</p>
+                <p className="text-gray-500 text-center py-8">No matching samples available.</p>
               ) : (
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">

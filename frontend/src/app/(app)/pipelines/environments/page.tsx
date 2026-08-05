@@ -353,7 +353,7 @@ export default function PipelineEnvironmentsPage() {
                               {labelFor("environmentVersion", env.latest_version.status)}
                             </span>
                           ) : (
-                            <span className="text-xs text-gray-400">No versions</span>
+                            <span className="text-xs text-gray-500">No versions</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-gray-700">
@@ -366,7 +366,7 @@ export default function PipelineEnvironmentsPage() {
                     ))}
                     {environments.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-12 text-center text-gray-400">
+                        <td colSpan={5} className="px-4 py-12 text-center text-gray-500">
                           No pipeline environments yet. Create one to get started.
                         </td>
                       </tr>
@@ -404,7 +404,7 @@ export default function PipelineEnvironmentsPage() {
                             {selectedVersion.definition_format}
                           </span>
                           {selectedVersion.image_uri && (
-                            <span className="text-xs text-gray-400 font-mono ml-2">
+                            <span className="text-xs text-gray-500 font-mono ml-2">
                               {selectedVersion.image_uri}
                             </span>
                           )}
@@ -524,7 +524,7 @@ export default function PipelineEnvironmentsPage() {
                               <span className="font-mono font-medium">
                                 v{v.version_number}
                               </span>
-                              <span className="text-xs text-gray-400">
+                              <span className="text-xs text-gray-500">
                                 build #{v.build_number}
                               </span>
                               <span
@@ -537,7 +537,7 @@ export default function PipelineEnvironmentsPage() {
                               </span>
                             </div>
                             <div className="flex items-center gap-3">
-                              <span className="text-xs text-gray-400">
+                              <span className="text-xs text-gray-500">
                                 {new Date(v.created_at).toLocaleDateString()}
                               </span>
                               {canBuild && (v.status === "draft" || v.status === "failed") && (
@@ -577,7 +577,7 @@ export default function PipelineEnvironmentsPage() {
                           </div>
                         ))}
                         {selectedEnv.versions.length === 0 && (
-                          <p className="text-center text-gray-400 py-8">
+                          <p className="text-center text-gray-500 py-8">
                             No versions yet. Create one in the &quot;New Version&quot; tab.
                           </p>
                         )}
@@ -587,10 +587,10 @@ export default function PipelineEnvironmentsPage() {
                     {activeTab === "new-version" && canCreate && (
                       <div className="space-y-4">
                         <div>
-                          <label className="text-sm text-gray-500 block mb-1">
+                          <label htmlFor="environment-yml" className="text-sm text-gray-500 block mb-1">
                             environment.yml
                           </label>
-                          <textarea
+                          <textarea id="environment-yml"
                             value={newVersionContent}
                             onChange={(e) => setNewVersionContent(e.target.value)}
                             rows={18}
@@ -617,8 +617,8 @@ export default function PipelineEnvironmentsPage() {
                   <h3 className="font-semibold text-lg mb-4">New Pipeline Environment</h3>
                   <div className="space-y-3">
                     <div>
-                      <label className="text-sm text-gray-500 block mb-1">Name</label>
-                      <input
+                      <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+                      <input id="name"
                         value={createForm.name}
                         onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
                         placeholder="rnaseq-pipeline"
@@ -626,8 +626,8 @@ export default function PipelineEnvironmentsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-sm text-gray-500 block mb-1">Description</label>
-                      <input
+                      <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
+                      <input id="description"
                         value={createForm.description}
                         onChange={(e) =>
                           setCreateForm({ ...createForm, description: e.target.value })
@@ -637,10 +637,10 @@ export default function PipelineEnvironmentsPage() {
                       />
                     </div>
                     <div>
-                      <label className="text-sm text-gray-500 block mb-1">
+                      <label htmlFor="environment-yml-2" className="text-sm text-gray-500 block mb-1">
                         environment.yml
                       </label>
-                      <textarea
+                      <textarea id="environment-yml-2"
                         value={createForm.definition_content}
                         onChange={(e) =>
                           setCreateForm({
@@ -651,7 +651,7 @@ export default function PipelineEnvironmentsPage() {
                         rows={14}
                         className="w-full border rounded px-3 py-2 text-sm font-mono"
                       />
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-xs text-gray-500 mt-1">
                         The first version is created automatically. You can build it from the
                         versions list.
                       </p>

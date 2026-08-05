@@ -163,7 +163,7 @@ export function DeployRecoveryModal({
                 Your previous deployment took longer than expected, but it
                 finished successfully. We can pick up right where you left off.
               </p>
-              <p className="text-xs text-gray-400 mb-4">
+              <p className="text-xs text-gray-500 mb-4">
                 This sometimes happens when Google Cloud is experiencing
                 delays in your region.
               </p>
@@ -215,7 +215,7 @@ export function DeployRecoveryModal({
                 There&apos;s nothing you need to do. Come back later and
                 we&apos;ll check again automatically.
               </p>
-              <p className="text-xs text-gray-400 mb-4">
+              <p className="text-xs text-gray-500 mb-4">
                 You can check{" "}
                 <a
                   href="https://status.cloud.google.com"

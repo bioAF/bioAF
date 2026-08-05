@@ -67,7 +67,7 @@ function SidebarChildItem({
       className={`block pl-10 pr-3 py-1.5 rounded-md text-sm transition-colors ${
         isActive
           ? "bg-bioaf-700 text-white"
-          : "text-gray-400 hover:bg-gray-800 hover:text-white"
+          : "text-gray-500 hover:bg-gray-800 hover:text-white"
       }`}
     >
       {child.label}
@@ -327,7 +327,7 @@ export function Sidebar() {
               </span>
               <span className="flex flex-col leading-none">
                 <span className="text-base font-bold text-bioaf-400">bioAF</span>
-                <span className="mt-0.5 text-[10px] tracking-tight text-gray-400 whitespace-nowrap">
+                <span className="mt-0.5 text-[10px] tracking-tight text-gray-500 whitespace-nowrap">
                   Comp Bio Automation Framework
                 </span>
               </span>
@@ -338,7 +338,7 @@ export function Sidebar() {
               aria-label="Collapse sidebar"
               aria-expanded={true}
               data-testid="sidebar-collapse-toggle"
-              className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+              className="p-1 rounded-md text-gray-500 hover:bg-gray-800 hover:text-white"
             >
               <CollapseToggleIcon collapsed={false} />
             </button>

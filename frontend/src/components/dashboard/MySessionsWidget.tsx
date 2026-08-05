@@ -78,7 +78,7 @@ export function MySessionsWidget() {
         My active sessions
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading sessions...</span>
         </div>
@@ -95,7 +95,7 @@ export function MySessionsWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No active sessions.
         </p>
       )}

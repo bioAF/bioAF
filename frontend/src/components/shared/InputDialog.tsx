@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface InputDialogProps {
   open: boolean;
@@ -66,6 +67,10 @@ export function InputDialog({
     }
   }, [open, initialValue]);
 
+  // Above the early return: hooks must run on every render, and this
+  // component bails out with `return null` when closed.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
+
   if (!open) return null;
 
   const canConfirm = !busy && (allowEmpty || value.trim().length > 0);
@@ -84,6 +89,7 @@ export function InputDialog({
     }
   };
 
+
   const fieldClass =
     "w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-bioaf-500 focus:outline-none focus:ring-1 focus:ring-bioaf-500";
 
@@ -93,6 +99,8 @@ export function InputDialog({
       onKeyDown={onKeyDown}
     >
       <div
+        ref={trapRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

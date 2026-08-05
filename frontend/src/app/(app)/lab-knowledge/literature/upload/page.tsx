@@ -50,8 +50,8 @@ export default function LiteratureUploadPage() {
           className="space-y-4 bg-white rounded shadow p-6"
         >
           <div>
-            <label className="block text-sm font-medium mb-1">PDF file</label>
-            <input
+            <label htmlFor="pdf-file" className="block text-sm font-medium mb-1">PDF file</label>
+            <input id="pdf-file"
               type="file"
               accept="application/pdf"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
@@ -65,40 +65,40 @@ export default function LiteratureUploadPage() {
             override what is extracted.
           </p>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="title-optional-override" className="block text-sm font-medium mb-1">
               Title (optional override)
             </label>
-            <input
+            <input id="title-optional-override"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full border border-gray-300 rounded px-3 py-2"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="doi-optional-override" className="block text-sm font-medium mb-1">
               DOI (optional override)
             </label>
-            <input
+            <input id="doi-optional-override"
               value={doi}
               onChange={(e) => setDoi(e.target.value)}
               className="w-full border border-gray-300 rounded px-3 py-2"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="journal-optional" className="block text-sm font-medium mb-1">
               Journal (optional)
             </label>
-            <input
+            <input id="journal-optional"
               value={journal}
               onChange={(e) => setJournal(e.target.value)}
               className="w-full border border-gray-300 rounded px-3 py-2"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">
+            <label htmlFor="abstract-optional" className="block text-sm font-medium mb-1">
               Abstract (optional)
             </label>
-            <textarea
+            <textarea id="abstract-optional"
               value={abstract}
               onChange={(e) => setAbstract(e.target.value)}
               rows={4}

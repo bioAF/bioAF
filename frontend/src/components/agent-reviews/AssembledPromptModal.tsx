@@ -92,7 +92,7 @@ export function AssembledPromptModal({
         </p>
 
         {editing ? (
-          <textarea
+          <textarea aria-label="Draft"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="mt-4 w-full font-mono text-xs border border-gray-300 rounded p-3 h-80"
@@ -105,8 +105,8 @@ export function AssembledPromptModal({
 
         {editing && (
           <div className="mt-3 flex items-center gap-2">
-            <label className="text-sm text-gray-700">Save as:</label>
-            <input
+            <label htmlFor="save-as" className="text-sm text-gray-700">Save as:</label>
+            <input id="save-as"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}

@@ -153,7 +153,7 @@ function StatusBadge({ status, mode }: { status: ResourceStatus; mode: "deploy" 
     );
   }
   return (
-    <span className="text-xs text-gray-400 uppercase tracking-wide">
+    <span className="text-xs text-gray-500 uppercase tracking-wide">
       Queued
     </span>
   );
@@ -323,7 +323,7 @@ export function DeployProgressModal({
               </p>
               <div className="mt-2">
                 {showTimingWarning && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     This can take 10-30 minutes depending on cloud provisioning.
                   </p>
                 )}
@@ -354,7 +354,7 @@ export function DeployProgressModal({
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1 text-right">
+            <p className="text-xs text-gray-500 mt-1 text-right">
               {resourcesCompleted} of {resourcesTotal} components
             </p>
           </div>

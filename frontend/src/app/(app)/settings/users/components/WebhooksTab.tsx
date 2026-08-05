@@ -229,15 +229,15 @@ export function WebhooksTab() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
             <h2 className="text-lg font-semibold mb-4">Create Webhook</h2>
-            <label className="block text-sm font-medium mb-1">Name</label>
-            <input
+            <label htmlFor="name" className="block text-sm font-medium mb-1">Name</label>
+            <input id="name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm mb-3"
               placeholder="LIMS bridge"
             />
-            <label className="block text-sm font-medium mb-1">URL</label>
-            <input
+            <label htmlFor="url" className="block text-sm font-medium mb-1">URL</label>
+            <input id="url"
               value={newUrl}
               onChange={(e) => setNewUrl(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm mb-3"
@@ -295,7 +295,7 @@ export function WebhooksTab() {
               </div>
               <button
                 onClick={() => setSelectedSub(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-500 hover:text-gray-600"
               >
                 Close
               </button>
@@ -329,8 +329,8 @@ export function WebhooksTab() {
             </div>
 
             <div className="mb-3 flex items-center gap-2">
-              <label className="text-xs text-gray-500">Status filter:</label>
-              <select
+              <label htmlFor="status-filter" className="text-xs text-gray-500">Status filter:</label>
+              <select id="status-filter"
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
                 className="text-xs border rounded px-2 py-1"
@@ -391,8 +391,8 @@ export function WebhooksTab() {
             <h3 className="text-lg font-semibold mb-4">Edit {editingSub.name}</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
+                <label htmlFor="name-2" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input id="name-2"
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -400,8 +400,8 @@ export function WebhooksTab() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">URL</label>
-                <input
+                <label htmlFor="url-2" className="block text-sm font-medium text-gray-700 mb-1">URL</label>
+                <input id="url-2"
                   type="text"
                   value={editUrl}
                   onChange={(e) => setEditUrl(e.target.value)}

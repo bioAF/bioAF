@@ -90,14 +90,14 @@ export default function DataReferencesPage() {
 
       <div className="bg-white rounded-lg shadow mb-6 p-4">
         <div className="flex flex-wrap gap-4">
-          <input
+          <input aria-label="Search by name"
             type="text"
             placeholder="Search by name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
           />
-          <select
+          <select aria-label="Filter by category"
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -109,7 +109,7 @@ export default function DataReferencesPage() {
               </option>
             ))}
           </select>
-          <select
+          <select aria-label="Filter by scope"
             value={scopeFilter}
             onChange={(e) => setScopeFilter(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -121,7 +121,7 @@ export default function DataReferencesPage() {
               </option>
             ))}
           </select>
-          <select
+          <select aria-label="Filter by status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -142,8 +142,8 @@ export default function DataReferencesPage() {
         </div>
       ) : references.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
-          <h2 className="text-lg font-semibold text-gray-400 mb-2">No reference datasets found</h2>
-          <p className="text-gray-400 mb-4">
+          <h2 className="text-lg font-semibold text-gray-500 mb-2">No reference datasets found</h2>
+          <p className="text-gray-500 mb-4">
             {canAdd
               ? "Get started by adding your first reference dataset."
               : "No reference datasets are available yet."}

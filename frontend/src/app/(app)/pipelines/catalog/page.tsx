@@ -114,7 +114,7 @@ export default function PipelineCatalogPage() {
                 </div>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.description || "No description"}</p>
                 <div className="flex items-center justify-between">
-                  <div className="text-xs text-gray-400">
+                  <div className="text-xs text-gray-500">
                     {isCustom && p.created_by_username ? (
                       <>
                         <span>by {p.created_by_username}</span>

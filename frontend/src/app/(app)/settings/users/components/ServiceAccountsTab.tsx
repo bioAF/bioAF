@@ -262,16 +262,16 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
             <h2 className="text-lg font-semibold mb-4">Create Service Account</h2>
-            <label className="block text-sm font-medium mb-1">Display name</label>
-            <input
+            <label htmlFor="display-name" className="block text-sm font-medium mb-1">Display name</label>
+            <input id="display-name"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm mb-3"
               placeholder="Benchling Sync"
             />
-            <label className="block text-sm font-medium mb-1">Role</label>
+            <label htmlFor="role" className="block text-sm font-medium mb-1">Role</label>
             <div className="flex items-center gap-2 mb-2">
-              <select
+              <select id="role"
                 value={newRoleId ?? ""}
                 onChange={(e) => setNewRoleId(Number(e.target.value) || null)}
                 className="flex-1 border rounded px-3 py-2 text-sm"
@@ -325,12 +325,12 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                 <p className="text-xs text-gray-500 font-mono">{selectedSa.email}</p>
                 <p className="text-xs text-gray-600 mt-1">
                   Role: <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
-                  <span className="text-gray-400">({selectedSaScopeCount} permissions)</span>
+                  <span className="text-gray-500">({selectedSaScopeCount} permissions)</span>
                 </p>
               </div>
               <button
                 onClick={() => setSelectedSa(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-500 hover:text-gray-600"
               >
                 Close
               </button>
@@ -409,8 +409,8 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
             <h3 className="text-lg font-semibold mb-4">Edit {editingSa.display_name}</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
-                <input
+                <label htmlFor="display-name-2" className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
+                <input id="display-name-2"
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -418,9 +418,9 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+                <label htmlFor="role-2" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                 <div className="flex items-center gap-2">
-                  <select
+                  <select id="role-2"
                     value={editRoleId ?? ""}
                     onChange={(e) => setEditRoleId(Number(e.target.value) || null)}
                     className="flex-1 px-3 py-2 border rounded-md text-sm"
@@ -472,8 +472,8 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               ({selectedSaScopeCount} permissions).
               To change what the key can do, edit the service account&apos;s role.
             </p>
-            <label className="block text-sm font-medium mb-1">Key name</label>
-            <input
+            <label htmlFor="key-name" className="block text-sm font-medium mb-1">Key name</label>
+            <input id="key-name"
               value={newKeyName}
               onChange={(e) => setNewKeyName(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm mb-4"

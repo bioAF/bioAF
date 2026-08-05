@@ -129,7 +129,7 @@ export function ProvenanceDAGComponent({ data }: Props) {
 
   if (!layout || data.nodes.length === 0) {
     return (
-      <div className="text-gray-400 text-center py-8">
+      <div className="text-gray-500 text-center py-8">
         No provenance data to display.
       </div>
     );

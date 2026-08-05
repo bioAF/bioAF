@@ -101,7 +101,7 @@ export default function ValidationStudiesListPage() {
                           {s.title || `Study #${s.id}`}
                         </Link>
                         {s.title && s.title !== `Study #${s.id}` && (
-                          <span className="ml-2 text-xs text-gray-400">#{s.id}</span>
+                          <span className="ml-2 text-xs text-gray-500">#{s.id}</span>
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-gray-600">

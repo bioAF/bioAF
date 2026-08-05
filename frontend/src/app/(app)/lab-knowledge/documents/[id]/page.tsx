@@ -164,7 +164,7 @@ export default function LabDocumentDetailPage() {
       <h1 className="text-2xl font-bold mb-1">
         {doc.title}
         {doc.is_archived && (
-          <span className="ml-2 text-sm font-normal text-gray-400">(archived)</span>
+          <span className="ml-2 text-sm font-normal text-gray-500">(archived)</span>
         )}
       </h1>
       <div className="text-gray-600 mb-4 text-sm">
@@ -255,7 +255,7 @@ export default function LabDocumentDetailPage() {
                 <li key={v.version_number} className="text-sm flex items-center justify-between">
                   <span>
                     v{v.version_number} {v.change_note ? `- ${v.change_note}` : ""}{" "}
-                    <span className="text-gray-400">({fmtDate(v.uploaded_at)})</span>
+                    <span className="text-gray-500">({fmtDate(v.uploaded_at)})</span>
                   </span>
                   <button
                     onClick={() => download(v.version_number)}

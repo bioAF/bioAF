@@ -607,7 +607,7 @@ export default function PipelineRunDetailPage() {
             <h2 className="text-lg font-semibold mb-4">Parameters</h2>
             {run.parameters ? (
               <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">{JSON.stringify(run.parameters, null, 2)}</pre>
-            ) : <p className="text-gray-400">No parameters recorded</p>}
+            ) : <p className="text-gray-500">No parameters recorded</p>}
           </div>
         )}
 
@@ -743,11 +743,11 @@ export default function PipelineRunDetailPage() {
                 />
               )
             ) : isActive ? (
-              <p className="text-gray-400">Reports are available after the pipeline run completes.</p>
+              <p className="text-gray-500">Reports are available after the pipeline run completes.</p>
             ) : reportLoading ? (
-              <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading report...</span></div>
+              <div className="flex items-center gap-2 text-gray-500"><LoadingSpinner size="sm" /><span>Loading report...</span></div>
             ) : (
-              <p className="text-gray-400">No report available.</p>
+              <p className="text-gray-500">No report available.</p>
             )}
           </div>
         )}
@@ -758,7 +758,7 @@ export default function PipelineRunDetailPage() {
             <div className="flex items-center gap-4 mb-4">
               <h2 className="text-lg font-semibold">Logs</h2>
               {!run.compute_job_ref && run.processes.length > 0 && (
-                <select value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
+                <select aria-label="Selected process" value={selectedProcess} onChange={(e) => setSelectedProcess(e.target.value)} className="border rounded px-3 py-1.5 text-sm">
                   <option value="">Select process...</option>
                   {run.processes.map((p) => <option key={p.id} value={p.process_name}>{p.process_name}</option>)}
                 </select>
@@ -797,7 +797,7 @@ export default function PipelineRunDetailPage() {
 
             {(run.compute_job_ref || selectedProcess) ? (
               logsLoading ? (
-                <div className="flex items-center gap-2 text-gray-400"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
+                <div className="flex items-center gap-2 text-gray-500"><LoadingSpinner size="sm" /><span>Loading logs...</span></div>
               ) : (
                 <div className="space-y-4">
                   <div>
@@ -814,7 +814,7 @@ export default function PipelineRunDetailPage() {
                     <div className="border-t pt-4">
                       <h3 className="text-sm font-medium mb-2">System Logs (pod stdout/stderr)</h3>
                       {systemLogsLoading ? (
-                        <div className="flex items-center gap-2 text-gray-400">
+                        <div className="flex items-center gap-2 text-gray-500">
                           <LoadingSpinner size="sm" /><span>Loading system logs...</span>
                         </div>
                       ) : (
@@ -826,7 +826,7 @@ export default function PipelineRunDetailPage() {
                   )}
                 </div>
               )
-            ) : <p className="text-gray-400">Select a process to view logs</p>}
+            ) : <p className="text-gray-500">Select a process to view logs</p>}
           </div>
         )}
 
@@ -923,7 +923,7 @@ export default function PipelineRunDetailPage() {
               <h2 className="text-lg font-semibold">Step retries</h2>
               <button
                 onClick={() => setShowRetriesModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl"
+                className="text-gray-500 hover:text-gray-600 text-xl"
                 aria-label="Close"
               >
                 &times;

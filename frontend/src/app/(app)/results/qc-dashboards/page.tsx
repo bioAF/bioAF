@@ -22,7 +22,7 @@ function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string;
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
       {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
+        <span className="text-gray-500 text-sm">Failed to load plot</span>
       ) : url ? (
         <>
           <img
@@ -42,7 +42,7 @@ function PlotImage({ fileId, title, onExpand }: { fileId: number; title: string;
           </button>
         </>
       ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
+        <span className="text-gray-500 text-sm">Loading plot...</span>
       )}
     </div>
   );
@@ -222,7 +222,7 @@ function QCDashboardsPageInner() {
         ) : loadError ? (
           <ErrorState message={`Could not load QC dashboards. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : dashboards.length === 0 ? (
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-500 text-sm">
             No QC dashboards yet. They are generated automatically when pipeline runs complete.
           </p>
         ) : (

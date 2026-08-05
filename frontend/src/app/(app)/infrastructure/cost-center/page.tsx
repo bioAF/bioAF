@@ -365,8 +365,8 @@ export default function InfraCostCenterPage() {
               <h2 className="font-semibold text-gray-900 mb-4">Budget Configuration</h2>
               <div className="space-y-4 max-w-md">
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Currency</label>
-                  <select
+                  <label htmlFor="currency" className="block text-sm text-gray-700 mb-1">Currency</label>
+                  <select id="currency"
                     value={currencyInput}
                     onChange={(e) => setCurrencyInput(e.target.value)}
                     className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
@@ -378,8 +378,8 @@ export default function InfraCostCenterPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-700 mb-1">Monthly Budget ({currencyInput})</label>
-                  <input
+                  <label htmlFor="monthly-budget" className="block text-sm text-gray-700 mb-1">Monthly Budget ({currencyInput})</label>
+                  <input id="monthly-budget"
                     type="number"
                     value={budgetInput}
                     onChange={(e) => setBudgetInput(e.target.value)}

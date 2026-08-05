@@ -173,7 +173,7 @@ export function SheetImportModal({
             {step === "url" && "Import from Google Sheet"}
             {step === "mapping" && "Map Columns"}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
             &times;
           </button>
         </div>
@@ -188,10 +188,10 @@ export function SheetImportModal({
               </p>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">
                   Google Sheets URL
                 </label>
-                <input
+                <input id="google-sheets-url"
                   type="url"
                   value={sheetUrl}
                   onChange={(e) => setSheetUrl(e.target.value)}
@@ -253,7 +253,7 @@ export function SheetImportModal({
                       );
                     })}
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-500 mt-2">
                     <span className="inline-block w-2 h-2 rounded-full bg-green-200 mr-1" />
                     Default value can be set &nbsp;
                     <span className="inline-block w-2 h-2 rounded-full bg-blue-200 mr-1" />
@@ -276,7 +276,7 @@ export function SheetImportModal({
                         <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
                           {col}
                         </span>
-                        <span className="text-gray-400">&rarr;</span>
+                        <span className="text-gray-500">&rarr;</span>
                         <select
                           value={columnMappings[col] ?? `custom:${col}`}
                           onChange={(e) => handleMappingChange(col, e.target.value)}

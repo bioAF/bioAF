@@ -33,7 +33,7 @@ function QCDashboardPlot({
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
       {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
+        <span className="text-gray-500 text-sm">Failed to load plot</span>
       ) : url ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -54,7 +54,7 @@ function QCDashboardPlot({
           </button>
         </>
       ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
+        <span className="text-gray-500 text-sm">Loading plot...</span>
       )}
     </div>
   );
@@ -86,7 +86,7 @@ function PlotThumbnail({
         <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
           PDF
         </div>
-        <span className="text-xs text-gray-400">No preview</span>
+        <span className="text-xs text-gray-500">No preview</span>
       </button>
     );
   }
@@ -101,7 +101,7 @@ function PlotThumbnail({
         <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
           {fileType || "?"}
         </div>
-        <span className="text-xs text-gray-400">No preview</span>
+        <span className="text-xs text-gray-500">No preview</span>
       </button>
     );
   }
@@ -210,7 +210,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
         </div>
         <QCAiReviewSection pipelineRunId={pipelineRunId} />
         {dashboardLoading ? (
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-gray-500">
             <LoadingSpinner size="sm" />
             <span>Loading QC dashboard...</span>
           </div>
@@ -257,7 +257,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
           </Link>
         </div>
         {plotsLoading ? (
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-gray-500">
             <LoadingSpinner size="sm" />
             <span>Loading plots...</span>
           </div>
@@ -274,7 +274,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
                   {plot.file ? (
                     <PlotThumbnail plot={plot} onClick={() => handleExpand(plot)} />
                   ) : (
-                    <span className="text-gray-400 text-xs">No preview</span>
+                    <span className="text-gray-500 text-xs">No preview</span>
                   )}
                   {plot.file && (
                     <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">

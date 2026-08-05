@@ -171,7 +171,7 @@ export default function SettingsRolesPage() {
                       </>
                     )}
                     {role.is_system && (
-                      <span className="text-xs text-gray-400">Built-in</span>
+                      <span className="text-xs text-gray-500">Built-in</span>
                     )}
                   </td>
                 </tr>

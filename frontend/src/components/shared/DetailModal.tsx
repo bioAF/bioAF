@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 export interface DetailField {
   label: string;
@@ -17,13 +18,22 @@ interface DetailModalProps {
 
 export function DetailModal({ title, onClose, fields, actions }: DetailModalProps) {
   useDismissOnEscape(true, onClose);
+  const trapRef = useFocusTrap<HTMLDivElement>(true);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={onClose}
     >
+      {/* This is mounted only while open, so the trap is always active. It had
+          no dialog semantics at all before: no role, no modal flag, and nothing
+          tying it to its own title. */}
       <div
+        ref={trapRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -31,7 +41,7 @@ export function DetailModal({ title, onClose, fields, actions }: DetailModalProp
           <h3 className="text-lg font-semibold">{title}</h3>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
+            className="text-gray-500 hover:text-gray-600 text-xl leading-none px-2"
           >
             &times;
           </button>

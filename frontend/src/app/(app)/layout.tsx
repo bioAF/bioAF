@@ -43,7 +43,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="text-center">
           <div className="text-3xl font-bold text-bioaf-400 mb-4">bioAF</div>
           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-bioaf-400 border-t-transparent" />
-          <p className="mt-3 text-sm text-gray-400">Loading bioAF...</p>
+          <p className="mt-3 text-sm text-gray-500">Loading bioAF...</p>
         </div>
       </div>
     );

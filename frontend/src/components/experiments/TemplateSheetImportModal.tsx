@@ -132,7 +132,7 @@ export function TemplateSheetImportModal({
             {step === "url" && "Import Template from Google Sheet"}
             {step === "mapping" && "Map Columns to Template"}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
             &times;
           </button>
         </div>
@@ -145,8 +145,8 @@ export function TemplateSheetImportModal({
                 from its column headers. Share the sheet with the bioAF reader service account.
               </p>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Google Sheets URL</label>
-                <input
+                <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">Google Sheets URL</label>
+                <input id="google-sheets-url"
                   type="url"
                   value={sheetUrl}
                   onChange={(e) => setSheetUrl(e.target.value)}
@@ -181,7 +181,7 @@ export function TemplateSheetImportModal({
                         <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
                           {col.header}
                         </span>
-                        <span className="text-gray-400">&rarr;</span>
+                        <span className="text-gray-500">&rarr;</span>
                         <span className="text-sm flex-1">
                           {ALL_SAMPLE_FIELDS.find((f) => f.value === col.mapped_to)?.label ?? col.mapped_to}
                         </span>

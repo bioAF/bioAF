@@ -150,7 +150,7 @@ export default function ValidationStudyPage() {
           </button>
           <h1 className="text-2xl font-bold">{displayTitle}</h1>
           {study.title && study.title !== fallbackTitle && (
-            <span className="font-mono text-sm text-gray-400" title="Validation study id">
+            <span className="font-mono text-sm text-gray-500" title="Validation study id">
               #{study.id}
             </span>
           )}

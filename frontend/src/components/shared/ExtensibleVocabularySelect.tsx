@@ -102,6 +102,7 @@ export function ExtensibleVocabularySelect({
       {adding && (
         <div className="flex items-center gap-2 mt-2">
           <input
+            aria-label={`New ${fieldName.replace(/_/g, " ")}`}
             type="text"
             value={newValue}
             onChange={(e) => setNewValue(e.target.value)}

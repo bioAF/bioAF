@@ -448,12 +448,12 @@ export default function CustomPipelineDetailPage() {
               <div className="flex-1 min-w-0">
                 {editingMeta ? (
                   <div className="space-y-3">
-                    <input
+                    <input aria-label="Edit name"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
                       className="w-full text-xl font-bold border rounded px-3 py-1.5"
                     />
-                    <textarea
+                    <textarea aria-label="Description"
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
                       rows={2}
@@ -488,7 +488,7 @@ export default function CustomPipelineDetailPage() {
                     {pipeline.description && (
                       <p className="text-sm text-gray-500 mt-1">{pipeline.description}</p>
                     )}
-                    <p className="text-xs text-gray-400 mt-2 font-mono">
+                    <p className="text-xs text-gray-500 mt-2 font-mono">
                       {pipeline.pipeline_key}
                     </p>
                   </>
@@ -610,7 +610,7 @@ export default function CustomPipelineDetailPage() {
                         >
                           {version.status}
                         </span>
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           {new Date(version.created_at).toLocaleString()}
                         </span>
                       </div>
@@ -670,7 +670,7 @@ export default function CustomPipelineDetailPage() {
                           {env ? (
                             <span>
                               {env.env_name} v{env.version_number}{" "}
-                              <span className="text-xs text-gray-400">
+                              <span className="text-xs text-gray-500">
                                 ({env.status})
                               </span>
                             </span>
@@ -873,8 +873,8 @@ function NewVersionForm({
 
       {versionForm.code_source_type === "github_repo" && (
         <div>
-          <label className="text-sm text-gray-500 block mb-1">GitHub repo</label>
-          <select
+          <label htmlFor="github-repo" className="text-sm text-gray-500 block mb-1">GitHub repo</label>
+          <select id="github-repo"
             value={versionForm.github_repo_id ?? ""}
             onChange={(e) =>
               setVersionForm((prev) => ({
@@ -901,8 +901,8 @@ function NewVersionForm({
 
       {versionForm.code_source_type === "code_blob" && (
         <div>
-          <label className="text-sm text-gray-500 block mb-1">Code blob</label>
-          <textarea
+          <label htmlFor="code-blob" className="text-sm text-gray-500 block mb-1">Code blob</label>
+          <textarea id="code-blob"
             value={versionForm.code_content}
             onChange={(e) =>
               setVersionForm((prev) => ({ ...prev, code_content: e.target.value }))
@@ -916,8 +916,8 @@ function NewVersionForm({
 
       {versionForm.code_source_type === "inline" && (
         <div>
-          <label className="text-sm text-gray-500 block mb-1">Inline command</label>
-          <input
+          <label htmlFor="inline-command" className="text-sm text-gray-500 block mb-1">Inline command</label>
+          <input id="inline-command"
             value={versionForm.code_content}
             onChange={(e) =>
               setVersionForm((prev) => ({ ...prev, code_content: e.target.value }))
@@ -929,8 +929,8 @@ function NewVersionForm({
       )}
 
       <div>
-        <label className="text-sm text-gray-500 block mb-1">Entrypoint command</label>
-        <input
+        <label htmlFor="entrypoint-command" className="text-sm text-gray-500 block mb-1">Entrypoint command</label>
+        <input id="entrypoint-command"
           value={versionForm.entrypoint_command}
           onChange={(e) =>
             setVersionForm((prev) => ({ ...prev, entrypoint_command: e.target.value }))
@@ -941,8 +941,8 @@ function NewVersionForm({
       </div>
 
       <div>
-        <label className="text-sm text-gray-500 block mb-1">Environment</label>
-        <select
+        <label htmlFor="environment" className="text-sm text-gray-500 block mb-1">Environment</label>
+        <select id="environment"
           value={versionForm.environment_version_id ?? ""}
           onChange={(e) =>
             setVersionForm((prev) => ({
@@ -968,8 +968,8 @@ function NewVersionForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-sm text-gray-500 block mb-1">CPU</label>
-          <input
+          <label htmlFor="cpu" className="text-sm text-gray-500 block mb-1">CPU</label>
+          <input id="cpu"
             value={versionForm.cpu_request}
             onChange={(e) =>
               setVersionForm((prev) => ({ ...prev, cpu_request: e.target.value }))
@@ -978,8 +978,8 @@ function NewVersionForm({
           />
         </div>
         <div>
-          <label className="text-sm text-gray-500 block mb-1">Memory</label>
-          <input
+          <label htmlFor="memory" className="text-sm text-gray-500 block mb-1">Memory</label>
+          <input id="memory"
             value={versionForm.memory_request}
             onChange={(e) =>
               setVersionForm((prev) => ({ ...prev, memory_request: e.target.value }))
@@ -990,8 +990,8 @@ function NewVersionForm({
       </div>
 
       <div>
-        <label className="text-sm text-gray-500 block mb-1">Log file path (optional)</label>
-        <input
+        <label htmlFor="log-file-path-optional" className="text-sm text-gray-500 block mb-1">Log file path (optional)</label>
+        <input id="log-file-path-optional"
           value={versionForm.log_file_path}
           onChange={(e) =>
             setVersionForm((prev) => ({ ...prev, log_file_path: e.target.value }))
@@ -1013,20 +1013,20 @@ function NewVersionForm({
       />
 
       <div>
-        <label className="text-sm text-gray-500 block mb-2">Variables</label>
+        <label htmlFor="variables" className="text-sm text-gray-500 block mb-2">Variables</label>
         <div className="space-y-2">
           {versionForm.variables.map((v, idx) => (
             <div
               key={v._key}
               className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1.2fr)_auto_auto] gap-2 items-center"
             >
-              <input
+              <input id="variables"
                 value={v.variable_name}
                 onChange={(e) => updateVariable(idx, { variable_name: e.target.value })}
                 placeholder="Variable name"
                 className="border rounded px-2 py-1.5 text-sm"
               />
-              <select
+              <select aria-label="Variable type"
                 value={v.variable_type}
                 onChange={(e) =>
                   updateVariable(idx, {
@@ -1065,7 +1065,7 @@ function NewVersionForm({
                   ))}
                 </select>
               ) : (
-                <input
+                <input aria-label="Default value"
                   value={v.default_value ?? ""}
                   onChange={(e) => updateVariable(idx, { default_value: e.target.value })}
                   placeholder="Default value"
@@ -1209,8 +1209,8 @@ function QcConfigPanel({
           </p>
 
           <div>
-            <label className="text-sm text-gray-500 block mb-1">QC template</label>
-            <select
+            <label htmlFor="qc-template" className="text-sm text-gray-500 block mb-1">QC template</label>
+            <select id="qc-template"
               value={qcTemplate}
               onChange={(e) => onChangeTemplate(e.target.value)}
               className="w-full border rounded px-3 py-2 text-sm bg-white"
@@ -1223,10 +1223,10 @@ function QcConfigPanel({
           </div>
 
           <div>
-            <label className="text-sm text-gray-500 block mb-1">
+            <label htmlFor="qc-config-json" className="text-sm text-gray-500 block mb-1">
               QC config JSON {qcTemplate === "custom" ? "(required for custom layouts)" : "(optional override)"}
             </label>
-            <textarea
+            <textarea id="qc-config-json"
               value={qcConfigJsonText}
               onChange={(e) => onChangeConfig(e.target.value)}
               rows={10}

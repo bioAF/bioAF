@@ -103,14 +103,14 @@ function ProjectsPageInner() {
 
         <div className="bg-white rounded-lg shadow mb-6 p-4">
           <div className="flex flex-wrap gap-4">
-            <input
+            <input aria-label="Search projects"
               type="text"
               placeholder="Search projects..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
             />
-            <select
+            <select aria-label="Filter by status"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -137,8 +137,8 @@ function ProjectsPageInner() {
           />
         ) : projects.length === 0 ? (
           <div className="bg-white rounded-lg shadow p-12 text-center">
-            <h2 className="text-lg font-semibold text-gray-400 mb-2">No projects found</h2>
-            <p className="text-gray-400 mb-4">Create a project to organize cross-experiment analysis.</p>
+            <h2 className="text-lg font-semibold text-gray-500 mb-2">No projects found</h2>
+            <p className="text-gray-500 mb-4">Create a project to organize cross-experiment analysis.</p>
             {canCreate && (
               <button
                 onClick={() => setShowCreateModal(true)}
@@ -197,8 +197,8 @@ function ProjectsPageInner() {
             <h2 className="text-lg font-bold mb-4">New Project</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                <input id="name"
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
@@ -207,8 +207,8 @@ function ProjectsPageInner() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
-                <textarea
+                <label htmlFor="hypothesis-optional" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
+                <textarea id="hypothesis-optional"
                   value={newHypothesis}
                   onChange={(e) => setNewHypothesis(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"

@@ -262,8 +262,8 @@ export default function LiteratureLibraryPage() {
 
         <div className="flex flex-wrap gap-3 mb-4 items-end">
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Project</label>
-            <select
+            <label htmlFor="project" className="block text-xs text-gray-600 mb-1">Project</label>
+            <select id="project"
               value={filterProjectId}
               onChange={(e) => {
                 setFilterProjectId(e.target.value);
@@ -280,8 +280,8 @@ export default function LiteratureLibraryPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Experiment</label>
-            <select
+            <label htmlFor="experiment" className="block text-xs text-gray-600 mb-1">Experiment</label>
+            <select id="experiment"
               value={filterExperimentId}
               onChange={(e) => setFilterExperimentId(e.target.value)}
               className="border border-gray-300 rounded px-3 py-2"
@@ -302,8 +302,8 @@ export default function LiteratureLibraryPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Provenance</label>
-            <select
+            <label htmlFor="provenance" className="block text-xs text-gray-600 mb-1">Provenance</label>
+            <select id="provenance"
               value={provenance}
               onChange={(e) =>
                 setProvenance(e.target.value as Provenance | "")
@@ -317,8 +317,8 @@ export default function LiteratureLibraryPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Sort</label>
-            <select
+            <label htmlFor="sort" className="block text-xs text-gray-600 mb-1">Sort</label>
+            <select id="sort"
               value={sort}
               onChange={(e) =>
                 setSort(

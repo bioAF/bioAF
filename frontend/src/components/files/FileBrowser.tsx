@@ -449,7 +449,7 @@ export function FileBrowser({
             }}
             className="flex gap-1"
           >
-            <input
+            <input aria-label="Search by filename"
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -470,7 +470,7 @@ export function FileBrowser({
                   setSearchQuery("");
                   setPage(1);
                 }}
-                className="px-2 py-2 text-gray-400 hover:text-gray-600 text-sm"
+                className="px-2 py-2 text-gray-500 hover:text-gray-600 text-sm"
               >
                 Clear
               </button>
@@ -479,7 +479,7 @@ export function FileBrowser({
         )}
 
         {showProjectFilter && (
-          <select
+          <select aria-label="Filter by project id"
             value={filterProjectId}
             onChange={(e) => {
               setFilterProjectId(e.target.value);
@@ -498,7 +498,7 @@ export function FileBrowser({
         )}
 
         {showExperimentFilter && (
-          <select
+          <select aria-label="Filter by experiment id"
             value={filterExperimentId}
             onChange={(e) => {
               setFilterExperimentId(e.target.value);
@@ -516,7 +516,7 @@ export function FileBrowser({
         )}
 
         {samples.length > 0 && (
-          <select
+          <select aria-label="Filter by sample id"
             value={filterSampleId}
             onChange={(e) => {
               setFilterSampleId(e.target.value);
@@ -533,7 +533,7 @@ export function FileBrowser({
           </select>
         )}
 
-        <select
+        <select aria-label="Filter by type"
           value={filterType}
           onChange={(e) => {
             setFilterType(e.target.value);
@@ -549,7 +549,7 @@ export function FileBrowser({
           ))}
         </select>
 
-        <select
+        <select aria-label="Filter by source"
           value={filterSource}
           onChange={(e) => {
             setFilterSource(e.target.value);
@@ -653,14 +653,14 @@ export function FileBrowser({
       {loading ? (
         <ContentLoading />
       ) : files.length === 0 && labDocHits.length === 0 ? (
-        <p className="text-gray-400 text-sm py-8 text-center">No files found.</p>
+        <p className="text-gray-500 text-sm py-8 text-center">No files found.</p>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className="px-4 py-3 w-10">
-                  <input
+                  <input aria-label="Length"
                     type="checkbox"
                     checked={files.length > 0 && selectedIds.size === files.length}
                     onChange={toggleSelectAll}
@@ -714,7 +714,7 @@ export function FileBrowser({
                           </svg>
                         </span>
                       )}
-                      <span className={file.storage_deleted ? "text-gray-400" : "text-bioaf-600"}>
+                      <span className={file.storage_deleted ? "text-gray-500" : "text-bioaf-600"}>
                         {file.filename}
                       </span>
                     </div>
@@ -766,7 +766,7 @@ export function FileBrowser({
                         <button
                           onClick={() => triggerDownload(file.id)}
                           title="Download"
-                          className="text-gray-400 hover:text-bioaf-600"
+                          className="text-gray-500 hover:text-bioaf-600"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
@@ -856,7 +856,7 @@ export function FileBrowser({
               <h3 className="text-lg font-semibold truncate pr-4">{viewingFile.filename}</h3>
               <button
                 onClick={() => setViewingFile(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
+                className="text-gray-500 hover:text-gray-600 text-xl leading-none px-2"
               >
                 &times;
               </button>
@@ -872,7 +872,7 @@ export function FileBrowser({
                     className="max-h-64 object-contain rounded"
                   />
                 ) : (
-                  <span className="text-gray-400 text-sm">Loading preview...</span>
+                  <span className="text-gray-500 text-sm">Loading preview...</span>
                 )}
               </div>
             ) : (
@@ -881,7 +881,7 @@ export function FileBrowser({
                   <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
                     {viewingFile.file_type}
                   </div>
-                  <span className="text-xs text-gray-400">No preview available</span>
+                  <span className="text-xs text-gray-500">No preview available</span>
                 </div>
               </div>
             )}
@@ -1030,7 +1030,7 @@ export function FileBrowser({
               <h3 className="text-lg font-semibold">Provenance: {viewingFile.filename}</h3>
               <button
                 onClick={() => setShowProvenance(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
+                className="text-gray-500 hover:text-gray-600 text-xl leading-none px-2"
               >
                 &times;
               </button>
@@ -1139,7 +1139,7 @@ export function FileBrowser({
                   ))}
                 </select>
                 {!linkExperimentId && (
-                  <p className="text-xs text-gray-400 mt-1">Select an experiment first</p>
+                  <p className="text-xs text-gray-500 mt-1">Select an experiment first</p>
                 )}
               </div>
             </div>

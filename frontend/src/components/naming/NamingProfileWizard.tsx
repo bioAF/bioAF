@@ -442,7 +442,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => addTemplateField(f)}
                   className="px-3 py-1 rounded-full border border-gray-200 bg-white text-sm text-gray-800 hover:bg-gray-50"
                 >
-                  + {f.name} <span className="text-gray-400">({f.type})</span>
+                  + {f.name} <span className="text-gray-500">({f.type})</span>
                 </button>
               ))}
             </div>
@@ -455,7 +455,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
             <div className="flex flex-wrap gap-2 mb-3">
               {customFields.map((f) => (
                 <span key={f.name} className="px-3 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800">
-                  {f.name} <span className="text-gray-400">({f.type})</span>
+                  {f.name} <span className="text-gray-500">({f.type})</span>
                 </span>
               ))}
             </div>
@@ -544,7 +544,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => moveSegment(idx, -1)}
                   aria-label={`move-up-${idx}`}
                   disabled={idx === 0}
-                  className="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                  className="text-gray-500 hover:text-gray-700 disabled:opacity-30"
                 >
                   ▲
                 </button>
@@ -553,7 +553,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => moveSegment(idx, 1)}
                   aria-label={`move-down-${idx}`}
                   disabled={idx === segments.length - 1}
-                  className="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                  className="text-gray-500 hover:text-gray-700 disabled:opacity-30"
                 >
                   ▼
                 </button>

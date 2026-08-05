@@ -515,7 +515,7 @@ export default function NotebooksPage() {
                 </tr>
               ) : null}
               {sessions.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No active sessions</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No active sessions</td></tr>
               )}
             </tbody>
           </table>
@@ -530,7 +530,7 @@ export default function NotebooksPage() {
               <h3 className="text-lg font-semibold">
                 {viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session
               </h3>
-              <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+              <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
             </div>
             <div className="p-6 space-y-3">
               {viewingSession.status === "failed" && viewingSession.failure_message && (
@@ -609,7 +609,7 @@ export default function NotebooksPage() {
                           <p className="text-xs text-gray-500 mb-1">Environment</p>
                           <p className="text-sm">
                             {provenance.environment.environment_name} v{provenance.environment.version_number}.{provenance.environment.build_number}
-                            <span className="text-gray-400 ml-1">({provenance.environment.definition_format})</span>
+                            <span className="text-gray-500 ml-1">({provenance.environment.definition_format})</span>
                           </p>
                         </div>
                       )}
@@ -634,7 +634,7 @@ export default function NotebooksPage() {
                         </div>
                       )}
                       {provenance.input_files.length === 0 && provenance.output_files.length === 0 && (
-                        <p className="text-sm text-gray-400">No input or output files recorded</p>
+                        <p className="text-sm text-gray-500">No input or output files recorded</p>
                       )}
                     </div>
                   )}
@@ -663,7 +663,7 @@ export default function NotebooksPage() {
           <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] flex flex-col">
             <div className="p-6 border-b flex items-center justify-between shrink-0">
               <h3 className="text-lg font-semibold">Launch Notebook Session</h3>
-              <button onClick={() => setShowLaunchModal(false)} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+              <button onClick={() => setShowLaunchModal(false)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
             </div>
             <div className="p-6 space-y-5 overflow-y-auto flex-1">
               {/* Resource Profile */}
@@ -706,7 +706,7 @@ export default function NotebooksPage() {
                           <span className="font-semibold flex items-center gap-2">
                             {meta.label}
                             {!available && (
-                              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-400 border border-gray-300 rounded px-1.5 py-0.5">
+                              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
                                 Admin upgrade required
                               </span>
                             )}
@@ -727,9 +727,9 @@ export default function NotebooksPage() {
 
               {/* Environment */}
               <div>
-                <label className="text-sm text-gray-500 mb-2 block">Environment</label>
+                <label htmlFor="environment" className="text-sm text-gray-500 mb-2 block">Environment</label>
                 <div className="flex gap-3">
-                  <select
+                  <select id="environment"
                     value={selectedEnvId || ""}
                     onChange={(e) => e.target.value ? handleEnvChange(Number(e.target.value)) : null}
                     className="border rounded px-3 py-2 text-sm flex-1"
@@ -813,7 +813,7 @@ export default function NotebooksPage() {
                 <div>
                   <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
                   {experimentFiles.length === 0 ? (
-                    <p className="text-xs text-gray-400">
+                    <p className="text-xs text-gray-500">
                       No files found for this experiment.
                     </p>
                   ) : (

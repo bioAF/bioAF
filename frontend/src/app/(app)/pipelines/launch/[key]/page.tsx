@@ -301,7 +301,7 @@ export default function PipelineLauncherPage() {
                   const def = (pipeline.default_params || {})[k];
                   return JSON.stringify(v) !== JSON.stringify(def);
                 }).length === 0 ? (
-                  <span className="text-gray-400">All defaults</span>
+                  <span className="text-gray-500">All defaults</span>
                 ) : (
                   <ul className="list-disc ml-4 mt-1">
                     {Object.entries(userParams).filter(([k, v]) => {
@@ -461,12 +461,12 @@ function ParameterField({
   if (prop.enum) {
     return (
       <div>
-        <label className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <select value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
+        <label id="lbl-page-1" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
+        <select aria-labelledby="lbl-page-1" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
           <option value="">--</option>
           {prop.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
         </select>
-        {prop.description && <p className="text-xs text-gray-400 mt-0.5">{prop.description}</p>}
+        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
       </div>
     );
   }
@@ -476,7 +476,7 @@ function ParameterField({
       <div className="flex items-center gap-2">
         <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
         <label className="text-sm">{label}{required ? " *" : ""}</label>
-        {prop.description && <span className="text-xs text-gray-400">({prop.description})</span>}
+        {prop.description && <span className="text-xs text-gray-500">({prop.description})</span>}
       </div>
     );
   }
@@ -484,8 +484,8 @@ function ParameterField({
   if (prop.type === "number" || prop.type === "integer") {
     return (
       <div>
-        <label className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <input
+        <label id="lbl-page-2" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
+        <input aria-labelledby="lbl-page-2"
           type="number"
           value={value != null ? String(value) : ""}
           min={prop.minimum}
@@ -493,7 +493,7 @@ function ParameterField({
           onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
           className="w-full border rounded px-3 py-1.5 text-sm"
         />
-        {prop.description && <p className="text-xs text-gray-400 mt-0.5">{prop.description}</p>}
+        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
       </div>
     );
   }
@@ -501,14 +501,14 @@ function ParameterField({
   // Default: string
   return (
     <div>
-      <label className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-      <input
+      <label id="lbl-page-3" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
+      <input aria-labelledby="lbl-page-3"
         type="text"
         value={String(value ?? "")}
         onChange={(e) => onChange(e.target.value)}
         className="w-full border rounded px-3 py-1.5 text-sm"
       />
-      {prop.description && <p className="text-xs text-gray-400 mt-0.5">{prop.description}</p>}
+      {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
     </div>
   );
 }

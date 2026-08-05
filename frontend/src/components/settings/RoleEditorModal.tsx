@@ -120,8 +120,8 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
           )}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input id="name"
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -130,8 +130,8 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <input
+              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <input id="description"
                 type="text"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}

@@ -67,7 +67,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
         Loading snapshots...
       </div>
     );
@@ -75,7 +75,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
   if (snapshots.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
         <p className="text-lg font-medium mb-2">No Analysis Snapshots</p>
         <p>
           Use <code className="bg-gray-100 px-1 rounded">bioaf.snapshot(adata, label=&quot;...&quot;)</code>{" "}
@@ -132,7 +132,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
               {groupKey === "other"
                 ? "Ungrouped Snapshots"
                 : `Session ${groupSnaps[0].notebook_session_id}`}
-              <span className="ml-2 text-gray-400 font-normal">
+              <span className="ml-2 text-gray-500 font-normal">
                 {groupSnaps[0].user_name} &middot; {groupSnaps.length} snapshot{groupSnaps.length !== 1 ? "s" : ""}
               </span>
             </h3>
@@ -187,7 +187,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
                 )}
 
                 {/* Timestamp */}
-                <div className="text-xs text-gray-400 whitespace-nowrap">
+                <div className="text-xs text-gray-500 whitespace-nowrap">
                   {new Date(snap.created_at).toLocaleString()}
                 </div>
               </div>
@@ -217,7 +217,7 @@ function ComparisonModal({ ids, snapshots, onClose }: ComparisonModalProps) {
           <h2 className="text-lg font-semibold">
             Comparing {snapshots.length} Snapshots
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
             &times;
           </button>
         </div>
@@ -246,7 +246,7 @@ function SnapshotComparisonContent({
   }, []);
 
   if (!SnapshotComparison) {
-    return <div className="text-center py-8 text-gray-400">Loading comparison...</div>;
+    return <div className="text-center py-8 text-gray-500">Loading comparison...</div>;
   }
 
   return <SnapshotComparison url={url} />;

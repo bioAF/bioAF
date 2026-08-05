@@ -193,7 +193,7 @@ test("links single file to experiment via row Associate button", async () => {
   });
 
   // Select an experiment from the modal's experiment dropdown
-  const experimentSelect = screen.getByRole("combobox", { name: /experiment/i });
+  const experimentSelect = screen.getByRole("combobox", { name: "Experiment" });
   fireEvent.change(experimentSelect, { target: { value: "20" } });
 
   fireEvent.click(screen.getByText("Save"));
@@ -244,7 +244,7 @@ test("bulk-associates selected files to experiment", async () => {
   });
 
   // Select an experiment and save
-  const experimentSelect = screen.getByRole("combobox", { name: /experiment/i });
+  const experimentSelect = screen.getByRole("combobox", { name: "Experiment" });
   fireEvent.change(experimentSelect, { target: { value: "10" } });
   fireEvent.click(screen.getByText("Save"));
 

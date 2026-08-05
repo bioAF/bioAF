@@ -548,7 +548,7 @@ function SettingsUsersPageInner() {
               Set a new password for {tempPasswordUser.email}. They should change
               it after logging in.
             </p>
-            <input
+            <input aria-label="Enter new password"
               type="password"
               value={tempPassword}
               onChange={(e) => setTempPassword(e.target.value)}
@@ -587,10 +587,10 @@ function SettingsUsersPageInner() {
             </h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
                   Name
                 </label>
-                <input
+                <input id="name"
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -598,10 +598,10 @@ function SettingsUsersPageInner() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
                   Role
                 </label>
-                <select
+                <select id="role"
                   value={editRole}
                   onChange={(e) => setEditRole(e.target.value)}
                   className="w-full px-3 py-2 border rounded-md text-sm"

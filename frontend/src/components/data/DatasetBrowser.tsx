@@ -144,7 +144,7 @@ export function DatasetBrowser() {
   return (
     <div className="space-y-4">
       <div className="flex gap-4 flex-wrap">
-        <input
+        <input aria-label="Search datasets"
           type="text"
           placeholder="Search datasets..."
           value={query}
@@ -154,7 +154,7 @@ export function DatasetBrowser() {
           }}
           className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-md text-sm"
         />
-        <select
+        <select aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -167,7 +167,7 @@ export function DatasetBrowser() {
           <option value="analysis">Analysis</option>
           <option value="complete">Complete</option>
         </select>
-        <select
+        <select aria-label="Filter by organism"
           value={organismFilter}
           onChange={(e) => { setOrganismFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -177,7 +177,7 @@ export function DatasetBrowser() {
             <option key={org} value={org}>{org}</option>
           ))}
         </select>
-        <select
+        <select aria-label="Filter by review status"
           value={reviewStatusFilter}
           onChange={(e) => { setReviewStatusFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -188,7 +188,7 @@ export function DatasetBrowser() {
           <option value="rejected">Rejected</option>
           <option value="revision_requested">Revision Requested</option>
         </select>
-        <select
+        <select aria-label="Filter by instrument model"
           value={instrumentModelFilter}
           onChange={(e) => { setInstrumentModelFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -199,7 +199,7 @@ export function DatasetBrowser() {
           <option value="NextSeq 2000">NextSeq 2000</option>
           <option value="MiSeq">MiSeq</option>
         </select>
-        <select
+        <select aria-label="Filter by molecule type"
           value={moleculeTypeFilter}
           onChange={(e) => { setMoleculeTypeFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -221,11 +221,11 @@ export function DatasetBrowser() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <p className="text-gray-500 text-sm">Loading...</p>
       ) : loadError ? (
         <ErrorState message={`Could not load datasets. ${loadError}`} onRetry={() => fetchDatasets()} />
       ) : datasets.length === 0 ? (
-        <p className="text-gray-400 text-sm">No datasets found.</p>
+        <p className="text-gray-500 text-sm">No datasets found.</p>
       ) : (
         <>
           <div className="bg-white rounded-lg shadow overflow-hidden">
@@ -352,8 +352,8 @@ export function DatasetBrowser() {
             </p>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
-                <select
+                <label htmlFor="select-project" className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
+                <select id="select-project"
                   value={selectedProjectId}
                   onChange={(e) => setSelectedProjectId(e.target.value)}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -367,8 +367,8 @@ export function DatasetBrowser() {
               </div>
               {selectedProjectId === "new" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">New Project Name</label>
-                  <input
+                  <label htmlFor="new-project-name" className="block text-sm font-medium text-gray-700 mb-1">New Project Name</label>
+                  <input id="new-project-name"
                     type="text"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}

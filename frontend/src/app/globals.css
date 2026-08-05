@@ -187,3 +187,26 @@
 .dark .prose :where(hr, thead, tbody tr):not(:where([class~="not-prose"] *)) {
   border-color: rgb(var(--color-hairline));
 }
+
+/* -------------------------------------------------------------------------- */
+/* Reduced motion                                                             */
+/*                                                                            */
+/* `LoadingSpinner` carries `motion-reduce:animate-none` itself and covers 63  */
+/* of the app's spinner sites, but 15 others hand-roll `animate-spin` and the  */
+/* skeletons use `animate-pulse`. Handling it here catches those and anything  */
+/* added later, instead of relying on every future author remembering the      */
+/* variant.                                                                   */
+/*                                                                            */
+/* Scoped to the looping utilities deliberately: it is continuous, unending    */
+/* motion that triggers vestibular symptoms. Nearly every transition in this   */
+/* app is `transition-colors`, which is not a motion trigger, so a blanket     */
+/* `transition-duration: 0` reset would change a great deal to fix nothing.    */
+/* -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse,
+  .animate-bounce,
+  .animate-ping {
+    animation: none;
+  }
+}

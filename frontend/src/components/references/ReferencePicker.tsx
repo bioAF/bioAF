@@ -48,7 +48,7 @@ export function ReferencePicker({
 
   return (
     <div className="space-y-1">
-      <select
+      <select aria-label="Reference dataset"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full border rounded px-3 py-2 text-sm font-mono bg-white"
@@ -75,7 +75,7 @@ export function ReferencePicker({
         />
         Include deprecated versions
       </label>
-      {loading && <p className="text-xs text-gray-400">Loading references...</p>}
+      {loading && <p className="text-xs text-gray-500">Loading references...</p>}
       {!loading && visible.length === 0 && (
         <p className="text-xs text-gray-500">
           No active references in category &ldquo;{category}&rdquo;.

@@ -78,7 +78,7 @@ export function TerraformRunHistory({ runs }: TerraformRunHistoryProps) {
           const status = describeStatus(run);
           return (
           <tr key={run.id} className="border-b hover:bg-gray-50 align-top">
-            <td className="py-2 pr-4 text-gray-400">#{run.id}</td>
+            <td className="py-2 pr-4 text-gray-500">#{run.id}</td>
             <td className="py-2 pr-4 font-mono text-xs">{run.action}</td>
             <td className="py-2 pr-4 text-gray-600">{run.module_name ?? "-"}</td>
             <td className="py-2 pr-4">

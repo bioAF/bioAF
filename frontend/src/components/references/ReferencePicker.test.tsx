@@ -91,7 +91,7 @@ describe("ReferencePicker", () => {
     render(<ReferencePicker category="annotation" value="" onChange={onChange} />);
 
     await waitFor(() => expect(mockGet).toHaveBeenCalled());
-    fireEvent.change(screen.getByRole("combobox", { name: "" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: "Reference dataset" }), {
       target: { value: "/data/references/annotation/gencode/v45/" },
     });
     expect(onChange).toHaveBeenCalledWith("/data/references/annotation/gencode/v45/");

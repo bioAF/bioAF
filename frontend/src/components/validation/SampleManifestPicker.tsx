@@ -90,8 +90,8 @@ export function SampleManifestPicker({
                 <p className="truncate text-sm font-medium text-gray-800">{s.title || id}</p>
                 <p className="truncate text-xs text-gray-500">
                   {s.condition && <span>{s.condition}</span>}
-                  {s.condition && id && <span className="text-gray-400"> &middot; </span>}
-                  {id && <span className="font-mono text-gray-400">{id}</span>}
+                  {s.condition && id && <span className="text-gray-500"> &middot; </span>}
+                  {id && <span className="font-mono text-gray-500">{id}</span>}
                 </p>
               </div>
               <label className="text-xs text-gray-600">

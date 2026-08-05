@@ -136,7 +136,7 @@ export function SheetsReaderSACard() {
         )}
         <button
           onClick={() => setShowInfo(!showInfo)}
-          className="text-gray-400 hover:text-gray-600 w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-xs font-medium"
+          className="text-gray-500 hover:text-gray-600 w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-xs font-medium"
           title="What is a reader account?"
         >
           ?

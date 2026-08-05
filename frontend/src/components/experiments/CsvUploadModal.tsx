@@ -241,7 +241,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
             {step === "preview" && "Map Unknown Columns"}
             {step === "done" && "Import Complete"}
           </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
             &times;
           </button>
         </div>
@@ -305,7 +305,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                           </tr>
                         </thead>
                         <tbody>
-                          <tr className="text-gray-400 italic">
+                          <tr className="text-gray-500 italic">
                             {SAMPLE_FIELDS.map((f) => (
                               <td key={f.value} className="px-2 py-1 whitespace-nowrap">
                                 {EXAMPLE_VALUES[f.value] ?? ""}
@@ -361,10 +361,10 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                   </p>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">
                       Google Sheets URL
                     </label>
-                    <input
+                    <input id="google-sheets-url"
                       type="url"
                       value={sheetUrl}
                       onChange={(e) => setSheetUrl(e.target.value)}
@@ -442,7 +442,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                       <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
                         {col}
                       </span>
-                      <span className="text-gray-400">&rarr;</span>
+                      <span className="text-gray-500">&rarr;</span>
                       <select
                         value={columnMappings[col] ?? "skip"}
                         onChange={(e) => handleMappingChange(col, e.target.value)}

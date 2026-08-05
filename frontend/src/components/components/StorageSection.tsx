@@ -140,13 +140,13 @@ function BucketCard({
       <p className="text-xs text-gray-500 mb-2 capitalize">
         {bucket.purpose.replace("_", " ")}
       </p>
-      <div className="flex gap-4 text-xs text-gray-400">
+      <div className="flex gap-4 text-xs text-gray-500">
         <span>{formatBytes(bucket.size_bytes)}</span>
         <span>{bucket.object_count} objects</span>
         <span>{bucket.storage_class}</span>
       </div>
       {bucket.lifecycle_rules.length > 0 && (
-        <div className="mt-1 text-xs text-gray-400">
+        <div className="mt-1 text-xs text-gray-500">
           {bucket.lifecycle_rules.map((rule, i) => (
             <span key={i} className="block">
               {rule}

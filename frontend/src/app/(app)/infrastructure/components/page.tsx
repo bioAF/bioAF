@@ -655,12 +655,12 @@ export default function InfraComponentsPage() {
                   {/* SLURM + NFS card (coming soon) */}
                   <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 opacity-60">
                     <div className="flex items-start justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-gray-400">SLURM + NFS</h3>
+                      <h3 className="text-lg font-semibold text-gray-500">SLURM + NFS</h3>
                       <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
                         Coming Soon
                       </span>
                     </div>
-                    <p className="text-sm text-gray-400 mb-4">
+                    <p className="text-sm text-gray-500 mb-4">
                       Traditional HPC scheduler with NFS shared storage. Available in a
                       future release.
                     </p>
@@ -764,8 +764,8 @@ export default function InfraComponentsPage() {
                           <div className="space-y-3">
                             <h5 className="text-sm font-medium text-gray-700">Pipeline Nodes</h5>
                             <div>
-                              <label className="text-xs text-gray-500">Machine Size</label>
-                              <select
+                              <label htmlFor="machine-size" className="text-xs text-gray-500">Machine Size</label>
+                              <select id="machine-size"
                                 value={configEdits.k8s_pipeline_machine_type ?? clusterConfig.k8s_pipeline_machine_type}
                                 onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_machine_type: e.target.value })}
                                 className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
@@ -780,8 +780,8 @@ export default function InfraComponentsPage() {
                             </div>
                             {has("autoscaling") && (
                             <div>
-                              <label className="text-xs text-gray-500">Max Nodes</label>
-                              <input
+                              <label htmlFor="max-nodes" className="text-xs text-gray-500">Max Nodes</label>
+                              <input id="max-nodes"
                                 type="number"
                                 value={configEdits.k8s_pipeline_max_nodes ?? clusterConfig.k8s_pipeline_max_nodes}
                                 onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_max_nodes: Number(e.target.value) })}
@@ -797,7 +797,7 @@ export default function InfraComponentsPage() {
                                 <button
                                   type="button"
                                   onClick={() => setShowSpotTooltip(!showSpotTooltip)}
-                                  className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-gray-400 text-[10px] leading-none hover:border-gray-600 hover:text-gray-600"
+                                  className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-gray-400 text-gray-500 text-[10px] leading-none hover:border-gray-600 hover:text-gray-600"
                                 >
                                   i
                                 </button>
@@ -807,7 +807,7 @@ export default function InfraComponentsPage() {
                                     <button
                                       type="button"
                                       onClick={(e) => { e.stopPropagation(); setShowSpotTooltip(false); }}
-                                      className="absolute top-1 right-2 text-gray-400 hover:text-white"
+                                      className="absolute top-1 right-2 text-gray-500 hover:text-white"
                                     >
                                       x
                                     </button>
@@ -846,8 +846,8 @@ export default function InfraComponentsPage() {
                           <div className="space-y-3">
                             <h5 className="text-sm font-medium text-gray-700">Interactive Nodes</h5>
                             <div>
-                              <label className="text-xs text-gray-500">Machine Size</label>
-                              <select
+                              <label htmlFor="machine-size-2" className="text-xs text-gray-500">Machine Size</label>
+                              <select id="machine-size-2"
                                 value={configEdits.k8s_interactive_machine_type ?? clusterConfig.k8s_interactive_machine_type}
                                 onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_machine_type: e.target.value })}
                                 className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
@@ -871,8 +871,8 @@ export default function InfraComponentsPage() {
                             </div>
                             {has("autoscaling") && (
                             <div>
-                              <label className="text-xs text-gray-500">Max Nodes</label>
-                              <input
+                              <label htmlFor="max-nodes-2" className="text-xs text-gray-500">Max Nodes</label>
+                              <input id="max-nodes-2"
                                 type="number"
                                 value={configEdits.k8s_interactive_max_nodes ?? clusterConfig.k8s_interactive_max_nodes}
                                 onChange={(e) => setConfigEdits({ ...configEdits, k8s_interactive_max_nodes: Number(e.target.value) })}
@@ -948,12 +948,12 @@ export default function InfraComponentsPage() {
                                 className="bg-white rounded-lg shadow p-5 border border-gray-200 opacity-60"
                               >
                                 <div className="flex items-start justify-between mb-2">
-                                  <h3 className="font-semibold text-sm text-gray-400">{comp.name}</h3>
+                                  <h3 className="font-semibold text-sm text-gray-500">{comp.name}</h3>
                                   <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
                                     Coming Soon
                                   </span>
                                 </div>
-                                <p className="text-xs text-gray-400">{comp.description}</p>
+                                <p className="text-xs text-gray-500">{comp.description}</p>
                               </div>
                             ) : (
                               <div
@@ -999,7 +999,7 @@ export default function InfraComponentsPage() {
                                 </div>
                                 <p className="text-xs text-gray-600 mb-3">{comp.description}</p>
                                 {comp.dependencies.length > 0 && (
-                                  <p className="text-xs text-gray-400 mb-2">
+                                  <p className="text-xs text-gray-500 mb-2">
                                     Requires: {comp.dependencies.join(", ")}
                                   </p>
                                 )}
@@ -1167,14 +1167,14 @@ export default function InfraComponentsPage() {
                  EKS spans availability zones automatically, so there is no GKE-
                  style zone selector or cross-region GCP cost warning. */
               <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-                <input
+                <label htmlFor="region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+                <input id="region"
                   type="text"
                   value={deployRegion}
                   readOnly
                   className="w-full px-3 py-2 border rounded text-sm bg-gray-50 text-gray-600"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   The cluster deploys in your install region and spans multiple availability
                   zones for resilience.
                 </p>
@@ -1183,8 +1183,8 @@ export default function InfraComponentsPage() {
               <>
                 {/* Region (GCP) */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-                  <select
+                  <label htmlFor="region-2" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+                  <select id="region-2"
                     value={deployRegion}
                     onChange={(e) => {
                       setDeployRegion(e.target.value);
@@ -1209,7 +1209,7 @@ export default function InfraComponentsPage() {
 
                 {/* Zone toggle (GCP) */}
                 <div className="mb-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                  <label id="lbl-page-1" className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={useSpecificZone}
@@ -1217,14 +1217,14 @@ export default function InfraComponentsPage() {
                     />
                     <span className="text-sm text-gray-700">Deploy to a specific zone</span>
                     <span
-                      className="text-gray-400 cursor-help"
+                      className="text-gray-500 cursor-help"
                       title="Without a specific zone, GKE creates a multi-zonal cluster with nodes distributed across availability zones. This provides better resilience but may cost slightly more."
                     >
                       &#9432;
                     </span>
                   </label>
                   {useSpecificZone && (
-                    <select
+                    <select aria-labelledby="lbl-page-1"
                       value={deployZone}
                       onChange={(e) => setDeployZone(e.target.value)}
                       className="w-full px-3 py-2 border rounded text-sm mt-2"
@@ -1235,7 +1235,7 @@ export default function InfraComponentsPage() {
                     </select>
                   )}
                   {!useSpecificZone && (
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-gray-500 mt-1">
                       Multi-zonal deployment across {deployRegion}. Greater flexibility,
                       slightly higher GCP cost.
                     </p>
@@ -1363,10 +1363,10 @@ export default function InfraComponentsPage() {
             </label>
 
             <div className="mb-4">
-              <label className="text-xs text-gray-500 block mb-1">
+              <label htmlFor="type-delete-my-data-to-confirm" className="text-xs text-gray-500 block mb-1">
                 Type <span className="font-mono font-medium text-gray-700">delete my data</span> to confirm
               </label>
-              <input
+              <input id="type-delete-my-data-to-confirm"
                 type="text"
                 value={destroyStoragePhrase}
                 onChange={(e) => setDestroyStoragePhrase(e.target.value)}

@@ -317,7 +317,7 @@ export default function EnvironmentsPage() {
                 </div>
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{env.description || "No description"}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-gray-500">
                     {env.version_count} version{env.version_count !== 1 ? "s" : ""}
                   </span>
                   {env.latest_version && (
@@ -332,7 +332,7 @@ export default function EnvironmentsPage() {
               </div>
             ))}
             {environments.length === 0 && (
-              <div className="col-span-full text-center py-12 text-gray-400">
+              <div className="col-span-full text-center py-12 text-gray-500">
                 No environments yet. Create one to get started.
               </div>
             )}
@@ -360,7 +360,7 @@ export default function EnvironmentsPage() {
                         {statusLabel("environmentVersion", selectedVersion.status)} - {selectedVersion.definition_format}
                       </span>
                       {selectedVersion.image_uri && (
-                        <span className="text-xs text-gray-400 font-mono ml-2">{selectedVersion.image_uri}</span>
+                        <span className="text-xs text-gray-500 font-mono ml-2">{selectedVersion.image_uri}</span>
                       )}
                     </div>
                   </div>
@@ -475,10 +475,10 @@ export default function EnvironmentsPage() {
                           }`}>
                             {statusLabel("environmentVersion", v.status)}
                           </span>
-                          <span className="text-xs text-gray-400">{v.definition_format}</span>
+                          <span className="text-xs text-gray-500">{v.definition_format}</span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <span className="text-xs text-gray-400">
+                          <span className="text-xs text-gray-500">
                             {new Date(v.created_at).toLocaleDateString()}
                           </span>
                           {canBuild && (v.status === "draft" || v.status === "failed") && (
@@ -501,7 +501,7 @@ export default function EnvironmentsPage() {
                       </div>
                     ))}
                     {selectedEnv.versions.length === 0 && (
-                      <p className="text-center text-gray-400 py-8">
+                      <p className="text-center text-gray-500 py-8">
                         No versions yet. Create one in the &quot;New Version&quot; tab.
                       </p>
                     )}
@@ -511,11 +511,11 @@ export default function EnvironmentsPage() {
                 {activeTab === "new-version" && canCreate && (
                   <div className="space-y-4">
                     <div>
-                      <label className="text-sm text-gray-500 block mb-1">Format</label>
+                      <label htmlFor="format" className="text-sm text-gray-500 block mb-1">Format</label>
                       {selectedEnv.environment_type === "work_node" ? (
                         <span className="text-sm text-gray-700">Conda (environment.yml)</span>
                       ) : (
-                        <select
+                        <select id="format"
                           value={newVersionFormat}
                           onChange={(e) => setNewVersionFormat(e.target.value as "dockerfile" | "conda")}
                           className="border rounded px-3 py-2 text-sm"
@@ -526,10 +526,11 @@ export default function EnvironmentsPage() {
                       )}
                     </div>
                     <div>
-                      <label className="text-sm text-gray-500 block mb-1">
+                      <label htmlFor="new-version-content" className="text-sm text-gray-500 block mb-1">
                         {newVersionFormat === "dockerfile" ? "Dockerfile" : "environment.yml"}
                       </label>
                       <textarea
+                        id="new-version-content"
                         value={newVersionContent}
                         onChange={(e) => setNewVersionContent(e.target.value)}
                         rows={16}
@@ -561,8 +562,8 @@ export default function EnvironmentsPage() {
               <h3 className="font-semibold text-lg mb-4">New Environment</h3>
               <div className="space-y-3">
                 <div>
-                  <label className="text-sm text-gray-500 block mb-1">Type</label>
-                  <select
+                  <label htmlFor="type" className="text-sm text-gray-500 block mb-1">Type</label>
+                  <select id="type"
                     value={createForm.environment_type}
                     onChange={(e) => setCreateForm({ ...createForm, environment_type: e.target.value as "notebook" | "work_node" })}
                     className="w-full border rounded px-3 py-2 text-sm"
@@ -570,15 +571,15 @@ export default function EnvironmentsPage() {
                     <option value="notebook">Notebook</option>
                     <option value="work_node">Work Node</option>
                   </select>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-gray-500 mt-1">
                     {createForm.environment_type === "work_node"
                       ? "Work node environments use conda and build as GCE VM images."
                       : "Notebook environments use Dockerfile or conda and build as container images."}
                   </p>
                 </div>
                 <div>
-                  <label className="text-sm text-gray-500 block mb-1">Name</label>
-                  <input
+                  <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+                  <input id="name"
                     value={createForm.name}
                     onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
                     placeholder="seurat-gpu"
@@ -586,8 +587,8 @@ export default function EnvironmentsPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-gray-500 block mb-1">Description</label>
-                  <input
+                  <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
+                  <input id="description"
                     value={createForm.description}
                     onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
                     placeholder="Optional description"

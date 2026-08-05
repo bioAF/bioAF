@@ -104,9 +104,9 @@ function PublishForm({
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Select h5ad file</label>
         {loadingFiles ? (
-          <p className="text-sm text-gray-400">Loading available files...</p>
+          <p className="text-sm text-gray-500">Loading available files...</p>
         ) : files.length === 0 ? (
-          <p className="text-sm text-gray-400">No publishable h5ad files available.</p>
+          <p className="text-sm text-gray-500">No publishable h5ad files available.</p>
         ) : (
           <div className="border border-gray-200 rounded-md max-h-64 overflow-y-auto divide-y divide-gray-100">
             {files.map((f) => (
@@ -124,7 +124,7 @@ function PublishForm({
                 }`} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-gray-900 truncate">{f.filename}</p>
-                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400 mt-0.5">
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-500 mt-0.5">
                     {f.experiment_name && <span>Experiment: {f.experiment_name}</span>}
                     {f.project_name && <span>Project: {f.project_name}</span>}
                     {f.sample_names.length > 0 && <span>Samples: {f.sample_names.join(", ")}</span>}
@@ -171,8 +171,8 @@ function PublishForm({
       {/* Dataset name */}
       {selectedFile && inspection?.cellxgene_ready && (
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Dataset name</label>
-          <input
+          <label htmlFor="dataset-name" className="block text-sm font-medium text-gray-700 mb-1">Dataset name</label>
+          <input id="dataset-name"
             type="text"
             value={datasetName}
             onChange={(e) => setDatasetName(e.target.value)}
@@ -225,7 +225,7 @@ function PublicationCard({
           <p className="font-medium text-sm truncate">{pub.dataset_name}</p>
           <StatusBadge status={pub.status} />
         </div>
-        <div className="text-xs text-gray-400 space-y-0.5">
+        <div className="text-xs text-gray-500 space-y-0.5">
           {experimentName && <p>Experiment: {experimentName}</p>}
           {pub.file && (
             <p>{pub.file.filename} ({formatBytes(pub.file.size_bytes)})</p>
@@ -248,7 +248,7 @@ function PublicationCard({
           </a>
         )}
         {isActive && !pub.access_url && (
-          <span className="px-3 py-1 text-sm text-gray-400">
+          <span className="px-3 py-1 text-sm text-gray-500">
             Starting...
           </span>
         )}
@@ -387,7 +387,7 @@ export default function CellxgenePage() {
       {loading ? (
         <ContentLoading />
       ) : publications.length === 0 ? (
-        <p className="text-gray-400 text-sm">
+        <p className="text-gray-500 text-sm">
           {filterExperimentId
             ? "No published datasets for this experiment."
             : "No published datasets yet. Use the Publish Dataset button to get started."}

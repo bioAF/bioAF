@@ -329,10 +329,10 @@ function ProviderCard({
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {hosted && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="api-key" className="block text-sm font-medium text-gray-700 mb-1">
               API key
             </label>
-            <input
+            <input id="api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -352,10 +352,10 @@ function ProviderCard({
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="model" className="block text-sm font-medium text-gray-700 mb-1">
             Model
           </label>
-          <select
+          <select id="model"
             value={model}
             onChange={(e) => setModel(e.target.value)}
             className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
@@ -518,7 +518,7 @@ function LitReviewThresholdSection() {
         more candidates.
       </p>
       <div className="flex items-center gap-2">
-        <input
+        <input aria-label="Input"
           type="number"
           min={0}
           max={1}
@@ -659,10 +659,10 @@ export function AutoLitReviewSection() {
 
       <div className="flex flex-wrap items-end gap-4">
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="cadence" className="block text-xs font-medium text-gray-700 mb-1">
             Cadence
           </label>
-          <select
+          <select id="cadence"
             value={cadence}
             onChange={(e) => setCadence(e.target.value)}
             disabled={!enabled}
@@ -676,10 +676,10 @@ export function AutoLitReviewSection() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="first-run" className="block text-xs font-medium text-gray-700 mb-1">
             First run
           </label>
-          <input
+          <input id="first-run"
             type="datetime-local"
             value={firstRun}
             onChange={(e) => setFirstRun(e.target.value)}
@@ -688,10 +688,10 @@ export function AutoLitReviewSection() {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="max-experiments-per-run" className="block text-xs font-medium text-gray-700 mb-1">
             Max experiments per run
           </label>
-          <input
+          <input id="max-experiments-per-run"
             type="number"
             min={1}
             step={1}

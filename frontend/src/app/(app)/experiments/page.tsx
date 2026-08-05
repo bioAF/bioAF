@@ -68,14 +68,14 @@ export default function ExperimentsPage() {
 
       <div className="bg-white rounded-lg shadow mb-6 p-4">
         <div className="flex flex-wrap gap-4">
-          <input
+          <input aria-label="Search experiments"
             type="text"
             placeholder="Search experiments..."
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm flex-1 min-w-[200px]"
           />
-          <select
+          <select aria-label="Filter by status"
             value={statusFilter}
             onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -85,7 +85,7 @@ export default function ExperimentsPage() {
               <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
             ))}
           </select>
-          <select
+          <select aria-label="Filter by project"
             value={projectFilter}
             onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
             className="border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -104,8 +104,8 @@ export default function ExperimentsPage() {
         </div>
       ) : experiments.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
-          <h2 className="text-lg font-semibold text-gray-400 mb-2">No experiments found</h2>
-          <p className="text-gray-400 mb-4">Get started by creating your first experiment.</p>
+          <h2 className="text-lg font-semibold text-gray-500 mb-2">No experiments found</h2>
+          <p className="text-gray-500 mb-4">Get started by creating your first experiment.</p>
           <Link
             href="/experiments/new"
             className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"

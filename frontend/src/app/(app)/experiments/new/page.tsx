@@ -188,8 +188,8 @@ export default function NewExperimentPage() {
           <h2 className="text-lg font-semibold">Basics</h2>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Template (optional)</label>
-            <select
+            <label htmlFor="template-optional" className="block text-sm font-medium text-gray-700 mb-1">Template (optional)</label>
+            <select id="template-optional"
               value={form.template_id ?? ""}
               onChange={(e) => setForm({ ...form, template_id: e.target.value ? Number(e.target.value) : null })}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -202,8 +202,8 @@ export default function NewExperimentPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
-            <input
+            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+            <input id="name"
               type="text"
               required
               value={form.name}
@@ -213,8 +213,8 @@ export default function NewExperimentPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Project</label>
-            <select
+            <label htmlFor="project" className="block text-sm font-medium text-gray-700 mb-1">Project</label>
+            <select id="project"
               value={form.project_id ?? ""}
               onChange={(e) => setForm({ ...form, project_id: e.target.value ? Number(e.target.value) : null })}
               className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
@@ -248,8 +248,8 @@ export default function NewExperimentPage() {
           />
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Hypothesis</label>
-            <textarea
+            <label htmlFor="hypothesis" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis</label>
+            <textarea id="hypothesis"
               value={form.hypothesis ?? ""}
               onChange={(e) => setForm({ ...form, hypothesis: e.target.value || null })}
               rows={3}
@@ -258,8 +258,8 @@ export default function NewExperimentPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-            <textarea
+            <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea id="description"
               value={form.description ?? ""}
               onChange={(e) => setForm({ ...form, description: e.target.value || null })}
               rows={3}
@@ -269,8 +269,8 @@ export default function NewExperimentPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
-              <input
+              <label htmlFor="start-date" className="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input id="start-date"
                 type="date"
                 value={form.start_date ?? ""}
                 onChange={(e) => setForm({ ...form, start_date: e.target.value || null })}
@@ -278,8 +278,8 @@ export default function NewExperimentPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Expected Sample Count</label>
-              <input
+              <label htmlFor="expected-sample-count" className="block text-sm font-medium text-gray-700 mb-1">Expected Sample Count</label>
+              <input id="expected-sample-count"
                 type="number"
                 min={0}
                 value={form.expected_sample_count ?? ""}
@@ -340,7 +340,7 @@ export default function NewExperimentPage() {
                           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                         />
                       ) : (
-                        <input
+                        <input aria-label="Default"
                           type="text"
                           value={current?.default_value ?? ""}
                           onChange={(e) => updateFieldDefault(field.name, e.target.value || null, current?.is_required ?? null)}
@@ -367,7 +367,7 @@ export default function NewExperimentPage() {
                   <div key={`tmpl-${field.name}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
                     <label className="text-sm text-gray-700 truncate">{field.name} {field.required && "*"}</label>
                     <div className="min-w-0">
-                      <input
+                      <input aria-label="Default"
                         type={field.type === "number" ? "number" : "text"}
                         value={customFieldValues[field.name] ?? ""}
                         onChange={(e) => setCustomFieldValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
@@ -375,14 +375,14 @@ export default function NewExperimentPage() {
                         className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                       />
                     </div>
-                    <span className="text-xs text-gray-400 whitespace-nowrap">from template</span>
+                    <span className="text-xs text-gray-500 whitespace-nowrap">from template</span>
                   </div>
                 ))
               }
 
               {extraCustomFields.map((field, idx) => (
                 <div key={`extra-${idx}`} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-3 items-center">
-                  <input
+                  <input aria-label="Field name"
                     type="text"
                     value={field.name}
                     onChange={(e) => setExtraCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, name: e.target.value } : f))}
@@ -390,7 +390,7 @@ export default function NewExperimentPage() {
                     className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                   />
                   <div className="min-w-0">
-                    <input
+                    <input aria-label="Default"
                       type="text"
                       value={field.value}
                       onChange={(e) => setExtraCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, value: e.target.value } : f))}

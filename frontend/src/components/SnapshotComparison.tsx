@@ -50,7 +50,7 @@ export default function SnapshotComparison({ url }: SnapshotComparisonProps) {
     }
   }
 
-  if (loading) return <div className="text-center py-8 text-gray-400">Loading comparison...</div>;
+  if (loading) return <div className="text-center py-8 text-gray-500">Loading comparison...</div>;
   if (error) return <div className="text-center py-8 text-red-500">{error}</div>;
   if (!data) return null;
 
@@ -267,7 +267,7 @@ function CommandLogDiffTable({
                   ) : diff.params_differ ? (
                     <span className="text-yellow-600 font-medium">CHANGED</span>
                   ) : (
-                    <span className="text-gray-400">same</span>
+                    <span className="text-gray-500">same</span>
                   )}
                 </td>
               </tr>

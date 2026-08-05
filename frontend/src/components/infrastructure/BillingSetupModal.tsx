@@ -146,7 +146,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               <li>Select your project and choose the <code className="bg-gray-100 px-1 rounded text-xs">billing_export</code> dataset</li>
               <li>Click <strong>Save</strong></li>
             </ol>
-            <p className="text-xs text-gray-400 mb-4">
+            <p className="text-xs text-gray-500 mb-4">
               Data may take up to 24 hours to appear after enabling.
             </p>
             <div className="flex justify-end gap-2">

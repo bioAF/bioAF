@@ -34,7 +34,7 @@ export function AutoIngestActivityWidget() {
         Auto-ingest activity
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading activity...</span>
         </div>
@@ -69,7 +69,7 @@ export function AutoIngestActivityWidget() {
             <div>
               <div
                 className={`text-3xl font-bold ${
-                  data.messages_failed_24h > 0 ? "text-red-600" : "text-gray-400"
+                  data.messages_failed_24h > 0 ? "text-red-600" : "text-gray-500"
                 }`}
               >
                 {data.messages_failed_24h}

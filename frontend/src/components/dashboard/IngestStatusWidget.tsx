@@ -53,7 +53,7 @@ export function IngestStatusWidget() {
         File Inventory
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading file stats...</span>
         </div>
       )}
@@ -61,7 +61,7 @@ export function IngestStatusWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">{error}</div>
       )}
       {!loading && !error && stats && (stats.artifacts?.total ?? 0) === 0 && (stats.uploaded?.total ?? 0) === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">No files yet.</p>
+        <p className="text-sm text-gray-500" data-testid="widget-empty">No files yet.</p>
       )}
       {!loading && !error && stats && ((stats.artifacts?.total ?? 0) > 0 || (stats.uploaded?.total ?? 0) > 0) && (
         <div className="space-y-3">

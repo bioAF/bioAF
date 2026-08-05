@@ -155,26 +155,26 @@ export function SessionCredentialsTab() {
               </h3>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="username-optional" className="block text-sm font-medium text-gray-700 mb-1">
                   Username (optional)
                 </label>
-                <input
+                <input id="username-optional"
                   type="text"
                   value={credUsername}
                   onChange={(e) => setCredUsername(e.target.value)}
                   placeholder="Auto-generated from your email"
                   className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   Lowercase letters, numbers, and underscores. 3-32 characters.
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                   Password
                 </label>
-                <input
+                <input id="password"
                   type="password"
                   value={credPassword}
                   onChange={(e) => setCredPassword(e.target.value)}
@@ -184,10 +184,10 @@ export function SessionCredentialsTab() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="confirm-password" className="block text-sm font-medium text-gray-700 mb-1">
                   Confirm password
                 </label>
-                <input
+                <input id="confirm-password"
                   type="password"
                   value={credConfirm}
                   onChange={(e) => setCredConfirm(e.target.value)}

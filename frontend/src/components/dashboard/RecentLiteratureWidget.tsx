@@ -43,7 +43,7 @@ export function RecentLiteratureWidget() {
         Recent literature
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading papers...</span>
         </div>
@@ -60,7 +60,7 @@ export function RecentLiteratureWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No papers shared yet.
         </p>
       )}
@@ -74,7 +74,7 @@ export function RecentLiteratureWidget() {
                   className="block rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="block truncate text-sm text-gray-800">{p.title}</span>
-                  <span className="block truncate text-xs text-gray-400">
+                  <span className="block truncate text-xs text-gray-500">
                     {p.journal || "Unknown journal"} &middot; {timeAgo(p.created_at)}
                   </span>
                 </Link>

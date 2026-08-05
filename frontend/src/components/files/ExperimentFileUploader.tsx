@@ -220,7 +220,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
             className="block border-2 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer hover:border-blue-400 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]"
           >
             <p className="text-gray-500 mb-1">Drag &amp; drop any files here</p>
-            <p className="text-sm text-gray-400">or click to browse</p>
+            <p className="text-sm text-gray-500">or click to browse</p>
             <input
               ref={fileInputRef}
               data-testid="upload-file-input"
@@ -295,7 +295,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                       <span className="truncate flex-1 mr-3 font-mono text-xs">
                         {item.file.name}
                       </span>
-                      <span className="text-gray-400 mr-3 shrink-0">
+                      <span className="text-gray-500 mr-3 shrink-0">
                         {(item.file.size / 1024 / 1024).toFixed(1)} MB
                       </span>
                       <StatusLabel item={item} />
@@ -347,7 +347,7 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
                     {item.status === "queued" &&
                       item.suggestedName &&
                       item.nameAccepted === false && (
-                        <p className="mt-1 text-xs text-gray-400">
+                        <p className="mt-1 text-xs text-gray-500">
                           Keeping original name.{" "}
                           <button
                             className="underline text-gray-500 hover:text-gray-700"
@@ -417,7 +417,7 @@ function StatusLabel({ item }: { item: FileItem }) {
       </span>
     );
   }
-  return <span className="text-xs text-gray-400 shrink-0">Queued</span>;
+  return <span className="text-xs text-gray-500 shrink-0">Queued</span>;
 }
 
 function ProgressBar({ item }: { item: FileItem }) {

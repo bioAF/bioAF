@@ -31,7 +31,7 @@ function PlotImage({
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
       {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
+        <span className="text-gray-500 text-sm">Failed to load plot</span>
       ) : url ? (
         <>
           <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
@@ -57,7 +57,7 @@ function PlotImage({
           </button>
         </>
       ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
+        <span className="text-gray-500 text-sm">Loading plot...</span>
       )}
     </div>
   );

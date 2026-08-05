@@ -201,7 +201,7 @@ export default function CustomPipelineListPage() {
                           {row.last_run.status}
                         </span>
                       ) : (
-                        <span className="text-xs text-gray-400">Never run</span>
+                        <span className="text-xs text-gray-500">Never run</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
@@ -211,7 +211,7 @@ export default function CustomPipelineListPage() {
                 ))}
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-12 text-center text-gray-400">
+                    <td colSpan={5} className="px-4 py-12 text-center text-gray-500">
                       No custom pipelines yet.
                       {canCreate && " Click \"Create Pipeline\" to get started."}
                     </td>
@@ -231,8 +231,8 @@ export default function CustomPipelineListPage() {
                 </p>
                 <div className="space-y-3">
                   <div>
-                    <label className="text-sm text-gray-500 block mb-1">Name</label>
-                    <input
+                    <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+                    <input id="name"
                       value={createForm.name}
                       onChange={(e) =>
                         setCreateForm({ ...createForm, name: e.target.value })
@@ -242,10 +242,10 @@ export default function CustomPipelineListPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-gray-500 block mb-1">
+                    <label htmlFor="description" className="text-sm text-gray-500 block mb-1">
                       Description
                     </label>
-                    <input
+                    <input id="description"
                       value={createForm.description ?? ""}
                       onChange={(e) =>
                         setCreateForm({ ...createForm, description: e.target.value })
@@ -257,7 +257,7 @@ export default function CustomPipelineListPage() {
                   {createError && (
                     <p className="text-sm text-red-600">{createError}</p>
                   )}
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     After clicking Create, you&apos;ll be taken to the version form to
                     provide the code source, entrypoint command (e.g.{" "}
                     <code>bash run.sh</code>), pipeline environment, and any variables.

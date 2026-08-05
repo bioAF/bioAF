@@ -64,14 +64,14 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
       )}
 
       <div className="flex gap-2">
-        <input
+        <input aria-label="Email address"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email address"
           className="flex-1 px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
         />
-        <select
+        <select aria-label="Active role"
           value={activeRole}
           onChange={(e) => setSelectedRoleName(e.target.value)}
           className="px-3 py-2 border rounded"

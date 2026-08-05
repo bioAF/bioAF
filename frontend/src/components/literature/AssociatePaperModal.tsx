@@ -119,8 +119,8 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
           Associate {paperIds.length === 1 ? "paper" : `${paperIds.length} papers`}
         </h3>
         <div className="mb-3">
-          <label className="block text-xs text-gray-500 mb-1">Project</label>
-          <select
+          <label htmlFor="project" className="block text-xs text-gray-500 mb-1">Project</label>
+          <select id="project"
             ref={firstFieldRef}
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
@@ -135,10 +135,10 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
           </select>
         </div>
         <div className="mb-4">
-          <label className="block text-xs text-gray-500 mb-1">
+          <label htmlFor="experiment-optional" className="block text-xs text-gray-500 mb-1">
             Experiment (optional)
           </label>
-          <select
+          <select id="experiment-optional"
             value={experimentId}
             onChange={(e) => setExperimentId(e.target.value)}
             className="w-full border border-gray-300 rounded px-3 py-2"

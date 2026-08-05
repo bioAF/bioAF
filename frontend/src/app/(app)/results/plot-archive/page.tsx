@@ -119,10 +119,10 @@ export default function PlotArchivePage() {
         {/* Filters */}
         <div className="flex flex-wrap gap-3 items-end">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs text-gray-500 mb-1">
+            <label htmlFor="search" className="block text-xs text-gray-500 mb-1">
               Search
             </label>
-            <input
+            <input id="search"
               type="text"
               placeholder="Search plots..."
               value={query}
@@ -134,10 +134,10 @@ export default function PlotArchivePage() {
             />
           </div>
           <div className="min-w-[180px]">
-            <label className="block text-xs text-gray-500 mb-1">
+            <label htmlFor="experiment" className="block text-xs text-gray-500 mb-1">
               Experiment
             </label>
-            <select
+            <select id="experiment"
               value={experimentId}
               onChange={(e) => {
                 setExperimentId(e.target.value);
@@ -154,10 +154,10 @@ export default function PlotArchivePage() {
             </select>
           </div>
           <div className="min-w-[180px]">
-            <label className="block text-xs text-gray-500 mb-1">
+            <label htmlFor="pipeline-run" className="block text-xs text-gray-500 mb-1">
               Pipeline Run
             </label>
-            <select
+            <select id="pipeline-run"
               value={pipelineRunId}
               onChange={(e) => {
                 setPipelineRunId(e.target.value);
@@ -174,10 +174,10 @@ export default function PlotArchivePage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">
+            <label htmlFor="date-from" className="block text-xs text-gray-500 mb-1">
               Date from
             </label>
-            <input
+            <input id="date-from"
               type="date"
               value={dateFrom}
               onChange={(e) => {
@@ -188,10 +188,10 @@ export default function PlotArchivePage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">
+            <label htmlFor="date-to" className="block text-xs text-gray-500 mb-1">
               Date to
             </label>
-            <input
+            <input id="date-to"
               type="date"
               value={dateTo}
               onChange={(e) => {
@@ -208,7 +208,7 @@ export default function PlotArchivePage() {
         ) : loadError ? (
           <ErrorState message={`Could not load plots. ${loadError}`} onRetry={() => fetchPlots()} />
         ) : plots.length === 0 ? (
-          <p className="text-gray-400 text-sm">No plots found.</p>
+          <p className="text-gray-500 text-sm">No plots found.</p>
         ) : (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -228,7 +228,7 @@ export default function PlotArchivePage() {
                           onClick={() => handleExpand(plot)}
                         />
                       ) : (
-                        <span className="text-gray-400 text-xs">
+                        <span className="text-gray-500 text-xs">
                           No preview
                         </span>
                       )}
@@ -239,7 +239,7 @@ export default function PlotArchivePage() {
                       )}
                     </div>
                     <div className="p-2">
-                      <p className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-gray-400" : ""}`} title={plot.title ?? undefined}>
+                      <p className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-gray-500" : ""}`} title={plot.title ?? undefined}>
                         {plot.title}
                       </p>
                       {plot.tags.length > 0 && (

@@ -34,7 +34,7 @@ export function BarcodeRankChart({ data }: BarcodeRankChartProps) {
   return (
     <div className="bg-white rounded-lg border p-4">
       <h4 className="text-sm font-semibold text-gray-700 mb-3">Barcode Rank (Knee) Plot</h4>
-      <p className="text-xs text-gray-400 mb-2">
+      <p className="text-xs text-gray-500 mb-2">
         UMI counts per barcode, sorted by rank. The knee separates real cells from background.
       </p>
       <ResponsiveContainer width="100%" height={320}>

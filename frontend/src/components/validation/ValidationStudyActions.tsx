@@ -72,7 +72,7 @@ export function ValidationStudyActions({
             Fetches the full text by DOI and extracts the reproduction plan (may take a moment).
           </span>
         </div>
-        <textarea
+        <textarea aria-label="Optional: paste the full text if the paper is not open access"
           value={fullText}
           onChange={(e) => setFullText(e.target.value)}
           placeholder="Optional: paste the full text if the paper is not open access."
@@ -92,7 +92,7 @@ export function ValidationStudyActions({
           >
             {busy ? "Working..." : "Approve plan"}
           </button>
-          <input
+          <input aria-label="Reason (optional)"
             value={declineReason}
             onChange={(e) => setDeclineReason(e.target.value)}
             placeholder="Reason (optional)"

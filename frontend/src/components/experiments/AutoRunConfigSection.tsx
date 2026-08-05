@@ -87,12 +87,12 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Loading...</div>
+        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Loading...</div>
       ) : loadError ? (
         <ErrorState message={`Could not load auto-run rules. ${loadError}`} onRetry={() => loadConfigs()} />
       ) : configs.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-500 text-sm">
             No auto-run configurations. Configure one to automatically run pipelines
             when sample files arrive.
           </p>
@@ -256,7 +256,7 @@ function AutoRunConfigModal({
             <h2 className="text-lg font-semibold">
               {isEdit ? "Edit Auto-Run Configuration" : "Configure Auto-Run"}
             </h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
           </div>
 
           {/* Step indicator */}
@@ -277,8 +277,8 @@ function AutoRunConfigModal({
           {/* Step 1: Select Pipeline */}
           {step === 1 && (
             <div>
-              <label className="text-sm text-gray-600 mb-2 block">Select Pipeline</label>
-              <select
+              <label htmlFor="select-pipeline" className="text-sm text-gray-600 mb-2 block">Select Pipeline</label>
+              <select id="select-pipeline"
                 value={selectedPipelineKey}
                 onChange={(e) => setSelectedPipelineKey(e.target.value)}
                 className="w-full border rounded-md px-3 py-2 text-sm"
@@ -291,7 +291,7 @@ function AutoRunConfigModal({
                 ))}
               </select>
               {selectedPipeline && (
-                <p className="text-xs text-gray-400 mt-2">{selectedPipeline.description || ""}</p>
+                <p className="text-xs text-gray-500 mt-2">{selectedPipeline.description || ""}</p>
               )}
               <div className="mt-6 flex justify-end">
                 <button
@@ -337,15 +337,15 @@ function AutoRunConfigModal({
           {step === 3 && (
             <div>
               <div className="mb-6">
-                <label className="text-sm text-gray-600 block mb-1">Delay after sample completion (minutes)</label>
-                <input
+                <label htmlFor="delay-after-sample-completion-minutes" className="text-sm text-gray-600 block mb-1">Delay after sample completion (minutes)</label>
+                <input id="delay-after-sample-completion-minutes"
                   type="number"
                   min={0}
                   value={delayMinutes}
                   onChange={(e) => setDelayMinutes(Math.max(0, Number(e.target.value)))}
                   className="w-32 border rounded px-3 py-1.5 text-sm"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   Pipeline will launch this many minutes after all expected files for a sample
                   are verified. Set to 0 for immediate launch.
                 </p>
@@ -428,8 +428,8 @@ function ModalParameterForm({
                 if (prop.enum) {
                   return (
                     <div key={paramKey}>
-                      <label className="text-xs text-gray-500">{label}</label>
-                      <select value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
+                      <label id="lbl-autorunconfigsection-1" className="text-xs text-gray-500">{label}</label>
+                      <select aria-labelledby="lbl-autorunconfigsection-1" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
                         <option value="">--</option>
                         {prop.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                       </select>
@@ -449,16 +449,16 @@ function ModalParameterForm({
                 if (prop.type === "number" || prop.type === "integer") {
                   return (
                     <div key={paramKey}>
-                      <label className="text-xs text-gray-500">{label}</label>
-                      <input type="number" value={value != null ? String(value) : ""} onChange={(e) => setValue(paramKey, e.target.value ? Number(e.target.value) : null)} className="w-full border rounded px-3 py-1.5 text-sm" />
+                      <label id="lbl-autorunconfigsection-2" className="text-xs text-gray-500">{label}</label>
+                      <input aria-labelledby="lbl-autorunconfigsection-2" type="number" value={value != null ? String(value) : ""} onChange={(e) => setValue(paramKey, e.target.value ? Number(e.target.value) : null)} className="w-full border rounded px-3 py-1.5 text-sm" />
                     </div>
                   );
                 }
 
                 return (
                   <div key={paramKey}>
-                    <label className="text-xs text-gray-500">{label}</label>
-                    <input type="text" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm" />
+                    <label id="lbl-autorunconfigsection-3" className="text-xs text-gray-500">{label}</label>
+                    <input aria-labelledby="lbl-autorunconfigsection-3" type="text" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm" />
                   </div>
                 );
               })}

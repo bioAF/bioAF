@@ -106,20 +106,20 @@ export function SmtpSettingsContent() {
       <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Host</label>
-            <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="smtp.example.com" />
+            <label htmlFor="host" className="block text-sm font-medium text-gray-700 mb-1">Host</label>
+            <input id="host" type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="smtp.example.com" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
-            <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <label htmlFor="port" className="block text-sm font-medium text-gray-700 mb-1">Port</label>
+            <input id="port" type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-            <input type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} className="w-full px-3 py-2 border rounded" />
+            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+            <input id="username" type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)} className="w-full px-3 py-2 border rounded" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder={hasExistingPassword ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (saved)" : "Enter password"} />
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input id="password" type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder={hasExistingPassword ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (saved)" : "Enter password"} />
             {hasExistingPassword && (
               <p className="text-xs text-gray-500 mt-1">
                 A password is saved. Leave blank to keep it, or type a new one to replace it.
@@ -127,12 +127,12 @@ export function SmtpSettingsContent() {
             )}
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
-            <input type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="noreply@example.com" />
+            <label htmlFor="from-address" className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
+            <input id="from-address" type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)} className="w-full px-3 py-2 border rounded" placeholder="noreply@example.com" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
-            <select value={smtpEncryption} onChange={(e) => setSmtpEncryption(e.target.value)} className="w-full px-3 py-2 border rounded">
+            <label htmlFor="encryption" className="block text-sm font-medium text-gray-700 mb-1">Encryption</label>
+            <select id="encryption" value={smtpEncryption} onChange={(e) => setSmtpEncryption(e.target.value)} className="w-full px-3 py-2 border rounded">
               <option value="starttls">STARTTLS (port 587)</option>
               <option value="ssl">SSL/TLS (port 465)</option>
               <option value="none">None (port 25)</option>
@@ -149,7 +149,7 @@ export function SmtpSettingsContent() {
         <div className="mt-6 pt-6 border-t border-gray-200">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Send Test Email</h3>
           <div className="flex gap-3">
-            <input
+            <input aria-label="recipient@example.com"
               type="email"
               value={testEmailTo}
               onChange={(e) => setTestEmailTo(e.target.value)}

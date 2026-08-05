@@ -106,8 +106,8 @@ export default function ActivityFeedPage() {
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-4 items-end" data-testid="activity-filters">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Event Type</label>
-            <select
+            <label htmlFor="event-type" className="block text-xs text-gray-500 mb-1">Event Type</label>
+            <select id="event-type"
               value={eventTypeFilter}
               onChange={(e) => { setEventTypeFilter(e.target.value); setPage(1); }}
               className="border border-gray-300 rounded px-3 py-1.5 text-sm"
@@ -126,8 +126,8 @@ export default function ActivityFeedPage() {
             </select>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">User</label>
-            <input
+            <label htmlFor="user" className="block text-xs text-gray-500 mb-1">User</label>
+            <input id="user"
               type="text"
               placeholder="Filter by email"
               value={userFilter}
@@ -137,8 +137,8 @@ export default function ActivityFeedPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">From</label>
-            <input
+            <label htmlFor="from" className="block text-xs text-gray-500 mb-1">From</label>
+            <input id="from"
               type="date"
               value={dateFrom}
               onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
@@ -146,8 +146,8 @@ export default function ActivityFeedPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">To</label>
-            <input
+            <label htmlFor="to" className="block text-xs text-gray-500 mb-1">To</label>
+            <input id="to"
               type="date"
               value={dateTo}
               onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
@@ -216,7 +216,7 @@ export default function ActivityFeedPage() {
                         {event.user_email && (
                           <span className="text-xs text-gray-500">{event.user_email}</span>
                         )}
-                        <span className="text-xs font-mono text-gray-400">{event.event_type}</span>
+                        <span className="text-xs font-mono text-gray-500">{event.event_type}</span>
                         {event.entity_type && event.entity_id && (
                           entityLinks[event.entity_type] ? (
                             <Link
@@ -227,12 +227,12 @@ export default function ActivityFeedPage() {
                               {event.entity_type} #{event.entity_id}
                             </Link>
                           ) : (
-                            <span className="text-xs text-gray-400">
+                            <span className="text-xs text-gray-500">
                               {event.entity_type} #{event.entity_id}
                             </span>
                           )
                         )}
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-gray-500">
                           {new Date(event.created_at).toLocaleString()}
                         </span>
                       </div>

@@ -362,7 +362,7 @@ export function NotificationsTab() {
                   >
                     <div className="min-w-0 flex-1 mr-4">
                       <p className="text-sm text-gray-900">{event.label}</p>
-                      <p className="text-xs text-gray-400">{event.description}</p>
+                      <p className="text-xs text-gray-500">{event.description}</p>
                     </div>
                     <div className="flex items-center gap-6">
                       {visibleChannels.map((ch) => (

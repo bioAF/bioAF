@@ -517,8 +517,8 @@ export function SlackSettingsContent() {
                       </p>
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Client ID</label>
-                          <input
+                          <label htmlFor="client-id" className="block text-xs font-medium text-gray-600 mb-1">Client ID</label>
+                          <input id="client-id"
                             type="text"
                             value={clientId}
                             onChange={(e) => setClientId(e.target.value)}
@@ -527,8 +527,8 @@ export function SlackSettingsContent() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Client Secret</label>
-                          <input
+                          <label htmlFor="client-secret" className="block text-xs font-medium text-gray-600 mb-1">Client Secret</label>
+                          <input id="client-secret"
                             type="password"
                             value={clientSecret}
                             onChange={(e) => setClientSecret(e.target.value)}
@@ -537,8 +537,8 @@ export function SlackSettingsContent() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Signing Secret</label>
-                          <input
+                          <label htmlFor="signing-secret" className="block text-xs font-medium text-gray-600 mb-1">Signing Secret</label>
+                          <input id="signing-secret"
                             type="password"
                             value={signingSecret}
                             onChange={(e) => setSigningSecret(e.target.value)}
@@ -629,7 +629,7 @@ export function SlackSettingsContent() {
                   {/* Add new mapping */}
                   <div className="mb-6">
                     <div className="flex gap-3 mb-3">
-                      <select
+                      <select aria-label="Selected channel"
                         value={selectedChannel}
                         onChange={(e) => setSelectedChannel(e.target.value)}
                         className="flex-1 px-3 py-2 border rounded text-sm"
@@ -698,7 +698,7 @@ export function SlackSettingsContent() {
 
                   {/* Existing mappings list */}
                   {mappings.length === 0 && !selectedChannel && (
-                    <div className="text-center py-6 text-gray-400 text-sm border rounded border-dashed">
+                    <div className="text-center py-6 text-gray-500 text-sm border rounded border-dashed">
                       No channel mappings yet. Select a channel above to get started.
                     </div>
                   )}

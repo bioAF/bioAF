@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect, useId, useRef } from "react";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -61,8 +62,11 @@ export function ConfirmDialog({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [open, busy, onCancel]);
 
-  // Move focus into the dialog, so the keyboard is inside it. The ref is attached during commit,
-  // so it is already there by the time this effect runs.
+  // Keep the keyboard inside the dialog and hand focus back to whatever opened
+  // it on close. The trap focuses the first control; Cancel is focused
+  // explicitly afterwards so the safe choice, not the destructive one, is the
+  // default when someone hits Enter straight away.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
   useEffect(() => {
     if (open) cancelRef.current?.focus();
   }, [open]);
@@ -72,6 +76,8 @@ export function ConfirmDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div
+        ref={trapRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

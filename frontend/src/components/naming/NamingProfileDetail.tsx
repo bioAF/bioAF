@@ -62,7 +62,7 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
             type="button"
             aria-label="close detail"
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-500 hover:text-gray-600"
           >
             ✕
           </button>
@@ -70,19 +70,19 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
 
         <section className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div className="text-xs uppercase text-gray-400">Delimiter</div>
+            <div className="text-xs uppercase text-gray-500">Delimiter</div>
             <div className="font-mono">{profile.delimiter}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Strip extension</div>
+            <div className="text-xs uppercase text-gray-500">Strip extension</div>
             <div>{profile.strip_extension ? "Yes" : "No"}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Status</div>
+            <div className="text-xs uppercase text-gray-500">Status</div>
             <div>{profile.status}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Template</div>
+            <div className="text-xs uppercase text-gray-500">Template</div>
             <div>
               {profile.experiment_template_id == null
                 ? "(none)"
@@ -92,7 +92,7 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
         </section>
 
         <section>
-          <div className="text-xs uppercase text-gray-400 mb-1">Segments</div>
+          <div className="text-xs uppercase text-gray-500 mb-1">Segments</div>
           <ul className="space-y-1 text-sm">
             {profile.segments.map((s, idx) => (
               <li key={`${s.field_name}-${idx}`} className="font-mono">
@@ -103,7 +103,7 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
         </section>
 
         <section>
-          <div className="text-xs uppercase text-gray-400 mb-1">Example filename</div>
+          <div className="text-xs uppercase text-gray-500 mb-1">Example filename</div>
           <code
             data-testid="example-filename"
             className="block bg-gray-50 border rounded px-3 py-2 font-mono text-sm break-all"

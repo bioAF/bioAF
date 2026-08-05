@@ -79,7 +79,7 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
         </Link>
       </div>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading activity...</span>
         </div>
       )}
@@ -92,7 +92,7 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
         </div>
       )}
       {!loading && !error && events.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No recent activity. Events will appear here as you use the platform.
         </p>
       )}
@@ -107,7 +107,7 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-700 truncate">{humanize(e.summary)}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   {e.user_email && (
                     <span className="text-gray-500">executed by {e.user_email} &middot; </span>
                   )}

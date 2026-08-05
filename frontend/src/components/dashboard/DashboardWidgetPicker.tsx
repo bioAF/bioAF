@@ -60,7 +60,7 @@ export function DashboardWidgetPicker({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            className="text-gray-500 hover:text-gray-600 text-2xl leading-none"
           >
             &times;
           </button>

@@ -194,14 +194,14 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
                 {refreshing ? "Refreshing..." : "Refresh registry"}
               </button>
             )}
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">
+            <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-2xl leading-none">
               &times;
             </button>
           </div>
         </div>
 
         <div className="px-6 py-3 border-b">
-          <input
+          <input aria-label="Search by name, description, or topic"
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -214,9 +214,9 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading ? (
-            <div className="text-center py-8 text-gray-400">Loading nf-core catalog...</div>
+            <div className="text-center py-8 text-gray-500">Loading nf-core catalog...</div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">No pipelines match your search</div>
+            <div className="text-center py-8 text-gray-500">No pipelines match your search</div>
           ) : (
             <ul className="divide-y divide-gray-200">
               {filtered.map((p) => (
@@ -225,7 +225,7 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{p.full_name}</span>
                       {p.stars != null && (
-                        <span className="text-xs text-gray-400">{p.stars.toLocaleString()} stars</span>
+                        <span className="text-xs text-gray-500">{p.stars.toLocaleString()} stars</span>
                       )}
                       <StatusChip p={p} />
                     </div>
@@ -258,10 +258,10 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
                       </button>
                     )}
                     {p.installed && !p.update_available && (
-                      <span className="text-xs text-gray-400">Latest installed</span>
+                      <span className="text-xs text-gray-500">Latest installed</span>
                     )}
                     {!canInstall && !p.installed && (
-                      <span className="text-xs text-gray-400">View only</span>
+                      <span className="text-xs text-gray-500">View only</span>
                     )}
                   </div>
                 </li>
@@ -281,8 +281,8 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
               <div className="text-sm text-red-600">No released versions available.</div>
             ) : (
               <div className="flex items-center gap-3">
-                <label className="text-sm text-gray-600">Version</label>
-                <select
+                <label htmlFor="version" className="text-sm text-gray-600">Version</label>
+                <select id="version"
                   value={picker.selected}
                   onChange={(e) =>
                     setPicker({ ...picker, selected: e.target.value })

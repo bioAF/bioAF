@@ -46,7 +46,7 @@ export function RunsAwaitingReviewWidget() {
         Runs awaiting review
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading runs...</span>
         </div>
@@ -63,7 +63,7 @@ export function RunsAwaitingReviewWidget() {
         </div>
       )}
       {!loading && !error && awaiting.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           Nothing awaiting review.
         </p>
       )}
@@ -78,7 +78,7 @@ export function RunsAwaitingReviewWidget() {
                   className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="truncate text-sm text-gray-800">{r.pipeline_name}</span>
-                  <span className="shrink-0 text-xs text-gray-400">
+                  <span className="shrink-0 text-xs text-gray-500">
                     {r.completed_at ? `waiting ${timeAgo(r.completed_at)}` : ""}
                   </span>
                 </Link>

@@ -50,7 +50,7 @@ export function QueueDepthWidget() {
         </div>
       )}
       {!loading && !error && !data && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">No queued jobs.</p>
+        <p className="text-sm text-gray-500" data-testid="widget-empty">No queued jobs.</p>
       )}
     </div>
   );

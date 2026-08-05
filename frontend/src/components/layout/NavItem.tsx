@@ -16,7 +16,7 @@ export function NavItem({ label, href, active, phase, isCurrentPage }: NavItemPr
       <div className="flex items-center justify-between px-3 py-2 rounded-md text-gray-500 cursor-not-allowed">
         <span>{label}</span>
         {phase && (
-          <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded">
+          <span className="text-xs bg-gray-700 text-gray-500 px-2 py-0.5 rounded">
             {phase}
           </span>
         )}
