@@ -9,6 +9,8 @@ import { ReviewBadge } from "@/components/experiments/ReviewBadge";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
 
+import { clickableRow } from "@/lib/a11y";
+
 export default function PipelineRunsPage() {
   const router = useRouter();
   const { has } = useCapabilities();
@@ -77,6 +79,19 @@ export default function PipelineRunsPage() {
 
   const sortIcon = (field: string) => sortField === field ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
+  // Sortable headers were mouse-only, and the sort direction was conveyed
+  // solely by the arrow glyph above. `aria-sort` is the machine-readable
+  // equivalent, so the column announces "sorted descending" rather than leaving
+  // a screen reader to guess from a character appended to the label.
+  const sortProps = (field: "id" | "status" | "pipeline_name") => ({
+    ...clickableRow(() => toggleSort(field)),
+    "aria-sort": (sortField === field
+      ? sortDir === "desc"
+        ? "descending"
+        : "ascending"
+      : "none") as "descending" | "ascending" | "none",
+  });
+
   return (
     <main className="flex-1 overflow-y-auto p-6">
       {loading ? (
@@ -99,10 +114,10 @@ export default function PipelineRunsPage() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("id")}>Run{sortIcon("id")}</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("id")}>Run{sortIcon("id")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
               <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" onClick={() => toggleSort("status")}>Status{sortIcon("status")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("status")}>Status{sortIcon("status")}</th>
               <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
               <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
               <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
@@ -113,7 +128,7 @@ export default function PipelineRunsPage() {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {sortedRuns.map((r) => (
-              <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/pipelines/runs/${r.id}`)}>
+              <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => router.push(`/pipelines/runs/${r.id}`))}>
                 <td className="px-4 py-3 text-sm font-mono">#{r.id}</td>
                 <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
                 <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>

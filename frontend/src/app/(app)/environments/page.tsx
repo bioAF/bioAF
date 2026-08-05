@@ -6,6 +6,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { statusDotClass, statusLabel } from "@/lib/statusStyles";
+import { clickableCard } from "@/lib/a11y";
+
 import type {
   EnvironmentResponse,
   EnvironmentListResponse,
@@ -304,7 +306,7 @@ export default function EnvironmentsPage() {
             {environments.map((env) => (
               <div
                 key={env.id}
-                onClick={() => selectEnvironment(env.id)}
+                {...clickableCard(() => selectEnvironment(env.id))}
                 className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
               >
                 <div className="mb-3 flex items-center gap-2">
@@ -460,7 +462,7 @@ export default function EnvironmentsPage() {
                     {selectedEnv.versions.map((v: EnvironmentVersionSummary) => (
                       <div
                         key={v.id}
-                        onClick={() => loadVersionDetail(selectedEnv.id, v.id)}
+                        {...clickableCard(() => loadVersionDetail(selectedEnv.id, v.id))}
                         className="flex items-center justify-between p-4 border rounded-md hover:bg-gray-50 cursor-pointer"
                       >
                         <div className="flex items-center gap-3">

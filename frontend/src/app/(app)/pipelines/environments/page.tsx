@@ -5,6 +5,8 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { clickableCard, clickableRow } from "@/lib/a11y";
+
 import {
   statusBadgeClass as badgeClass,
   statusDotClass as dotClass,
@@ -318,7 +320,7 @@ export default function PipelineEnvironmentsPage() {
                     {environments.map((env) => (
                       <tr
                         key={env.id}
-                        onClick={() => selectEnvironment(env.id)}
+                        {...clickableRow(() => selectEnvironment(env.id))}
                         className="border-t hover:bg-gray-50 cursor-pointer"
                       >
                         <td className="px-4 py-3">
@@ -515,7 +517,7 @@ export default function PipelineEnvironmentsPage() {
                         {selectedEnv.versions.map((v) => (
                           <div
                             key={v.id}
-                            onClick={() => loadVersionDetail(selectedEnv.id, v.id)}
+                            {...clickableCard(() => loadVersionDetail(selectedEnv.id, v.id))}
                             className="flex items-center justify-between p-4 border rounded-md hover:bg-gray-50 cursor-pointer"
                           >
                             <div className="flex items-center gap-3">

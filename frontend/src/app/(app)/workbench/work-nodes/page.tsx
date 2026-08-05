@@ -31,6 +31,8 @@ import type {
 } from "@/lib/types";
 import { statusBadgeClass } from "@/lib/statusStyles";
 
+import { clickableRow } from "@/lib/a11y";
+
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
   // Prefer the backend-supplied failure taxonomy (failure_reason). Fall back
@@ -576,7 +578,7 @@ export default function WorkNodesPage() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {nodes.map((node) => (
-                <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingNode(node)}>
+                <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => setViewingNode(node))}>
                   <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || "\u2014"}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? "\u2014"}</td>
                   <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || "\u2014"}</td>

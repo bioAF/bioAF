@@ -5,6 +5,8 @@ import { ApiActivityRow, integrationsApi } from "@/lib/integrationsApi";
 import { ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
+import { clickableRow } from "@/lib/a11y";
+
 export function ApiActivityTab() {
   const [rows, setRows] = useState<ApiActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,7 +68,7 @@ export function ApiActivityTab() {
               {rows.map((r) => (
                 <tr
                   key={r.id}
-                  onClick={() => setSelected(r)}
+                  {...clickableRow(() => setSelected(r))}
                   className="hover:bg-gray-50 cursor-pointer"
                 >
                   <td className="px-4 py-3 text-sm text-gray-500">

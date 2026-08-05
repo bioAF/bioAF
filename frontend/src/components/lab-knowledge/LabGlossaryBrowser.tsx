@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 
+import { clickableCard } from "@/lib/a11y";
+
 interface UserSummary {
   id: number;
   name: string | null;
@@ -260,7 +262,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           {terms.map((t) => (
             <li
               key={t.id}
-              onClick={() => setSelected(t)}
+              {...clickableCard(() => setSelected(t))}
               className="p-3 hover:bg-gray-50 cursor-pointer"
             >
               <div className="flex items-baseline justify-between">

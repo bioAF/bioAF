@@ -13,6 +13,8 @@ import type {
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
 
+import { clickableRow } from "@/lib/a11y";
+
 export function DatasetBrowser() {
   const toast = useToast();
   const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
@@ -255,7 +257,7 @@ export function DatasetBrowser() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {datasets.map((ds) => (
-                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} onClick={() => setViewingDataset(ds)}>
+                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
                     {canModify && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input

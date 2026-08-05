@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
 
+import { clickableRow } from "@/lib/a11y";
+
 interface Tag {
   id: number;
   name: string;
@@ -188,7 +190,7 @@ export function LabDocumentBrowser() {
             {documents.map((d) => (
               <tr
                 key={d.id}
-                onClick={() => router.push(`/lab-knowledge/documents/${d.id}`)}
+                {...clickableRow(() => router.push(`/lab-knowledge/documents/${d.id}`))}
                 className="border-b hover:bg-gray-50 cursor-pointer"
               >
                 <td className="py-2 font-medium">

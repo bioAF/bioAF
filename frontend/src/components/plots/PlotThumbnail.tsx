@@ -64,14 +64,23 @@ export function PlotThumbnail({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={imgUrl}
-      alt={plot.title ?? "Plot"}
-      className="w-full h-full object-cover cursor-pointer"
+    // A real button rather than role="button" on the image: the thumbnail
+    // opens the full plot, and a clickable image is mouse-only. Wrapping keeps
+    // native focus and Enter/Space handling, and the alt text becomes the
+    // button's accessible name instead of being replaced by one.
+    <button
+      type="button"
       onClick={onClick}
-      onError={() => setError(true)}
-    />
+      className="block w-full h-full cursor-pointer"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imgUrl}
+        alt={plot.title ?? "Plot"}
+        className="w-full h-full object-cover"
+        onError={() => setError(true)}
+      />
+    </button>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import type { AnalysisSnapshot } from "@/lib/types";
+import { clickableRow } from "@/lib/a11y";
 
 interface SnapshotComparisonTableProps {
   snapshots: AnalysisSnapshot[];
@@ -47,9 +48,16 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
   }, [snapshots, sortKey, sortDir]);
 
   const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
+    // Sorting was mouse-only, and the direction was carried solely by the
+    // triangle glyph below. `aria-sort` states it in a form assistive tech can
+    // read; `clickableRow` adds the keyboard path without a role that would
+    // strip this out of the table's accessibility tree.
     <th scope="col"
       className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700"
-      onClick={() => handleSort(field)}
+      aria-sort={
+        sortKey === field ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+      }
+      {...clickableRow(() => handleSort(field))}
     >
       {label} {sortKey === field && (sortDir === "asc" ? "\u25B2" : "\u25BC")}
     </th>

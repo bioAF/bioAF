@@ -6,6 +6,8 @@ import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBad
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { clickableRow } from "@/lib/a11y";
+
 import type {
   ReferenceDatasetDetail,
   ReferenceDataset,
@@ -554,7 +556,7 @@ export default function DataReferenceDetailPage() {
                         <tr
                           key={run.pipeline_run_id}
                           className="hover:bg-gray-50 cursor-pointer"
-                          onClick={() => router.push(`/pipelines/runs/${run.pipeline_run_id}`)}
+                          {...clickableRow(() => router.push(`/pipelines/runs/${run.pipeline_run_id}`))}
                         >
                           <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
                           <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || "—"}</td>

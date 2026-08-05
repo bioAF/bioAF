@@ -6,6 +6,8 @@ import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { SearchProgress, sourceChipClass } from "@/components/literature/SearchProgress";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { clickableCard } from "@/lib/a11y";
+
 import {
   cleanText,
   formatAuthors,
@@ -195,7 +197,7 @@ export default function LiteratureSearchesPage() {
                 <div
                   key={s.id}
                   className={`p-4 cursor-pointer ${activeSearchId === s.id ? "bg-bioaf-50" : "hover:bg-gray-50"}`}
-                  onClick={() => viewResults(s.id)}
+                  {...clickableCard(() => viewResults(s.id))}
                 >
                   <div className="flex justify-between">
                     <div className="font-mono text-sm">{s.query_text}</div>

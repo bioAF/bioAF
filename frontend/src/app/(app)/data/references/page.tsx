@@ -8,6 +8,8 @@ import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types";
 
+import { clickableRow } from "@/lib/a11y";
+
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "—";
   if (bytes < 1024) return `${bytes} B`;
@@ -175,7 +177,7 @@ export default function DataReferencesPage() {
                 {references.map((ref) => (
                   <tr
                     key={ref.id}
-                    onClick={() => router.push(`/data/references/${ref.id}`)}
+                    {...clickableRow(() => router.push(`/data/references/${ref.id}`))}
                     className="hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{ref.name}</td>

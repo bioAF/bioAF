@@ -59,6 +59,8 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
+import { clickableRow } from "@/lib/a11y";
+
 type Tab = ExperimentTabKey;
 
 export default function ExperimentDetailPage() {
@@ -911,7 +913,7 @@ function ExperimentDetailPageInner() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {samples.map((s) => (
-                  <tr key={s.id} className={`hover:bg-gray-50 cursor-pointer ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`} onClick={() => setViewingSample(s)}>
+                  <tr key={s.id} className={`hover:bg-gray-50 cursor-pointer ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`} {...clickableRow(() => setViewingSample(s))}>
                     <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"

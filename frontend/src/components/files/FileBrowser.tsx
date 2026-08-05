@@ -18,6 +18,8 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
+import { clickableRow } from "@/lib/a11y";
+
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
   if (bytes === 0) return "0 B";
@@ -691,7 +693,7 @@ export function FileBrowser({
                 <tr
                   key={file.id}
                   className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setViewingFile(file)}
+                  {...clickableRow(() => setViewingFile(file))}
                 >
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <input

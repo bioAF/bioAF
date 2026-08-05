@@ -7,6 +7,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
+import { clickableRow } from "@/lib/a11y";
+
 interface UserSummary {
   id: number;
   name: string | null;
@@ -249,7 +251,7 @@ export function SdrBrowser() {
             {sdrs.map((s) => (
               <tr
                 key={s.id}
-                onClick={() => router.push(`/lab-knowledge/decision-records/${s.id}`)}
+                {...clickableRow(() => router.push(`/lab-knowledge/decision-records/${s.id}`))}
                 className="hover:bg-gray-50 cursor-pointer"
               >
                 <td className="p-2 font-mono text-xs">{sdrCode(s.sdr_number)}</td>

@@ -9,6 +9,8 @@ import { NamingProfileDetail } from "@/components/naming/NamingProfileDetail";
 import { NamingProfileWizard } from "@/components/naming/NamingProfileWizard";
 import type { NamingProfile } from "@/lib/types";
 
+import { clickableRow } from "@/lib/a11y";
+
 export default function SettingsNamingProfilesPage() {
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
@@ -181,7 +183,7 @@ export default function SettingsNamingProfilesPage() {
                 {profiles.map((p) => (
                   <tr
                     key={p.id}
-                    onClick={() => setDetailProfile(p)}
+                    {...clickableRow(() => setDetailProfile(p))}
                     className="hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-6 py-4">

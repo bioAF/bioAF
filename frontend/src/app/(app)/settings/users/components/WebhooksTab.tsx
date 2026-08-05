@@ -11,6 +11,8 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevealSecretModal } from "./RevealSecretModal";
 
+import { clickableRow } from "@/lib/a11y";
+
 const VALID_EVENTS = [
   "experiment.created",
   "experiment.updated",
@@ -208,7 +210,7 @@ export function WebhooksTab() {
               {subs.map((s) => (
                 <tr
                   key={s.id}
-                  onClick={() => setSelectedSub(s)}
+                  {...clickableRow(() => setSelectedSub(s))}
                   className="hover:bg-gray-50 cursor-pointer"
                 >
                   <td className="px-4 py-3 text-sm font-medium">{s.name}</td>

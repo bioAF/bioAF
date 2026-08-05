@@ -18,6 +18,8 @@ import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
+import { clickableRow } from "@/lib/a11y";
+
 type Tab =
   | "experiments"
   | "samples"
@@ -275,7 +277,7 @@ export default function ProjectDetailPage() {
                     {project.experiments.map((exp) => (
                       <tr
                         key={exp.id}
-                        onClick={() => router.push(`/experiments/${exp.id}`)}
+                        {...clickableRow(() => router.push(`/experiments/${exp.id}`))}
                         className="hover:bg-gray-50 cursor-pointer"
                       >
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>
@@ -335,7 +337,7 @@ export default function ProjectDetailPage() {
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {group.samples.map((s) => (
-                          <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setViewingSample({ ...s, experiment_name: group.experiment_name })}>
+                          <tr key={s.sample_id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => setViewingSample({ ...s, experiment_name: group.experiment_name }))}>
                             <td className="px-6 py-4 text-sm font-medium text-gray-900">
                               {s.external_id || `#${s.sample_id}`}
                             </td>
@@ -419,7 +421,7 @@ export default function ProjectDetailPage() {
                     {project.pipeline_runs.map((run) => (
                       <tr
                         key={run.id}
-                        onClick={() => router.push(`/pipelines/runs/${run.id}`)}
+                        {...clickableRow(() => router.push(`/pipelines/runs/${run.id}`))}
                         className="hover:bg-gray-50 cursor-pointer"
                       >
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
@@ -528,7 +530,7 @@ export default function ProjectDetailPage() {
                     {filteredAvailable.map((s) => (
                       <tr
                         key={s.id}
-                        onClick={() => toggleSample(s.id)}
+                        {...clickableRow(() => toggleSample(s.id))}
                         className={`cursor-pointer ${
                           selectedSampleIds.has(s.id) ? "bg-bioaf-50" : "hover:bg-gray-50"
                         }`}

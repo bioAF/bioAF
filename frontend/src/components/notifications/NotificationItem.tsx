@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { notificationHref } from "@/lib/notificationLinks";
 
+import { clickableCard } from "@/lib/a11y";
+
 interface Notification {
   id: number;
   event_type: string;
@@ -58,7 +60,7 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
       className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${
         !n.read ? "bg-blue-50/50" : ""
       }`}
-      onClick={handleClick}
+      {...clickableCard(handleClick)}
     >
       <div className="flex items-start gap-3">
         <span

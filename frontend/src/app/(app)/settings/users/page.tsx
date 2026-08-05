@@ -15,6 +15,8 @@ import { WebhooksTab } from "./components/WebhooksTab";
 import { ApiActivityTab } from "./components/ApiActivityTab";
 import { PasswordResetActions } from "./components/PasswordResetActions";
 
+import { clickableRow } from "@/lib/a11y";
+
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
 const TAB_LABELS: Record<TabKey, string> = {
@@ -480,7 +482,7 @@ function SettingsUsersPageInner() {
                 <tr
                   key={user.id}
                   className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setViewingUser(user)}
+                  {...clickableRow(() => setViewingUser(user))}
                 >
                   <td className="px-4 py-3 text-sm">{user.email}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">

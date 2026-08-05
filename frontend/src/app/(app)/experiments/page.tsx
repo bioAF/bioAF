@@ -9,6 +9,8 @@ import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import type { Experiment, ExperimentListResponse, ExperimentStatus, ProjectListResponse } from "@/lib/types";
 
+import { clickableRow } from "@/lib/a11y";
+
 export default function ExperimentsPage() {
   const router = useRouter();
   const [experiments, setExperiments] = useState<Experiment[]>([]);
@@ -130,7 +132,7 @@ export default function ExperimentsPage() {
                 {experiments.map((exp) => (
                   <tr
                     key={exp.id}
-                    onClick={() => router.push(`/experiments/${exp.id}`)}
+                    {...clickableRow(() => router.push(`/experiments/${exp.id}`))}
                     className="hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>

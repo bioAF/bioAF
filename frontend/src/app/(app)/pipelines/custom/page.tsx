@@ -6,6 +6,8 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { clickableRow } from "@/lib/a11y";
+
 import type {
   CustomPipeline,
   CustomPipelineCreateRequest,
@@ -169,7 +171,7 @@ export default function CustomPipelineListPage() {
                 {rows.map((row) => (
                   <tr
                     key={row.id}
-                    onClick={() => router.push(`/pipelines/custom/${row.id}`)}
+                    {...clickableRow(() => router.push(`/pipelines/custom/${row.id}`))}
                     className="border-t hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-4 py-3">

@@ -9,6 +9,8 @@ import type { PipelineCatalog, PipelineCatalogListResponse } from "@/lib/types";
 import { RegistryBrowseModal } from "@/components/pipelines/RegistryBrowseModal";
 import { ErrorState } from "@/components/shared/ErrorState";
 
+import { clickableCard } from "@/lib/a11y";
+
 export default function PipelineCatalogPage() {
   const router = useRouter();
   const { canAccess, loading: permsLoading } = usePermissions();
@@ -97,7 +99,7 @@ export default function PipelineCatalogPage() {
             return (
               <div
                 key={p.id}
-                onClick={() => openPipeline(p)}
+                {...clickableCard(() => openPipeline(p))}
                 className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
               >
                 <div className="flex items-start justify-between mb-3">

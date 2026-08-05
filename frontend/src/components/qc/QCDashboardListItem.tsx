@@ -7,6 +7,8 @@
 import { QualityBadge } from "./QualityBadge";
 import type { QCDashboardSummary } from "@/lib/types";
 
+import { clickableCard } from "@/lib/a11y";
+
 export function QCDashboardListItem({
   dashboard,
   onClick,
@@ -24,7 +26,7 @@ export function QCDashboardListItem({
 
   return (
     <div
-      onClick={onClick}
+      {...clickableCard(onClick)}
       className="p-4 flex items-start justify-between gap-4 hover:bg-gray-50 cursor-pointer"
     >
       <div className="min-w-0 flex-1">

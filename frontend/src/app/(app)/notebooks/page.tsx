@@ -33,6 +33,8 @@ import { prefillFromNotebookSession } from "@/lib/sessionRecreate";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { useToast } from "@/components/shared/Toast";
 
+import { clickableRow } from "@/lib/a11y";
+
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
 const PROFILE_META: Record<ResourceProfile, { label: string; description: string }> = {
@@ -436,7 +438,7 @@ export default function NotebooksPage() {
             </thead>
             <tbody className="divide-y divide-gray-200">
               {sessions.map((s) => (
-                <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} onClick={() => setViewingSession(s)}>
+                <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} {...clickableRow(() => setViewingSession(s))}>
                   <td className="px-4 py-3 text-sm capitalize font-medium">{s.session_type}</td>
                   <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || "\u2014"}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ experiment: s.experiment, project: s.project }) ?? "\u2014"}</td>

@@ -13,6 +13,8 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevealSecretModal } from "./RevealSecretModal";
 import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
 
+import { clickableRow } from "@/lib/a11y";
+
 interface Props {
   roles: Role[];
   onRolesChanged?: () => void;
@@ -239,7 +241,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               {accounts.map((sa) => (
                 <tr
                   key={sa.id}
-                  onClick={() => openDetail(sa)}
+                  {...clickableRow(() => openDetail(sa))}
                   className="hover:bg-gray-50 cursor-pointer"
                 >
                   <td className="px-4 py-3 text-sm font-medium">{sa.display_name}</td>

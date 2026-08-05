@@ -10,6 +10,8 @@ import { api } from "@/lib/api";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
+import { clickableRow } from "@/lib/a11y";
+
 export default function ProjectsPage() {
   return (
     <Suspense fallback={null}>
@@ -165,7 +167,7 @@ function ProjectsPageInner() {
                 {projects.map((p) => (
                   <tr
                     key={p.id}
-                    onClick={() => router.push(`/projects/${p.id}`)}
+                    {...clickableRow(() => router.push(`/projects/${p.id}`))}
                     className="hover:bg-gray-50 cursor-pointer"
                   >
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">{p.name}</td>
