@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useRef, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -48,6 +49,7 @@ export default function PipelineEnvironmentsPage() {
   const canDelete = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
+  const toast = useToast();
   const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -158,7 +160,7 @@ export default function PipelineEnvironmentsPage() {
       setBuildLogs(null);
       setNewVersionContent(DEFAULT_PIPELINE_CONDA_YML);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to load environment");
+      toast.error(err instanceof Error ? err.message : "Failed to load environment");
     }
   }
 
@@ -186,7 +188,7 @@ export default function PipelineEnvironmentsPage() {
       });
       await loadEnvironments();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create environment");
+      toast.error(err instanceof Error ? err.message : "Failed to create environment");
     } finally {
       setCreating(false);
     }
@@ -205,7 +207,7 @@ export default function PipelineEnvironmentsPage() {
       setSelectedEnv(null);
       await loadEnvironments();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
   }
 
@@ -222,7 +224,7 @@ export default function PipelineEnvironmentsPage() {
       setActiveTab("versions");
       await selectEnvironment(selectedEnv.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create version");
+      toast.error(err instanceof Error ? err.message : "Failed to create version");
     } finally {
       setCreatingVersion(false);
     }
@@ -247,7 +249,7 @@ export default function PipelineEnvironmentsPage() {
       await loadEnvironments(true);
     } catch (err) {
       const fallback = kind === "rebuild" ? "Rebuild failed to start" : "Build failed to start";
-      alert(err instanceof Error ? err.message : fallback);
+      toast.error(err instanceof Error ? err.message : fallback);
     }
   }
 
@@ -262,7 +264,7 @@ export default function PipelineEnvironmentsPage() {
       );
       setBuildLogs(logs);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to load version detail");
+      toast.error(err instanceof Error ? err.message : "Failed to load version detail");
     }
   }
 
@@ -273,7 +275,7 @@ export default function PipelineEnvironmentsPage() {
       setShowDeleteVersionModal(null);
       await selectEnvironment(envId);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete version");
+      toast.error(err instanceof Error ? err.message : "Failed to delete version");
     } finally {
       setDeletingVersion(false);
     }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
@@ -143,6 +144,7 @@ function getUserRole(): string {
 
 export default function PipelineRunDetailPage() {
   const router = useRouter();
+  const toast = useToast();
   const confirm = useConfirm();
   const params = useParams();
   const { canAccess } = usePermissions();
@@ -224,7 +226,7 @@ export default function PipelineRunDetailPage() {
       await api.post(`/api/pipeline-runs/${runId}/cancel`);
       loadRun();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Cancel failed");
+      toast.error(err instanceof Error ? err.message : "Cancel failed");
     }
   }
 
@@ -264,7 +266,7 @@ export default function PipelineRunDetailPage() {
         }
         return;
       }
-      alert(err instanceof Error ? err.message : "Reproduce failed");
+      toast.error(err instanceof Error ? err.message : "Reproduce failed");
     }
   }
 

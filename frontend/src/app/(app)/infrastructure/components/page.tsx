@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useEffect, useState } from "react";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
@@ -129,6 +130,7 @@ export default function InfraComponentsPage() {
   const [stackStatus, setStackStatus] = useState<StackStatus | null>(null);
   const [componentsData, setComponentsData] = useState<ComponentsData | null>(null);
   const [clusterConfig, setClusterConfig] = useState<ClusterConfig | null>(null);
+  const toast = useToast();
   const [showBootstrapModal, setShowBootstrapModal] = useState(false);
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [deployStarted, setDeployStarted] = useState(false);
@@ -339,7 +341,7 @@ export default function InfraComponentsPage() {
       setShowDeployModal(true);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to start deployment";
-      alert(message);
+      toast.error(message);
     } finally {
       setDeployLoading(false);
     }
@@ -369,7 +371,7 @@ export default function InfraComponentsPage() {
       setShowDeployModal(true);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Failed to start deployment";
-      alert(message);
+      toast.error(message);
     } finally {
       setDeployLoading(false);
     }
@@ -386,7 +388,7 @@ export default function InfraComponentsPage() {
       setRefreshKey((k) => k + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Abort failed";
-      alert(message);
+      toast.error(message);
     } finally {
       setAbortLoading(false);
     }
@@ -420,7 +422,7 @@ export default function InfraComponentsPage() {
       setRefreshKey((k) => k + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Abandon failed";
-      alert(message);
+      toast.error(message);
     } finally {
       setAbandonLoading(false);
     }
@@ -488,7 +490,7 @@ export default function InfraComponentsPage() {
       setRefreshKey((k) => k + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Cancel failed";
-      alert(message);
+      toast.error(message);
     } finally {
       setCancellingBuild(false);
     }
@@ -1314,7 +1316,7 @@ export default function InfraComponentsPage() {
                     setShowTeardownProgress(true);
                   } catch (e: unknown) {
                     const msg = e instanceof Error ? e.message : "Teardown failed to start";
-                    alert(msg);
+                    toast.error(msg);
                   }
                 }}
                 className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1405,7 +1407,7 @@ export default function InfraComponentsPage() {
                     setShowDestroyStorageProgress(true);
                   } catch (e: unknown) {
                     const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
-                    alert(msg);
+                    toast.error(msg);
                   }
                 }}
                 className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"

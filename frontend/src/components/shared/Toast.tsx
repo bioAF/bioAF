@@ -65,10 +65,28 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
+      {/* Two regions, both always mounted and both starting empty.
+          A live region has to exist BEFORE content is put into it: a screen
+          reader watches the node it already knows about, so inserting the
+          region and the message together can be seen as a new node rather than
+          a change, and announce nothing. Splitting by urgency lets an error
+          interrupt while a confirmation waits its turn, which one shared region
+          could not do. */}
       <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2">
-        {toasts.map((t) => (
-          <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
-        ))}
+        <div aria-live="assertive" className="flex flex-col gap-2 empty:hidden">
+          {toasts
+            .filter((t) => t.tone === "error")
+            .map((t) => (
+              <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
+            ))}
+        </div>
+        <div aria-live="polite" className="flex flex-col gap-2 empty:hidden">
+          {toasts
+            .filter((t) => t.tone !== "error")
+            .map((t) => (
+              <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
+            ))}
+        </div>
       </div>
     </ToastContext.Provider>
   );
@@ -89,10 +107,10 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number)
 
   return (
     <div
-      // An error interrupts; a confirmation waits its turn. Both are announced,
-      // which is new: the app previously shipped zero live regions.
+      // The urgency now lives on the enclosing region, which is mounted before
+      // anything is put in it. The role stays here so the item is still exposed
+      // as an alert/status in its own right.
       role={toast.tone === "error" ? "alert" : "status"}
-      aria-live={toast.tone === "error" ? "assertive" : "polite"}
       className={`pointer-events-auto flex items-start gap-3 rounded-md border px-4 py-3 text-sm shadow-lg ${tone}`}
     >
       <span className="flex-1">{toast.message}</span>

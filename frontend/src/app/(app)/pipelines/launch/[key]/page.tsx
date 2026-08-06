@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
@@ -46,6 +47,7 @@ function detectProtocol(samples: SampleBrief[]): string | null {
 
 export default function PipelineLauncherPage() {
   const router = useRouter();
+  const toast = useToast();
   const confirm = useConfirm();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -153,7 +155,7 @@ export default function PipelineLauncherPage() {
         }
         return;
       }
-      alert(err instanceof Error ? err.message : "Launch failed");
+      toast.error(err instanceof Error ? err.message : "Launch failed");
       setLaunching(false);
     }
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
@@ -37,6 +38,7 @@ export default function DataReferenceDetailPage() {
   const isCompBio = user?.role_name === "comp_bio";
   const canDeprecate = isAdmin || isCompBio;
 
+  const toast = useToast();
   const [reference, setReference] = useState<ReferenceDatasetDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("files");
@@ -107,7 +109,7 @@ export default function DataReferenceDetailPage() {
       }
       router.push("/data/references");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to cancel");
+      toast.error(err instanceof Error ? err.message : "Failed to cancel");
     } finally {
       setCancelling(false);
     }
@@ -123,7 +125,7 @@ export default function DataReferenceDetailPage() {
       // 'active' (or 'pending_approval') state without a manual refresh.
       await loadReference();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to finalize");
+      toast.error(err instanceof Error ? err.message : "Failed to finalize");
     } finally {
       setFinalizing(false);
     }
@@ -189,7 +191,7 @@ export default function DataReferenceDetailPage() {
       setSupersededById("");
       loadReference();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to deprecate");
+      toast.error(err instanceof Error ? err.message : "Failed to deprecate");
     } finally {
       setSubmitting(false);
     }
@@ -200,7 +202,7 @@ export default function DataReferenceDetailPage() {
       await api.post(`/api/references/${id}/approve-deprecation`);
       loadReference();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to approve deprecation");
+      toast.error(err instanceof Error ? err.message : "Failed to approve deprecation");
     }
   }
 

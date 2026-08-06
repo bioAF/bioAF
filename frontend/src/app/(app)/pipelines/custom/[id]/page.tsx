@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -78,6 +79,7 @@ const TONE_CLASSES: Record<"blue" | "amber" | "purple" | "gray", string> = {
 
 export default function CustomPipelineDetailPage() {
   const router = useRouter();
+  const toast = useToast();
   const confirm = useConfirm();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -287,7 +289,7 @@ export default function CustomPipelineDetailPage() {
       await api.delete(`/api/v1/custom-pipelines/${pipeline.id}`);
       router.push("/pipelines/custom");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
       setDeleting(false);
     }
   }
@@ -307,7 +309,7 @@ export default function CustomPipelineDetailPage() {
       );
       await loadAll();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to deprecate");
+      toast.error(err instanceof Error ? err.message : "Failed to deprecate");
     }
   }
 

@@ -216,7 +216,7 @@ function ExperimentDetailPageInner() {
       });
       loadNotebookSessions();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to launch session");
+      toast.error(err instanceof Error ? err.message : "Failed to launch session");
     }
   }
 
@@ -435,7 +435,7 @@ function ExperimentDetailPageInner() {
       await api.patch(`/api/experiments/${id}/status`, { status: newStatus });
       loadExperiment();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : "Failed to update status");
+      toast.error(err instanceof Error ? err.message : "Failed to update status");
     }
   }
 

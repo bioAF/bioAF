@@ -1,7 +1,7 @@
 // Exercise the real implementation, not the default test stub in jest.setup.ts.
 jest.unmock("@/components/shared/Toast");
 
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, screen, act, waitFor, fireEvent } from "@testing-library/react";
 import { ToastProvider, useToast } from "./Toast";
 
 function Trigger({ run }: { run: (t: ReturnType<typeof useToast>) => void }) {
@@ -17,6 +17,41 @@ const setup = (run: (t: ReturnType<typeof useToast>) => void) =>
       <Trigger run={run} />
     </ToastProvider>,
   );
+
+test("the live regions exist before any toast is pushed", () => {
+  // A live region has to be in the DOM before content lands in it. If the region
+  // itself is inserted along with the message, a screen reader may see a new
+  // node rather than a change to a watched one, and announce nothing. The
+  // regions are therefore always mounted and start empty.
+  render(
+    <ToastProvider>
+      <div>quiet</div>
+    </ToastProvider>
+  );
+  const polite = document.querySelector('[aria-live="polite"]');
+  const assertive = document.querySelector('[aria-live="assertive"]');
+  expect(polite).toBeInTheDocument();
+  expect(assertive).toBeInTheDocument();
+  expect(polite).toBeEmptyDOMElement();
+  expect(assertive).toBeEmptyDOMElement();
+});
+
+test("a pushed error lands inside the already-mounted assertive region", async () => {
+  function Boom() {
+    const toast = useToast();
+    return <button onClick={() => toast.error("Disk on fire")}>boom</button>;
+  }
+  render(
+    <ToastProvider>
+      <Boom />
+    </ToastProvider>
+  );
+  const assertive = document.querySelector('[aria-live="assertive"]')!;
+  fireEvent.click(screen.getByRole("button", { name: "boom" }));
+  await waitFor(() => expect(assertive).toHaveTextContent("Disk on fire"));
+  // and not in the polite one
+  expect(document.querySelector('[aria-live="polite"]')).not.toHaveTextContent("Disk on fire");
+});
 
 test("an error toast is announced assertively to screen readers", async () => {
   setup((t) => t.error("Could not stop the work node"));

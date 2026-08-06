@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { ReviewBadge } from "./ReviewBadge";
@@ -16,6 +17,7 @@ interface ReviewPanelProps {
 }
 
 export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: ReviewPanelProps) {
+  const toast = useToast();
   const [reviews, setReviews] = useState<PipelineRunReview[]>([]);
   const [activeReview, setActiveReview] = useState<PipelineRunReview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,7 +60,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
       loadReviews();
       onReviewSubmitted?.();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to submit review");
+      toast.error(err instanceof Error ? err.message : "Failed to submit review");
     } finally {
       setSubmitting(false);
     }

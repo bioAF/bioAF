@@ -1,5 +1,6 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -28,6 +29,7 @@ export default function EnvironmentsPage() {
   const canDelete = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
+  const toast = useToast();
   const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -119,7 +121,7 @@ export default function EnvironmentsPage() {
       setCreateForm({ name: "", description: "", environment_type: "notebook" });
       loadEnvironments();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create environment");
+      toast.error(err instanceof Error ? err.message : "Failed to create environment");
     } finally { setCreating(false); }
   }
 
@@ -136,7 +138,7 @@ export default function EnvironmentsPage() {
       setSelectedEnv(null);
       loadEnvironments();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete");
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
   }
 
@@ -153,7 +155,7 @@ export default function EnvironmentsPage() {
       setActiveTab("versions");
       selectEnvironment(selectedEnv.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to create version");
+      toast.error(err instanceof Error ? err.message : "Failed to create version");
     } finally { setCreatingVersion(false); }
   }
 
@@ -171,7 +173,7 @@ export default function EnvironmentsPage() {
       );
       selectEnvironment(envId);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Build failed to start");
+      toast.error(err instanceof Error ? err.message : "Build failed to start");
     }
   }
 
@@ -251,7 +253,7 @@ export default function EnvironmentsPage() {
       setShowRebuildModal(false);
       selectEnvironment(selectedEnv.id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Rebuild failed");
+      toast.error(err instanceof Error ? err.message : "Rebuild failed");
     } finally {
       setRebuildLoading(false);
     }
@@ -264,7 +266,7 @@ export default function EnvironmentsPage() {
       setShowDeleteVersionModal(null);
       selectEnvironment(envId);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to delete version");
+      toast.error(err instanceof Error ? err.message : "Failed to delete version");
     } finally {
       setDeletingVersion(false);
     }
