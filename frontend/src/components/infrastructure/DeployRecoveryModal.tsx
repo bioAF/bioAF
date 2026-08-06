@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
@@ -133,143 +134,145 @@ export function DeployRecoveryModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full mx-4 overflow-hidden">
-        {/* Loading */}
-        {state === "loading" && (
-          <div className="p-8 text-center">
-            <div className="inline-block h-8 w-8 border-4 border-bioaf-200 border-t-bioaf-600 rounded-full animate-spin mb-4" />
-            <p className="text-sm text-gray-600">
-              Checking deployment status...
+    // Not dismissible, matching what this had before: no backdrop click and no
+    // Escape. A half-finished deploy is what puts this on screen, so dropping out
+    // of it by tapping the background would hide the recovery choice rather than
+    // make one. Each state renders its own explicit way out.
+    <Modal open title="Deployment recovery" onClose={onClose} hideTitle dismissible={false}>
+      {/* Loading */}
+      {state === "loading" && (
+        <div className="p-8 text-center">
+          <div className="inline-block h-8 w-8 border-4 border-bioaf-200 border-t-bioaf-600 rounded-full animate-spin mb-4" />
+          <p className="text-sm text-gray-600">
+            Checking deployment status...
+          </p>
+        </div>
+      )}
+
+      {/* Recoverable: previous deploy finished successfully */}
+      {state === "recoverable" && (
+        <>
+          <div className="p-6 pb-0">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-green-100">
+                <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Previous deployment found
+              </h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-2">
+              Your previous deployment took longer than expected, but it
+              finished successfully. We can pick up right where you left off.
             </p>
-          </div>
-        )}
-
-        {/* Recoverable: previous deploy finished successfully */}
-        {state === "recoverable" && (
-          <>
-            <div className="p-6 pb-0">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-green-100">
-                  <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Previous deployment found
-                </h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-2">
-                Your previous deployment took longer than expected, but it
-                finished successfully. We can pick up right where you left off.
-              </p>
-              <p className="text-xs text-gray-500 mb-4">
-                This sometimes happens when Google Cloud is experiencing
-                delays in your region.
-              </p>
-              {error && (
-                <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
-                  {error}
-                </p>
-              )}
-            </div>
-            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
-              <button
-                onClick={handleStartFresh}
-                disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Start Fresh
-              </button>
-              <button
-                onClick={handleRecover}
-                disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-white bg-bioaf-600 rounded-lg hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {actionLoading ? "Recovering..." : "Resume Deployment"}
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Provisioning: cluster is still being created by GCP */}
-        {state === "provisioning" && (
-          <>
-            <div className="p-6 pb-0">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-amber-100">
-                  <svg className="h-5 w-5 text-amber-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Deployment still in progress
-                </h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-2">
-                Google Cloud is still setting up your compute cluster. This is
-                taking longer than usual, likely due to a service delay on
-                Google&apos;s side.
-              </p>
-              <p className="text-sm text-gray-600 mb-2">
-                There&apos;s nothing you need to do. Come back later and
-                we&apos;ll check again automatically.
-              </p>
-              <p className="text-xs text-gray-500 mb-4">
-                You can check{" "}
-                <a
-                  href="https://status.cloud.google.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-bioaf-600 hover:underline"
-                >
-                  Google Cloud Status
-                </a>{" "}
-                for current service health.
-              </p>
-              {error && (
-                <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
-                  {error}
-                </p>
-              )}
-            </div>
-            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Got It
-              </button>
-              <button
-                onClick={runCheck}
-                disabled={actionLoading}
-                className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Check Again
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Error with no state */}
-        {state === "none" && error && (
-          <>
-            <div className="p-6">
-              <p className="text-sm text-red-600 bg-red-50 rounded p-2">
+            <p className="text-xs text-gray-500 mb-4">
+              This sometimes happens when Google Cloud is experiencing
+              delays in your region.
+            </p>
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
                 {error}
               </p>
+            )}
+          </div>
+          <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+            <button
+              onClick={handleStartFresh}
+              disabled={actionLoading}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Start Fresh
+            </button>
+            <button
+              onClick={handleRecover}
+              disabled={actionLoading}
+              className="px-4 py-2 text-sm font-medium text-white bg-bioaf-600 rounded-lg hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {actionLoading ? "Recovering..." : "Resume Deployment"}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Provisioning: cluster is still being created by GCP */}
+      {state === "provisioning" && (
+        <>
+          <div className="p-6 pb-0">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="flex items-center justify-center h-10 w-10 rounded-full bg-amber-100">
+                <svg className="h-5 w-5 text-amber-600 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Deployment still in progress
+              </h3>
             </div>
-            <div className="bg-gray-50 px-6 py-4 flex justify-end">
-              <button
-                onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            <p className="text-sm text-gray-600 mb-2">
+              Google Cloud is still setting up your compute cluster. This is
+              taking longer than usual, likely due to a service delay on
+              Google&apos;s side.
+            </p>
+            <p className="text-sm text-gray-600 mb-2">
+              There&apos;s nothing you need to do. Come back later and
+              we&apos;ll check again automatically.
+            </p>
+            <p className="text-xs text-gray-500 mb-4">
+              You can check{" "}
+              <a
+                href="https://status.cloud.google.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-bioaf-600 hover:underline"
               >
-                Close
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+                Google Cloud Status
+              </a>{" "}
+              for current service health.
+            </p>
+            {error && (
+              <p className="text-sm text-red-600 bg-red-50 rounded p-2 mb-4">
+                {error}
+              </p>
+            )}
+          </div>
+          <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Got It
+            </button>
+            <button
+              onClick={runCheck}
+              disabled={actionLoading}
+              className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Check Again
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Error with no state */}
+      {state === "none" && error && (
+        <>
+          <div className="p-6">
+            <p className="text-sm text-red-600 bg-red-50 rounded p-2">
+              {error}
+            </p>
+          </div>
+          <div className="bg-gray-50 px-6 py-4 flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Close
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }

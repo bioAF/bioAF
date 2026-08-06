@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type {
@@ -175,145 +176,135 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col">
-        <div className="flex items-start justify-between px-6 py-4 border-b">
-          <div>
-            <h2 className="text-lg font-semibold">Search Available Pipelines</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Browse the nf-core catalog. Registry last refreshed {formatTimeAgo(lastRefreshedAt)}.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {canInstall && (
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                className="text-sm px-3 py-1 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-              >
-                {refreshing ? "Refreshing..." : "Refresh registry"}
-              </button>
-            )}
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-2xl leading-none">
-              &times;
-            </button>
-          </div>
-        </div>
+    <Modal open title="Search Available Pipelines" onClose={onClose} size="xl">
+    <div className="flex items-start justify-between gap-4 pb-3">
+      <p className="text-xs text-gray-500">
+        Browse the nf-core catalog. Registry last refreshed {formatTimeAgo(lastRefreshedAt)}.
+      </p>
+      {canInstall && (
+        <button
+          onClick={handleRefresh}
+          disabled={refreshing}
+          className="shrink-0 text-sm px-3 py-1 rounded border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {refreshing ? "Refreshing..." : "Refresh registry"}
+        </button>
+      )}
+    </div>
 
-        <div className="px-6 py-3 border-b">
-          <input aria-label="Search by name, description, or topic"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, description, or topic..."
-            className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-          />
-        </div>
+      <div className="px-6 py-3 border-b">
+        <input aria-label="Search by name, description, or topic"
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name, description, or topic..."
+          className="w-full px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+        />
+      </div>
 
-        {error && <div className="mx-6 mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
+      {error && <div className="mx-6 mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
-          {loading ? (
-            <div className="text-center py-8 text-gray-500">Loading nf-core catalog...</div>
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">No pipelines match your search</div>
-          ) : (
-            <ul className="divide-y divide-gray-200">
-              {filtered.map((p) => (
-                <li key={p.name} className="py-3 flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{p.full_name}</span>
-                      {p.stars != null && (
-                        <span className="text-xs text-gray-500">{p.stars.toLocaleString()} stars</span>
-                      )}
-                      <StatusChip p={p} />
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        {loading ? (
+          <div className="text-center py-8 text-gray-500">Loading nf-core catalog...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">No pipelines match your search</div>
+        ) : (
+          <ul className="divide-y divide-gray-200">
+            {filtered.map((p) => (
+              <li key={p.name} className="py-3 flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{p.full_name}</span>
+                    {p.stars != null && (
+                      <span className="text-xs text-gray-500">{p.stars.toLocaleString()} stars</span>
+                    )}
+                    <StatusChip p={p} />
+                  </div>
+                  <p className="text-sm text-gray-600 mt-0.5 line-clamp-2">{p.description || "No description"}</p>
+                  {p.topics.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {p.topics.slice(0, 5).map((t) => (
+                        <span key={t} className="px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600">
+                          {t}
+                        </span>
+                      ))}
                     </div>
-                    <p className="text-sm text-gray-600 mt-0.5 line-clamp-2">{p.description || "No description"}</p>
-                    {p.topics.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {p.topics.slice(0, 5).map((t) => (
-                          <span key={t} className="px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="shrink-0 flex flex-col items-end gap-1">
-                    {p.update_available && canInstall && (
-                      <button
-                        onClick={() => applyUpdate(p)}
-                        className="text-sm px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700"
-                      >
-                        Update to v{p.latest_release}
-                      </button>
-                    )}
-                    {!p.installed && canInstall && !p.archived && (
-                      <button
-                        onClick={() => openVersionPicker(p)}
-                        className="text-sm px-3 py-1 rounded bg-bioaf-600 text-white hover:bg-bioaf-700"
-                      >
-                        Install
-                      </button>
-                    )}
-                    {p.installed && !p.update_available && (
-                      <span className="text-xs text-gray-500">Latest installed</span>
-                    )}
-                    {!canInstall && !p.installed && (
-                      <span className="text-xs text-gray-500">View only</span>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {picker && (
-          <div className="border-t bg-gray-50 px-6 py-4">
-            <h3 className="text-sm font-medium mb-2">
-              Install nf-core/{picker.pipeline.name}
-            </h3>
-            {picker.loading ? (
-              <div className="text-sm text-gray-500">Loading versions...</div>
-            ) : picker.versions.length === 0 ? (
-              <div className="text-sm text-red-600">No released versions available.</div>
-            ) : (
-              <div className="flex items-center gap-3">
-                <label htmlFor="version" className="text-sm text-gray-600">Version</label>
-                <select id="version"
-                  value={picker.selected}
-                  onChange={(e) =>
-                    setPicker({ ...picker, selected: e.target.value })
-                  }
-                  className="border border-gray-300 rounded px-2 py-1 text-sm"
-                >
-                  {picker.versions.map((v) => (
-                    <option key={v.tag_name} value={v.tag_name}>
-                      {v.tag_name}
-                      {v.published_at ? ` (${v.published_at.slice(0, 10)})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={confirmInstall}
-                  disabled={installing || !picker.selected}
-                  className="text-sm px-3 py-1 rounded bg-bioaf-600 text-white hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {installing ? "Installing..." : "Install"}
-                </button>
-                <button
-                  onClick={() => setPicker(null)}
-                  className="text-sm px-3 py-1 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
+                  )}
+                </div>
+                <div className="shrink-0 flex flex-col items-end gap-1">
+                  {p.update_available && canInstall && (
+                    <button
+                      onClick={() => applyUpdate(p)}
+                      className="text-sm px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700"
+                    >
+                      Update to v{p.latest_release}
+                    </button>
+                  )}
+                  {!p.installed && canInstall && !p.archived && (
+                    <button
+                      onClick={() => openVersionPicker(p)}
+                      className="text-sm px-3 py-1 rounded bg-bioaf-600 text-white hover:bg-bioaf-700"
+                    >
+                      Install
+                    </button>
+                  )}
+                  {p.installed && !p.update_available && (
+                    <span className="text-xs text-gray-500">Latest installed</span>
+                  )}
+                  {!canInstall && !p.installed && (
+                    <span className="text-xs text-gray-500">View only</span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
-    </div>
+
+      {picker && (
+        <div className="border-t bg-gray-50 px-6 py-4">
+          <h3 className="text-sm font-medium mb-2">
+            Install nf-core/{picker.pipeline.name}
+          </h3>
+          {picker.loading ? (
+            <div className="text-sm text-gray-500">Loading versions...</div>
+          ) : picker.versions.length === 0 ? (
+            <div className="text-sm text-red-600">No released versions available.</div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <label htmlFor="version" className="text-sm text-gray-600">Version</label>
+              <select id="version"
+                value={picker.selected}
+                onChange={(e) =>
+                  setPicker({ ...picker, selected: e.target.value })
+                }
+                className="border border-gray-300 rounded px-2 py-1 text-sm"
+              >
+                {picker.versions.map((v) => (
+                  <option key={v.tag_name} value={v.tag_name}>
+                    {v.tag_name}
+                    {v.published_at ? ` (${v.published_at.slice(0, 10)})` : ""}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={confirmInstall}
+                disabled={installing || !picker.selected}
+                className="text-sm px-3 py-1 rounded bg-bioaf-600 text-white hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {installing ? "Installing..." : "Install"}
+              </button>
+              <button
+                onClick={() => setPicker(null)}
+                className="text-sm px-3 py-1 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
