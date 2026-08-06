@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { statusDotClass } from "@/lib/statusStyles";
 
 interface ActivityEvent {
   id: number;
@@ -34,12 +35,6 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
       .finally(() => { clearTimeout(timeout); setLoading(false); });
     return () => clearTimeout(timeout);
   }, []);
-
-  const severityColor: Record<string, string> = {
-    info: "bg-blue-400",
-    warning: "bg-amber-400",
-    critical: "bg-red-400",
-  };
 
   function humanize(text: string): string {
     return text.replace(/[a-z0-9]+(_[a-z0-9]+)+/g, (match) =>
@@ -101,9 +96,10 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
           {events.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
               <span
-                className={`w-1.5 h-1.5 mt-1.5 rounded-full flex-shrink-0 ${
-                  severityColor[e.severity || "info"] || severityColor.info
-                }`}
+                className={`w-1.5 h-1.5 mt-1.5 rounded-full flex-shrink-0 ${statusDotClass(
+                  "severity",
+                  e.severity || "info",
+                )}`}
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-700 truncate">{humanize(e.summary)}</p>

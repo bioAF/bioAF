@@ -253,6 +253,34 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     pending_review: { badge: "bg-gray-100 text-gray-700" },
   },
 
+  // What changed between two versions of a Custom Pipeline. The launch dialog
+  // and the detail page both label version history, and each carried its own
+  // byte-identical copy of the mapping before this entry.
+  pipelineVersionChange: {
+    initial: { badge: "bg-gray-100 text-gray-700", label: "Initial version" },
+    image: { badge: "bg-amber-100 text-amber-700", label: "Image change" },
+    config_and_image: { badge: "bg-purple-100 text-purple-700", label: "Config + image change" },
+    config: { badge: "bg-blue-100 text-blue-700", label: "Config change" },
+  },
+
+  // Event severity, shared by notifications and the activity feed. They are two
+  // views of the same scale, so they must not diverge: before this entry the
+  // notification list painted `warning` yellow and the activity feed painted it
+  // amber, on screens a user moves between. Yellow wins because it is what the
+  // rest of this registry already uses for a warning (environmentVersion
+  // building, sampleBatch partial_complete) and because yellow-700 on yellow-100
+  // measures 4.58:1, slightly ahead of amber's 4.51:1.
+  //
+  // Dots are the -500 step, matching environmentVersion, rather than the -400
+  // the activity widget used. Note that none of these dots reaches 3:1 on white:
+  // a dot is not a sufficient carrier for severity on its own, which is a
+  // separate open finding and not fixed by this entry.
+  severity: {
+    info: { badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500", label: "Info" },
+    warning: { badge: "bg-yellow-100 text-yellow-700", dot: "bg-yellow-500", label: "Warning" },
+    critical: { badge: "bg-red-100 text-red-700", dot: "bg-red-500", label: "Critical" },
+  },
+
   // Catch-all for mixed/generic status surfaces (component health, users,
   // projects, publications). Labels default to the humanized status.
   generic: {

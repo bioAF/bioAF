@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { notificationHref } from "@/lib/notificationLinks";
+import { statusBadgeClass, STATUS_STYLES } from "@/lib/statusStyles";
 
 import { clickableCard } from "@/lib/a11y";
 
@@ -24,12 +25,6 @@ interface Props {
   /** Called right before navigating, e.g. to close the dropdown. */
   onNavigate?: () => void;
 }
-
-const severityColors: Record<string, string> = {
-  info: "bg-blue-100 text-blue-700",
-  warning: "bg-yellow-100 text-yellow-700",
-  critical: "bg-red-100 text-red-700",
-};
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -64,9 +59,10 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
     >
       <div className="flex items-start gap-3">
         <span
-          className={`mt-0.5 text-xs px-1.5 py-0.5 rounded font-medium ${
-            severityColors[n.severity] || severityColors.info
-          }`}
+          className={`mt-0.5 text-xs px-1.5 py-0.5 rounded font-medium ${statusBadgeClass(
+            "severity",
+            n.severity in STATUS_STYLES.severity ? n.severity : "info",
+          )}`}
         >
           {n.severity}
         </span>

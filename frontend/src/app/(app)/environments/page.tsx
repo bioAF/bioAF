@@ -7,7 +7,7 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
-import { statusDotClass, statusLabel } from "@/lib/statusStyles";
+import { statusBadgeClass, statusDotClass, statusLabel } from "@/lib/statusStyles";
 import { clickableCard } from "@/lib/a11y";
 
 import type {
@@ -477,12 +477,7 @@ export default function EnvironmentsPage() {
                       >
                         <div className="flex items-center gap-3">
                           <span className="font-mono font-medium">v{v.version_number}</span>
-                          <span className={`px-2 py-0.5 text-xs rounded-full ${
-                            v.status === "ready" ? "bg-green-100 text-green-700" :
-                            v.status === "building" ? "bg-yellow-100 text-yellow-700" :
-                            v.status === "failed" ? "bg-red-100 text-red-700" :
-                            "bg-gray-100 text-gray-700"
-                          }`}>
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("environmentVersion", v.status)}`}>
                             {statusLabel("environmentVersion", v.status)}
                           </span>
                           <span className="text-xs text-gray-500">{v.definition_format}</span>

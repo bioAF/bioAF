@@ -8,6 +8,8 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { CustomPipelineLaunchDialog } from "@/components/pipelines/CustomPipelineLaunchDialog";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { versionChangeKind } from "@/lib/customPipelineVersions";
+import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import type {
   CustomPipelineCodeSource,
   CustomPipelineDetail,
@@ -55,27 +57,6 @@ const REFERENCE_CATEGORY_OPTIONS = [
   "markers",
   "other",
 ] as const;
-
-function changeLabel(
-  current: CustomPipelineVersion,
-  previous: CustomPipelineVersion | null,
-): { label: string; tone: "blue" | "amber" | "purple" | "gray" } {
-  if (previous == null) return { label: "Initial version", tone: "gray" };
-  if (current.version_trigger === "environment_cascade") {
-    return { label: "Image change", tone: "amber" };
-  }
-  if (current.environment_version_id !== previous.environment_version_id) {
-    return { label: "Config + image change", tone: "purple" };
-  }
-  return { label: "Config change", tone: "blue" };
-}
-
-const TONE_CLASSES: Record<"blue" | "amber" | "purple" | "gray", string> = {
-  blue: "bg-blue-100 text-blue-700",
-  amber: "bg-amber-100 text-amber-700",
-  purple: "bg-purple-100 text-purple-700",
-  gray: "bg-gray-100 text-gray-700",
-};
 
 export default function CustomPipelineDetailPage() {
   const router = useRouter();
@@ -591,7 +572,7 @@ export default function CustomPipelineDetailPage() {
             <div className="divide-y">
               {pipeline.versions.map((version, idx) => {
                 const previous = pipeline.versions[idx + 1] ?? null;
-                const change = changeLabel(version, previous);
+                const changeKind = versionChangeKind(version, previous);
                 const expanded = expandedVersionIds.has(version.id);
                 const env = envOptionsById.get(version.environment_version_id);
                 const repo =
@@ -606,9 +587,9 @@ export default function CustomPipelineDetailPage() {
                           v{version.version_number}
                         </span>
                         <span
-                          className={`px-2 py-0.5 text-xs rounded-full ${TONE_CLASSES[change.tone]}`}
+                          className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineVersionChange", changeKind)}`}
                         >
-                          {change.label}
+                          {statusLabel("pipelineVersionChange", changeKind)}
                         </span>
                         <span
                           className={`px-2 py-0.5 text-xs rounded-full ${

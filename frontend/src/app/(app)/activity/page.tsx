@@ -6,6 +6,7 @@ import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 interface ActivityEvent {
   id: number;
@@ -18,12 +19,6 @@ interface ActivityEvent {
   severity?: string;
   created_at: string;
 }
-
-const severityColors: Record<string, string> = {
-  info: "bg-blue-100 text-blue-700",
-  warning: "bg-amber-100 text-amber-700",
-  critical: "bg-red-100 text-red-700",
-};
 
 const entityLinks: Record<string, (id: number) => string> = {
   experiment: (id) => `/experiments/${id}`,
@@ -163,7 +158,7 @@ export default function ActivityFeedPage() {
                   onClick={() => toggleSeverity(sev)}
                   className={`px-2 py-1 rounded text-xs font-medium border ${
                     severityFilter.includes(sev)
-                      ? severityColors[sev] + " border-transparent"
+                      ? statusBadgeClass("severity", sev) + " border-transparent"
                       : "bg-white text-gray-500 border-gray-300"
                   }`}
                   data-testid={`filter-severity-${sev}`}
@@ -205,7 +200,7 @@ export default function ActivityFeedPage() {
                         {event.severity && (
                           <span
                             className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                              severityColors[event.severity] || "bg-gray-100 text-gray-700"
+                              statusBadgeClass("severity", event.severity)
                             }`}
                           >
                             {event.severity}
