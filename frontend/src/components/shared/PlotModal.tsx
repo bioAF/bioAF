@@ -88,14 +88,14 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
   if (!hasDetail) {
     return (
       <Modal open title={title} onClose={onClose}>
-    <div className="p-4 flex justify-center bg-gray-50">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={url}
-        alt={title}
-        className="max-h-64 object-contain rounded"
-      />
-    </div>
+        <div className="-mx-6 flex justify-center bg-gray-50 py-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={title}
+            className="max-h-64 object-contain rounded"
+          />
+        </div>
       </Modal>
     );
   }
@@ -109,7 +109,7 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
     <Modal open title={title} onClose={onClose}>
 
       {isImage ? (
-        <div className="p-4 flex justify-center bg-gray-50">
+        <div className="-mx-6 flex justify-center bg-gray-50 py-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
@@ -118,7 +118,7 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
           />
         </div>
       ) : (
-        <div className="p-4 flex justify-center bg-gray-50">
+        <div className="-mx-6 flex justify-center bg-gray-50 py-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
