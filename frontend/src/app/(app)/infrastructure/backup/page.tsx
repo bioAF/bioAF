@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -121,7 +122,8 @@ export default function InfraBackupPage() {
     } catch (e) {
       // Falling through to the empty states told an admin there were NO backups,
       // which during an outage is the most alarming possible wrong answer.
-      setLoadError(e instanceof Error ? e.message : "Could not load backup status.");
+      logError("loading backup status", e);
+      setLoadError(loadFailureMessage("Backup status"));
     } finally {
       setLoading(false);
     }
@@ -308,7 +310,7 @@ export default function InfraBackupPage() {
         {loadError && (
           <div className="mb-6">
             <ErrorState
-              message={`Could not load backup status. ${loadError}`}
+              message={loadError}
               onRetry={() => loadData()}
             />
           </div>

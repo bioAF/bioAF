@@ -38,7 +38,7 @@ test("a failed load shows an error with retry, not an empty state", async () => 
   render(<ProjectsPage />);
 
   await waitFor(() => expect(screen.getByTestId("error-message")).toBeInTheDocument());
-  expect(screen.getByTestId("error-message")).toHaveTextContent(/could not load projects/i);
+  expect(screen.getByTestId("error-message")).toHaveTextContent(/projects could not be loaded/i);
   expect(screen.queryByText(/no projects found/i)).not.toBeInTheDocument();
 });
 

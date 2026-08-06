@@ -40,7 +40,7 @@ test("a failed node list shows an error with a retry, not an empty state", async
   render(<WorkNodesPage />);
 
   await waitFor(() =>
-    expect(screen.getByText(/could not load work nodes/i)).toBeInTheDocument(),
+    expect(screen.getByText(/work nodes could not be loaded/i)).toBeInTheDocument(),
   );
   // The dangerous message: it says the user has nothing, when really we do not know.
   expect(screen.queryByText(/no work nodes in this view/i)).not.toBeInTheDocument();
@@ -53,5 +53,5 @@ test("a genuinely empty list still says so", async () => {
   await waitFor(() =>
     expect(screen.getByText(/no work nodes in this view/i)).toBeInTheDocument(),
   );
-  expect(screen.queryByText(/could not load work nodes/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/work nodes could not be loaded/i)).not.toBeInTheDocument();
 });

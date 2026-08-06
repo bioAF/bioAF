@@ -34,6 +34,6 @@ test("shows a retry-able error when recommendations fail to load", async () => {
   render(<LiteratureRecommendationsPage />);
 
   expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-  expect(screen.getByText(/couldn't load recommendations/i)).toBeInTheDocument();
+  expect(screen.getByText(/recommendations could not be loaded/i)).toBeInTheDocument();
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
 });

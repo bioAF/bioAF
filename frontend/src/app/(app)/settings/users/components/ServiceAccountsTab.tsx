@@ -14,6 +14,8 @@ import { RevealSecretModal } from "./RevealSecretModal";
 import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
 
 import { clickableRow } from "@/lib/a11y";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 interface Props {
   roles: Role[];
@@ -21,6 +23,7 @@ interface Props {
 }
 
 export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) {
+  const toast = useToast();
   const [roles, setRoles] = useState<Role[]>(rolesProp);
   useEffect(() => setRoles(rolesProp), [rolesProp]);
   const [accounts, setAccounts] = useState<ServiceAccount[]>([]);
@@ -72,7 +75,10 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
     load();
     api.get<PermissionCatalog>("/api/roles/permissions-catalog")
       .then(setCatalog)
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the permission catalog", e);
+        toast.error(loadFailureMessage("The permission catalog"));
+      });
   }, []);
 
   const refreshRoles = async (): Promise<Role[]> => {

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 interface WorkNodeConfig {
   max_nodes_per_user: number;
@@ -37,6 +39,7 @@ function SaveBanner({ message }: { message: string }) {
 }
 
 export default function WorkbenchSettingsPage() {
+  const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
 
@@ -73,11 +76,17 @@ export default function WorkbenchSettingsPage() {
     try {
       const data = await api.get<WorkNodeConfig>("/api/v1/settings/work-nodes");
       setWorkNodes(data);
-    } catch {}
+    } catch (e) {
+      logError("loading the work node settings", e);
+      toast.error(loadFailureMessage("Work node settings"));
+    }
     try {
       const data = await api.get<NotebookConfig>("/api/v1/settings/notebooks");
       setNotebooks((prev) => ({ ...prev, ...data }));
-    } catch {}
+    } catch (e) {
+      logError("loading the notebook settings", e);
+      toast.error(loadFailureMessage("Notebook settings"));
+    }
   }
 
   async function saveWorkNodes() {

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { statusBadgeClass } from "@/lib/statusStyles";
 
@@ -66,7 +67,8 @@ export default function ActivityFeedPage() {
         // The old comment claimed the api client handled this. It does not:
         // lib/api.ts only throws. Falling through left the page saying there was
         // no activity, which is a different claim from "we could not load it".
-        setLoadError(e instanceof Error ? e.message : "Could not load activity.");
+        logError("loading the activity feed", e);
+        setLoadError(loadFailureMessage("Activity"));
       } finally {
         setLoading(false);
       }
@@ -183,7 +185,7 @@ export default function ActivityFeedPage() {
           {loading ? (
             <ContentLoading />
           ) : loadError ? (
-            <ErrorState message={`Could not load activity. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
+            <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
           ) : events.length === 0 ? (
             <div className="p-8 text-center text-gray-500" data-testid="activity-empty">
               No activity matches your filters.

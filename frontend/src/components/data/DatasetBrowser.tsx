@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { getCurrentUser } from "@/lib/auth";
 import { DetailModal } from "@/components/shared/DetailModal";
 import type {
@@ -62,7 +63,8 @@ export function DatasetBrowser() {
       setDatasets(data.experiments);
       setTotal(data.total);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load datasets.");
+      logError("loading datasets", e);
+      setLoadError(loadFailureMessage("Datasets"));
     } finally {
       setLoading(false);
     }
@@ -75,7 +77,10 @@ export function DatasetBrowser() {
   useEffect(() => {
     api.get<{ organisms: string[] }>("/api/datasets/filter-options")
       .then((data) => setOrganismOptions(data.organisms))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the organism filter", e);
+        toast.error(loadFailureMessage("The organism filter"));
+      });
   }, []);
 
   const toggleExperiment = (id: number) => {
@@ -223,7 +228,7 @@ export function DatasetBrowser() {
       {loading ? (
         <p className="text-gray-500 text-sm">Loading...</p>
       ) : loadError ? (
-        <ErrorState message={`Could not load datasets. ${loadError}`} onRetry={() => fetchDatasets()} />
+        <ErrorState message={loadError} onRetry={() => fetchDatasets()} />
       ) : datasets.length === 0 ? (
         <p className="text-gray-500 text-sm">No datasets found.</p>
       ) : (

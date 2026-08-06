@@ -3,8 +3,11 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 export function SSHKeyTab() {
+  const toast = useToast();
   const [sshKey, setSSHKey] = useState<{ configured: boolean; public_key: string | null } | null>(null);
   const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
@@ -20,7 +23,12 @@ export function SSHKeyTab() {
     try {
       const data = await api.get<{ configured: boolean; public_key: string | null }>("/api/auth/me/ssh-key");
       setSSHKey(data);
-    } catch {}
+    } catch (e) {
+      // Silence here reads as "you have no SSH key", which would send the user
+      // off to generate a second one.
+      logError("loading the SSH key", e);
+      toast.error(loadFailureMessage("Your SSH key"));
+    }
     setLoading(false);
   }
 

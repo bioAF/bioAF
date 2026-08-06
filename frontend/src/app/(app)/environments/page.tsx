@@ -9,6 +9,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { statusBadgeClass, statusDotClass, statusLabel } from "@/lib/statusStyles";
 import { clickableCard } from "@/lib/a11y";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 import type {
   EnvironmentResponse,
@@ -106,7 +107,10 @@ export default function EnvironmentsPage() {
       if (detail.environment_type === "work_node") {
         setNewVersionFormat("conda");
       }
-    } catch {}
+    } catch (e) {
+      logError("loading the environment detail", e);
+      toast.error(loadFailureMessage("The environment"));
+    }
   }
 
   async function handleCreate() {
@@ -187,7 +191,10 @@ export default function EnvironmentsPage() {
         `/api/v1/environments/${envId}/versions/${versionId}/logs`
       );
       setBuildLogs(logs);
-    } catch {}
+    } catch (e) {
+      logError("loading build logs", e);
+      toast.error(loadFailureMessage("Build logs"));
+    }
   }
 
   async function openRebuildModal() {

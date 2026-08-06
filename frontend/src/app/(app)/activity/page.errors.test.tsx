@@ -30,7 +30,7 @@ test("a failed load shows an error with retry, not an empty feed", async () => {
   mockGet.mockRejectedValue(new Error("Backend unavailable"));
   render(<ActivityPage />);
   await waitFor(() => expect(screen.getByTestId("error-message")).toBeInTheDocument());
-  expect(screen.getByTestId("error-message")).toHaveTextContent(/could not load activity/i);
+  expect(screen.getByTestId("error-message")).toHaveTextContent(/activity could not be loaded/i);
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
 });
 

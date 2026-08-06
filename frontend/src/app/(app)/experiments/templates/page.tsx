@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheetImportModal";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -49,7 +50,8 @@ export default function ExperimentTemplatesPage() {
       setTemplates(data);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load templates.");
+      logError("loading experiment templates", e);
+      setLoadError(loadFailureMessage("Templates"));
     } finally {
       setLoading(false);
     }
@@ -254,7 +256,7 @@ export default function ExperimentTemplatesPage() {
       {loading ? (
         <div className="flex justify-center py-12"><LoadingSpinner size="lg" /></div>
       ) : loadError ? (
-        <ErrorState message={`Could not load templates. ${loadError}`} onRetry={() => loadTemplates()} />
+        <ErrorState message={loadError} onRetry={() => loadTemplates()} />
       ) : templates.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">
           <p className="text-gray-500">No templates yet. Create one to standardize experiment registration.</p>

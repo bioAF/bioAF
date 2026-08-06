@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { PlotThumbnail, StorageDeletedPlaceholder } from "@/components/plots/PlotThumbnail";
 import { ErrorState } from "@/components/shared/ErrorState";
 import type {
@@ -87,7 +88,8 @@ export default function PlotArchivePage() {
       setPlots(data.plots);
       setTotal(data.total);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load plots.");
+      logError("loading the plot archive", e);
+      setLoadError(loadFailureMessage("Plots"));
     } finally {
       setLoading(false);
     }
@@ -206,7 +208,7 @@ export default function PlotArchivePage() {
         {loading ? (
           <ContentLoading />
         ) : loadError ? (
-          <ErrorState message={`Could not load plots. ${loadError}`} onRetry={() => fetchPlots()} />
+          <ErrorState message={loadError} onRetry={() => fetchPlots()} />
         ) : plots.length === 0 ? (
           <p className="text-gray-500 text-sm">No plots found.</p>
         ) : (

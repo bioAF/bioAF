@@ -36,6 +36,7 @@ import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -121,7 +122,10 @@ export default function NotebooksPage() {
           Object.fromEntries(data.profiles.map((p) => [p.name, p.available]))
         );
       }
-    } catch {}
+    } catch (e) {
+      logError("loading resource profiles", e);
+      toast.error(loadFailureMessage("Resource profile availability"));
+    }
   }
 
   async function loadBuildStatus() {
@@ -135,7 +139,10 @@ export default function NotebooksPage() {
       if (status.build_status && ["WORKING", "QUEUED"].includes(status.build_status)) {
         setTimeout(loadBuildStatus, 15000);
       }
-    } catch {}
+    } catch (e) {
+      // Polled every few seconds, so a toast per tick would bury the page. The log is the record.
+      logError("loading the notebook image build status", e);
+    }
   }
 
   async function loadSessions(currentBucket: SessionBucket = bucket) {
@@ -158,14 +165,20 @@ export default function NotebooksPage() {
     try {
       const data = await api.get<ExperimentListResponse>("/api/experiments?page_size=100");
       setExperiments(data.experiments);
-    } catch {}
+    } catch (e) {
+      logError("loading experiments", e);
+      toast.error(loadFailureMessage("Experiments"));
+    }
   }
 
   async function loadProjects() {
     try {
       const data = await api.get<ProjectListResponse>("/api/projects?page_size=100");
       setProjects(data.projects);
-    } catch {}
+    } catch (e) {
+      logError("loading projects", e);
+      toast.error(loadFailureMessage("Projects"));
+    }
   }
 
   async function loadEnvironments() {
@@ -179,7 +192,10 @@ export default function NotebooksPage() {
         setSelectedEnvId(withReady.id);
         setSelectedVersionImageUri(withReady.latest_version.image_uri);
       }
-    } catch {}
+    } catch (e) {
+      logError("loading environments", e);
+      toast.error(loadFailureMessage("Environments"));
+    }
   }
 
   async function handleEnvChange(envId: number) {
@@ -604,7 +620,10 @@ export default function NotebooksPage() {
                         try {
                           const p = await api.get<SessionProvenance>(`/api/v1/notebooks/sessions/${viewingSession.id}/provenance`);
                           setProvenance(p);
-                        } catch {}
+                        } catch (e) {
+                          logError("loading session provenance", e);
+                          toast.error(loadFailureMessage("Provenance"));
+                        }
                       }}
                       className="text-sm text-bioaf-600 hover:underline"
                     >

@@ -9,8 +9,10 @@ import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { useToast } from "@/components/shared/Toast";
 import {
   cleanText,
   formatAssociation,
@@ -38,6 +40,7 @@ const DEFAULT_TOGGLES: Record<StatusFlag, boolean> = {
 };
 
 export default function LiteratureLibraryPage() {
+  const toast = useToast();
   const router = useRouter();
   const user = getCurrentUser();
   const canUpload =
@@ -75,13 +78,19 @@ export default function LiteratureLibraryPage() {
       .then((data) =>
         setProjects(data.projects.map((p) => ({ id: p.id, name: p.name }))),
       )
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the project filter", e);
+        toast.error(loadFailureMessage("The project filter"));
+      });
     api
       .get<ExperimentListResponse>("/api/experiments?page_size=100")
       .then((data) =>
         setExperiments(data.experiments.map((e) => ({ id: e.id, name: e.name }))),
       )
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the experiment filter", e);
+        toast.error(loadFailureMessage("The experiment filter"));
+      });
   }, []);
 
   const readingSelection = useMemo<ReadingStatusValue[]>(() => {
@@ -114,7 +123,10 @@ export default function LiteratureLibraryPage() {
         setSelectedIds(new Set());
         setError(null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load the library."))
+      .catch((e) => {
+        logError("loading the library", e);
+        setError(loadFailureMessage("The library"));
+      })
       .finally(() => setLoading(false));
   }, [
     provenance,
@@ -146,7 +158,10 @@ export default function LiteratureLibraryPage() {
         setSelectedIds(new Set());
         setError(null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load the library."))
+      .catch((e) => {
+        logError("loading the library", e);
+        setError(loadFailureMessage("The library"));
+      })
       .finally(() => setLoading(false));
   };
 
@@ -408,8 +423,7 @@ export default function LiteratureLibraryPage() {
           <LoadingSpinner />
         ) : error ? (
           <ErrorState
-            message="Couldn't load the library."
-            details={error}
+            message={error}
             onRetry={refresh}
           />
         ) : papers.length === 0 ? (

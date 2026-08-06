@@ -6,6 +6,8 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 interface BillingExportStatus {
   configured: boolean;
@@ -59,6 +61,7 @@ const COMPONENT_LABELS: Record<string, string> = {
 };
 
 export default function InfraCostCenterPage() {
+  const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
   const [summary, setSummary] = useState<CostSummary | null>(null);
@@ -206,10 +209,16 @@ export default function InfraCostCenterPage() {
             // Refresh data
             api.get<BillingExportStatus>("/api/v1/infrastructure/billing-export/status")
               .then(setBillingExport)
-              .catch(() => {});
+              .catch((e) => {
+                logError("refreshing the billing export status", e);
+                toast.error(loadFailureMessage("Billing export status"));
+              });
             api.get<CostSummary>("/api/costs/summary")
               .then(setSummary)
-              .catch(() => {});
+              .catch((e) => {
+                logError("refreshing the cost summary", e);
+                toast.error(loadFailureMessage("The cost summary"));
+              });
           }}
           onClose={() => setShowBillingSetupModal(false)}
         />
@@ -257,10 +266,16 @@ export default function InfraCostCenterPage() {
             // Refresh status
             api.get<BillingExportStatus>("/api/v1/infrastructure/billing-export/status")
               .then(setBillingExport)
-              .catch(() => {});
+              .catch((e) => {
+                logError("refreshing the billing export status", e);
+                toast.error(loadFailureMessage("Billing export status"));
+              });
             api.get<CostSummary>("/api/costs/summary")
               .then(setSummary)
-              .catch(() => {});
+              .catch((e) => {
+                logError("refreshing the cost summary", e);
+                toast.error(loadFailureMessage("The cost summary"));
+              });
           }}
           onClose={() => setShowTeardownModal(false)}
         />

@@ -5,13 +5,17 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Experiment, ExperimentListResponse, ExperimentStatus, ProjectListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
+import { useToast } from "@/components/shared/Toast";
 
 export default function ExperimentsPage() {
+  const toast = useToast();
   const router = useRouter();
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [total, setTotal] = useState(0);
@@ -21,12 +25,19 @@ export default function ExperimentsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by Retry: the load lives in an effect keyed on the filters, so this
+  // is what re-triggers it without changing what the user asked for.
+  const [reloadKey, setReloadKey] = useState(0);
   const pageSize = 25;
 
   useEffect(() => {
     api.get<ProjectListResponse>("/api/projects").then((data) => {
       setProjects(data.projects.map((p) => ({ id: p.id, name: p.name })));
-    }).catch(() => {});
+    }).catch((e) => {
+      logError("loading the project filter", e);
+      toast.error(loadFailureMessage("The project filter"));
+    });
   }, [router]);
 
   useEffect(() => {
@@ -38,14 +49,18 @@ export default function ExperimentsPage() {
     if (statusFilter) params.set("status", statusFilter);
     if (projectFilter) params.set("project_id", projectFilter);
 
+    setLoadError(null);
     api.get<ExperimentListResponse>(`/api/experiments?${params}`)
       .then((data) => {
         setExperiments(data.experiments);
         setTotal(data.total);
       })
-      .catch(() => {})
+      .catch((e) => {
+        logError("loading experiments", e);
+        setLoadError(loadFailureMessage("Experiments"));
+      })
       .finally(() => setLoading(false));
-  }, [page, search, statusFilter, projectFilter]);
+  }, [page, search, statusFilter, projectFilter, reloadKey]);
 
   const totalPages = Math.ceil(total / pageSize);
 
@@ -101,6 +116,13 @@ export default function ExperimentsPage() {
       {loading ? (
         <div className="flex justify-center py-12">
           <LoadingSpinner size="lg" />
+        </div>
+      ) : loadError ? (
+        <div className="bg-white rounded-lg shadow">
+          <ErrorState
+            message={loadError}
+            onRetry={() => setReloadKey((k) => k + 1)}
+          />
         </div>
       ) : experiments.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">

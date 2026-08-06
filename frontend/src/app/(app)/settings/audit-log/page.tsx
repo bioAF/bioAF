@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -60,7 +61,8 @@ export default function AuditLogPage() {
       setLoadError(null);
       setTotal(data.total);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load the audit log.");
+      logError("loading the audit log", e);
+      setLoadError(loadFailureMessage("The audit log"));
     } finally {
       setLoading(false);
     }
@@ -210,7 +212,7 @@ export default function AuditLogPage() {
                 <tr><td colSpan={5} className="px-4 py-8"><ContentLoading /></td></tr>
               ) : loadError ? (
                 <tr><td colSpan={5} className="px-4 py-8">
-                  <ErrorState message={`Could not load the audit log. ${loadError}`} onRetry={() => load()} />
+                  <ErrorState message={loadError} onRetry={() => load()} />
                 </td></tr>
               ) : entries.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No audit log entries</td></tr>

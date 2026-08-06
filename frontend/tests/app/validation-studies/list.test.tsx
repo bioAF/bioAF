@@ -73,7 +73,7 @@ describe("ValidationStudiesListPage", () => {
     mockGet.mockRejectedValue(new Error("network down"));
     render(<ValidationStudiesListPage />);
     expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-    expect(screen.getByText(/couldn't load validation studies/i)).toBeInTheDocument();
+    expect(screen.getByText(/validation studies could not be loaded/i)).toBeInTheDocument();
     expect(screen.getByTestId("error-retry")).toBeInTheDocument();
     expect(screen.queryByText(/no validation studies/i)).not.toBeInTheDocument();
   });

@@ -5,6 +5,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
@@ -128,7 +129,8 @@ export default function WorkNodesPage() {
     } catch (e) {
       // Never fall through to the empty state here: these nodes bill by the hour,
       // and "you have none" is a very different claim from "we could not ask".
-      setLoadError(e instanceof Error ? e.message : "Could not load work nodes.");
+      logError("loading work nodes", e);
+      setLoadError(loadFailureMessage("Work nodes"));
     } finally {
       setLoading(false);
     }
@@ -138,7 +140,10 @@ export default function WorkNodesPage() {
     try {
       const data = await api.get<GitHubRepoListResponse>("/api/v1/github-repos");
       setRepos(data.repos);
-    } catch {}
+    } catch (e) {
+      logError("loading GitHub repositories", e);
+      toast.error(loadFailureMessage("Repositories"));
+    }
   }
 
   async function handleAddRepo() {
@@ -197,7 +202,10 @@ export default function WorkNodesPage() {
       setExperiments(expData.experiments);
       setMachineTypes(mtData);
       setEnvironments(envData.environments);
-    } catch {}
+    } catch (e) {
+      logError("loading the work node form options", e);
+      toast.error(loadFailureMessage("Form options"));
+    }
   }
 
   async function handleRecreateWorkNode(source: WorkNode) {
@@ -560,7 +568,7 @@ export default function WorkNodesPage() {
       </div>
       {loadError ? (
         <ErrorState
-          message={`Could not load work nodes. ${loadError}`}
+          message={loadError}
           onRetry={() => {
             setLoading(true);
             loadNodes();

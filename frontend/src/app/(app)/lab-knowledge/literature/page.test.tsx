@@ -102,7 +102,7 @@ test("shows a retry-able error, not the empty state, when the library fails to l
   render(<LiteraturePage />);
 
   expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-  expect(screen.getByText(/couldn't load the library/i)).toBeInTheDocument();
+  expect(screen.getByText(/the library could not be loaded/i)).toBeInTheDocument();
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
   expect(screen.queryByText(/no papers match/i)).not.toBeInTheDocument();
 });

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
   AutoRunConfig,
   AutoRunConfigCreate,
@@ -32,7 +33,8 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       const data = await api.get<AutoRunConfig[]>(`/api/experiments/${experimentId}/auto-runs`);
       setConfigs(data);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load auto-run rules.");
+      logError("loading auto-run rules", e);
+      setLoadError(loadFailureMessage("Auto-run rules"));
     } finally { setLoading(false); }
   }
 
@@ -89,7 +91,7 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       {loading ? (
         <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Loading...</div>
       ) : loadError ? (
-        <ErrorState message={`Could not load auto-run rules. ${loadError}`} onRetry={() => loadConfigs()} />
+        <ErrorState message={loadError} onRetry={() => loadConfigs()} />
       ) : configs.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
           <p className="text-gray-500 text-sm">
@@ -180,6 +182,7 @@ function AutoRunConfigModal({
   onSaved: () => void;
 }) {
   const isEdit = !!existingConfig;
+  const toast = useToast();
 
   const [step, setStep] = useState<1 | 2 | 3>(isEdit ? 2 : 1);
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
@@ -210,7 +213,10 @@ function AutoRunConfigModal({
         const match = data.pipelines.find((p) => p.pipeline_key === existingConfig.pipeline_key);
         if (match) setSelectedPipeline(match);
       }
-    } catch {}
+    } catch (e) {
+      logError("loading the pipeline catalog", e);
+      toast.error(loadFailureMessage("The pipeline catalog"));
+    }
   }
 
   async function loadPipelineDetail(key: string) {
@@ -220,7 +226,10 @@ function AutoRunConfigModal({
       if (!isEdit && data.default_params) {
         setUserParams({ ...data.default_params });
       }
-    } catch {}
+    } catch (e) {
+      logError("loading pipeline detail", e);
+      toast.error(loadFailureMessage("Pipeline detail"));
+    }
   }
 
   async function handleSave() {
@@ -321,7 +330,13 @@ function AutoRunConfigModal({
                   <textarea
                     aria-label="Pipeline parameters as JSON"
                     value={JSON.stringify(userParams, null, 2)}
-                    onChange={(e) => { try { setUserParams(JSON.parse(e.target.value)); } catch {} }}
+                    onChange={(e) => {
+            try {
+              setUserParams(JSON.parse(e.target.value));
+            } catch {
+              // Half-typed JSON is not a failure worth reporting; see the launch page.
+            }
+          }}
                     className="w-full h-32 border rounded px-3 py-2 font-mono text-xs"
                   />
                 </div>

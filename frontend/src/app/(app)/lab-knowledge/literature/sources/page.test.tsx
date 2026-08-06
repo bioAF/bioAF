@@ -43,7 +43,7 @@ test("shows a retry-able error when sources fail to load", async () => {
   mockList.mockRejectedValue(new Error("boom"));
   render(<LiteratureSourcesPage />);
   expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-  expect(screen.getByText(/couldn't load literature sources/i)).toBeInTheDocument();
+  expect(screen.getByText(/literature sources could not be loaded/i)).toBeInTheDocument();
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
 });
 

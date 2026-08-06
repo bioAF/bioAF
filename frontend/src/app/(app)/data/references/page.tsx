@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
@@ -26,6 +28,10 @@ export default function DataReferencesPage() {
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Bumped by Retry: the load lives in an effect keyed on the filters, so this
+  // is what re-triggers it without changing what the user asked for.
+  const [reloadKey, setReloadKey] = useState(0);
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [scopeFilter, setScopeFilter] = useState("");
@@ -64,15 +70,19 @@ export default function DataReferencesPage() {
     if (statusFilter) params.set("status", statusFilter);
 
     const query = params.toString();
+    setLoadError(null);
     api
       .get<ReferenceDatasetListResponse>(`/api/references${query ? `?${query}` : ""}`)
       .then((data) => {
         setReferences(data.references);
         setTotal(data.total);
       })
-      .catch(() => {})
+      .catch((e) => {
+        logError("loading reference data", e);
+        setLoadError(loadFailureMessage("Reference data"));
+      })
       .finally(() => setLoading(false));
-  }, [search, categoryFilter, scopeFilter, statusFilter]);
+  }, [search, categoryFilter, scopeFilter, statusFilter, reloadKey]);
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
@@ -139,6 +149,13 @@ export default function DataReferencesPage() {
       {loading ? (
         <div className="flex justify-center py-12">
           <LoadingSpinner size="lg" />
+        </div>
+      ) : loadError ? (
+        <div className="bg-white rounded-lg shadow">
+          <ErrorState
+            message={loadError}
+            onRetry={() => setReloadKey((k) => k + 1)}
+          />
         </div>
       ) : references.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-12 text-center">

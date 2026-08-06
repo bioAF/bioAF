@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay, type StorageDisplay } from "@/lib/storageDisplay";
 import { AutoIngestControls } from "./AutoIngestControls";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 interface BucketMetrics {
   bucket_name: string;
@@ -214,6 +216,7 @@ export function StorageSection({
   onDeploy,
   onUpdateStorage,
 }: StorageSectionProps) {
+  const toast = useToast();
   const [buckets, setBuckets] = useState<BucketMetrics[]>([]);
   // Provider-appropriate object-storage labels (GCS / S3), resolved from the
   // install's cloud via /stack-options; defaults to GCS so GCP is unchanged.
@@ -226,7 +229,10 @@ export function StorageSection({
     api
       .get<BucketMetricsResponse>("/api/v1/infrastructure/storage/buckets")
       .then((data) => setBuckets(data.buckets))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading bucket metrics", e);
+        toast.error(loadFailureMessage("Bucket metrics"));
+      });
   }, [storageDeployed]);
 
   if (!storageDeployed) {

@@ -11,6 +11,7 @@ import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
 import { QualityBadge } from "@/components/qc/QualityBadge";
 import { QCDashboardListItem } from "@/components/qc/QCDashboardListItem";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardSummary, QCDashboardResponse } from "@/lib/types";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -155,7 +156,8 @@ function QCDashboardsPageInner() {
         const data = await api.get<QCDashboardSummary[]>("/api/qc-dashboards");
         setDashboards(data);
       } catch (e) {
-        setLoadError(e instanceof Error ? e.message : "Could not load QC dashboards.");
+        logError("loading QC dashboards", e);
+        setLoadError(loadFailureMessage("QC dashboards"));
       } finally {
         setLoading(false);
       }
@@ -220,7 +222,7 @@ function QCDashboardsPageInner() {
         ) : loading ? (
           <ContentLoading />
         ) : loadError ? (
-          <ErrorState message={`Could not load QC dashboards. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
+          <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : dashboards.length === 0 ? (
           <p className="text-gray-500 text-sm">
             No QC dashboards yet. They are generated automatically when pipeline runs complete.

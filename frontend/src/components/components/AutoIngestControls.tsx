@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/shared/Toast";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface AutoIngestStatus {
   enabled: boolean;
@@ -63,7 +64,10 @@ export function AutoIngestControls({
           manifest_max_retries: data.manifest_max_retries,
         });
       })
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the auto-ingest configuration", e);
+        toast.error(loadFailureMessage("The auto-ingest configuration"));
+      });
   }, [storageDeployed, pubsubConfigured]);
 
   if (!storageDeployed) return null;

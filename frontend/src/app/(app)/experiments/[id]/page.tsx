@@ -58,6 +58,7 @@ import type {
   PlotArchiveListResponse,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
@@ -171,7 +172,12 @@ function ExperimentDetailPageInner() {
     try {
       const data = await api.get<Sample[]>(`/api/experiments/${id}/samples`);
       setSamples(data);
-    } catch {}
+    } catch (e) {
+      // An empty samples table is a statement about the experiment. Say when it
+      // is really a statement about the request.
+      logError("loading the samples", e);
+      toast.error(loadFailureMessage("Samples"));
+    }
   }
 
   async function loadBatches() {
@@ -182,7 +188,10 @@ function ExperimentDetailPageInner() {
       ]);
       setBatches(sampleBatchData);
       setSeqBatches(seqBatchData);
-    } catch {}
+    } catch (e) {
+      logError("loading the batches", e);
+      toast.error(loadFailureMessage("Batches"));
+    }
   }
 
   async function loadAudit(page = 1) {
@@ -190,21 +199,30 @@ function ExperimentDetailPageInner() {
       const data = await api.get<AuditLogResponse>(`/api/experiments/${id}/audit?page=${page}`);
       setAuditEntries(data.entries);
       setAuditTotal(data.total);
-    } catch {}
+    } catch (e) {
+      logError("loading the audit trail", e);
+      toast.error(loadFailureMessage("The audit trail"));
+    }
   }
 
   async function loadPipelineRuns() {
     try {
       const data = await api.get<PipelineRunListResponse>(`/api/pipeline-runs?experiment_id=${id}`);
       setPipelineRuns(data.runs);
-    } catch {}
+    } catch (e) {
+      logError("loading the pipeline runs", e);
+      toast.error(loadFailureMessage("Pipeline runs"));
+    }
   }
 
   async function loadNotebookSessions() {
     try {
       const data = await api.get<SessionListResponse>("/api/notebooks/sessions");
       setNotebookSessions(data.sessions.filter(s => s.experiment?.id === Number(id)));
-    } catch {}
+    } catch (e) {
+      logError("loading the notebook sessions", e);
+      toast.error(loadFailureMessage("Notebook sessions"));
+    }
   }
 
   async function handleLaunchNotebook(sessionType: "jupyter" | "rstudio") {

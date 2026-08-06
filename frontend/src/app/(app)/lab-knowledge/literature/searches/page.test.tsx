@@ -78,7 +78,7 @@ test("shows a retry-able error when searches fail to load", async () => {
   render(<LiteratureSearchesPage />);
 
   expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-  expect(screen.getByText(/couldn't load searches/i)).toBeInTheDocument();
+  expect(screen.getByText(/searches could not be loaded/i)).toBeInTheDocument();
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
 });
 

@@ -16,6 +16,8 @@ import { ApiActivityTab } from "./components/ApiActivityTab";
 import { PasswordResetActions } from "./components/PasswordResetActions";
 
 import { clickableRow } from "@/lib/a11y";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
@@ -53,6 +55,7 @@ export default function SettingsUsersPage() {
 }
 
 function SettingsUsersPageInner() {
+  const toast = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { canAccess, loading: permLoading } = usePermissions();
@@ -86,11 +89,17 @@ function SettingsUsersPageInner() {
     fetchUsers();
     api.get<RoleListResponse>("/api/roles")
       .then((data) => setRoles(data.roles))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading roles", e);
+        toast.error(loadFailureMessage("Roles"));
+      });
     fetchNeverLoggedIn();
     api.get<{ setup_complete: boolean; smtp_configured: boolean }>("/api/bootstrap/status")
       .then((data) => setSmtpConfigured(data.smtp_configured))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the setup status", e);
+        toast.error(loadFailureMessage("The setup status"));
+      });
   }, [router, permLoading, canAccess]);
 
   const fetchUsers = async () => {
@@ -105,7 +114,10 @@ function SettingsUsersPageInner() {
   const fetchNeverLoggedIn = () => {
     api.get<{ users: NeverLoggedInUser[] }>("/api/access-logs/never-logged-in")
       .then((data) => setNeverLoggedIn(data.users))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the never-logged-in list", e);
+        toast.error(loadFailureMessage("The never-signed-in list"));
+      });
   };
 
   const clearMessages = () => { setError(""); setSuccess(""); };
@@ -400,7 +412,10 @@ function SettingsUsersPageInner() {
           onRolesChanged={() => {
             api.get<RoleListResponse>("/api/roles")
               .then((data) => setRoles(data.roles))
-              .catch(() => {});
+              .catch((e) => {
+                logError("refreshing roles", e);
+                toast.error(loadFailureMessage("Roles"));
+              });
           }}
         />
       )}

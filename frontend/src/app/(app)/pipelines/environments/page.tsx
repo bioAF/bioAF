@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { clickableCard, clickableRow } from "@/lib/a11y";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 import {
   statusBadgeClass as badgeClass,
@@ -139,7 +140,10 @@ export default function PipelineEnvironmentsPage() {
     try {
       const detail = await api.get<EnvironmentDetailResponse>(`/api/v1/environments/${id}`);
       setSelectedEnv((prev) => (prev && prev.id === id ? detail : prev));
-    } catch {}
+    } catch (e) {
+      logError("refreshing the environment", e);
+      toast.error(loadFailureMessage("The environment"));
+    }
   }
 
   async function refreshSelectedVersion(envId: number, versionId: number) {
@@ -148,7 +152,10 @@ export default function PipelineEnvironmentsPage() {
         `/api/v1/environments/${envId}/versions/${versionId}`,
       );
       setSelectedVersion((prev) => (prev && prev.id === versionId ? version : prev));
-    } catch {}
+    } catch (e) {
+      logError("refreshing the environment version", e);
+      toast.error(loadFailureMessage("The environment version"));
+    }
   }
 
   async function selectEnvironment(id: number) {

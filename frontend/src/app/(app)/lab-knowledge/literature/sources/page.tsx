@@ -8,6 +8,7 @@ import { InputDialog } from "@/components/shared/InputDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser } from "@/lib/auth";
 import { literature, type SourceConfig, type LiteratureSourceName } from "@/lib/literature";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 const SOURCE_LABELS: Record<LiteratureSourceName, string> = {
   pubmed: "PubMed (NCBI E-utilities)",
@@ -41,7 +42,10 @@ export default function LiteratureSourcesPage() {
         setSources(data.items);
         setError(null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load sources."))
+      .catch((e) => {
+        logError("loading literature sources", e);
+        setError(loadFailureMessage("Literature sources"));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -92,8 +96,7 @@ export default function LiteratureSourcesPage() {
           <LoadingSpinner />
         ) : error ? (
           <ErrorState
-            message="Couldn't load literature sources."
-            details={error}
+            message={error}
             onRetry={refresh}
           />
         ) : (

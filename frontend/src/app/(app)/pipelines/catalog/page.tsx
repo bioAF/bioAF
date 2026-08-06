@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { PipelineCatalog, PipelineCatalogListResponse } from "@/lib/types";
 import { RegistryBrowseModal } from "@/components/pipelines/RegistryBrowseModal";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -30,7 +31,8 @@ export default function PipelineCatalogPage() {
       setPipelines(data.pipelines);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load the pipeline catalog.");
+      logError("loading the pipeline catalog", e);
+      setLoadError(loadFailureMessage("The pipeline catalog"));
     } finally { setLoading(false); }
   }
 
@@ -138,7 +140,7 @@ export default function PipelineCatalogPage() {
           })}
           {loadError ? (
             <div className="col-span-full">
-              <ErrorState message={`Could not load the pipeline catalog. ${loadError}`} onRetry={() => loadPipelines()} />
+              <ErrorState message={loadError} onRetry={() => loadPipelines()} />
             </div>
           ) : null}
           {!loadError && pipelines.length === 0 && (

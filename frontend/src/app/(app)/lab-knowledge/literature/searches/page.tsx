@@ -6,10 +6,10 @@ import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { SearchProgress, sourceChipClass } from "@/components/literature/SearchProgress";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { clickableCard } from "@/lib/a11y";
 
-import {
-  cleanText,
+import {  cleanText,
   formatAuthors,
   formatYear,
   literature,
@@ -45,7 +45,10 @@ export default function LiteratureSearchesPage() {
         setSearches(data.items);
         setError(null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load searches."))
+      .catch((e) => {
+        logError("loading searches", e);
+        setError(loadFailureMessage("Searches"));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -186,8 +189,7 @@ export default function LiteratureSearchesPage() {
           <LoadingSpinner />
         ) : error ? (
           <ErrorState
-            message="Couldn't load searches."
-            details={error}
+            message={error}
             onRetry={refresh}
           />
         ) : (

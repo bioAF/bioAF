@@ -17,6 +17,7 @@ import {
 } from "@/lib/literature";
 import { AiLitReviewLauncher } from "@/components/literature/AiLitReviewLauncher";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 export default function LiteratureRecommendationsPage() {
   const router = useRouter();
@@ -40,7 +41,10 @@ export default function LiteratureRecommendationsPage() {
         setRecommendations(data.items);
         setError(null);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load recommendations."))
+      .catch((e) => {
+        logError("loading recommendations", e);
+        setError(loadFailureMessage("Recommendations"));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -103,8 +107,7 @@ export default function LiteratureRecommendationsPage() {
           <LoadingSpinner />
         ) : error ? (
           <ErrorState
-            message="Couldn't load recommendations."
-            details={error}
+            message={error}
             onRetry={refresh}
           />
         ) : recommendations.length === 0 ? (

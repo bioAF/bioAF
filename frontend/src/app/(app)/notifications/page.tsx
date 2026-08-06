@@ -5,6 +5,7 @@ import Link from "next/link";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
 
 interface Notification {
@@ -42,7 +43,8 @@ export default function NotificationsPage() {
         setTotal(data.total);
         setLoadError(null);
       } catch (e) {
-        setLoadError(e instanceof Error ? e.message : "Could not load notifications.");
+        logError("loading notifications", e);
+        setLoadError(loadFailureMessage("Notifications"));
       } finally {
         setLoading(false);
       }
@@ -113,7 +115,7 @@ export default function NotificationsPage() {
         {loading ? (
           <ContentLoading />
         ) : loadError ? (
-          <ErrorState message={`Could not load notifications. ${loadError}`} onRetry={() => setReloadKey((k) => k + 1)} />
+          <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : notifications.length === 0 ? (
           <div className="p-8 text-center text-gray-500">No notifications</div>
         ) : (

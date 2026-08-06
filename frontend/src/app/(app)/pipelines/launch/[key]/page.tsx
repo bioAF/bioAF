@@ -5,7 +5,9 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
   PipelineCatalog,
   Experiment,
@@ -55,6 +57,7 @@ export default function PipelineLauncherPage() {
   const preselectedExperimentId = searchParams.get("experiment");
 
   const [pipeline, setPipeline] = useState<PipelineCatalog | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [samples, setSamples] = useState<SampleBrief[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +93,17 @@ export default function PipelineLauncherPage() {
       if (pipelineData.default_params) {
         setUserParams({ ...pipelineData.default_params });
       }
-    } catch {} finally { setLoading(false); }
+      setLoadError(null);
+    } catch (e) {
+      // A 404 is a real "no such pipeline" and keeps its own wording. Anything
+      // else means we do not know, and must not be reported as absence.
+      if (e instanceof ApiError && e.status === 404) {
+        setLoadError(null);
+      } else {
+        logError("loading the pipeline", e);
+        setLoadError(loadFailureMessage("This pipeline"));
+      }
+    } finally { setLoading(false); }
   }
 
   async function loadSamples(experimentId: number) {
@@ -104,7 +117,10 @@ export default function PipelineLauncherPage() {
       if (protocol) {
         setUserParams((prev) => ({ ...prev, protocol }));
       }
-    } catch {}
+    } catch (e) {
+      logError("loading samples", e);
+      toast.error(loadFailureMessage("Samples"));
+    }
   }
 
   async function handleLaunch(dropSamplesWithoutFiles = false) {
@@ -163,6 +179,17 @@ export default function PipelineLauncherPage() {
   function toggleSample(id: number) {
     setSelectedSampleIds((prev) =>
       prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
+  }
+
+  if (!loading && !pipeline && loadError) {
+    return (
+      <main className="flex-1 flex items-center justify-center">
+        <ErrorState
+          message={loadError}
+          onRetry={() => { setLoading(true); void loadData(); }}
+        />
+      </main>
     );
   }
 
@@ -362,7 +389,14 @@ function ParameterForm({
         <textarea
           aria-label="Pipeline parameters as JSON"
           value={JSON.stringify(values, null, 2)}
-          onChange={(e) => { try { onChange(JSON.parse(e.target.value)); } catch {} }}
+          onChange={(e) => {
+              try {
+                onChange(JSON.parse(e.target.value));
+              } catch {
+                // Typing JSON means passing through invalid states on the way to a
+                // valid one. Reporting each keystroke would be noise, not help.
+              }
+            }}
           className="w-full h-40 border rounded px-3 py-2 font-mono text-xs"
         />
       </div>

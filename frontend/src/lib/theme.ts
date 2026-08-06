@@ -74,4 +74,6 @@ export function applyResolvedTheme(resolved: ResolvedTheme): void {
  */
 export const THEME_INIT_SCRIPT = `(function(){try{var k=${JSON.stringify(
   THEME_STORAGE_KEY,
-)};var c=null;try{c=localStorage.getItem(k);}catch(e){}if(c!=="light"&&c!=="dark"){c=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}var r=document.documentElement;if(c==="dark"){r.classList.add("dark");}else{r.classList.remove("dark");}r.style.colorScheme=c;}catch(e){}})();`;
+)};/* localStorage can throw in a blocked-cookie context; falling back to the
+   system preference is the whole point, and no UI exists yet to report into. */
+var c=null;try{c=localStorage.getItem(k);}catch(e){}if(c!=="light"&&c!=="dark"){c=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}var r=document.documentElement;if(c==="dark"){r.classList.add("dark");}else{r.classList.remove("dark");}r.style.colorScheme=c;}catch(e){}})();`;

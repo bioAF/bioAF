@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
@@ -14,6 +15,7 @@ import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBad
 import { usePermissions } from "@/hooks/usePermissions";
 import { getToken } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
@@ -153,6 +155,7 @@ export default function PipelineRunDetailPage() {
     canAccess("experiments", "view") || canAccess("pipelines", "view");
 
   const [run, setRun] = useState<PipelineRunDetail | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("logs");
   const [aiReviewSignal, setAiReviewSignal] = useState(0);
@@ -174,7 +177,17 @@ export default function PipelineRunDetailPage() {
     try {
       const data = await api.get<PipelineRunDetail>(`/api/pipeline-runs/${runId}`);
       setRun(data);
-    } catch {} finally { setLoading(false); }
+      setLoadError(null);
+    } catch (e) {
+      // A 404 is a real "this run does not exist" and keeps its own wording. Any
+      // other failure means we do not know, and must not be reported as absence.
+      if (e instanceof ApiError && e.status === 404) {
+        setLoadError(null);
+      } else {
+        logError("loading the run", e);
+        setLoadError(loadFailureMessage("This run"));
+      }
+    } finally { setLoading(false); }
   }, [runId]);
 
   const isCustomRun = run?.custom_pipeline_version_id != null;
@@ -277,7 +290,10 @@ export default function PipelineRunDetailPage() {
         headers: { Authorization: `Bearer ${localStorage.getItem("bioaf_token")}` },
       });
       setReport(await res.text());
-    } catch {} finally { setReportLoading(false); }
+    } catch (e) {
+      logError("loading the run report", e);
+      toast.error(loadFailureMessage("The run report"));
+    } finally { setReportLoading(false); }
   }
 
   // showSpinner=false suppresses the loading state on background polls so
@@ -291,7 +307,10 @@ export default function PipelineRunDetailPage() {
         : `/api/pipeline-runs/${runId}/logs`;
       const data = await api.get<LogResponse>(url);
       setLogs(data);
-    } catch {} finally { if (showSpinner) setLogsLoading(false); }
+    } catch (e) {
+      // Polled while the run is active, so this logs rather than raising a toast on every tick.
+      logError("loading run logs", e);
+    } finally { if (showSpinner) setLogsLoading(false); }
   }
 
   async function loadSystemLogs() {
@@ -310,14 +329,20 @@ export default function PipelineRunDetailPage() {
     try {
       const data = await api.get<Record<string, unknown>>(`/api/pipeline-runs/${runId}/provenance`);
       setProvenance(data);
-    } catch {}
+    } catch (e) {
+      logError("loading provenance", e);
+      toast.error(loadFailureMessage("Provenance"));
+    }
   }
 
   async function loadReferences() {
     try {
       const data = await api.get<ReferenceDataset[]>(`/api/pipeline-runs/${runId}/references`);
       setReferences(data);
-    } catch {}
+    } catch (e) {
+      logError("loading the run's reference data", e);
+      toast.error(loadFailureMessage("Reference data"));
+    }
   }
 
   useEffect(() => {
@@ -356,6 +381,17 @@ export default function PipelineRunDetailPage() {
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, run?.status, run?.compute_job_ref, selectedProcess]);
+
+  if (!loading && !run && loadError) {
+    return (
+      <main className="flex-1 flex items-center justify-center">
+        <ErrorState
+          message={loadError}
+          onRetry={() => { setLoading(true); void loadRun(); }}
+        />
+      </main>
+    );
+  }
 
   if (!loading && !run) {
     return (

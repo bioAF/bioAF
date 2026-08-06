@@ -8,6 +8,8 @@ import { AssaySelect } from "@/components/shared/AssaySelect";
 import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabularySelect";
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { SheetImportModal } from "@/components/experiments/SheetImportModal";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
 import type {
   Experiment,
   ExperimentCreateRequest,
@@ -19,6 +21,7 @@ import type {
 } from "@/lib/types";
 
 export default function NewExperimentPage() {
+  const toast = useToast();
   const router = useRouter();
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
@@ -112,7 +115,10 @@ export default function NewExperimentPage() {
       setProjects(projData.projects.map((p) => ({ id: p.id, name: p.name })));
       setTemplates(templateData);
       setProfiles(profileData);
-    }).catch(() => {});
+    }).catch((e) => {
+      logError("loading the new-experiment form options", e);
+      toast.error(loadFailureMessage("Form options"));
+    });
   }, [router]);
 
   const selectedTemplate = templates.find((t) => t.id === form.template_id);

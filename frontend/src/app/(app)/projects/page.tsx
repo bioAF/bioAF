@@ -7,6 +7,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
@@ -61,7 +62,8 @@ function ProjectsPageInner() {
     } catch (e) {
       // The old comment here claimed the api client handled this. It does not:
       // lib/api.ts only throws, and there was no notification layer to catch it.
-      setLoadError(e instanceof Error ? e.message : "Could not load projects.");
+      logError("loading projects", e);
+      setLoadError(loadFailureMessage("Projects"));
     } finally {
       setLoading(false);
     }
@@ -129,7 +131,7 @@ function ProjectsPageInner() {
           </div>
         ) : loadError ? (
           <ErrorState
-            message={`Could not load projects. ${loadError}`}
+            message={loadError}
             onRetry={() => {
               setLoading(true);
               loadProjects();

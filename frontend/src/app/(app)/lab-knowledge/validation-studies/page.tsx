@@ -8,6 +8,7 @@ import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyO
 import { LitValidationGate } from "@/components/validation/LitValidationGate";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface ValidationStudySummary {
   id: number;
@@ -45,7 +46,8 @@ export default function ValidationStudiesListPage() {
       const data = await api.get<ValidationStudySummary[]>("/api/validation-studies");
       setStudies(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load validation studies.");
+      logError("loading validation studies", e);
+      setError(loadFailureMessage("Validation studies"));
     }
   }, []);
 
@@ -66,8 +68,7 @@ export default function ValidationStudiesListPage() {
 
           {error ? (
             <ErrorState
-              message="Couldn't load validation studies."
-              details={error}
+              message={error}
               onRetry={load}
             />
           ) : studies === null ? (
