@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { NamingProfileDetail } from "@/components/naming/NamingProfileDetail";
 import { NamingProfileWizard } from "@/components/naming/NamingProfileWizard";
 import type { NamingProfile } from "@/lib/types";
@@ -21,6 +22,7 @@ export default function SettingsNamingProfilesPage() {
   const [detailProfile, setDetailProfile] = useState<NamingProfile | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [pendingDeactivate, setPendingDeactivate] = useState<NamingProfile | null>(null);
 
   useEffect(() => {
     if (permLoading) return;
@@ -219,7 +221,7 @@ export default function SettingsNamingProfilesPage() {
                     >
                       {p.status === "active" && (
                         <button
-                          onClick={() => handleDeactivate(p.id)}
+                          onClick={() => setPendingDeactivate(p)}
                           className="text-sm text-red-600 hover:text-red-700"
                         >
                           Deactivate
@@ -232,6 +234,34 @@ export default function SettingsNamingProfilesPage() {
             </table>
           </div>
         )}
+
+        <ConfirmDialog
+          open={pendingDeactivate !== null}
+          variant="danger"
+          title="Deactivate this naming profile?"
+          message={
+            pendingDeactivate ? (
+              <>
+                <p>
+                  <strong>{pendingDeactivate.name}</strong> will stop being
+                  offered when creating experiments and templates, and it{" "}
+                  <strong>cannot be reactivated</strong> from bioAF.
+                </p>
+                <p>
+                  Experiments and templates already pointing at it keep parsing
+                  filenames with it, and no file is renamed.
+                </p>
+              </>
+            ) : null
+          }
+          confirmLabel="Deactivate profile"
+          onConfirm={() => {
+            const p = pendingDeactivate;
+            setPendingDeactivate(null);
+            if (p) handleDeactivate(p.id);
+          }}
+          onCancel={() => setPendingDeactivate(null)}
+        />
       </div>
     </main>
   );
