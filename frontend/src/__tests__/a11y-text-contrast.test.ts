@@ -12,6 +12,14 @@ import { join } from "path";
 //
 // Dark mode is unaffected: globals.css already maps `.dark .text-gray-500` and
 // `.dark .text-gray-400` to the same token.
+//
+// THE SHADE DEPENDS ON THE BACKGROUND, and the first version of this sweep got
+// that wrong. The sidebar is permanently dark (`bg-gray-900`) regardless of
+// theme, and there the relationship inverts: gray-400 is ~7:1 and gray-500 only
+// 3.67:1, so "fixing" those sites made them fail. A browser audit of the
+// rendered tree caught it; no amount of source grepping could have, because the
+// background comes from an ancestor. Hence the allowlist below rather than a
+// blanket ban.
 
 const SRC = join(__dirname, "..");
 
@@ -29,19 +37,29 @@ function tsxFiles(dir: string): string[] {
   return out;
 }
 
-test("no text uses the shade that fails AA", () => {
+// Components rendered on the permanently dark sidebar, where gray-400 is the
+// CORRECT choice (~7:1) and gray-500 fails (3.67:1).
+const DARK_SURFACES = [
+  "components/layout/Sidebar.tsx",
+  "components/layout/NavItem.tsx",
+];
+
+test("no text uses a shade that fails AA on its own background", () => {
   const offenders: string[] = [];
   for (const file of tsxFiles(SRC)) {
+    const rel = file.replace(SRC, "src");
+    const onDark = DARK_SURFACES.some((d) => rel.endsWith(d));
     readFileSync(file, "utf8")
       .split("\n")
       .forEach((line, i) => {
-        // `disabled:text-gray-400` is allowed. WCAG 1.4.3 exempts inactive
-        // controls, and a disabled field that looks as solid as an active one
-        // is its own usability problem.
+        // `disabled:text-gray-400` is allowed everywhere. WCAG 1.4.3 exempts
+        // inactive controls, and a disabled field that looks as solid as an
+        // active one is its own usability problem.
         const bare = line.replace(/disabled:text-gray-400/g, "");
-        if (bare.includes("text-gray-400")) {
-          offenders.push(`${file.replace(SRC, "src")}:${i + 1}`);
-        }
+        const bad = onDark
+          ? /\btext-gray-(500|600)\b/.test(bare) // too dark for a dark surface
+          : bare.includes("text-gray-400"); // too light for a light surface
+        if (bad) offenders.push(`${rel}:${i + 1}`);
       });
   }
   expect(offenders).toEqual([]);
