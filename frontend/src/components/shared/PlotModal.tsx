@@ -102,11 +102,11 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
 
   // Detail mode for plot archive -- matches Files page modal.
   //
-  // NOTE: this used to branch on whether the file was an image, but both arms of
-  // that ternary rendered the identical <img>, so it never did anything. The
-  // branch is gone; the underlying gap it was presumably meant to cover is not
-  // fixed here, and is recorded in HANDOFF: a non-image artifact still renders
-  // through <img> and will simply fail to load.
+  // This used to branch on whether the file was an image and then render the
+  // identical <img> in both arms, so it never did anything. It is also not
+  // needed: ThumbnailService.render_pdf_thumbnail rasterises a PDF to PNG on the
+  // backend, so what arrives here is always an image regardless of the source
+  // file type. A PDF plot in the archive renders through this path today.
 
   return (
     <Modal open title={title} onClose={onClose} size="xl">
