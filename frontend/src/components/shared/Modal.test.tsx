@@ -129,6 +129,45 @@ describe("Modal", () => {
     expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
   });
 
+  it("hands the keyboard to a nested dialog and takes it back on close", () => {
+    // Three places in the app open a second dialog from inside the first
+    // (version picker, plot viewer, assembled prompt). The inner panel is a DOM
+    // descendant of the outer one, so a Tab inside it bubbles into BOTH traps.
+    // Only the topmost may act, or the two fight over where focus lands.
+    function Nested({ inner }: { inner: boolean }) {
+      return (
+        <Modal open title="Outer" onClose={() => {}}>
+          <button>outer control</button>
+          {inner && (
+            <Modal open title="Inner" onClose={() => {}}>
+              <button>inner control</button>
+            </Modal>
+          )}
+        </Modal>
+      );
+    }
+    // Mounted together on purpose: child effects run before parent effects, so
+    // this is the ordering where the OUTER trap runs last and would otherwise
+    // yank focus back out of the dialog that just opened.
+    const { rerender } = render(<Nested inner />);
+    const dialogs = screen.getAllByRole("dialog");
+    expect(dialogs).toHaveLength(2);
+    const outer = dialogs[0];
+    const innerPanel = dialogs[1];
+    expect(outer.contains(innerPanel)).toBe(true);
+
+    // Focus moved into the inner dialog, and tabbing keeps it there.
+    expect(innerPanel.contains(document.activeElement)).toBe(true);
+    for (let i = 0; i < 6; i++) fireEvent.keyDown(innerPanel, { key: "Tab" });
+    expect(innerPanel.contains(document.activeElement)).toBe(true);
+
+    // Close the inner one; the outer trap must resume rather than stay inert.
+    rerender(<Nested inner={false} />);
+    const outerAgain = screen.getByRole("dialog");
+    for (let i = 0; i < 6; i++) fireEvent.keyDown(outerAgain, { key: "Tab" });
+    expect(outerAgain.contains(document.activeElement)).toBe(true);
+  });
+
   it("locks body scroll while open and releases it on close", () => {
     const { unmount } = render(<Harness />);
     expect(document.body.style.overflow).toBe("hidden");

@@ -42,6 +42,10 @@ export interface ModalProps {
   hideTitle?: boolean;
 }
 
+/** How many modals currently want the page behind them to stay still. */
+let scrollLocks = 0;
+let overflowBeforeLock = "";
+
 const SIZES = {
   sm: "max-w-md",
   md: "max-w-lg",
@@ -65,14 +69,23 @@ export function Modal({
   useDismissOnEscape(open && dismissible, onClose);
 
   // A modal that scrolls the page behind it reads as two documents at once, and
-  // on touch the background is what actually moves. Restored on close so a
-  // second modal opening and closing cannot leave the page stuck.
+  // on touch the background is what actually moves.
+  //
+  // Counted rather than saved-and-restored per dialog: a dialog opened from
+  // inside another would capture "hidden" as the value to put back, so whichever
+  // one unmounted last decided the outcome and the page could stay locked with
+  // nothing on screen. The style is touched only on the first lock and the last
+  // release.
   useEffect(() => {
     if (!open) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (scrollLocks === 0) {
+      overflowBeforeLock = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+    }
+    scrollLocks++;
     return () => {
-      document.body.style.overflow = previous;
+      scrollLocks--;
+      if (scrollLocks === 0) document.body.style.overflow = overflowBeforeLock;
     };
   }, [open]);
 
