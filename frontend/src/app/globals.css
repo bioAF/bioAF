@@ -18,7 +18,7 @@
     --color-ink-muted: 55 65 81; /* secondary text (gray-700) */
     --color-ink-subtle: 107 114 128; /* muted labels (gray-500) */
     --color-hairline: 229 231 235; /* borders/dividers (gray-200) */
-    --color-focus-ring: 2 132 199; /* keyboard focus outline (bioaf-600) */
+    --color-focus-ring: 3 105 161; /* keyboard focus outline (bioaf-600) */
   }
 
   .dark {
