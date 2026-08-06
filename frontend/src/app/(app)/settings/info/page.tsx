@@ -241,7 +241,7 @@ export default function SettingsInfoPage() {
                     {`Restarting in ${rebootCountdown}s -- the application will be briefly unavailable.`}
                   </p>
                 ) : (
-                  <p className="text-xs text-amber-600 ml-7 mt-1">
+                  <p className="text-xs text-amber-700 ml-7 mt-1">
                     The application will restart during this process.
                   </p>
                 )}

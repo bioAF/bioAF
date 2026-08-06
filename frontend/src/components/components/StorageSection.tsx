@@ -187,11 +187,11 @@ function DeployStorageCard({
         buckets to enable file storage.
       </p>
       {!terraformInitialized && (
-        <p className="text-xs text-amber-600 mb-3">
+        <p className="text-xs text-amber-700 mb-3">
           Terraform must be initialized before deploying storage.{" "}
           <Link
             href="/infrastructure/components"
-            className="underline hover:text-amber-800"
+            className="underline hover:text-amber-900"
           >
             Run bootstrap first
           </Link>

@@ -1230,7 +1230,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             cluster, storage buckets, and supporting resources on {cloudLabel}.
           </p>
           {!(isAws ? awsConfigured : gcpConfigured) && (
-            <p className="text-sm text-amber-600">
+            <p className="text-sm text-amber-700">
               {cloudLabel} credentials are required to set up infrastructure. You can configure them
               later in Settings.
             </p>
@@ -1304,7 +1304,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             >
               <div className="flex items-center justify-between mb-2">
                 <h3 className="font-semibold text-gray-500">SLURM + NFS</h3>
-                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                   Coming Soon
                 </span>
               </div>

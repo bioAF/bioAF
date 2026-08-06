@@ -1008,7 +1008,7 @@ export default function WorkNodesPage() {
                         className={`px-3 py-1.5 text-sm rounded ${
                           scopeType === "experiment"
                             ? "bg-bioaf-100 text-bioaf-700 font-medium"
-                            : "text-gray-500 hover:bg-gray-100"
+                            : "text-gray-600 hover:bg-gray-100"
                         }`}
                       >
                         Experiment
@@ -1020,7 +1020,7 @@ export default function WorkNodesPage() {
                         className={`px-3 py-1.5 text-sm rounded ${
                           scopeType === "project"
                             ? "bg-bioaf-100 text-bioaf-700 font-medium"
-                            : "text-gray-500 hover:bg-gray-100"
+                            : "text-gray-600 hover:bg-gray-100"
                         }`}
                       >
                         Project

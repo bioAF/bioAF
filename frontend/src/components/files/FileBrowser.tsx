@@ -617,7 +617,7 @@ export function FileBrowser({
             <p className="text-sm font-medium text-amber-800">
               {stuckCount} {stuckCount === 1 ? "file needs" : "files need"} to be synced to storage
             </p>
-            <p className="text-xs text-amber-600 mt-1">
+            <p className="text-xs text-amber-700 mt-1">
               These files are linked to an experiment but haven&apos;t been moved to long-term storage yet.
             </p>
           </div>
@@ -742,7 +742,7 @@ export function FileBrowser({
                         className="text-xs mt-0.5 flex items-center gap-2"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <span className="text-amber-600 font-medium">Unlinked</span>
+                        <span className="text-amber-700 font-medium">Unlinked</span>
                         <button
                           onClick={() => openLinkModal([file.id])}
                           className="text-bioaf-600 hover:underline"

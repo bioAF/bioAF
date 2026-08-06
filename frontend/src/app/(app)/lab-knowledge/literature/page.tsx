@@ -372,7 +372,7 @@ export default function LiteratureLibraryPage() {
               {f === "active" ? "Active" : "Dismissed"}
             </button>
           ))}
-          <span className="text-gray-300 self-center">|</span>
+          <span aria-hidden="true" className="self-center h-4 border-l border-gray-300" />
           {(["unread", "reading", "read"] as StatusFlag[]).map((f) => (
             <button
               key={f}

@@ -327,7 +327,7 @@ export function DeployProgressModal({
                     This can take 10-30 minutes depending on cloud provisioning.
                   </p>
                 )}
-                <p className="text-xs text-gray-300 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   {PATIENCE_MESSAGES[patienceIndex]}
                 </p>
               </div>

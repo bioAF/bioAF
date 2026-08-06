@@ -330,7 +330,7 @@ export default function InfraBackupPage() {
                     <> Auto-reverts in <span className="font-semibold">{formatMinutes(restoreStatus.seconds_remaining)}</span>.</>
                   )}
                 </p>
-                <p className="text-xs text-amber-600 mt-1">
+                <p className="text-xs text-amber-700 mt-1">
                   Browse the application to verify data. Accept to make permanent, or reject to revert.
                 </p>
               </div>
@@ -652,7 +652,7 @@ export default function InfraBackupPage() {
                             <button
                               onClick={() => handleStartRestore(s.filename)}
                               disabled={restoreStatus.active || restoringFile !== ""}
-                              className="text-xs text-amber-600 hover:text-amber-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="text-xs text-amber-700 hover:text-amber-900 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               {restoringFile === s.filename ? "Restoring..." : "Restore"}
                             </button>

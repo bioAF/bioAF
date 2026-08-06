@@ -221,7 +221,7 @@ export default function ValidationStudyPage() {
             </dl>
             {plan.blockers && plan.blockers.length > 0 && (
               <div className="mt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-600">Blockers</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
                 <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
                   {plan.blockers.map((b, i) => (
                     <li key={i}>{b}</li>

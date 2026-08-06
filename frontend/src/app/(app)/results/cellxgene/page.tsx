@@ -29,7 +29,7 @@ function StatusBadge({ status }: { status: string }) {
       case "publishing":
         return "bg-yellow-100 text-yellow-700";
       case "unpublished":
-        return "bg-gray-100 text-gray-500";
+        return "bg-gray-100 text-gray-600";
       case "failed":
         return "bg-red-100 text-red-700";
       default:

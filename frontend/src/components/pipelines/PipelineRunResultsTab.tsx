@@ -277,7 +277,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
                     <span className="text-gray-500 text-xs">No preview</span>
                   )}
                   {plot.file && (
-                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">
+                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-semibold uppercase rounded">
                       {plot.file.file_type}
                     </span>
                   )}

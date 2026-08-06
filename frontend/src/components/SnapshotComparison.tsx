@@ -130,7 +130,7 @@ function ParameterDiffTable({
                   <td key={snap.id} className="px-3 py-2 text-xs">
                     {diff.values[snap.id] !== null && diff.values[snap.id] !== undefined
                       ? String(diff.values[snap.id])
-                      : <span className="text-gray-300">&mdash;</span>}
+                      : <span className="text-gray-500">Not set</span>}
                   </td>
                 ))}
               </tr>
@@ -257,7 +257,7 @@ function CommandLogDiffTable({
                         <span className="text-green-600">&#10003;</span>
                       )
                     ) : (
-                      <span className="text-gray-300">&mdash;</span>
+                      <span className="text-gray-500">Not set</span>
                     )}
                   </td>
                 ))}

@@ -62,7 +62,7 @@ export function FailedRunsWidget() {
               className={`text-xs px-1.5 py-0.5 rounded ${
                 hours === w.hours
                   ? "bg-bioaf-600 text-white"
-                  : "text-gray-500 hover:bg-gray-100"
+                  : "text-gray-600 hover:bg-gray-100"
               }`}
             >
               {w.label}

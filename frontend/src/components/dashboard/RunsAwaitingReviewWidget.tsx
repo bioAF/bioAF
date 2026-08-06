@@ -69,7 +69,7 @@ export function RunsAwaitingReviewWidget() {
       )}
       {!loading && !error && awaiting.length > 0 && (
         <div>
-          <div className="text-3xl font-bold text-amber-600">{awaiting.length}</div>
+          <div className="text-3xl font-bold text-amber-700">{awaiting.length}</div>
           <ul className="mt-2 space-y-1">
             {awaiting.slice(0, 5).map((r) => (
               <li key={r.id}>

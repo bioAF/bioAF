@@ -688,7 +688,7 @@ export default function CustomPipelineDetailPage() {
                             <p className="text-gray-500 text-xs">No variables.</p>
                           ) : (
                             <table className="w-full text-xs border">
-                              <thead className="bg-gray-100 text-gray-500 uppercase">
+                              <thead className="bg-gray-100 text-gray-600 uppercase">
                                 <tr>
                                   <th scope="col" className="px-2 py-1 text-left">Name</th>
                                   <th scope="col" className="px-2 py-1 text-left">Type</th>

@@ -157,7 +157,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
                 {/* Star */}
                 <button
                   onClick={() => toggleStar(snap.id)}
-                  className={`text-lg ${snap.starred ? "text-yellow-500" : "text-gray-300 hover:text-yellow-400"}`}
+                  className={`text-lg ${snap.starred ? "text-yellow-500" : "text-gray-500 hover:text-yellow-500"}`}
                   title={snap.starred ? "Unstar" : "Star"}
                 >
                   {snap.starred ? "\u2605" : "\u2606"}

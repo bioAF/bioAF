@@ -501,7 +501,7 @@ export default function PipelineRunDetailPage() {
             </div>
             {run.failure_reason === "oom" && (
               <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
-                <span className="text-amber-600 text-lg" title="Memory">&#x1F4BE;</span>
+                <span className="text-amber-700 text-lg" title="Memory">&#x1F4BE;</span>
                 <div className="flex-1">
                   <p className="text-sm text-amber-800 font-medium">This pipeline ran out of memory.</p>
                   <p className="text-sm text-amber-700 mt-1">The current pipeline node size does not have enough RAM for this workload.</p>
@@ -767,7 +767,7 @@ export default function PipelineRunDetailPage() {
                       </div>
                       <ReferenceStatusBadge status={ref.status} />
                       {ref.status === "deprecated" && (
-                        <span className="text-amber-600 text-xs">
+                        <span className="text-amber-700 text-xs">
                           Deprecated{ref.deprecation_note ? `: ${ref.deprecation_note}` : ""}
                         </span>
                       )}
@@ -948,7 +948,7 @@ export default function PipelineRunDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">
                       {ref.status === "deprecated" && (
-                        <span className="text-amber-600">
+                        <span className="text-amber-700">
                           This reference dataset has been deprecated.
                           {ref.deprecation_note ? ` ${ref.deprecation_note}` : ""}
                           {ref.superseded_by_id ? ` Superseded by reference #${ref.superseded_by_id}.` : ""}

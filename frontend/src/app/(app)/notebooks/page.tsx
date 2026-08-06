@@ -415,7 +415,7 @@ export default function NotebooksPage() {
               <p className="text-sm font-medium text-amber-800">
                 Notebook image is building
               </p>
-              <p className="text-xs text-amber-600 mt-0.5">
+              <p className="text-xs text-amber-700 mt-0.5">
                 Status: {imageBuildStatus.build_status}
                 {imageBuildStatus.build_id && (
                   <span className="ml-1 text-amber-400">
@@ -800,13 +800,13 @@ export default function NotebooksPage() {
                 <div className="flex gap-2 mb-2">
                   <button
                     onClick={() => { setScopeType("experiment"); setSelectedProject(null); }}
-                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "experiment" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-500 hover:bg-gray-100"}`}
+                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "experiment" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
                   >
                     Experiment
                   </button>
                   <button
                     onClick={() => { setScopeType("project"); setSelectedExperiment(null); setExperimentFiles([]); setSelectedFileIds([]); }}
-                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "project" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-500 hover:bg-gray-100"}`}
+                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "project" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
                   >
                     Project
                   </button>

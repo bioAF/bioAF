@@ -922,7 +922,7 @@ function ReviewPanel({
                   <span className="font-medium">
                     {p.term}
                     {p.previously_rejected && (
-                      <span className="ml-2 text-xs text-amber-600">previously rejected</span>
+                      <span className="ml-2 text-xs text-amber-700">previously rejected</span>
                     )}
                   </span>
                   <span className="flex gap-2">

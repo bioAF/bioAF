@@ -520,9 +520,7 @@ function SettingsUsersPageInner() {
                         &#10003;
                       </span>
                     ) : (
-                      <span className="text-gray-300 text-sm" title="Not configured">
-                        &#8212;
-                      </span>
+                      <span className="text-gray-500 text-sm">Not set</span>
                     )}
                   </td>
                 </tr>

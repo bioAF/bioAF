@@ -43,7 +43,7 @@ export function QueueDepthWidget() {
           <div className="text-3xl font-bold text-gray-800">{data.queued}</div>
           <p className="text-sm text-gray-500 mt-1">pending jobs</p>
           {data.budget_queued > 0 && (
-            <p className="text-xs text-amber-600 mt-1">
+            <p className="text-xs text-amber-700 mt-1">
               {data.budget_queued} awaiting budget approval
             </p>
           )}

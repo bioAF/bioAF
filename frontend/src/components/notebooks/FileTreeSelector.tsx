@@ -446,7 +446,7 @@ export function FileTreeSelector({
                                     <span
                                       className={`text-[10px] px-1.5 py-0.5 rounded ${
                                         SOURCE_COLORS[file.source_type] ||
-                                        "bg-gray-100 text-gray-500"
+                                        "bg-gray-100 text-gray-600"
                                       }`}
                                     >
                                       {sourceLabel(file.source_type)}
@@ -456,7 +456,7 @@ export function FileTreeSelector({
                                         ({formatBytes(file.size_bytes)})
                                       </span>
                                     )}
-                                    <span className="text-[10px] text-gray-300">
+                                    <span className="text-[10px] text-gray-500">
                                       {new Date(file.created_at).toLocaleDateString()}
                                     </span>
                                   </label>
@@ -482,7 +482,7 @@ export function FileTreeSelector({
             {formatBytes(totalSelectedSize)}
           </span>
           {totalSelectedSize > 10_737_418_240 && (
-            <span className="ml-2 text-amber-600 font-medium">
+            <span className="ml-2 text-amber-700 font-medium">
               Warning: selection exceeds 10 GB
             </span>
           )}

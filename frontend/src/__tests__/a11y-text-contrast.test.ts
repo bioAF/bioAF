@@ -48,6 +48,61 @@ const DARK_SURFACES = [
   "app/(app)/layout.tsx", // the bg-gray-900 boot splash
 ];
 
+// Pairings measured on a rendered page (composited, so alpha layers are real
+// rather than assumed), each below the 4.5:1 AA wants for normal text. None is
+// large text: every one is 10px or 12px.
+//
+// The replacement is the next step down the same ramp in each case, so the hue
+// and the intent of the shade are unchanged.
+const FAILING_PAIRS: { bad: RegExp; measured: string; use: string }[] = [
+  // white on red-500 = 3.76:1, on the notification badge, on 52 of 53 pages,
+  // and the only one of these that survives into dark mode.
+  { bad: /\btext-white\b[^"'`]*\bbg-red-500\b|\bbg-red-500\b[^"'`]*\btext-white\b/, measured: "3.76:1", use: "bg-red-600 (4.83:1)" },
+  // amber-600 on white = 3.05:1, measured, not the 3.19:1 first reported.
+  { bad: /\btext-amber-600\b/, measured: "3.05:1", use: "text-amber-700 (5.02:1)" },
+  // gray-500 on gray-100 = 4.39:1. On white the same shade is 4.83:1 and fine,
+  // so this only fails where the two are paired.
+  { bad: /\bbg-gray-100\b[^"'`]*\btext-gray-500\b|\btext-gray-500\b[^"'`]*\bbg-gray-100\b/, measured: "4.39:1", use: "text-gray-600 (6.87:1)" },
+  // gray-300 on white = 1.47:1, effectively invisible.
+  { bad: /\btext-gray-300\b/, measured: "1.47:1", use: "text-gray-500 (4.83:1)" },
+  // white on bg-black/50 over a light thumbnail = 4.29:1. The backdrop varies
+  // with the image, so the shade has to hold against a white one.
+  { bad: /\bbg-black\/50\b[^"'`]*\btext-white\b|\btext-white\b[^"'`]*\bbg-black\/50\b/, measured: "4.29:1", use: "bg-black/70 (8.45:1 even over white)" },
+];
+
+test("the measured failing pairings are gone", () => {
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    const rel = file.replace(SRC, "src");
+    // The sidebar is permanently dark, where gray-300 is the correct light text.
+    if (DARK_SURFACES.some((d) => rel.endsWith(d))) continue;
+    readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        for (const { bad, measured, use } of FAILING_PAIRS) {
+          if (bad.test(line)) offenders.push(`${rel}:${i + 1} (${measured}, use ${use})`);
+        }
+      });
+  }
+  expect(offenders).toEqual([]);
+});
+
+test("no user-facing em-dash slipped back in as an HTML entity", () => {
+  // The null placeholder in settings/users was `&#8212;`, which is U+2014 and
+  // banned repo-wide. The entity forms evade a plain grep for the character.
+  const offenders: string[] = [];
+  for (const file of tsxFiles(SRC)) {
+    readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        if (/&mdash;|&#8212;|&#x2014;/i.test(line)) {
+          offenders.push(`${file.replace(SRC, "src")}:${i + 1}`);
+        }
+      });
+  }
+  expect(offenders).toEqual([]);
+});
+
 test("no text uses a shade that fails AA on its own background", () => {
   const offenders: string[] = [];
   for (const file of tsxFiles(SRC)) {

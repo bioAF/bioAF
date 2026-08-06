@@ -140,7 +140,7 @@ export function ComponentPicker({
                       <span className="font-medium text-sm text-gray-500">
                         {c.name}
                       </span>
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                         Coming Soon
                       </span>
                     </div>

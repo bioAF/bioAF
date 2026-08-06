@@ -687,7 +687,7 @@ export default function InfraComponentsPage() {
                   <div className="bg-white rounded-lg shadow-md border border-gray-200 p-6 opacity-60">
                     <div className="flex items-start justify-between mb-3">
                       <h3 className="text-lg font-semibold text-gray-500">SLURM + NFS</h3>
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                         Coming Soon
                       </span>
                     </div>
@@ -964,7 +964,7 @@ export default function InfraComponentsPage() {
                               >
                                 <div className="flex items-start justify-between mb-2">
                                   <h3 className="font-semibold text-sm text-gray-500">{comp.name}</h3>
-                                  <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                                     Coming Soon
                                   </span>
                                 </div>
@@ -996,7 +996,7 @@ export default function InfraComponentsPage() {
                                                 ? "bg-amber-100 text-amber-700"
                                                 : comp.status === "queued_for_infra"
                                                   ? "bg-blue-100 text-blue-700"
-                                                  : "bg-gray-100 text-gray-500"
+                                                  : "bg-gray-100 text-gray-600"
                                         }`}
                                       >
                                         {comp.status === "enabled"
@@ -1024,7 +1024,7 @@ export default function InfraComponentsPage() {
                                     <p className="text-xs font-medium text-amber-800">
                                       Building image...
                                     </p>
-                                    <p className="text-xs text-amber-600 mt-0.5">
+                                    <p className="text-xs text-amber-700 mt-0.5">
                                       Status: {buildStatus.build_status ?? "Starting"}
                                       {buildStatus.build_id && (
                                         <span className="text-amber-400 ml-1">
@@ -1214,7 +1214,7 @@ export default function InfraComponentsPage() {
                     ))}
                   </select>
                   {deployRegion !== defaultRegion && (
-                    <p className="text-xs text-amber-600 mt-1 flex items-start gap-1">
+                    <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
                       <span className="mt-0.5">&#9888;</span>
                       Your storage is in {defaultRegion}. Deploying compute in {deployRegion} may
                       incur cross-region network costs in GCP.

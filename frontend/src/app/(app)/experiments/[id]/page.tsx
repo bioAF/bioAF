@@ -1417,7 +1417,7 @@ function ExperimentDetailPageInner() {
         />
       )}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Samples</h3>
             <p className="text-sm text-gray-600 mb-1">
@@ -1575,7 +1575,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
                       <span className="text-gray-500 text-xs">No preview</span>
                     )}
                     {plot.file && (
-                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">
+                      <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-semibold uppercase rounded">
                         {plot.file.file_type}
                       </span>
                     )}

@@ -144,7 +144,7 @@ export default function InfraCostCenterPage() {
         <div className="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 flex items-center justify-between">
           <div>
             <p className="text-sm font-medium text-amber-800">Cost data is estimated</p>
-            <p className="text-xs text-amber-600 mt-0.5">
+            <p className="text-xs text-amber-700 mt-0.5">
               Set up BigQuery billing export for accurate, invoice-matched costs.
             </p>
           </div>

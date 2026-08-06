@@ -376,7 +376,7 @@ function ProviderCard({
             ))}
           </select>
           {models?.used_fallback && (
-            <div className="text-xs text-amber-600 mt-1">
+            <div className="text-xs text-amber-700 mt-1">
               Model list shown from local fallback; live fetch failed.
             </div>
           )}
