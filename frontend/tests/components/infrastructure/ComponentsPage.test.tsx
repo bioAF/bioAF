@@ -14,7 +14,7 @@
  * 34: Dependency enforcement shows message
  */
 
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import InfraComponentsPage from "@/app/(app)/infrastructure/components/page";
 
 // Mock API
@@ -687,6 +687,145 @@ describe("InfraComponentsPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/dependency/i)).toBeInTheDocument();
+    });
+  });
+
+  // Tests 35-37: "Apply and redeploy" is gated by a confirmation.
+  //
+  // Replacing a machine type recreates the node pool, which stops pipelines and
+  // notebooks running on it. That is irreversible for the running work, and the
+  // button used to POST on the first click with only a warning paragraph above
+  // it. Note this gate is client-side only: the backend keeps the single-request
+  // auto-apply flow that e4ed8f9 introduced, so this does not restore the
+  // two-step awaiting_confirmation state machine that commit removed.
+  async function openConfigPanel() {
+    mockApiGet.mockImplementation((url: string) => {
+      if (url.includes("terraform/status")) return Promise.resolve(mockTfStatus());
+      if (url.includes("terraform/runs")) return Promise.resolve({ runs: [] });
+      if (url.includes("stack/status")) return Promise.resolve(mockClusterStatus());
+      if (url.includes("stack/components")) return Promise.resolve(mockStackComponents([]));
+      if (url.includes("storage/buckets")) return Promise.resolve({ buckets: [] });
+      if (url.includes("cluster/config"))
+        return Promise.resolve({
+          k8s_pipeline_machine_type: "n2-highmem-8",
+          k8s_pipeline_max_nodes: 20,
+          k8s_pipeline_use_spot: true,
+          k8s_interactive_machine_type: "n2-standard-4",
+          k8s_interactive_max_nodes: 5,
+        });
+      return Promise.reject(new Error("Not found"));
+    });
+
+    await act(async () => {
+      render(<InfraComponentsPage />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Configure/i)).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText(/Configure/i));
+    await waitFor(() => {
+      expect(screen.getByText(/Pipeline Pool/i)).toBeInTheDocument();
+    });
+
+  }
+
+  /** Scaling only. Does NOT recreate a node pool, so nothing running is lost. */
+  async function editMaxNodes() {
+    // Both pools have a "Max Nodes" field; the first is the pipeline pool.
+    const maxNodes = screen.getAllByLabelText(/Max Nodes/i)[0];
+    await act(async () => {
+      fireEvent.change(maxNodes, { target: { value: "30" } });
+    });
+  }
+
+  /** Replacing the machine type recreates the pool and stops work on it. */
+  async function editMachineType() {
+    // Both pools have a "Machine Size" select; the first is the pipeline pool.
+    const select = screen.getAllByLabelText(/Machine Size/i)[0] as HTMLSelectElement;
+    const other = Array.from(select.options).find(
+      (o) => o.value !== select.value
+    )!;
+    await act(async () => {
+      fireEvent.change(select, { target: { value: other.value } });
+    });
+  }
+
+  async function clickApply() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /Apply and redeploy/i }));
+    });
+  }
+
+  function expectNoRedeploy() {
+    expect(mockApiPost).not.toHaveBeenCalledWith(
+      expect.stringContaining("cluster/config"),
+      expect.anything()
+    );
+  }
+
+  it("does not redeploy on the first click of Apply and redeploy", async () => {
+    await openConfigPanel();
+    await editMaxNodes();
+    await clickApply();
+
+    expectNoRedeploy();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("warns that work stops only when a machine type is being replaced", async () => {
+    await openConfigPanel();
+    await editMachineType();
+    await clickApply();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toMatch(/node pool/i);
+    expect(dialog.textContent).toMatch(/pipelines and notebooks/i);
+  });
+
+  it("does not claim work stops when only the node count changed", async () => {
+    // Scaling does not recreate the pool. A dialog that said otherwise would be
+    // the same class of defect as a control that lies about what it does.
+    await openConfigPanel();
+    await editMaxNodes();
+    await clickApply();
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).not.toMatch(/pipelines and notebooks/i);
+    expect(dialog.textContent).toMatch(/redeploy/i);
+  });
+
+  it("changes nothing when the confirmation is cancelled", async () => {
+    await openConfigPanel();
+    await editMachineType();
+    await clickApply();
+
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: /^Cancel$/i })
+      );
+    });
+
+    expectNoRedeploy();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("redeploys once the confirmation is accepted", async () => {
+    mockApiPost.mockResolvedValue({});
+    await openConfigPanel();
+    await editMaxNodes();
+    await clickApply();
+
+    await act(async () => {
+      fireEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: /Redeploy/i })
+      );
+    });
+
+    await waitFor(() => {
+      expect(mockApiPost).toHaveBeenCalledWith(
+        expect.stringContaining("cluster/config"),
+        expect.objectContaining({ k8s_pipeline_max_nodes: 30 })
+      );
     });
   });
 });

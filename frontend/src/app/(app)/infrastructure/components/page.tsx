@@ -145,6 +145,7 @@ export default function InfraComponentsPage() {
   const [showSpotTooltip, setShowSpotTooltip] = useState(false);
   const [configEdits, setConfigEdits] = useState<Partial<ClusterConfig>>({});
   const [configSaving, setConfigSaving] = useState(false);
+  const [showRedeployConfirm, setShowRedeployConfirm] = useState(false);
   const [configError, setConfigError] = useState("");
   const [componentErrors, setComponentErrors] = useState<Record<string, string>>({});
   const [togglingComponent, setTogglingComponent] = useState<string | null>(null);
@@ -506,6 +507,34 @@ export default function InfraComponentsPage() {
       setComponentErrors((prev) => ({ ...prev, [componentKey]: message }));
     } finally {
       setTogglingComponent(null);
+    }
+  }
+
+  /**
+   * True when the pending edits replace a machine type, which is the only
+   * change that recreates a node pool. Scaling max_nodes or flipping spot does
+   * not destroy running work, so the confirmation must not claim it does.
+   */
+  function redeployRecreatesAPool(): boolean {
+    return (
+      configEdits.k8s_pipeline_machine_type !== undefined ||
+      configEdits.k8s_interactive_machine_type !== undefined
+    );
+  }
+
+  async function handleApplyClusterConfig() {
+    setShowRedeployConfirm(false);
+    setConfigError("");
+    setConfigSaving(true);
+    try {
+      await api.post("/api/v1/infrastructure/cluster/config", configEdits);
+      setConfigEdits({});
+      setShowConfigPanel(false);
+      setShowDeployModal(true);
+    } catch (e) {
+      setConfigError(e instanceof Error ? e.message : "Failed to apply changes");
+    } finally {
+      setConfigSaving(false);
     }
   }
 
@@ -891,23 +920,7 @@ export default function InfraComponentsPage() {
                         <div className="flex gap-2 mt-4">
                           <button
                             disabled={configSaving || Object.keys(configEdits).length === 0}
-                            onClick={async () => {
-                              setConfigError("");
-                              setConfigSaving(true);
-                              try {
-                                await api.post(
-                                  "/api/v1/infrastructure/cluster/config",
-                                  configEdits,
-                                );
-                                setConfigEdits({});
-                                setShowConfigPanel(false);
-                                setShowDeployModal(true);
-                              } catch (e) {
-                                setConfigError(e instanceof Error ? e.message : "Failed to apply changes");
-                              } finally {
-                                setConfigSaving(false);
-                              }
-                            }}
+                            onClick={() => setShowRedeployConfirm(true)}
                             className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
                           >
                             {configSaving ? "Applying..." : "Apply and redeploy"}
@@ -1501,6 +1514,42 @@ export default function InfraComponentsPage() {
           </div>
         </div>
       )}
+      {/* Gate on the cluster redeploy. This is client-side only: the endpoint
+          still plans and auto-applies in one request, so the two-step
+          awaiting_confirmation flow that e4ed8f9 removed stays removed. */}
+      <ConfirmDialog
+        open={showRedeployConfirm}
+        variant={redeployRecreatesAPool() ? "danger" : "default"}
+        title={
+          redeployRecreatesAPool()
+            ? "Replace the machine type and redeploy?"
+            : "Redeploy the cluster now?"
+        }
+        message={
+          redeployRecreatesAPool() ? (
+            <>
+              <p>
+                Replacing a machine type recreates its node pool. Pipelines and
+                notebooks running on that pool stop immediately and are not
+                resumed.
+              </p>
+              <p>Nothing changes if you cancel.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                Applying these changes redeploys the cluster now. The node pools
+                are kept, so work already running continues.
+              </p>
+              <p>Nothing changes if you cancel.</p>
+            </>
+          )
+        }
+        confirmLabel="Redeploy"
+        busy={configSaving}
+        onConfirm={handleApplyClusterConfig}
+        onCancel={() => setShowRedeployConfirm(false)}
+      />
       <ConfirmDialog
         open={pendingRebuild !== null}
         title="Rebuild the image?"
