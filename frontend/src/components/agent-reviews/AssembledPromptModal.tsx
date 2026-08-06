@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
@@ -68,25 +69,8 @@ export function AssembledPromptModal({
   const modified = draft !== body;
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
-        <div className="flex items-start justify-between">
-          <h3 className="text-lg font-semibold">Assembled prompt</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700"
-            aria-label="Close"
-          >
-            ✕
-          </button>
-        </div>
-
-        <p className="text-sm text-gray-600 mt-1">
+    <Modal open title="Assembled prompt" onClose={onClose} size="lg">
+      <p className="text-sm text-gray-600">
           This is what will be sent to the active LLM. You can customize it for
           this run, or name it and save for future use.
         </p>
@@ -156,7 +140,6 @@ export function AssembledPromptModal({
             </>
           )}
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

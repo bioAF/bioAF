@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
@@ -294,154 +295,13 @@ export function CustomPipelineLaunchDialog({
     selectedFileIds.length === 0;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h2 className="font-semibold text-lg">Launch {pipeline.name}</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
-            ×
-          </button>
-        </div>
-
-        <div className="overflow-y-auto p-6 space-y-6">
-          {activeVersions.length === 0 ? (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
-              No active versions available. Create a version before launching.
-            </div>
-          ) : (
-            <>
-              {/* Version selection */}
-              <section>
-                <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
-                  Pipeline Version
-                </div>
-                <div className="flex items-center justify-between bg-gray-50 border rounded px-3 py-2">
-                  <div className="text-sm">
-                    {selectedVersion ? (
-                      <>
-                        <span className="font-mono font-semibold">
-                          v{selectedVersion.version_number}
-                        </span>
-                        <span className="text-gray-500 ml-2">
-                          {new Date(selectedVersion.created_at).toLocaleDateString()}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-gray-500">Select a version</span>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setShowVersionModal(true)}
-                    className="text-sm text-bioaf-600 hover:underline"
-                  >
-                    Change Version
-                  </button>
-                </div>
-              </section>
-
-              {/* Target selection */}
-              <section>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label htmlFor="project-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
-                      Project (optional)
-                    </label>
-                    <select id="project-optional"
-                      value={projectId ?? ""}
-                      onChange={(e) =>
-                        setProjectId(e.target.value ? Number(e.target.value) : null)
-                      }
-                      className="w-full border rounded px-3 py-2 text-sm bg-white"
-                    >
-                      <option value="">All projects</option>
-                      {projects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="experiment-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
-                      Experiment (optional)
-                    </label>
-                    <select id="experiment-optional"
-                      value={experimentId ?? ""}
-                      onChange={(e) =>
-                        setExperimentId(e.target.value ? Number(e.target.value) : null)
-                      }
-                      disabled={projectId == null}
-                      className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400"
-                    >
-                      <option value="">
-                        {projectId == null ? "Select a project first" : "All experiments"}
-                      </option>
-                      {experiments.map((e) => (
-                        <option key={e.id} value={e.id}>
-                          {e.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
-
-              {/* File picker */}
-              <section>
-                <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                  Input Files
-                </div>
-                {loadingFiles ? (
-                  <p className="text-sm text-gray-500">Loading files...</p>
-                ) : files.length === 0 ? (
-                  <p className="text-sm text-gray-500">
-                    No files available
-                    {projectId != null || experimentId != null
-                      ? " for the selected target."
-                      : ". Adjust filters or upload files."}
-                  </p>
-                ) : (
-                  <FileTreeSelector
-                    files={files}
-                    sampleNames={sampleNames}
-                    onSelectionChange={setSelectedFileIds}
-                  />
-                )}
-                {selectedFileIds.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {selectedFileIds.length} file(s) selected
-                  </p>
-                )}
-              </section>
-
-              {/* Variables */}
-              {selectedVersion && selectedVersion.variables.length > 0 && (
-                <section>
-                  <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-                    Variables
-                  </div>
-                  <div className="space-y-3">
-                    {selectedVersion.variables.map((v) => (
-                      <VariableInput
-                        key={v.id}
-                        variable={v}
-                        value={variableValues[v.variable_name] ?? ""}
-                        error={variableErrors[v.variable_name]}
-                        onChange={(value) => setVariableValue(v.variable_name, value)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
-          )}
-
-          {launchError && (
-            <p className="text-sm text-red-600">{launchError}</p>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t flex items-center justify-end gap-2">
+    <Modal
+      open
+      title={`Launch ${pipeline.name}`}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
           <button onClick={onClose} className="border px-4 py-2 rounded text-sm">
             Cancel
           </button>
@@ -452,8 +312,144 @@ export function CustomPipelineLaunchDialog({
           >
             {launching ? "Launching..." : "Launch"}
           </button>
+        </>
+      }
+    >
+      {activeVersions.length === 0 ? (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded text-sm text-amber-700">
+          No active versions available. Create a version before launching.
         </div>
-      </div>
+      ) : (
+        <>
+          {/* Version selection */}
+          <section>
+            <div className="text-xs uppercase tracking-wide text-gray-500 mb-1">
+              Pipeline Version
+            </div>
+            <div className="flex items-center justify-between bg-gray-50 border rounded px-3 py-2">
+              <div className="text-sm">
+                {selectedVersion ? (
+                  <>
+                    <span className="font-mono font-semibold">
+                      v{selectedVersion.version_number}
+                    </span>
+                    <span className="text-gray-500 ml-2">
+                      {new Date(selectedVersion.created_at).toLocaleDateString()}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-gray-500">Select a version</span>
+                )}
+              </div>
+              <button
+                onClick={() => setShowVersionModal(true)}
+                className="text-sm text-bioaf-600 hover:underline"
+              >
+                Change Version
+              </button>
+            </div>
+          </section>
+
+          {/* Target selection */}
+          <section>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="project-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
+                  Project (optional)
+                </label>
+                <select id="project-optional"
+                  value={projectId ?? ""}
+                  onChange={(e) =>
+                    setProjectId(e.target.value ? Number(e.target.value) : null)
+                  }
+                  className="w-full border rounded px-3 py-2 text-sm bg-white"
+                >
+                  <option value="">All projects</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="experiment-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
+                  Experiment (optional)
+                </label>
+                <select id="experiment-optional"
+                  value={experimentId ?? ""}
+                  onChange={(e) =>
+                    setExperimentId(e.target.value ? Number(e.target.value) : null)
+                  }
+                  disabled={projectId == null}
+                  className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400"
+                >
+                  <option value="">
+                    {projectId == null ? "Select a project first" : "All experiments"}
+                  </option>
+                  {experiments.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </section>
+
+          {/* File picker */}
+          <section>
+            <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+              Input Files
+            </div>
+            {loadingFiles ? (
+              <p className="text-sm text-gray-500">Loading files...</p>
+            ) : files.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No files available
+                {projectId != null || experimentId != null
+                  ? " for the selected target."
+                  : ". Adjust filters or upload files."}
+              </p>
+            ) : (
+              <FileTreeSelector
+                files={files}
+                sampleNames={sampleNames}
+                onSelectionChange={setSelectedFileIds}
+              />
+            )}
+            {selectedFileIds.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                {selectedFileIds.length} file(s) selected
+              </p>
+            )}
+          </section>
+
+          {/* Variables */}
+          {selectedVersion && selectedVersion.variables.length > 0 && (
+            <section>
+              <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+                Variables
+              </div>
+              <div className="space-y-3">
+                {selectedVersion.variables.map((v) => (
+                  <VariableInput
+                    key={v.id}
+                    variable={v}
+                    value={variableValues[v.variable_name] ?? ""}
+                    error={variableErrors[v.variable_name]}
+                    onChange={(value) => setVariableValue(v.variable_name, value)}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {launchError && (
+        <p className="text-sm text-red-600">{launchError}</p>
+      )}
 
       {showVersionModal && (
         <VersionPickerModal
@@ -470,7 +466,7 @@ export function CustomPipelineLaunchDialog({
           onClose={() => setShowVersionModal(false)}
         />
       )}
-    </div>
+    </Modal>
   );
 }
 
@@ -551,123 +547,120 @@ function VersionPickerModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
-        <div className="px-6 py-4 border-b flex items-center justify-between">
-          <h3 className="font-semibold">Select Pipeline Version</h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">
-            ×
-          </button>
-        </div>
-        <div className="overflow-y-auto p-4 space-y-2">
-          {versions.length === 0 && (
-            <p className="text-sm text-gray-500">No active versions.</p>
-          )}
-          {versions.map((version, idx) => {
-            const previous = versions[idx + 1] ?? null;
-            const change = changeLabel(version, previous);
-            const expanded = expandedVersionIds.has(version.id);
-            const env = envOptionsById.get(version.environment_version_id);
-            const repo =
-              version.github_repo_id != null
-                ? repoById.get(version.github_repo_id)
-                : null;
-            const isSelected = version.id === selectedVersionId;
-            return (
-              <div
-                key={version.id}
-                className={`border rounded-lg p-3 ${
-                  isSelected ? "border-bioaf-500 bg-bioaf-50" : "border-gray-200"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <button
-                    type="button"
-                    onClick={() => onSelect(version.id)}
-                    className="flex-1 text-left"
-                  >
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono font-semibold">
-                        v{version.version_number}
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 text-xs rounded-full ${TONE_CLASSES[change.tone]}`}
-                      >
-                        {change.label}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(version.created_at).toLocaleString()}
-                      </span>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onToggleDetails(version.id)}
-                    className="text-sm text-bioaf-600 hover:underline"
-                  >
-                    {expanded ? "Hide Details" : "Show Details"}
-                  </button>
-                </div>
-
-                {expanded && (
-                  <div className="mt-3 pl-2 border-l-2 border-gray-200 space-y-2 text-sm">
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase">Code source: </span>
-                      {version.code_source_type === "github_repo" ? (
-                        <span className="font-mono text-gray-700">
-                          {repo
-                            ? `${repo.display_name} (${repo.git_ssh_url})`
-                            : `GitHub repo #${version.github_repo_id}`}
-                        </span>
-                      ) : version.code_source_type === "code_blob" ? (
-                        <span>Code blob</span>
-                      ) : (
-                        <span>Inline command</span>
-                      )}
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase">Entrypoint: </span>
-                      <code className="font-mono bg-gray-100 px-2 py-0.5 rounded">
-                        {version.entrypoint_command}
-                      </code>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase">Environment: </span>
-                      {env
-                        ? `${env.env_name} v${env.version_number}`
-                        : `Environment version #${version.environment_version_id}`}
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500 uppercase">Resources: </span>
-                      <span className="font-mono">
-                        CPU {version.cpu_request} / Memory {version.memory_request}
-                      </span>
-                    </div>
-                    {version.variables.length > 0 && (
-                      <div>
-                        <span className="text-xs text-gray-500 uppercase">Variables: </span>
-                        <span className="text-gray-700">
-                          {version.variables
-                            .map(
-                              (v) =>
-                                `${v.variable_name}${v.is_required ? "*" : ""}: ${v.variable_type}`,
-                            )
-                            .join(", ")}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        <div className="px-6 py-3 border-t flex items-center justify-end">
+    <Modal
+      open
+      title="Select Pipeline Version"
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
           <button onClick={onClose} className="border px-4 py-2 rounded text-sm">
             Close
           </button>
-        </div>
-      </div>
-    </div>
+        </>
+      }
+    >
+      {versions.length === 0 && (
+        <p className="text-sm text-gray-500">No active versions.</p>
+      )}
+      {versions.map((version, idx) => {
+        const previous = versions[idx + 1] ?? null;
+        const change = changeLabel(version, previous);
+        const expanded = expandedVersionIds.has(version.id);
+        const env = envOptionsById.get(version.environment_version_id);
+        const repo =
+          version.github_repo_id != null
+            ? repoById.get(version.github_repo_id)
+            : null;
+        const isSelected = version.id === selectedVersionId;
+        return (
+          <div
+            key={version.id}
+            className={`border rounded-lg p-3 ${
+              isSelected ? "border-bioaf-500 bg-bioaf-50" : "border-gray-200"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => onSelect(version.id)}
+                className="flex-1 text-left"
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-semibold">
+                    v{version.version_number}
+                  </span>
+                  <span
+                    className={`px-2 py-0.5 text-xs rounded-full ${TONE_CLASSES[change.tone]}`}
+                  >
+                    {change.label}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {new Date(version.created_at).toLocaleString()}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleDetails(version.id)}
+                className="text-sm text-bioaf-600 hover:underline"
+              >
+                {expanded ? "Hide Details" : "Show Details"}
+              </button>
+            </div>
+
+            {expanded && (
+              <div className="mt-3 pl-2 border-l-2 border-gray-200 space-y-2 text-sm">
+                <div>
+                  <span className="text-xs text-gray-500 uppercase">Code source: </span>
+                  {version.code_source_type === "github_repo" ? (
+                    <span className="font-mono text-gray-700">
+                      {repo
+                        ? `${repo.display_name} (${repo.git_ssh_url})`
+                        : `GitHub repo #${version.github_repo_id}`}
+                    </span>
+                  ) : version.code_source_type === "code_blob" ? (
+                    <span>Code blob</span>
+                  ) : (
+                    <span>Inline command</span>
+                  )}
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase">Entrypoint: </span>
+                  <code className="font-mono bg-gray-100 px-2 py-0.5 rounded">
+                    {version.entrypoint_command}
+                  </code>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase">Environment: </span>
+                  {env
+                    ? `${env.env_name} v${env.version_number}`
+                    : `Environment version #${version.environment_version_id}`}
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase">Resources: </span>
+                  <span className="font-mono">
+                    CPU {version.cpu_request} / Memory {version.memory_request}
+                  </span>
+                </div>
+                {version.variables.length > 0 && (
+                  <div>
+                    <span className="text-xs text-gray-500 uppercase">Variables: </span>
+                    <span className="text-gray-700">
+                      {version.variables
+                        .map(
+                          (v) =>
+                            `${v.variable_name}${v.is_required ? "*" : ""}: ${v.variable_type}`,
+                        )
+                        .join(", ")}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </Modal>
   );
 }
