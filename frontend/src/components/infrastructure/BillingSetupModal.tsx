@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 
@@ -82,9 +83,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
-        <h2 className="text-lg font-semibold mb-4">Set Up Billing Export</h2>
+    <Modal open title="Set Up Billing Export" onClose={onClose}>
 
         {/* Intro */}
         {step === "intro" && (
@@ -253,7 +252,6 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }
