@@ -87,20 +87,41 @@ test("the measured failing pairings are gone", () => {
   expect(offenders).toEqual([]);
 });
 
-test("no user-facing em-dash slipped back in as an HTML entity", () => {
-  // The null placeholder in settings/users was `&#8212;`, which is U+2014 and
-  // banned repo-wide. The entity forms evade a plain grep for the character.
+// An em-dash has THREE spellings in this codebase and the first pass only
+// caught one. The literal character is greppable; `&#8212;` / `&mdash;` are not;
+// and `"\u2014"` evades both, which is how two of them survived on
+// /settings/users until the page was read in a browser.
+//
+// The remaining literal placeholders elsewhere are a separate, larger sweep that
+// has not been signed off, so this guard covers the files already cleaned.
+const EM_DASH_CLEANED = [
+  "app/(app)/settings/users/page.tsx",
+  "components/SnapshotComparison.tsx",
+];
+
+test("no user-facing em-dash in any of its three spellings, in the cleaned files", () => {
   const offenders: string[] = [];
   for (const file of tsxFiles(SRC)) {
+    const rel = file.replace(SRC + "/", "");
     readFileSync(file, "utf8")
       .split("\n")
       .forEach((line, i) => {
-        if (/&mdash;|&#8212;|&#x2014;/i.test(line)) {
-          offenders.push(`${file.replace(SRC, "src")}:${i + 1}`);
+        const entity = /&mdash;|&#8212;|&#x2014;/i.test(line);
+        const escaped = /\\u2014/.test(line);
+        const literal = line.includes("\u2014");
+        if (entity || (EM_DASH_CLEANED.includes(rel) && (escaped || literal))) {
+          offenders.push(`${rel}:${i + 1}`);
         }
       });
   }
   expect(offenders).toEqual([]);
+});
+
+test("the paired state of a status cell is as readable as the cell it pairs with", () => {
+  // Fixing "not configured" to 4.83:1 while its ✓ sibling sat at 3.30:1 would
+  // have been half a column. green-600 on white is 3.30:1; green-700 is 5.02:1.
+  const users = readFileSync(join(SRC, "app", "(app)", "settings", "users", "page.tsx"), "utf8");
+  expect(users).not.toMatch(/text-green-600/);
 });
 
 test("no text uses a shade that fails AA on its own background", () => {

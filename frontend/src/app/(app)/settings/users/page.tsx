@@ -501,7 +501,7 @@ function SettingsUsersPageInner() {
                 >
                   <td className="px-4 py-3 text-sm">{user.email}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">
-                    {user.name || "\u2014"}
+                    {user.name || "Not set"}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
@@ -516,7 +516,7 @@ function SettingsUsersPageInner() {
                   </td>
                   <td className="px-4 py-3 text-center">
                     {user.session_credentials_configured ? (
-                      <span className="text-green-600 text-sm" title="Session credentials configured">
+                      <span className="text-green-700 text-sm" title="Session credentials configured">
                         &#10003;
                       </span>
                     ) : (
