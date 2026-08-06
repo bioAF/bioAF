@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, act } from "@/testing/renderWithProviders";
+import { render, screen, waitFor, fireEvent, act, within } from "@/testing/renderWithProviders";
 
 const mockRouter = { push: jest.fn() };
 const mockParams = { id: "1" };
@@ -465,7 +465,7 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
         }),
       )
       .mockResolvedValueOnce({ id: 55 });
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(true);
+    const nativeConfirm = jest.spyOn(window, "confirm");
 
     render(<PipelineRunDetailPage />);
     await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
@@ -474,13 +474,20 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
       fireEvent.click(screen.getByRole("button", { name: "Reproduce" }));
     });
 
+    // The recovery prompt is a real dialog now. It still names the offending
+    // sample, and every assertion after this point is unchanged.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("SAMPLE-102");
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Drop and reproduce" }));
+    });
+
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(confirmSpy.mock.calls[0][0]).toContain("SAMPLE-102");
     expect(mockPost.mock.calls[0][0]).toContain("drop_samples_without_files=false");
     expect(mockPost.mock.calls[1][0]).toContain("drop_samples_without_files=true");
     await waitFor(() => expect(mockRouter.push).toHaveBeenCalledWith("/pipelines/runs/55"));
-    confirmSpy.mockRestore();
+    nativeConfirm.mockRestore();
   });
 
   test("does not retry when the user cancels the confirm", async () => {
@@ -490,8 +497,6 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
         samples_without_files: [{ id: 9, external_id: "SAMPLE-102" }],
       }),
     );
-    const confirmSpy = jest.spyOn(window, "confirm").mockReturnValue(false);
-
     render(<PipelineRunDetailPage />);
     await waitFor(() => expect(screen.queryByText(/scrnaseq/i)).toBeTruthy());
 
@@ -499,8 +504,12 @@ describe("PipelineRunDetailPage reproduce with file-less samples", () => {
       fireEvent.click(screen.getByRole("button", { name: "Reproduce" }));
     });
 
+    const dialog = await screen.findByRole("dialog");
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Do not reproduce" }));
+    });
+
     await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(1));
     expect(mockRouter.push).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
   });
 });

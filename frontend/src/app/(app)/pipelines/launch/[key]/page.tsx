@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -45,6 +46,7 @@ function detectProtocol(samples: SampleBrief[]): string | null {
 
 export default function PipelineLauncherPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const params = useParams();
   const searchParams = useSearchParams();
   const pipelineKey = decodeURIComponent(params.key as string);
@@ -132,12 +134,21 @@ export default function PipelineLauncherPage() {
           .map((s) => s.external_id || `sample ${s.id}`)
           .join(", ");
         setLaunching(false);
-        if (
-          window.confirm(
-            `These samples have no linked input files and cannot run: ${names}.\n\n` +
-              `Drop them and launch with the remaining samples?`,
-          )
-        ) {
+        // A dialog can show the sample list as its own line; the native confirm
+        // could only jam it into one string with escaped newlines.
+        const dropThem = await confirm({
+          title: "Some samples have no input files",
+          message: (
+            <>
+              <p>These samples have no linked input files and cannot run:</p>
+              <p className="font-medium text-gray-900">{names}</p>
+              <p>Drop them and launch with the remaining samples?</p>
+            </>
+          ),
+          confirmLabel: "Drop and launch",
+          cancelLabel: "Do not launch",
+        });
+        if (dropThem) {
           await handleLaunch(true);
         }
         return;

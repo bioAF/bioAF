@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { setToken } from "@/lib/auth";
@@ -96,6 +97,7 @@ interface SetupWizardProps {
 }
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
+  const confirm = useConfirm();
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   // The install's cloud (gcp | aws), read from /api/bootstrap/status. We do NOT
@@ -364,8 +366,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStep(1);
       return;
     }
-    if (completedSteps.has(0) && !confirm("Re-verify the setup code with the new value?")) {
-      return;
+    if (completedSteps.has(0)) {
+      const ok = await confirm({
+        title: "Re-verify the setup code with the new value?",
+        message: "The code you already verified is replaced by the one entered now.",
+        confirmLabel: "Re-verify",
+      });
+      if (!ok) return;
     }
     try {
       // Use raw fetch since the api module auto-redirects on 401
@@ -406,7 +413,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         c.name !== name ? `Name: ${c.name || "(empty)"} -> ${name || "(empty)"}` : null,
         c.password !== password ? "Password updated" : null,
       ].filter(Boolean).join("\n");
-      if (!confirm(`This will overwrite the admin account.\n\n${diff}\n\nContinue?`)) return;
+      const ok = await confirm({
+        title: "Overwrite the admin account?",
+        message: (
+          <>
+            <p>This replaces the admin account you already created:</p>
+            <p className="whitespace-pre-line font-medium text-gray-900">{diff}</p>
+          </>
+        ),
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       // Use raw fetch with setup token (not the stored auth token)
@@ -441,7 +459,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     if (completedSteps.has(2)) {
       const c = committedValues[2] ?? {};
-      if (!confirm(`This will overwrite the organization name.\n\n${c.orgName} -> ${orgName}\n\nContinue?`)) return;
+      const ok = await confirm({
+        title: "Overwrite the organization name?",
+        message: (
+          <>
+            <p>This replaces the name you already saved:</p>
+            <p className="font-medium text-gray-900">
+              {c.orgName} -&gt; {orgName}
+            </p>
+          </>
+        ),
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       await api.post("/api/bootstrap/configure-org", { org_name: orgName });
@@ -527,7 +558,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       return;
     }
     if (completedSteps.has(4)) {
-      if (!confirm("This will overwrite the previously saved SMTP settings. Continue?")) return;
+      const ok = await confirm({
+        title: "Overwrite the saved SMTP settings?",
+        message: "The settings you already saved are replaced by the values entered now.",
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       await api.post("/api/bootstrap/configure-smtp", {

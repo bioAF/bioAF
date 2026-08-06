@@ -247,12 +247,19 @@ export default function PipelineRunDetailPage() {
             | { id: number; external_id: string | null }[]
             | undefined) ?? [];
         const names = offending.map((s) => s.external_id || `sample ${s.id}`).join(", ");
-        if (
-          window.confirm(
-            `These samples have no linked input files and cannot run: ${names}.\n\n` +
-              `Drop them and reproduce with the remaining samples?`,
-          )
-        ) {
+        const dropThem = await confirm({
+          title: "Some samples have no input files",
+          message: (
+            <>
+              <p>These samples have no linked input files and cannot run:</p>
+              <p className="font-medium text-gray-900">{names}</p>
+              <p>Drop them and reproduce with the remaining samples?</p>
+            </>
+          ),
+          confirmLabel: "Drop and reproduce",
+          cancelLabel: "Do not reproduce",
+        });
+        if (dropThem) {
           await handleReproduce(true);
         }
         return;
