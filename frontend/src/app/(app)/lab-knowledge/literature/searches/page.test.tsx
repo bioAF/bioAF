@@ -81,3 +81,20 @@ test("shows a retry-able error when searches fail to load", async () => {
   expect(screen.getByText(/couldn't load searches/i)).toBeInTheDocument();
   expect(screen.getByTestId("error-retry")).toBeInTheDocument();
 });
+
+test("the query box is named for what it is, not for its example text", async () => {
+  // The placeholder is an EXAMPLE of a query, not a label. Naming the control
+  // after it made a screen reader announce the whole worked example
+  // ("e.g., TGF-beta signalling in triple-negative breast cancer") every time
+  // focus landed there. The example stays visible; the name says what the box
+  // is for.
+  mockListSearches.mockResolvedValue({ items: [] });
+
+  render(<LiteratureSearchesPage />);
+
+  const box = await screen.findByRole("textbox", { name: "Literature Search" });
+  expect(box).toHaveAttribute(
+    "placeholder",
+    "e.g., TGF-beta signalling in triple-negative breast cancer",
+  );
+});

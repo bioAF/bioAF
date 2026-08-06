@@ -155,7 +155,9 @@ export default function LiteratureSearchesPage() {
         <h1 className="text-2xl font-bold mb-6">Literature Searches</h1>
         <div className="bg-white rounded shadow p-4 mb-6">
           <div className="flex gap-2">
-            <input aria-label="e.g., TGF-beta signalling in triple-negative breast cancer"
+            {/* The placeholder is an example query, not a label, so it stays
+                visible but does not become the accessible name. */}
+            <input aria-label="Literature Search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="e.g., TGF-beta signalling in triple-negative breast cancer"

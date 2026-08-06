@@ -149,7 +149,7 @@ export function SmtpSettingsContent() {
         <div className="mt-6 pt-6 border-t border-gray-200">
           <h3 className="text-sm font-semibold text-gray-700 mb-3">Send Test Email</h3>
           <div className="flex gap-3">
-            <input aria-label="recipient@example.com"
+            <input aria-label="Test email recipient"
               type="email"
               value={testEmailTo}
               onChange={(e) => setTestEmailTo(e.target.value)}

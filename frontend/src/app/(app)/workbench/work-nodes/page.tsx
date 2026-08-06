@@ -494,7 +494,7 @@ export default function WorkNodesPage() {
             {/* Add repo form */}
             {canAccess("work_nodes", "launch") && (
               <div className="flex gap-2 mb-3">
-                <input aria-label="git@github.com:owner/repo.git"
+                <input aria-label="Git SSH URL"
                   type="text"
                   value={newRepoUrl}
                   onChange={(e) => setNewRepoUrl(e.target.value)}
