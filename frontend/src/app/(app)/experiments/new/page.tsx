@@ -437,6 +437,7 @@ export default function NewExperimentPage() {
           </p>
           <input
             type="file"
+            aria-label="Sample CSV or TSV file"
             accept=".csv,.tsv,.txt"
             onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
             className="block text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-bioaf-50 file:text-bioaf-700 hover:file:bg-bioaf-100"

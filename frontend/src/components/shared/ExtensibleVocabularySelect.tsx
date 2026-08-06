@@ -64,7 +64,7 @@ export function ExtensibleVocabularySelect({
 
   if (loading) {
     return (
-      <select disabled className={className}>
+      <select disabled aria-label={placeholder ?? fieldName} className={className}>
         <option>Loading...</option>
       </select>
     );
@@ -73,6 +73,7 @@ export function ExtensibleVocabularySelect({
   return (
     <div>
       <select
+        aria-label={placeholder ?? fieldName}
         value={value ?? ""}
         onChange={(e) => {
           onChange(e.target.value || null);

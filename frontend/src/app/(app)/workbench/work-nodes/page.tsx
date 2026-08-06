@@ -1012,6 +1012,7 @@ export default function WorkNodesPage() {
                     </div>
                     {scopeType === "experiment" ? (
                       <select
+                        aria-label="Select experiment"
                         value={selectedExperimentId || ""}
                         onChange={(e) =>
                           e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
@@ -1028,6 +1029,7 @@ export default function WorkNodesPage() {
                       </select>
                     ) : (
                       <select
+                        aria-label="Select project"
                         value={selectedProjectId || ""}
                         onChange={(e) =>
                           e.target.value ? handleProjectSelect(Number(e.target.value)) : null

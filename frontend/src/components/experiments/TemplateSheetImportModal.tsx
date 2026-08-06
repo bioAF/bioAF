@@ -211,6 +211,7 @@ export function TemplateSheetImportModal({
                           {col}
                         </span>
                         <select
+                          aria-label={`Map column ${col} to`}
                           value={columnMappings[col] ?? "custom"}
                           onChange={(e) =>
                             setColumnMappings((prev) => ({ ...prev, [col]: e.target.value }))
@@ -227,6 +228,7 @@ export function TemplateSheetImportModal({
                         </select>
                         {(columnMappings[col] ?? "custom") === "custom" && (
                           <select
+                            aria-label={`Type for custom field ${col}`}
                             value={customTypes[col] ?? "string"}
                             onChange={(e) =>
                               setCustomTypes((prev) => ({ ...prev, [col]: e.target.value }))

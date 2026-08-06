@@ -262,6 +262,7 @@ export function DatasetBrowser() {
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          aria-label={`Select ${ds.experiment_name}`}
                           checked={selectedExperiments.has(ds.experiment_id)}
                           onChange={() => toggleExperiment(ds.experiment_id)}
                           className="rounded"

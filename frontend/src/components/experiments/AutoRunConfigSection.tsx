@@ -319,6 +319,7 @@ function AutoRunConfigModal({
                 <div className="text-sm text-gray-500">
                   <p className="mb-3">No parameter schema available. Enter parameters as JSON:</p>
                   <textarea
+                    aria-label="Pipeline parameters as JSON"
                     value={JSON.stringify(userParams, null, 2)}
                     onChange={(e) => { try { setUserParams(JSON.parse(e.target.value)); } catch {} }}
                     className="w-full h-32 border rounded px-3 py-2 font-mono text-xs"
@@ -440,7 +441,7 @@ function ModalParameterForm({
                 if (prop.type === "boolean") {
                   return (
                     <div key={paramKey} className="flex items-center gap-2">
-                      <input type="checkbox" checked={Boolean(value)} onChange={(e) => setValue(paramKey, e.target.checked)} />
+                      <input type="checkbox" aria-label={label} checked={Boolean(value)} onChange={(e) => setValue(paramKey, e.target.checked)} />
                       <label className="text-sm">{label}</label>
                     </div>
                   );

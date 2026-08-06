@@ -37,11 +37,15 @@ function tsxFiles(dir: string): string[] {
   return out;
 }
 
-// Components rendered on the permanently dark sidebar, where gray-400 is the
-// CORRECT choice (~7:1) and gray-500 fails (3.67:1).
+// Surfaces that are dark whatever the theme, where gray-400 is the CORRECT
+// choice (~7:1) and gray-500 fails (3.67:1). Found by grepping for a dark
+// background token used as a text container, rather than as a modal backdrop
+// (`bg-black/40` sits behind a white panel, so text on it is unaffected) or as
+// a `hover:` state.
 const DARK_SURFACES = [
   "components/layout/Sidebar.tsx",
   "components/layout/NavItem.tsx",
+  "app/(app)/layout.tsx", // the bg-gray-900 boot splash
 ];
 
 test("no text uses a shade that fails AA on its own background", () => {

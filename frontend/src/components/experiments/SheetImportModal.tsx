@@ -278,6 +278,7 @@ export function SheetImportModal({
                         </span>
                         <span className="text-gray-500">&rarr;</span>
                         <select
+                          aria-label={`Map column ${col} to`}
                           value={columnMappings[col] ?? `custom:${col}`}
                           onChange={(e) => handleMappingChange(col, e.target.value)}
                           className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5"

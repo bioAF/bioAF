@@ -744,6 +744,7 @@ export default function NotebooksPage() {
                   </select>
                   {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
                     <select
+                      aria-label="Environment version"
                       value={selectedVersionId || ""}
                       onChange={(e) => {
                         const vid = e.target.value ? Number(e.target.value) : null;

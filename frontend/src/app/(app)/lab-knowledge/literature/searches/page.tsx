@@ -261,6 +261,7 @@ export default function LiteratureSearchesPage() {
                   ) : (
                     <input
                       type="checkbox"
+                      aria-label={`Select ${cleanText(p.title)}`}
                       className="mt-1.5"
                       checked={selectedIds.has(p.id)}
                       onChange={() => toggleSelect(p.id)}

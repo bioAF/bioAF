@@ -726,6 +726,7 @@ function ExperimentDetailPageInner() {
               <div className="flex items-center gap-4">
                 <ExperimentStatusBadge status={experiment.status} />
                 <select
+                  aria-label="Change experiment status"
                   onChange={(e) => { if (e.target.value) handleStatusUpdate(e.target.value); e.target.value = ""; }}
                   className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
                   defaultValue=""
@@ -935,6 +936,7 @@ function ExperimentDetailPageInner() {
                     <td className="px-4 py-3 text-sm">{s.file_count}</td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <select
+                        aria-label={`QC status for sample ${s.external_id ?? s.id}`}
                         value={s.qc_status ?? ""}
                         onChange={(e) => { if (e.target.value) handleUpdateQC(s.id, e.target.value); }}
                         className="text-xs border rounded px-2 py-1"

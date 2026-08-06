@@ -108,6 +108,7 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
                 <td className="px-3 py-2">
                   <input
                     type="checkbox"
+                    aria-label={`Select snapshot ${snap.label}`}
                     checked={selected.has(snap.id)}
                     onChange={() => toggleSelection(snap.id)}
                     className="h-4 w-4 text-bioaf-600 rounded border-gray-300"

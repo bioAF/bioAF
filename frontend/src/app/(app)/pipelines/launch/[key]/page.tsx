@@ -192,6 +192,7 @@ export default function PipelineLauncherPage() {
         <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
           <select
+            aria-label="Select experiment"
             value={selectedExperimentId ?? ""}
             onChange={(e) => setSelectedExperimentId(Number(e.target.value) || null)}
             className="w-full border rounded-md px-3 py-2 text-sm"
@@ -241,7 +242,7 @@ export default function PipelineLauncherPage() {
               {samples.map((s) => (
                 <tr key={s.id} className={s.qc_status === "fail" ? "bg-red-50" : ""}>
                   <td className="px-4 py-3">
-                    <input type="checkbox" checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
+                    <input type="checkbox" aria-label={`Select sample ${s.external_id || `#${s.id}`}`} checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
                   </td>
                   <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
                   <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
@@ -346,6 +347,7 @@ function ParameterForm({
       <div className="text-sm text-gray-500">
         <p className="mb-3">No parameter schema available. Enter parameters as JSON:</p>
         <textarea
+          aria-label="Pipeline parameters as JSON"
           value={JSON.stringify(values, null, 2)}
           onChange={(e) => { try { onChange(JSON.parse(e.target.value)); } catch {} }}
           className="w-full h-40 border rounded px-3 py-2 font-mono text-xs"
@@ -474,7 +476,7 @@ function ParameterField({
   if (prop.type === "boolean") {
     return (
       <div className="flex items-center gap-2">
-        <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+        <input type="checkbox" aria-label={label} checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
         <label className="text-sm">{label}{required ? " *" : ""}</label>
         {prop.description && <span className="text-xs text-gray-500">({prop.description})</span>}
       </div>
