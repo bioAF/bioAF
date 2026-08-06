@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { getToken } from "@/lib/auth";
 
@@ -141,14 +142,8 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
   const isLarge = sizeData ? sizeData.total_bytes > 1_073_741_824 : false;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Export Data</h2>
-          <button onClick={handleClose} className="text-gray-500 hover:text-gray-600 text-xl leading-none">
-            &times;
-          </button>
-        </div>
+    <Modal open title="Export Data" onClose={handleClose}>
+      <div className="space-y-4">
         <p className="text-sm text-gray-600">{experimentName}</p>
 
         {/* Step 1: Options */}
@@ -280,6 +275,6 @@ export function DataExportModal({ experimentId, experimentName, isOpen, onClose 
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
