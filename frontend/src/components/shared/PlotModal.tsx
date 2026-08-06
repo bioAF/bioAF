@@ -87,46 +87,39 @@ export function PlotModal({ url, title, metadata, onClose }: PlotModalProps) {
   // Simple mode for non-archive consumers (experiments, QC dashboards, results)
   if (!hasDetail) {
     return (
-      <Modal open title={title} onClose={onClose}>
+      <Modal open title={title} onClose={onClose} size="xl">
         <div className="-mx-6 flex justify-center bg-gray-50 py-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={url}
             alt={title}
-            className="max-h-64 object-contain rounded"
+            className="max-h-[70vh] object-contain rounded"
           />
         </div>
       </Modal>
     );
   }
 
-  // Detail mode for plot archive -- matches Files page modal
-  const isImage = file
-    ? ["png", "jpg", "jpeg", "svg"].includes(file.file_type.toLowerCase())
-    : true;
+  // Detail mode for plot archive -- matches Files page modal.
+  //
+  // NOTE: this used to branch on whether the file was an image, but both arms of
+  // that ternary rendered the identical <img>, so it never did anything. The
+  // branch is gone; the underlying gap it was presumably meant to cover is not
+  // fixed here, and is recorded in HANDOFF: a non-image artifact still renders
+  // through <img> and will simply fail to load.
 
   return (
-    <Modal open title={title} onClose={onClose}>
-
-      {isImage ? (
-        <div className="-mx-6 flex justify-center bg-gray-50 py-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={url}
-            alt={title}
-            className="max-h-64 object-contain rounded"
-          />
-        </div>
-      ) : (
-        <div className="-mx-6 flex justify-center bg-gray-50 py-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={url}
-            alt={title}
-            className="max-h-64 object-contain rounded"
-          />
-        </div>
-      )}
+    <Modal open title={title} onClose={onClose} size="xl">
+      {/* Capped lower than the simple viewer because the metadata below shares
+          this panel; the body scrolls if a very tall plot still overflows. */}
+      <div className="-mx-6 flex justify-center bg-gray-50 py-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={url}
+          alt={title}
+          className="max-h-[55vh] object-contain rounded"
+        />
+      </div>
 
       <dl className="p-4 grid grid-cols-2 gap-x-4 gap-y-3">
         {file && (
