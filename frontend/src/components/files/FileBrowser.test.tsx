@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
 import { FileBrowser } from "./FileBrowser";
 
 jest.mock("@/components/shared/ContentLoading", () => ({

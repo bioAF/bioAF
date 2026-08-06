@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
@@ -303,6 +304,7 @@ export function SdrDetailView({
   const canManage = canAccess("sdr", "manage");
 
   const [sdr, setSdr] = useState<SdrDetail | null>(null);
+  const confirm = useConfirm();
   const [categories, setCategories] = useState<Category[]>([]);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -345,7 +347,13 @@ export function SdrDetailView({
   };
 
   const remove = async () => {
-    if (!window.confirm("Permanently delete this decision record?")) return;
+    const ok = await confirm({
+      title: "Permanently delete this decision record?",
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     await api.delete(`${API_BASE}/sdrs/${sdrId}`);
     onDeleted();
   };

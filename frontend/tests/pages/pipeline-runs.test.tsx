@@ -6,7 +6,7 @@
  * 29: Log viewer displays real content
  * 30: Cancel button calls cancel endpoint
  */
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@/testing/renderWithProviders";
 
 // Mock next/navigation
 const mockPush = jest.fn();
@@ -247,9 +247,6 @@ describe("Cancel Button (Test 30)", () => {
     });
     mockApiPost.mockResolvedValue({ ...mockRunWithK8s, status: "cancelled" });
 
-    // Mock confirm dialog
-    jest.spyOn(window, "confirm").mockReturnValue(true);
-
     const PipelineRunDetailPage =
       require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
@@ -258,7 +255,11 @@ describe("Cancel Button (Test 30)", () => {
       expect(screen.getByText("Cancel")).toBeInTheDocument();
     });
 
+    // The page's own "Cancel" button opens the gate; inside the dialog the
+    // accept button is "Cancel run", because "Cancel" there means dismiss.
     fireEvent.click(screen.getByText("Cancel"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(

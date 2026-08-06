@@ -20,6 +20,7 @@ import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { useConfirm } from "@/hooks/useConfirm";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
@@ -69,6 +70,7 @@ export function FileBrowser({
   focusFileId,
 }: Props) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -299,7 +301,13 @@ export function FileBrowser({
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     const count = selectedIds.size;
-    if (!confirm(`Delete ${count} ${count === 1 ? "file" : "files"}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete ${count} ${count === 1 ? "file" : "files"}?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       await Promise.all(
         Array.from(selectedIds).map((id) => api.delete(`/api/files/${id}`)),

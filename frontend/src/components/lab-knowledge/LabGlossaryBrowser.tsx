@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -354,6 +355,7 @@ function TermDetailPanel({
   onChanged: () => void;
 }) {
   useDismissOnEscape(true, () => onClose());
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState(term.definition);
   const [category, setCategory] = useState(term.category ?? "");
@@ -375,7 +377,13 @@ function TermDetailPanel({
   };
 
   const remove = async () => {
-    if (!window.confirm("This will permanently remove this term. Are you sure?")) return;
+    const ok = await confirm({
+      title: "Permanently remove this term?",
+      message: "This cannot be undone.",
+      confirmLabel: "Remove",
+      variant: "danger",
+    });
+    if (!ok) return;
     await api.delete(`${API_BASE}/glossary/${term.id}`);
     onChanged();
   };

@@ -5,7 +5,7 @@
  * this view", so a backend outage told the user their running, billing VMs were
  * gone. A failed Stop was silent too: the spinner cleared and the node stayed up.
  */
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
 import WorkNodesPage from "./page";
 
 jest.mock("@/lib/auth", () => ({

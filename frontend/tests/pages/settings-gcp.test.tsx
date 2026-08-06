@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";
 import GcpSettingsPage from "@/app/(app)/settings/gcp/page";
 
 const mockPush = jest.fn();

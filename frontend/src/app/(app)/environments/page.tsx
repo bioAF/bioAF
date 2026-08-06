@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
@@ -27,6 +28,7 @@ export default function EnvironmentsPage() {
   const canDelete = user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentDetailResponse | null>(null);
@@ -122,7 +124,13 @@ export default function EnvironmentsPage() {
   }
 
   async function handleDelete(id: number) {
-    if (!confirm("Delete this environment and all its versions?")) return;
+    const ok = await confirm({
+      title: "Delete this environment and all its versions?",
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/v1/environments/${id}`);
       setSelectedEnv(null);

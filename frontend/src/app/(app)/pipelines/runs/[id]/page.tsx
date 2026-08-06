@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -142,6 +143,7 @@ function getUserRole(): string {
 
 export default function PipelineRunDetailPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const params = useParams();
   const { canAccess } = usePermissions();
   const runId = params.id as string;
@@ -208,7 +210,16 @@ export default function PipelineRunDetailPage() {
   }, [run?.status, loadRun]);
 
   async function handleCancel() {
-    if (!confirm("Cancel this pipeline run?")) return;
+    // "Cancel" is the dismiss label on every dialog, so the accept button has
+    // to say what it actually does or the two read as the same choice.
+    const ok = await confirm({
+      title: "Cancel this pipeline run?",
+      message: "This cannot be undone.",
+      confirmLabel: "Cancel run",
+      cancelLabel: "Keep running",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       await api.post(`/api/pipeline-runs/${runId}/cancel`);
       loadRun();

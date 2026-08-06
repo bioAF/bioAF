@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@/testing/renderWithProviders";
 import userEvent from "@testing-library/user-event";
 import WorkNodesPage from "./page";
 

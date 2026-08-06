@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { literature } from "@/lib/literature";
@@ -50,6 +51,7 @@ interface ProvidersResponse {
 
 export function LlmSettingsContent() {
   const [data, setData] = useState<ProvidersResponse | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState<ProviderId | null>(null);
@@ -137,7 +139,13 @@ export function LlmSettingsContent() {
   }
 
   async function handleDelete(provider: ProviderId) {
-    if (!confirm(`Remove the ${PROVIDER_LABEL[provider]} configuration?`)) return;
+    const ok = await confirm({
+      title: `Remove the ${PROVIDER_LABEL[provider]} configuration?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Remove",
+      variant: "danger",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.delete(`/api/integrations/llm/providers/${provider}`);

@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -50,6 +51,7 @@ function fmtDate(iso: string): string {
 export default function LabDocumentDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const confirm = useConfirm();
   const documentId = Number(params.id);
   const user = getCurrentUser();
   const { canAccess } = usePermissions();
@@ -130,7 +132,13 @@ export default function LabDocumentDetailPage() {
   };
 
   const deleteNote = async (noteId: number) => {
-    if (!confirm("Delete this note?")) return;
+    const ok = await confirm({
+      title: "Delete this note?",
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     await labDocuments.deleteNote(documentId, noteId);
     setNotes(await labDocuments.listNotes(documentId));
   };

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@/testing/renderWithProviders";
 
 // Mock next/navigation
 jest.mock("next/navigation", () => ({
@@ -281,14 +281,15 @@ describe("NotebooksPage", () => {
     });
     mockApiPost.mockResolvedValue({ status: "stopped" });
 
-    // Mock window.confirm
-    window.confirm = jest.fn(() => true);
-
     render(<NotebooksPage />);
     await waitFor(() => {
       expect(screen.getByText("Stop")).toBeInTheDocument();
     });
+    // The gate is a real dialog now, not window.confirm. The assertion below is
+    // unchanged from when it was: same endpoint, same call.
     fireEvent.click(screen.getByText("Stop"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stop" }));
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(
         expect.stringContaining("/sessions/1/stop")

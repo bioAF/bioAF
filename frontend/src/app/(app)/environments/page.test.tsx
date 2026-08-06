@@ -1,4 +1,4 @@
-import { render, waitFor, screen, fireEvent } from "@testing-library/react";
+import { render, waitFor, screen, fireEvent } from "@/testing/renderWithProviders";
 import EnvironmentsPage from "./page";
 
 jest.mock("next/navigation", () => ({

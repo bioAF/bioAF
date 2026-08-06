@@ -1,11 +1,13 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReaderSAStatus, ReaderSACreateResponse } from "@/lib/types";
 
 export function SheetsReaderSACard() {
   const [status, setStatus] = useState<ReaderSAStatus | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
@@ -40,9 +42,13 @@ export function SheetsReaderSACard() {
   }
 
   async function handleDelete() {
-    if (!confirm("Delete the Google Sheets reader service account? Users will no longer be able to import columns from Google Sheets.")) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Delete the Google Sheets reader service account?",
+      message: "Users will no longer be able to import columns from Google Sheets.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     setLoading(true);
     setError("");
     try {

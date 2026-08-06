@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@/testing/renderWithProviders";
 import DataFilesPage from "./page";
 
 jest.mock("next/link", () => {
@@ -345,13 +345,34 @@ test("delete button removes selected files after confirmation", async () => {
 
   expect(screen.getByText("1 selected")).toBeInTheDocument();
 
-  // Confirm the deletion
-  window.confirm = jest.fn(() => true);
+  // Confirm the deletion. The gate moved from window.confirm to a real dialog;
+  // the assertion below is unchanged, which is the point.
   fireEvent.click(screen.getByText("Delete"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
   await waitFor(() => {
     expect(mockDelete).toHaveBeenCalledWith("/api/files/1");
   });
+});
+
+test("the delete gate never calls the native confirm", async () => {
+  // A suppressed native dialog returns false without asking, which silently
+  // turns the delete button into a no-op. That is why this moved.
+  const nativeConfirm = jest.spyOn(window, "confirm");
+  mockGet.mockImplementation(makeGetMock());
+  mockDelete.mockResolvedValue({});
+
+  render(<DataFilesPage />);
+  await waitFor(() => {
+    expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getAllByRole("checkbox")[1]);
+  fireEvent.click(screen.getByText("Delete"));
+  await screen.findByRole("dialog");
+
+  expect(nativeConfirm).not.toHaveBeenCalled();
+  nativeConfirm.mockRestore();
 });
 
 test("delete button does nothing when user cancels confirmation", async () => {
@@ -366,8 +387,9 @@ test("delete button does nothing when user cancels confirmation", async () => {
   const checkboxes = screen.getAllByRole("checkbox");
   fireEvent.click(checkboxes[1]);
 
-  window.confirm = jest.fn(() => false);
   fireEvent.click(screen.getByText("Delete"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
   expect(mockDelete).not.toHaveBeenCalled();
 });

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
 import { SdrBrowser, SdrDetailView, sdrCode } from "./SdrBrowser";
 
 let canAccessImpl = (_resource: string, _action: string) => true;

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";
 
 const mockGet = jest.fn();
 const mockPost = jest.fn();

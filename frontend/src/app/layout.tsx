@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { FloatingAssistant } from "@/components/assistant/FloatingAssistant";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { ConfirmProvider } from "@/hooks/useConfirm";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 
 export const metadata: Metadata = {
@@ -23,10 +24,15 @@ export default function RootLayout({
       </head>
       <body className="bg-gray-50 text-gray-900">
         <ThemeProvider>
-          {children}
-          {/* Mounted once here so the assistant follows the user across pages without losing the
-              conversation (the root layout persists across client navigation). */}
-          <FloatingAssistant />
+          {/* ConfirmProvider sits in the ROOT layout, not the (app) shell, because
+              the setup wizard at /setup is outside that group and guards the
+              bootstrap steps with confirmations too. */}
+          <ConfirmProvider>
+            {children}
+            {/* Mounted once here so the assistant follows the user across pages without losing the
+                conversation (the root layout persists across client navigation). */}
+            <FloatingAssistant />
+          </ConfirmProvider>
         </ThemeProvider>
       </body>
     </html>

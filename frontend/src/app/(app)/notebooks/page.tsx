@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -48,6 +49,7 @@ const PROFILE_META: Record<ResourceProfile, { label: string; description: string
 
 export default function NotebooksPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const { components } = useComponents();
   const jupyterEnabled = components.some((c) => c.key === "jupyterhub" && c.enabled);
   const rstudioEnabled = components.some((c) => c.key === "rstudio" && c.enabled);
@@ -327,7 +329,14 @@ export default function NotebooksPage() {
   }
 
   async function handleStop(sessionId: number) {
-    if (!confirm("Stop this notebook session? Files in /outputs/ will be synced to GCS before shutdown. This may take a few minutes for large files.")) return;
+    const ok = await confirm({
+      title: "Stop this notebook session?",
+      message:
+        "Files in /outputs/ will be synced to GCS before shutdown. This may take a few minutes for large files.",
+      confirmLabel: "Stop",
+      variant: "danger",
+    });
+    if (!ok) return;
     setStoppingSessions((prev) => new Set(prev).add(sessionId));
     try {
       await api.post(`/api/v1/notebooks/sessions/${sessionId}/stop`);

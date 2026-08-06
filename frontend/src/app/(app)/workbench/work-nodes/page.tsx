@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -53,6 +54,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 export default function WorkNodesPage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
 
@@ -360,7 +362,13 @@ export default function WorkNodesPage() {
   }
 
   async function handleStop(nodeId: number) {
-    if (!confirm("Stop this work node? Files in /outputs/ will be synced to GCS. Data in /scratch will be lost.")) return;
+    const ok = await confirm({
+      title: "Stop this work node?",
+      message: "Files in /outputs/ will be synced to GCS. Data in /scratch will be lost.",
+      confirmLabel: "Stop",
+      variant: "danger",
+    });
+    if (!ok) return;
     setStoppingNodes((prev) => new Set(prev).add(nodeId));
     try {
       await api.post(`/api/v1/work-nodes/sessions/${nodeId}/stop`);

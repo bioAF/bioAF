@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -77,6 +78,7 @@ const TONE_CLASSES: Record<"blue" | "amber" | "purple" | "gray", string> = {
 
 export default function CustomPipelineDetailPage() {
   const router = useRouter();
+  const confirm = useConfirm();
   const params = useParams();
   const searchParams = useSearchParams();
   const pipelineId = Number(params.id);
@@ -292,7 +294,12 @@ export default function CustomPipelineDetailPage() {
 
   async function handleDeprecate(versionId: number) {
     if (!pipeline) return;
-    if (!confirm("Deprecate this version? It will no longer be launchable.")) return;
+    const ok = await confirm({
+      title: "Deprecate this version?",
+      message: "It will no longer be launchable.",
+      confirmLabel: "Deprecate",
+    });
+    if (!ok) return;
     try {
       await api.post(
         `/api/v1/custom-pipelines/${pipeline.id}/versions/${versionId}/deprecate`,

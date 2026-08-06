@@ -1,5 +1,6 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
@@ -267,6 +268,7 @@ function PublicationCard({
 
 export default function CellxgenePage() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [publications, setPublications] = useState<CellxgenePublicationResponse[]>([]);
   const [experiments, setExperiments] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -331,7 +333,13 @@ export default function CellxgenePage() {
   };
 
   const handleUnpublish = async (id: number) => {
-    if (!confirm("Unpublish this dataset? The cellxgene viewer will be shut down.")) return;
+    const ok = await confirm({
+      title: "Unpublish this dataset?",
+      message: "The cellxgene viewer will be shut down.",
+      confirmLabel: "Unpublish",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       await api.delete(`/api/cellxgene/${id}`);
       fetchPublications();

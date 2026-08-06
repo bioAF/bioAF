@@ -1,10 +1,12 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 export function SSHKeyTab() {
   const [sshKey, setSSHKey] = useState<{ configured: boolean; public_key: string | null } | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
@@ -23,7 +25,17 @@ export function SSHKeyTab() {
   }
 
   async function handleGenerate() {
-    if (sshKey?.configured && !confirm("This will replace your existing SSH key. Continue?")) return;
+    // Only gate when there is actually a key to lose: the short-circuit here
+    // matches the original `configured && !confirm(...)` exactly.
+    if (sshKey?.configured) {
+      const ok = await confirm({
+        title: "Replace your existing SSH key?",
+        message: "This cannot be undone.",
+        confirmLabel: "Replace",
+        variant: "danger",
+      });
+      if (!ok) return;
+    }
     setGenerating(true);
     setMessage("");
     try {
