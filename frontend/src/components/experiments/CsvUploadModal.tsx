@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 
@@ -232,333 +233,21 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
     ...Object.values(columnMappings).filter((v) => v !== "skip" && !v.startsWith("custom:") && !v.startsWith("existing:")),
   ]);
 
+  const title =
+    step === "select"
+      ? "Import Samples"
+      : step === "preview"
+        ? "Map Unknown Columns"
+        : "Import Complete";
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b flex justify-between items-center">
-          <h2 className="text-lg font-semibold">
-            {step === "select" && "Import Samples"}
-            {step === "preview" && "Map Unknown Columns"}
-            {step === "done" && "Import Complete"}
-          </h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
-            &times;
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* Step 1: Source selection */}
-          {step === "select" && (
-            <div className="space-y-4">
-              {/* Source toggle */}
-              <div className="flex border-b">
-                <button
-                  type="button"
-                  onClick={() => { setSource("csv"); setError(""); }}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                    source === "csv"
-                      ? "border-bioaf-600 text-bioaf-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  CSV File
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSource("gsheet"); setError(""); }}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                    source === "gsheet"
-                      ? "border-bioaf-600 text-bioaf-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
-                  }`}
-                >
-                  Google Sheet
-                </button>
-              </div>
-
-              {source === "csv" && (
-                <>
-                  <p className="text-sm text-gray-600">
-                    Upload a CSV or TSV file to bulk-create samples. Your CSV should include a
-                    header row with column names matching the fields below.
-                  </p>
-
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-medium text-gray-700">Expected CSV Format</h3>
-                      <button
-                        onClick={() => api.download(`/api/experiments/${experimentId}/samples/csv-template`)}
-                        className="text-xs text-bioaf-600 hover:underline"
-                      >
-                        Download template CSV
-                      </button>
-                    </div>
-                    <div className="overflow-x-auto border rounded-md">
-                      <table className="min-w-full text-xs">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            {SAMPLE_FIELDS.map((f) => (
-                              <th scope="col" key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
-                                {f.value}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr className="text-gray-500 italic">
-                            {SAMPLE_FIELDS.map((f) => (
-                              <td key={f.value} className="px-2 py-1 whitespace-nowrap">
-                                {EXAMPLE_VALUES[f.value] ?? ""}
-                              </td>
-                            ))}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      All columns are optional. Unrecognized columns will prompt you to map or skip them.
-                    </p>
-                  </div>
-
-                  {/* `sr-only` rather than `hidden` on the input below: the
-                      label was already click-to-browse for a mouse, but
-                      display:none kept the input out of the tab order, so there
-                      was no keyboard path to the picker. */}
-                  <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]">
-                    <div className="text-center">
-                      {loading ? (
-                        <p className="text-sm text-gray-500">Analyzing file...</p>
-                      ) : (
-                        <>
-                          <p className="text-sm font-medium text-gray-700">
-                            Click to select a CSV file
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            Supports .csv, .tsv, and .txt
-                          </p>
-                        </>
-                      )}
-                    </div>
-                    <input
-                      type="file"
-                      accept=".csv,.tsv,.txt"
-                      className="sr-only"
-                      aria-label="Select a CSV file"
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
-                      }}
-                      disabled={loading}
-                    />
-                  </label>
-                </>
-              )}
-
-              {source === "gsheet" && (
-                <>
-                  <p className="text-sm text-gray-600">
-                    Import samples directly from a Google Sheet. The sheet must be shared with
-                    the bioAF reader account (see Settings &gt; Integrations &gt; GCP).
-                  </p>
-
-                  <div>
-                    <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">
-                      Google Sheets URL
-                    </label>
-                    <input id="google-sheets-url"
-                      type="url"
-                      value={sheetUrl}
-                      onChange={(e) => setSheetUrl(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleSheetPreview();
-                        }
-                      }}
-                      placeholder="https://docs.google.com/spreadsheets/d/..."
-                      className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-bioaf-500 focus:border-bioaf-500"
-                      autoFocus
-                    />
-                  </div>
-
-                  <p className="text-xs text-gray-500">
-                    The first row should contain column headers. Data rows start from row 2.
-                    Unrecognized columns will prompt you to map or skip them.
-                  </p>
-
-                  <button
-                    onClick={handleSheetPreview}
-                    disabled={loading || !sheetUrl.trim()}
-                    className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-                  >
-                    {loading ? "Reading sheet..." : "Import from Sheet"}
-                  </button>
-                </>
-              )}
-
-              {error && (
-                <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 2: Map unknown columns */}
-          {step === "preview" && preview && (
-            <div className="space-y-6">
-              <div>
-                <p className="text-sm text-gray-600 mb-2">
-                  Found {preview.total_rows} row{preview.total_rows !== 1 ? "s" : ""}.{" "}
-                  {preview.recognized_columns.length} column{preview.recognized_columns.length !== 1 ? "s" : ""} recognized,{" "}
-                  {preview.unknown_columns.length} need mapping.
-                </p>
-              </div>
-
-              {preview.recognized_columns.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Recognized Columns</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {preview.recognized_columns.map((col) => (
-                      <span
-                        key={col.csv_header}
-                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
-                      >
-                        {col.csv_header} &rarr; {col.mapped_to}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <h3 className="text-sm font-medium text-gray-700 mb-3">Unknown Columns</h3>
-                <p className="text-xs text-gray-500 mb-3">
-                  For each unknown column, choose to map it to an existing sample field,
-                  accept it as a custom field, or skip it.
-                </p>
-                <div className="space-y-3">
-                  {preview.unknown_columns.map((col) => (
-                    <div key={col} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
-                      <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
-                        {col}
-                      </span>
-                      <span className="text-gray-500">&rarr;</span>
-                      <select
-                        aria-label={`Map column ${col} to`}
-                        value={columnMappings[col] ?? "skip"}
-                        onChange={(e) => handleMappingChange(col, e.target.value)}
-                        className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5"
-                      >
-                        <option value="skip">Skip this column</option>
-                        <option value={`custom:${col}`}>Add as new custom field &quot;{col}&quot;</option>
-                        {existingCustomFields.length > 0 && (
-                          <optgroup label="Map to existing custom field">
-                            {existingCustomFields.map((cf) => (
-                              <option key={`cf:${cf}`} value={`existing:${cf}`}>
-                                {cf}
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        <optgroup label="Map to sample field">
-                          {SAMPLE_FIELDS.filter(
-                            (f) => !usedFields.has(f.value) || columnMappings[col] === f.value
-                          ).map((f) => (
-                            <option key={f.value} value={f.value}>
-                              {f.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {preview.preview_rows.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">
-                    Preview (first {preview.preview_rows.length} rows)
-                  </h3>
-                  <div className="overflow-x-auto border rounded-md">
-                    <table className="min-w-full text-xs">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          {Object.keys(preview.preview_rows[0]).map((key) => (
-                            <th scope="col" key={key} className="px-3 py-2 text-left font-medium text-gray-600">
-                              {key}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {preview.preview_rows.map((row, i) => (
-                          <tr key={i} className="border-t">
-                            {Object.values(row).map((val, j) => (
-                              <td key={j} className="px-3 py-1.5 text-gray-700">
-                                {val != null ? String(val) : ""}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {preview.errors.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
-                  <p className="text-sm font-medium text-amber-800 mb-1">Parse Warnings</p>
-                  <ul className="text-xs text-amber-700 list-disc list-inside">
-                    {preview.errors.map((err, i) => (
-                      <li key={i}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {error && (
-                <div className="bg-red-50 border border-red-200 rounded-md p-3">
-                  <p className="text-sm text-red-700">{error}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Step 3: Results */}
-          {step === "done" && result && (
-            <div className="space-y-4">
-              <div className={`rounded-md p-4 ${result.error_count > 0 ? "bg-amber-50 border border-amber-200" : "bg-green-50 border border-green-200"}`}>
-                <p className={`text-sm font-medium ${result.error_count > 0 ? "text-amber-800" : "text-green-800"}`}>
-                  Created {result.created_count} sample{result.created_count !== 1 ? "s" : ""}
-                  {result.error_count > 0 && ` with ${result.error_count} error${result.error_count !== 1 ? "s" : ""}`}
-                </p>
-              </div>
-
-              {result.custom_fields_created.length > 0 && (
-                <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
-                  <p className="text-sm text-blue-800">
-                    Custom fields created: {result.custom_fields_created.join(", ")}
-                  </p>
-                </div>
-              )}
-
-              {result.errors.length > 0 && (
-                <div>
-                  <p className="text-sm font-medium text-gray-700 mb-1">Errors</p>
-                  <ul className="text-xs text-red-700 list-disc list-inside bg-red-50 rounded-md p-3">
-                    {result.errors.map((err, i) => (
-                      <li key={i}>{err}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
+    <Modal
+      open
+      title={title}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
           {step === "preview" && (
             <>
               <button
@@ -599,8 +288,318 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
               Cancel
             </button>
           )}
+        </>
+      }
+    >
+      {/* Step 1: Source selection */}
+      {step === "select" && (
+        <div className="space-y-4">
+          {/* Source toggle */}
+          <div className="flex border-b">
+            <button
+              type="button"
+              onClick={() => { setSource("csv"); setError(""); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                source === "csv"
+                  ? "border-bioaf-600 text-bioaf-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              CSV File
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSource("gsheet"); setError(""); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+                source === "gsheet"
+                  ? "border-bioaf-600 text-bioaf-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Google Sheet
+            </button>
+          </div>
+
+          {source === "csv" && (
+            <>
+              <p className="text-sm text-gray-600">
+                Upload a CSV or TSV file to bulk-create samples. Your CSV should include a
+                header row with column names matching the fields below.
+              </p>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-medium text-gray-700">Expected CSV Format</h3>
+                  <button
+                    onClick={() => api.download(`/api/experiments/${experimentId}/samples/csv-template`)}
+                    className="text-xs text-bioaf-600 hover:underline"
+                  >
+                    Download template CSV
+                  </button>
+                </div>
+                <div className="overflow-x-auto border rounded-md">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        {SAMPLE_FIELDS.map((f) => (
+                          <th scope="col" key={f.value} className="px-2 py-1.5 text-left font-medium text-gray-600 whitespace-nowrap">
+                            {f.value}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="text-gray-500 italic">
+                        {SAMPLE_FIELDS.map((f) => (
+                          <td key={f.value} className="px-2 py-1 whitespace-nowrap">
+                            {EXAMPLE_VALUES[f.value] ?? ""}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  All columns are optional. Unrecognized columns will prompt you to map or skip them.
+                </p>
+              </div>
+
+              {/* `sr-only` rather than `hidden` on the input below: the
+                  label was already click-to-browse for a mouse, but
+                  display:none kept the input out of the tab order, so there
+                  was no keyboard path to the picker. */}
+              <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-bioaf-400 hover:bg-gray-50 transition-colors focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[rgb(var(--color-focus-ring))]">
+                <div className="text-center">
+                  {loading ? (
+                    <p className="text-sm text-gray-500">Analyzing file...</p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-medium text-gray-700">
+                        Click to select a CSV file
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Supports .csv, .tsv, and .txt
+                      </p>
+                    </>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  accept=".csv,.tsv,.txt"
+                  className="sr-only"
+                  aria-label="Select a CSV file"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
+                  }}
+                  disabled={loading}
+                />
+              </label>
+            </>
+          )}
+
+          {source === "gsheet" && (
+            <>
+              <p className="text-sm text-gray-600">
+                Import samples directly from a Google Sheet. The sheet must be shared with
+                the bioAF reader account (see Settings &gt; Integrations &gt; GCP).
+              </p>
+
+              <div>
+                <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">
+                  Google Sheets URL
+                </label>
+                <input id="google-sheets-url"
+                  type="url"
+                  value={sheetUrl}
+                  onChange={(e) => setSheetUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleSheetPreview();
+                    }
+                  }}
+                  placeholder="https://docs.google.com/spreadsheets/d/..."
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-bioaf-500 focus:border-bioaf-500"
+                  autoFocus
+                />
+              </div>
+
+              <p className="text-xs text-gray-500">
+                The first row should contain column headers. Data rows start from row 2.
+                Unrecognized columns will prompt you to map or skip them.
+              </p>
+
+              <button
+                onClick={handleSheetPreview}
+                disabled={loading || !sheetUrl.trim()}
+                className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {loading ? "Reading sheet..." : "Import from Sheet"}
+              </button>
+            </>
+          )}
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {/* Step 2: Map unknown columns */}
+      {step === "preview" && preview && (
+        <div className="space-y-6">
+          <div>
+            <p className="text-sm text-gray-600 mb-2">
+              Found {preview.total_rows} row{preview.total_rows !== 1 ? "s" : ""}.{" "}
+              {preview.recognized_columns.length} column{preview.recognized_columns.length !== 1 ? "s" : ""} recognized,{" "}
+              {preview.unknown_columns.length} need mapping.
+            </p>
+          </div>
+
+          {preview.recognized_columns.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Recognized Columns</h3>
+              <div className="flex flex-wrap gap-2">
+                {preview.recognized_columns.map((col) => (
+                  <span
+                    key={col.csv_header}
+                    className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"
+                  >
+                    {col.csv_header} &rarr; {col.mapped_to}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Unknown Columns</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              For each unknown column, choose to map it to an existing sample field,
+              accept it as a custom field, or skip it.
+            </p>
+            <div className="space-y-3">
+              {preview.unknown_columns.map((col) => (
+                <div key={col} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
+                  <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
+                    {col}
+                  </span>
+                  <span className="text-gray-500">&rarr;</span>
+                  <select
+                    aria-label={`Map column ${col} to`}
+                    value={columnMappings[col] ?? "skip"}
+                    onChange={(e) => handleMappingChange(col, e.target.value)}
+                    className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                  >
+                    <option value="skip">Skip this column</option>
+                    <option value={`custom:${col}`}>Add as new custom field &quot;{col}&quot;</option>
+                    {existingCustomFields.length > 0 && (
+                      <optgroup label="Map to existing custom field">
+                        {existingCustomFields.map((cf) => (
+                          <option key={`cf:${cf}`} value={`existing:${cf}`}>
+                            {cf}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    <optgroup label="Map to sample field">
+                      {SAMPLE_FIELDS.filter(
+                        (f) => !usedFields.has(f.value) || columnMappings[col] === f.value
+                      ).map((f) => (
+                        <option key={f.value} value={f.value}>
+                          {f.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {preview.preview_rows.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">
+                Preview (first {preview.preview_rows.length} rows)
+              </h3>
+              <div className="overflow-x-auto border rounded-md">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      {Object.keys(preview.preview_rows[0]).map((key) => (
+                        <th scope="col" key={key} className="px-3 py-2 text-left font-medium text-gray-600">
+                          {key}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.preview_rows.map((row, i) => (
+                      <tr key={i} className="border-t">
+                        {Object.values(row).map((val, j) => (
+                          <td key={j} className="px-3 py-1.5 text-gray-700">
+                            {val != null ? String(val) : ""}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {preview.errors.length > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-md p-3">
+              <p className="text-sm font-medium text-amber-800 mb-1">Parse Warnings</p>
+              <ul className="text-xs text-amber-700 list-disc list-inside">
+                {preview.errors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-md p-3">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Step 3: Results */}
+      {step === "done" && result && (
+        <div className="space-y-4">
+          <div className={`rounded-md p-4 ${result.error_count > 0 ? "bg-amber-50 border border-amber-200" : "bg-green-50 border border-green-200"}`}>
+            <p className={`text-sm font-medium ${result.error_count > 0 ? "text-amber-800" : "text-green-800"}`}>
+              Created {result.created_count} sample{result.created_count !== 1 ? "s" : ""}
+              {result.error_count > 0 && ` with ${result.error_count} error${result.error_count !== 1 ? "s" : ""}`}
+            </p>
+          </div>
+
+          {result.custom_fields_created.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
+              <p className="text-sm text-blue-800">
+                Custom fields created: {result.custom_fields_created.join(", ")}
+              </p>
+            </div>
+          )}
+
+          {result.errors.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-1">Errors</p>
+              <ul className="text-xs text-red-700 list-disc list-inside bg-red-50 rounded-md p-3">
+                {result.errors.map((err, i) => (
+                  <li key={i}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
