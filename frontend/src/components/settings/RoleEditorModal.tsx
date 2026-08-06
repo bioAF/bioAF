@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { PermissionEntry, Role } from "@/lib/types";
@@ -107,78 +108,13 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b">
-          <h2 className="text-lg font-semibold">
-            {editingRole ? `Edit Role: ${editingRole.name}` : "Create New Role"}
-          </h2>
-        </div>
-        <div className="p-6 space-y-4">
-          {error && (
-            <div className="p-3 bg-red-50 text-red-700 text-sm rounded border border-red-200">{error}</div>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-              <input id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm"
-                placeholder="e.g. data_analyst"
-              />
-            </div>
-            <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <input id="description"
-                type="text"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full border rounded px-3 py-2 text-sm"
-                placeholder="Optional description"
-              />
-            </div>
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Permissions</h3>
-            <div className="border rounded divide-y max-h-96 overflow-y-auto">
-              {Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([resource, actions]) => {
-                const selected = permissions[resource] || new Set();
-                const allSelected = actions.every((a) => selected.has(a));
-                return (
-                  <div key={resource} className="p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-gray-800">{resource}</span>
-                      <button
-                        type="button"
-                        onClick={() => toggleAllForResource(resource, actions)}
-                        className="text-xs text-bioaf-600 hover:underline"
-                      >
-                        {allSelected ? "Deselect all" : "Select all"}
-                      </button>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {actions.sort().map((action) => (
-                        <label key={action} className="flex items-center gap-1 text-xs cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(action)}
-                            onChange={() => togglePermission(resource, action)}
-                            className="rounded border-gray-300"
-                          />
-                          <span className="text-gray-700">{action}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-        <div className="p-6 border-t flex justify-end gap-3">
+    <Modal
+      open
+      title={editingRole ? `Edit Role: ${editingRole.name}` : "Create New Role"}
+      onClose={onClose}
+      size="xl"
+      footer={
+        <>
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm border rounded hover:bg-gray-50"
@@ -192,8 +128,71 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
           >
             {saving ? "Saving..." : editingRole ? "Save Changes" : "Create Role"}
           </button>
+        </>
+      }
+    >
+      {error && (
+        <div className="p-3 bg-red-50 text-red-700 text-sm rounded border border-red-200">{error}</div>
+      )}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+          <input id="name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm"
+            placeholder="e.g. data_analyst"
+          />
+        </div>
+        <div>
+          <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <input id="description"
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm"
+            placeholder="Optional description"
+          />
         </div>
       </div>
-    </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-gray-700 mb-2">Permissions</h3>
+        <div className="border rounded divide-y max-h-96 overflow-y-auto">
+          {Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([resource, actions]) => {
+            const selected = permissions[resource] || new Set();
+            const allSelected = actions.every((a) => selected.has(a));
+            return (
+              <div key={resource} className="p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-gray-800">{resource}</span>
+                  <button
+                    type="button"
+                    onClick={() => toggleAllForResource(resource, actions)}
+                    className="text-xs text-bioaf-600 hover:underline"
+                  >
+                    {allSelected ? "Deselect all" : "Select all"}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {actions.sort().map((action) => (
+                    <label key={action} className="flex items-center gap-1 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(action)}
+                        onChange={() => togglePermission(resource, action)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-gray-700">{action}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Modal>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature } from "@/lib/literature";
 import type { ExperimentListResponse, ProjectListResponse } from "@/lib/types";
@@ -31,7 +32,6 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
   const [experiments, setExperiments] = useState<NamedItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const titleId = useId();
   const firstFieldRef = useRef<HTMLSelectElement>(null);
 
   const open = paperIds.length > 0;
@@ -79,8 +79,7 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
         if (experimentId) {
           await literature.addAssociation(pid, {
             scope_type: "experiment",
-            scope_id: Number(experimentId),
-          });
+            scope_id: Number(experimentId) });
         } else if (projectId) {
           await literature.addAssociation(pid, {
             scope_type: "project",
@@ -97,27 +96,35 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
     }
   };
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape" && !busy) {
-      e.preventDefault();
-      onClose();
-    }
-  };
 
   return (
-    <div
-      className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50"
-      onKeyDown={onKeyDown}
+    <Modal
+      open
+      title={`Associate ${paperIds.length === 1 ? "paper" : `${paperIds.length} papers`}`}
+      // Busy means an association is in flight; dismissing mid-request would
+      // leave the caller unsure whether it landed. Mirrors the old onKeyDown,
+      // which also ignored Escape while busy.
+      dismissible={!busy}
+      onClose={onClose}
+      size="sm"
+      footer={
+        <>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={performAssociate}
+            disabled={busy || (!projectId && !experimentId)}
+            className="px-3 py-1.5 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm disabled:opacity-50"
+          >
+            {busy ? "Associating..." : "Associate"}
+          </button>
+        </>
+      }
     >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="bg-white rounded-lg shadow-xl p-6 w-96"
-      >
-        <h3 id={titleId} className="font-semibold mb-3">
-          Associate {paperIds.length === 1 ? "paper" : `${paperIds.length} papers`}
-        </h3>
         <div className="mb-3">
           <label htmlFor="project" className="block text-xs text-gray-500 mb-1">Project</label>
           <select id="project"
@@ -157,22 +164,6 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
           </p>
         </div>
         {error && <div className="text-xs text-red-700 mb-2">{error}</div>}
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-50 text-sm"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={performAssociate}
-            disabled={busy || (!projectId && !experimentId)}
-            className="px-3 py-1.5 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm disabled:opacity-50"
-          >
-            {busy ? "Associating..." : "Associate"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
