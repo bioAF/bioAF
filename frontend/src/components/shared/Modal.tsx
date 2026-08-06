@@ -95,10 +95,31 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
         className={`flex max-h-[85vh] w-full ${SIZES[size]} flex-col rounded-lg bg-white shadow-xl`}
       >
-        <div className={hideTitle ? "sr-only" : "border-b border-gray-200 px-6 py-4"}>
+        <div
+          className={
+            hideTitle
+              ? "sr-only"
+              : "flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-4"
+          }
+        >
           <h2 id={titleId} className={hideTitle ? "" : "text-lg font-semibold text-gray-900"}>
             {title}
           </h2>
+          {/* Named, not a bare glyph. Every overlay this replaced hand-rolled a
+              naked &times; with no accessible name, which is how they ended up
+              in the unnamed-button count. Omitted when the dialog cannot be
+              dismissed, because there it would promise an exit that does not
+              exist. */}
+          {dismissible && !hideTitle && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="-mr-1 shrink-0 rounded px-1 text-xl leading-none text-gray-500 hover:text-gray-700"
+            >
+              &times;
+            </button>
+          )}
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-4">{children}</div>
         {footer && (

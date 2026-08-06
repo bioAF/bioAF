@@ -113,6 +113,22 @@ describe("Modal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("offers a close control with a real name, not a bare glyph", () => {
+    // The overlays this replaced each hand-rolled a naked &times; with no
+    // accessible name, which is why they showed up in the unnamed-button count.
+    const onClose = jest.fn();
+    render(<Harness onClose={onClose} />);
+    const close = screen.getByRole("button", { name: "Close" });
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the close control when the dialog is not dismissible", () => {
+    // Such a dialog has its own way out; an X here would contradict it.
+    render(<Harness dismissible={false} />);
+    expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+  });
+
   it("locks body scroll while open and releases it on close", () => {
     const { unmount } = render(<Harness />);
     expect(document.body.style.overflow).toBe("hidden");

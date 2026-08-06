@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { getToken } from "@/lib/auth";
 
@@ -149,150 +150,144 @@ export function ProjectExportModal({ projectId, projectName, isOpen, onClose }: 
   const isLarge = sizeData ? sizeData.total_bytes > 1_073_741_824 : false;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Export Project Data</h2>
-          <button onClick={handleClose} className="text-gray-500 hover:text-gray-600 text-xl leading-none">
-            &times;
-          </button>
-        </div>
-        <p className="text-sm text-gray-600">{projectName}</p>
+    <Modal open title="Export Project Data" onClose={handleClose}>
+      <div className="space-y-4">
+      <p className="text-sm text-gray-600">{projectName}</p>
 
-        {/* Step 1: Options */}
-        {step === "options" && (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeFastq}
-                  onChange={(e) => setIncludeFastq(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-800">Include FASTQ files</span>
-              </label>
-              <p className="text-xs text-gray-500 ml-7">Raw sequencing reads. Can be very large.</p>
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={includeProvenance}
-                  onChange={(e) => setIncludeProvenance(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-800">Include provenance report</span>
-              </label>
-              <p className="text-xs text-gray-500 ml-7">Full audit trail in JSON, Markdown, PDF, and CSV.</p>
+      {/* Step 1: Options */}
+      {step === "options" && (
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeFastq}
+                onChange={(e) => setIncludeFastq(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-sm text-gray-800">Include FASTQ files</span>
+            </label>
+            <p className="text-xs text-gray-500 ml-7">Raw sequencing reads. Can be very large.</p>
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeProvenance}
+                onChange={(e) => setIncludeProvenance(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-sm text-gray-800">Include provenance report</span>
+            </label>
+            <p className="text-xs text-gray-500 ml-7">Full audit trail in JSON, Markdown, PDF, and CSV.</p>
+          </div>
+          {sizeError && <p className="text-sm text-red-600">{sizeError}</p>}
+          <div className="flex justify-end gap-3">
+            <button onClick={handleClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Cancel
+            </button>
+            <button
+              onClick={calculateSize}
+              disabled={sizeLoading}
+              className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {sizeLoading ? "Calculating..." : "Calculate Size"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 2: Size display */}
+      {step === "size" && sizeData && (
+        <div className="space-y-4">
+          <div className="bg-gray-50 rounded-md p-4 space-y-3">
+            <div className="flex justify-between text-sm font-medium">
+              <span>Total size</span>
+              <span>{formatBytes(sizeData.total_bytes)}</span>
             </div>
-            {sizeError && <p className="text-sm text-red-600">{sizeError}</p>}
-            <div className="flex justify-end gap-3">
-              <button onClick={handleClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-                Cancel
+            {sizeData.experiments.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">By experiment</p>
+                {sizeData.experiments.map((exp) => (
+                  <div key={exp.experiment_id} className="flex justify-between text-xs text-gray-600">
+                    <span className="truncate max-w-xs">{exp.name}</span>
+                    <span className="shrink-0 ml-2">{formatBytes(exp.total_bytes)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {isLarge && (
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+              This export is larger than 1 GB. We recommend using &ldquo;Get Download Link&rdquo; instead of downloading
+              directly.
+            </p>
+          )}
+          {downloadError && <p className="text-sm text-red-600">{downloadError}</p>}
+          <div className="flex justify-between gap-3">
+            <button onClick={() => setStep("options")} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Back
+            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={startDirectDownload}
+                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+              >
+                Download Now
               </button>
               <button
-                onClick={calculateSize}
-                disabled={sizeLoading}
-                className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+                onClick={getSignedUrl}
+                className="px-4 py-2 text-sm bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200"
               >
-                {sizeLoading ? "Calculating..." : "Calculate Size"}
+                Get Download Link
               </button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Step 2: Size display */}
-        {step === "size" && sizeData && (
-          <div className="space-y-4">
-            <div className="bg-gray-50 rounded-md p-4 space-y-3">
-              <div className="flex justify-between text-sm font-medium">
-                <span>Total size</span>
-                <span>{formatBytes(sizeData.total_bytes)}</span>
-              </div>
-              {sizeData.experiments.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">By experiment</p>
-                  {sizeData.experiments.map((exp) => (
-                    <div key={exp.experiment_id} className="flex justify-between text-xs text-gray-600">
-                      <span className="truncate max-w-xs">{exp.name}</span>
-                      <span className="shrink-0 ml-2">{formatBytes(exp.total_bytes)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+      {/* Step 3: Download */}
+      {step === "download" && (
+        <div className="space-y-4">
+          {downloading && (
+            <div className="flex flex-col items-center gap-3 py-4">
+              <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-gray-600">Preparing your export...</p>
             </div>
-            {isLarge && (
-              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
-                This export is larger than 1 GB. We recommend using &ldquo;Get Download Link&rdquo; instead of downloading
-                directly.
-              </p>
-            )}
-            {downloadError && <p className="text-sm text-red-600">{downloadError}</p>}
-            <div className="flex justify-between gap-3">
-              <button onClick={() => setStep("options")} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-                Back
-              </button>
+          )}
+          {!downloading && signedUrl && (
+            <div className="space-y-3">
+              <p className="text-sm text-green-700 font-medium">Your download link is ready.</p>
+              <div className="bg-gray-50 rounded p-3 text-xs text-gray-700 break-all font-mono">{signedUrl}</div>
+              <p className="text-xs text-gray-500">This link expires in 24 hours.</p>
               <div className="flex gap-3">
                 <button
-                  onClick={startDirectDownload}
-                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                >
-                  Download Now
-                </button>
-                <button
-                  onClick={getSignedUrl}
+                  onClick={copyLink}
                   className="px-4 py-2 text-sm bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200"
                 >
-                  Get Download Link
+                  {copied ? "Copied!" : "Copy Link"}
                 </button>
+                <a
+                  href={signedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
+                >
+                  Download
+                </a>
               </div>
             </div>
+          )}
+          {!downloading && !signedUrl && !downloadError && (
+            <p className="text-sm text-green-700">Download started. Check your browser&apos;s downloads.</p>
+          )}
+          {downloadError && <p className="text-sm text-red-600">{downloadError}</p>}
+          <div className="flex justify-end">
+            <button onClick={handleClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
+              Close
+            </button>
           </div>
-        )}
-
-        {/* Step 3: Download */}
-        {step === "download" && (
-          <div className="space-y-4">
-            {downloading && (
-              <div className="flex flex-col items-center gap-3 py-4">
-                <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin" />
-                <p className="text-sm text-gray-600">Preparing your export...</p>
-              </div>
-            )}
-            {!downloading && signedUrl && (
-              <div className="space-y-3">
-                <p className="text-sm text-green-700 font-medium">Your download link is ready.</p>
-                <div className="bg-gray-50 rounded p-3 text-xs text-gray-700 break-all font-mono">{signedUrl}</div>
-                <p className="text-xs text-gray-500">This link expires in 24 hours.</p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={copyLink}
-                    className="px-4 py-2 text-sm bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200"
-                  >
-                    {copied ? "Copied!" : "Copy Link"}
-                  </button>
-                  <a
-                    href={signedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700"
-                  >
-                    Download
-                  </a>
-                </div>
-              </div>
-            )}
-            {!downloading && !signedUrl && !downloadError && (
-              <p className="text-sm text-green-700">Download started. Check your browser&apos;s downloads.</p>
-            )}
-            {downloadError && <p className="text-sm text-red-600">{downloadError}</p>}
-            <div className="flex justify-end">
-              <button onClick={handleClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
+        </div>
+      )}
       </div>
-    </div>
+    </Modal>
   );
 }
