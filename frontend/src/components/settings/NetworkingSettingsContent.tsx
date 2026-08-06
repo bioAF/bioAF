@@ -243,7 +243,7 @@ export function NetworkingSettingsContent() {
         <div className="grid grid-cols-2 gap-3">
           <label className="block">
             <span className="text-sm text-gray-700">Hostname</span>
-            <input aria-label="app"
+            <input
               data-testid="hostname-input"
               className="mt-1 w-full border rounded px-2 py-1.5 font-mono"
               value={hostname}
@@ -256,7 +256,7 @@ export function NetworkingSettingsContent() {
           </label>
           <label className="block">
             <span className="text-sm text-gray-700">Domain</span>
-            <input aria-label="acme.com"
+            <input
               data-testid="domain-input"
               className="mt-1 w-full border rounded px-2 py-1.5 font-mono"
               value={domain}

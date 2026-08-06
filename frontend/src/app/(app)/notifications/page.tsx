@@ -89,7 +89,7 @@ export default function NotificationsPage() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <select aria-label="Filter by filter"
+        <select aria-label="Filter notifications"
           value={filter}
           onChange={(e) => { setFilter(e.target.value as "all" | "unread"); setPage(1); }}
           className="border border-gray-300 rounded px-3 py-1.5 text-sm"

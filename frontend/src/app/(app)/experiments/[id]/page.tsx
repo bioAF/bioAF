@@ -649,7 +649,7 @@ function ExperimentDetailPageInner() {
                           className="w-full border rounded px-2 py-1 text-sm"
                         />
                         <div className="min-w-0">
-                          <input aria-label="Value"
+                          <input aria-label="Custom field value"
                             value={cf.field_value}
                             onChange={(e) => setEditCustomFields((prev) => prev.map((f, i) => i === idx ? { ...f, field_value: e.target.value } : f))}
                             placeholder="Value"
@@ -893,7 +893,7 @@ function ExperimentDetailPageInner() {
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-2 py-3 text-center">
-                    <input aria-label="Length"
+                    <input aria-label="Select all samples"
                       type="checkbox"
                       checked={samples.length > 0 && selectedSampleIds.size === samples.length}
                       onChange={toggleSelectAll}
@@ -919,6 +919,7 @@ function ExperimentDetailPageInner() {
                     <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
+                        aria-label={`Select sample ${s.external_id ?? s.id}`}
                         checked={selectedSampleIds.has(s.id)}
                         onChange={() => toggleSampleSelection(s.id)}
                         className="rounded border-gray-300"

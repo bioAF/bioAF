@@ -660,7 +660,7 @@ export function FileBrowser({
             <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className="px-4 py-3 w-10">
-                  <input aria-label="Length"
+                  <input aria-label="Select all files"
                     type="checkbox"
                     checked={files.length > 0 && selectedIds.size === files.length}
                     onChange={toggleSelectAll}
@@ -701,6 +701,7 @@ export function FileBrowser({
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
+                      aria-label={`Select ${file.filename}`}
                       checked={selectedIds.has(file.id)}
                       onChange={() => toggleSelect(file.id)}
                     />

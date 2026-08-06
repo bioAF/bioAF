@@ -487,7 +487,7 @@ export default function InfraBackupPage() {
                                   <option value="scheduled">Pick a time</option>
                                 </select>
                                 {pgFirstRun !== "now" && (
-                                  <input aria-label="Pg first run"
+                                  <input aria-label="First run date and time"
                                     type="datetime-local"
                                     value={pgFirstRun}
                                     onChange={(e) => setPgFirstRun(e.target.value)}

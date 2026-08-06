@@ -518,7 +518,7 @@ function LitReviewThresholdSection() {
         more candidates.
       </p>
       <div className="flex items-center gap-2">
-        <input aria-label="Input"
+        <input aria-label="Relevance lower bound"
           type="number"
           min={0}
           max={1}

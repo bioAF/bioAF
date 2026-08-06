@@ -495,7 +495,7 @@ function VariableInput({
         </span>
       </label>
       {variable.variable_type === "boolean" ? (
-        <label htmlFor="onchange-e-target-checked-true-false" className="inline-flex items-center gap-2 text-sm">
+        <label className="inline-flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={value.toLowerCase() === "true"}
@@ -504,7 +504,8 @@ function VariableInput({
           {value.toLowerCase() === "true" ? "true" : "false"}
         </label>
       ) : variable.variable_type === "number" ? (
-        <input id="onchange-e-target-checked-true-false"
+        <input
+          aria-label={variable.variable_name}
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -517,7 +518,8 @@ function VariableInput({
           onChange={onChange}
         />
       ) : (
-        <input aria-label="Value"
+        <input
+          aria-label={variable.variable_name}
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}

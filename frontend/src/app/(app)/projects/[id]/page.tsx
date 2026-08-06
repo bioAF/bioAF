@@ -538,7 +538,8 @@ export default function ProjectDetailPage() {
                         <td className="px-4 py-2">
                           <input
                             type="checkbox"
-                            checked={selectedSampleIds.has(s.id)}
+                            aria-label={`Select sample ${s.external_id ?? s.id}`}
+                        checked={selectedSampleIds.has(s.id)}
                             onChange={() => toggleSample(s.id)}
                             className="rounded"
                           />

@@ -132,7 +132,7 @@ export function UrlImportReferenceForm({
               (auto, override to keep your own scheme)
             </span>
           </span>
-          <input aria-label="v1"
+          <input
             type="text"
             value={version}
             onChange={(e) => setVersion(e.target.value)}
@@ -178,7 +178,7 @@ export function UrlImportReferenceForm({
 
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Source URL *</span>
-        <input aria-label="https://ftp.ebi.ac.uk/.../gencode.v45.annotation.gtf.gz"
+        <input
           type="url"
           value={sourceUrl}
           onChange={(e) => handleUrlChange(e.target.value)}
@@ -190,7 +190,7 @@ export function UrlImportReferenceForm({
 
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Source MD5 URL (optional)</span>
-        <input aria-label="https://ftp.example/MD5SUMS"
+        <input
           type="url"
           value={sourceMd5Url}
           onChange={(e) => setSourceMd5Url(e.target.value)}

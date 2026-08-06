@@ -181,7 +181,7 @@ export function UploadReferenceForm({
               (auto, override to keep your own scheme)
             </span>
           </span>
-          <input aria-label="v1"
+          <input
             type="text"
             value={version}
             onChange={(e) => setVersion(e.target.value)}
@@ -227,7 +227,7 @@ export function UploadReferenceForm({
 
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Source URL (optional)</span>
-        <input aria-label="https://www.gencodegenes.org/"
+        <input
           type="url"
           value={sourceUrl}
           onChange={(e) => setSourceUrl(e.target.value)}
