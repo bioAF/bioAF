@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
@@ -28,6 +28,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { ready: backendReady } = useBackendReady();
   const { loading: permissionsLoading } = usePermissions();
   const { loading: componentsLoading } = useComponents();
+
+  // Below `md` the sidebar is off-canvas, so the shell owns whether it is
+  // showing: the control that opens it lives in the Header, which is the
+  // sidebar's sibling rather than its parent.
+  const [navOpen, setNavOpen] = useState(false);
 
   // Redirect (not render-gate) so there is no server/client hydration mismatch:
   // isAuthenticated() reads localStorage, which is client-only. This matches the
@@ -57,9 +62,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     // and no announcement anywhere.
     <ToastProvider>
       <div className="flex h-screen">
-        <Sidebar />
+        <Sidebar mobileOpen={navOpen} onMobileClose={() => setNavOpen(false)} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Header />
+          <Header onOpenNav={() => setNavOpen(true)} navOpen={navOpen} />
           {children}
         </div>
       </div>

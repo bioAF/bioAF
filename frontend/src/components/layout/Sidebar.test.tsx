@@ -6,14 +6,21 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("next/link", () => {
+  // Forwards the rest of the props (onClick above all): the real next/link
+  // does, and the drawer closes itself from a link's click.
   return function MockLink({
     children,
     href,
+    ...rest
   }: {
     children: React.ReactNode;
     href: string;
-  }) {
-    return <a href={href}>{children}</a>;
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+    return (
+      <a href={href} {...rest}>
+        {children}
+      </a>
+    );
   };
 });
 
@@ -545,5 +552,92 @@ describe("Sidebar collapse persistence", () => {
 
     fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
+  });
+});
+
+// The shell, not the pages, is what breaks a narrow screen: measured on the
+// deployed demo at 375px, no route overflowed and no table was clipped, but the
+// fixed w-64 sidebar took 256px and left 119px for everything else. Below md the
+// sidebar becomes an off-canvas drawer, so the page gets the full width and the
+// nav is one tap away.
+describe("Sidebar as a drawer on a narrow screen", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("is off-canvas below md and back in the page flow above it", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("fixed");
+    expect(sidebar.className).toContain("-translate-x-full");
+    expect(sidebar.className).toContain("md:static");
+    expect(sidebar.className).toContain("md:translate-x-0");
+  });
+
+  test("slides into view when opened", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("translate-x-0");
+    expect(sidebar.className).not.toContain("-translate-x-full");
+  });
+
+  test("covers the page with a scrim only while it is open", () => {
+    const { rerender } = render(<Sidebar />);
+    expect(screen.queryByTestId("sidebar-scrim")).not.toBeInTheDocument();
+
+    rerender(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+    expect(screen.getByTestId("sidebar-scrim")).toBeInTheDocument();
+  });
+
+  test("closes when the scrim is tapped", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.click(screen.getByTestId("sidebar-scrim"));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("closes on Escape, so the keyboard has the same way out as the pointer", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("closes once the user has gone somewhere", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("link", { name: /Dashboard/ }));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("takes the keyboard while it is open, and names itself", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("role", "dialog");
+    expect(sidebar).toHaveAccessibleName();
+    expect(sidebar.contains(document.activeElement)).toBe(true);
+  });
+
+  test("is not a dialog when it is just the page's sidebar", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).not.toHaveAttribute("role", "dialog");
   });
 });

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 const mockReplace = jest.fn();
 const mockPush = jest.fn();
@@ -8,8 +8,22 @@ jest.mock("next/navigation", () => ({
 
 let authed = true;
 jest.mock("@/lib/auth", () => ({ isAuthenticated: () => authed }));
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <nav data-testid="app-sidebar" /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <header data-testid="app-header" /> }));
+// The stand-ins carry the drawer wiring: the header asks for the nav, the
+// sidebar reports whether it is open and can close itself.
+jest.mock("@/components/layout/Sidebar", () => ({
+  Sidebar: ({ mobileOpen, onMobileClose }: { mobileOpen?: boolean; onMobileClose?: () => void }) => (
+    <nav data-testid="app-sidebar" data-mobile-open={mobileOpen ? "true" : "false"}>
+      <button onClick={onMobileClose}>close nav</button>
+    </nav>
+  ),
+}));
+jest.mock("@/components/layout/Header", () => ({
+  Header: ({ onOpenNav }: { onOpenNav?: () => void }) => (
+    <header data-testid="app-header">
+      <button onClick={onOpenNav}>open nav</button>
+    </header>
+  ),
+}));
 
 let backendReady = true;
 let permissionsLoading = false;
@@ -91,5 +105,30 @@ describe("(app) route-group layout", () => {
       </AppLayout>
     );
     expect(screen.getByTestId("app-loading")).toBeInTheDocument();
+  });
+});
+
+describe("the off-canvas navigation the narrow screens use", () => {
+  it("starts closed", () => {
+    render(
+      <AppLayout>
+        <main data-testid="page-content">hello</main>
+      </AppLayout>
+    );
+    expect(screen.getByTestId("app-sidebar")).toHaveAttribute("data-mobile-open", "false");
+  });
+
+  it("opens when the header asks for it, and closes when the sidebar says so", () => {
+    render(
+      <AppLayout>
+        <main data-testid="page-content">hello</main>
+      </AppLayout>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "open nav" }));
+    expect(screen.getByTestId("app-sidebar")).toHaveAttribute("data-mobile-open", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "close nav" }));
+    expect(screen.getByTestId("app-sidebar")).toHaveAttribute("data-mobile-open", "false");
   });
 });

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { useCapabilities, type CapabilityFlag } from "@/hooks/useCapabilities";
 import { useComponents } from "@/hooks/useComponents";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
@@ -57,13 +59,16 @@ function CollapseToggleIcon({ collapsed }: { collapsed: boolean }) {
 function SidebarChildItem({
   child,
   isActive,
+  onNavigate,
 }: {
   child: NavChild;
   isActive: boolean;
+  onNavigate?: () => void;
 }) {
   return (
     <Link
       href={child.path}
+      onClick={onNavigate}
       className={`block pl-10 pr-3 py-1.5 rounded-md text-sm transition-colors ${
         isActive
           ? "bg-bioaf-700 text-white"
@@ -80,11 +85,13 @@ function SidebarSection({
   pathname,
   expanded,
   onToggle,
+  onNavigate,
 }: {
   section: NavSection;
   pathname: string;
   expanded: boolean;
   onToggle: () => void;
+  onNavigate?: () => void;
 }) {
   const isExpandable = !!section.children;
   const isSectionActive = sectionIsActive(section, pathname);
@@ -93,6 +100,7 @@ function SidebarSection({
     return (
       <Link
         href={section.path!}
+        onClick={onNavigate}
         className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
           isSectionActive
             ? "bg-bioaf-700 text-white"
@@ -128,6 +136,7 @@ function SidebarSection({
               key={child.path}
               child={child}
               isActive={isChildActive(pathname, child, section.children!)}
+              onNavigate={onNavigate}
             />
           ))}
         </div>
@@ -136,7 +145,25 @@ function SidebarSection({
   );
 }
 
-export function Sidebar() {
+/**
+ * Below `md` the sidebar leaves the page flow and becomes a drawer.
+ *
+ * Measured on the deployed demo at 375px with real data: no route overflowed
+ * and no table was clipped, so the pages were never the problem. This element
+ * was: a fixed `w-64` with no breakpoint takes 256px of a 375px screen and
+ * leaves 119px for the page. Off-canvas, the page gets all of it, and the nav
+ * is one tap on the header's control.
+ *
+ * `mobileOpen` is owned by the (app) layout, because the control that opens it
+ * lives in the Header, which is the sidebar's sibling.
+ */
+export function Sidebar({
+  mobileOpen = false,
+  onMobileClose,
+}: {
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
+} = {}) {
   const pathname = usePathname();
   const { canAccess, roleName, loading } = usePermissions();
   const { has: hasCapability } = useCapabilities();
@@ -280,9 +307,33 @@ export function Sidebar() {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "true" : "false");
   }, [collapsed]);
 
+  // Open over the page, it behaves as a dialog: the keyboard stays inside it,
+  // Escape closes it, and following a link closes it rather than leaving the
+  // drawer covering the page the user just asked for.
+  const drawerRef = useFocusTrap<HTMLElement>(mobileOpen);
+  useDismissOnEscape(mobileOpen, () => onMobileClose?.());
+  const closeDrawer = () => onMobileClose?.();
+
   return (
+    <>
+    {mobileOpen && (
+      <div
+        data-testid="sidebar-scrim"
+        onClick={closeDrawer}
+        aria-hidden="true"
+        className="fixed inset-0 z-30 bg-black/50 md:hidden"
+      />
+    )}
     <aside
-      className={`${collapsed ? "w-12" : "w-64"} bg-gray-900 text-white min-h-screen flex flex-col transition-[width] duration-150 dark:border-r dark:border-gray-800`}
+      ref={drawerRef}
+      tabIndex={mobileOpen ? -1 : undefined}
+      role={mobileOpen ? "dialog" : undefined}
+      aria-modal={mobileOpen ? true : undefined}
+      aria-label={mobileOpen ? "Main navigation" : undefined}
+      className={`${collapsed ? "w-12" : "w-64"} ${
+        mobileOpen ? "translate-x-0" : "-translate-x-full"
+      } fixed inset-y-0 left-0 z-40 md:static md:z-auto md:translate-x-0 bg-gray-900 text-white min-h-screen flex flex-col transition-transform md:transition-[width] duration-150 dark:border-r dark:border-gray-800`}
+      id="app-sidebar"
       data-testid="sidebar"
       data-collapsed={collapsed ? "true" : "false"}
     >
@@ -355,6 +406,7 @@ export function Sidebar() {
               pathname={pathname}
               expanded={expandedSection === section.label}
               onToggle={() => toggleSection(section.label)}
+              onNavigate={closeDrawer}
             />
           ))}
         </nav>
@@ -390,6 +442,7 @@ export function Sidebar() {
               <Link
                 key={section.label}
                 href={section.path!}
+                onClick={closeDrawer}
                 aria-label={section.label}
                 title={section.label}
                 className={cls}
@@ -405,5 +458,6 @@ export function Sidebar() {
         <div className="text-xs text-gray-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>
+    </>
   );
 }
