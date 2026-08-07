@@ -16,8 +16,8 @@ function component(key: string, category: string, enabled: boolean) {
 }
 
 beforeEach(() => {
-  mockPermissions.mockReturnValue({ canAccess: () => true, roleName: "admin", loading: false });
-  mockComponents.mockReturnValue({ components: [component("nextflow_k8s", "pipeline_orchestration", true)], loading: false });
+  mockPermissions.mockReturnValue({ canAccess: () => true, roleName: "admin", loading: false, failed: false });
+  mockComponents.mockReturnValue({ components: [component("nextflow_k8s", "pipeline_orchestration", true)], loading: false, failed: false });
   mockCapabilities.mockReturnValue({ has: () => true });
   mockBeta.mockReturnValue({ available: false, flags: {} });
 });
@@ -78,4 +78,54 @@ test("a section the user cannot reach at all has no destination", () => {
   mockPermissions.mockReturnValue({ canAccess: () => false, roleName: "viewer", loading: false });
   const { result } = renderHook(() => useVisibleNavSections());
   expect(result.current.firstChildPath("Settings")).toBeNull();
+});
+
+test("hides a component-gated section when the component really is not installed", () => {
+  mockComponents.mockReturnValue({
+    components: [component("nextflow_k8s", "pipeline_orchestration", false)],
+    loading: false,
+    failed: false,
+  });
+  const { result } = renderHook(() => useVisibleNavSections());
+  expect(result.current.sections.map((s) => s.label)).not.toContain("Pipelines");
+});
+
+/**
+ * Measured live on the deployed app: a 500 on /api/v1/infrastructure/stack/components
+ * removed the entire Pipelines section from the sidebar, with no error anywhere
+ * on screen, so the user concluded the feature was not installed.
+ *
+ * A failed check is not a negative answer. The gate already declines to hide
+ * anything while components are LOADING, for exactly this reason; a failure is
+ * the same state of ignorance and gets the same treatment. The page behind the
+ * link reports its own error if the feature really is absent, which is a far
+ * better outcome than a silently shorter menu.
+ */
+test("keeps a component-gated section visible when the component check failed", () => {
+  mockComponents.mockReturnValue({ components: [], loading: false, failed: true });
+  const { result } = renderHook(() => useVisibleNavSections());
+  expect(result.current.sections.map((s) => s.label)).toContain("Pipelines");
+});
+
+test("keeps component-gated children visible when the component check failed", () => {
+  mockComponents.mockReturnValue({ components: [], loading: false, failed: true });
+  const { result } = renderHook(() => useVisibleNavSections());
+  const results = result.current.sections.find((s) => s.label === "Results");
+  expect(results!.children!.map((c) => c.label)).toContain("QC Dashboards");
+});
+
+/**
+ * Permissions are the one gate that must NOT open on failure: granting what we
+ * cannot verify is a security defect. Instead the hook reports the failure so
+ * the shell can say so rather than rendering an empty account.
+ */
+test("reports a permission-load failure instead of returning a usable empty nav", () => {
+  mockPermissions.mockReturnValue({
+    canAccess: () => false,
+    roleName: "",
+    loading: false,
+    failed: true,
+  });
+  const { result } = renderHook(() => useVisibleNavSections());
+  expect(result.current.permissionsFailed).toBe(true);
 });

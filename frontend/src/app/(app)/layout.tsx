@@ -6,9 +6,10 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { isAuthenticated } from "@/lib/auth";
 import { useBackendReady } from "@/hooks/useBackendReady";
-import { usePermissions } from "@/hooks/usePermissions";
-import { useComponents } from "@/hooks/useComponents";
+import { usePermissions, clearPermissionsCache } from "@/hooks/usePermissions";
+import { useComponents, invalidateComponentCache } from "@/hooks/useComponents";
 import { ToastProvider } from "@/components/shared/Toast";
+import { BootSplash } from "@/components/layout/BootSplash";
 
 /**
  * Shared shell for every authenticated page. It mounts the Sidebar + Header ONCE
@@ -25,8 +26,8 @@ import { ToastProvider } from "@/components/shared/Toast";
  */
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { ready: backendReady } = useBackendReady();
-  const { loading: permissionsLoading } = usePermissions();
+  const { ready: backendReady, unreachable: backendUnreachable, retryNow } = useBackendReady();
+  const { loading: permissionsLoading, failed: permissionsFailed } = usePermissions();
   const { loading: componentsLoading } = useComponents();
 
   // Below `md` the sidebar is off-canvas, so the shell owns whether it is
@@ -41,18 +42,45 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated()) router.replace("/login");
   }, [router]);
 
+  // A boot dependency that failed is not the same as one still loading, and the
+  // splash has to say which. Measured on the deployed app 2026-08-07: a 500 on
+  // `/api/health/ready` held this splash forever with zero focusable elements and
+  // zero live regions, so the entire UI was the string "Loading bioAF...".
+  //
+  // The installed-component check is deliberately absent from `bootFailed`: it
+  // only decides which optional sections appear, so failing to read it is no
+  // reason to withhold the product. useVisibleNavSections keeps those sections
+  // visible instead.
+  const booting = !backendReady || permissionsLoading || componentsLoading;
+  const bootFailed = backendUnreachable || permissionsFailed;
+
+  /** Retry from the splash. Safe: it covers the whole app, so nothing is discarded. */
+  const retryBoot = () => {
+    if (backendUnreachable) {
+      retryNow();
+      return;
+    }
+    // A cached load failed. Clear it and remount the tree from scratch, because
+    // the hooks that already failed will not re-run their effects on their own.
+    clearPermissionsCache();
+    invalidateComponentCache();
+    window.location.reload();
+  };
+
   // One full-screen splash while the app boots, instead of a flash of empty shell.
-  if (!backendReady || permissionsLoading || componentsLoading) {
+  if (booting || bootFailed) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900" data-testid="app-loading">
-        <div className="text-center">
-          <div className="text-3xl font-bold text-bioaf-400 mb-4">bioAF</div>
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-bioaf-400 border-t-transparent" />
-          {/* gray-400, not gray-500: this splash sits on bg-gray-900, where the
-              lighter shade is the readable one (~7:1 against ~3.7:1). */}
-          <p className="mt-3 text-sm text-gray-400">Loading bioAF...</p>
-        </div>
-      </div>
+      <BootSplash
+        failed={bootFailed}
+        message={
+          backendUnreachable
+            ? "bioAF cannot be reached right now. It keeps trying, and the technical detail is in the application logs."
+            : permissionsFailed
+              ? "Your permissions could not be loaded, so nothing is shown yet. The technical detail is in the application logs."
+              : undefined
+        }
+        onRetry={retryBoot}
+      />
     );
   }
 

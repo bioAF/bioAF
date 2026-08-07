@@ -45,7 +45,11 @@ function tsxFiles(dir: string): string[] {
 const DARK_SURFACES = [
   "components/layout/Sidebar.tsx",
   "components/layout/NavItem.tsx",
-  "app/(app)/layout.tsx", // the bg-gray-900 boot splash
+  // The bg-gray-900 boot splash. It used to be inline in `app/(app)/layout.tsx`,
+  // which is what this list named until the splash grew a failure state and moved
+  // into its own component; the layout has no grey text left and no longer needs
+  // an exemption.
+  "components/layout/BootSplash.tsx",
 ];
 
 // Pairings measured on a rendered page (composited, so alpha layers are real

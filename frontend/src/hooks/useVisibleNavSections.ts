@@ -18,16 +18,24 @@ import { navConfig, type NavSection, type ComponentGate, type PermissionRef } fr
  * menu and a page start disagreeing about what exists.
  */
 export function useVisibleNavSections() {
-  const { canAccess, roleName, loading } = usePermissions();
+  const { canAccess, roleName, loading, failed: permissionsFailed } = usePermissions();
   const { has: hasCapability } = useCapabilities();
-  const { components, loading: componentsLoading } = useComponents();
+  const { components, loading: componentsLoading, failed: componentsFailed } = useComponents();
   const { available: betaAvailable, flags: betaFlags } = useBetaFeatures();
 
   const passesComponentGate = useCallback(
     (gate?: ComponentGate): boolean => {
       if (!gate) return true;
-      // While components are loading, show everything to avoid flash-of-missing-nav
-      if (componentsLoading) return true;
+      // While components are loading, show everything to avoid flash-of-missing-nav.
+      //
+      // A FAILED check gets the same treatment, and that is the point. Measured
+      // on the deployed app 2026-08-07: a 500 on the stack/components endpoint
+      // deleted the whole Pipelines section from the sidebar, with no error
+      // anywhere on screen, so the user concluded the feature was not installed.
+      // A failed check is not a negative answer; it is the same ignorance as
+      // still loading. If the feature really is absent, the page behind the link
+      // says so, which is a far better outcome than a silently shorter menu.
+      if (componentsLoading || componentsFailed) return true;
       if (gate.category) {
         return components.some((c) => c.category === gate.category && c.enabled);
       }
@@ -36,7 +44,7 @@ export function useVisibleNavSections() {
       }
       return true;
     },
-    [components, componentsLoading],
+    [components, componentsLoading, componentsFailed],
   );
 
   // A nav item passes when its single `permission` (if any) is granted AND, when
@@ -122,5 +130,9 @@ export function useVisibleNavSections() {
     [sections],
   );
 
-  return { sections, loading, firstChildPath };
+  // Permissions are the one gate that must NOT open on failure: granting what we
+  // cannot verify is a security defect. So the failure is surfaced instead, and
+  // the shell says the account could not be loaded rather than rendering a
+  // navigable app in which nothing works.
+  return { sections, loading, permissionsFailed, componentsFailed, firstChildPath };
 }

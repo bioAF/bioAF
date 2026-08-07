@@ -9,16 +9,25 @@ interface PermissionsCacheHolder {
   permissions: Set<string> | null;
   roleName: string | null;
   promise: Promise<void> | null;
+  /**
+   * Whether the last attempt failed. Held separately from `permissions` on
+   * purpose: an empty permission set is a legitimate answer for a locked-down
+   * role, so it cannot double as the failure signal. Never populated as a
+   * "result", so a failure is not cached for the life of the tab.
+   */
+  failed: boolean;
 }
 
 export const permissionsCache: PermissionsCacheHolder = {
   permissions: null,
   roleName: null,
   promise: null,
+  failed: false,
 };
 
 export function clearPermissionsCache(): void {
   permissionsCache.permissions = null;
   permissionsCache.roleName = null;
   permissionsCache.promise = null;
+  permissionsCache.failed = false;
 }
