@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -288,7 +289,7 @@ export default function ProjectDetailPage() {
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">{exp.sample_count}</td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {exp.created_at ? new Date(exp.created_at).toLocaleDateString() : "—"}
+                          {exp.created_at ? new Date(exp.created_at).toLocaleDateString() : NOT_SET}
                         </td>
                       </tr>
                     ))}
@@ -343,14 +344,14 @@ export default function ProjectDetailPage() {
                             <td className="px-6 py-4 text-sm font-medium text-gray-900">
                               {s.external_id || `#${s.sample_id}`}
                             </td>
-                            <td className="px-6 py-4 text-sm text-gray-500">{s.organism || "—"}</td>
-                            <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || "—"}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.organism || NOT_SET}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.tissue_type || NOT_SET}</td>
                             <td className="px-6 py-4">
-                              {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
+                              {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : NOT_SET}
                             </td>
-                            <td className="px-6 py-4 text-sm text-gray-500">{s.added_by || "—"}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500">{s.added_by || NOT_SET}</td>
                             <td className="px-6 py-4 text-sm text-gray-500">
-                              {s.added_at ? new Date(s.added_at).toLocaleDateString() : "—"}
+                              {s.added_at ? new Date(s.added_at).toLocaleDateString() : NOT_SET}
                             </td>
                             {canModify && (
                               <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -427,12 +428,12 @@ export default function ProjectDetailPage() {
                         className="hover:bg-gray-50 cursor-pointer"
                       >
                         <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
-                        <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || "—"}</td>
+                        <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || NOT_SET}</td>
                         <td className="px-6 py-4">
                           <StatusBadge status={run.status} />
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-500">
-                          {run.created_at ? new Date(run.created_at).toLocaleDateString() : "—"}
+                          {run.created_at ? new Date(run.created_at).toLocaleDateString() : NOT_SET}
                         </td>
                       </tr>
                     ))}
@@ -575,10 +576,10 @@ export default function ProjectDetailPage() {
                     </td>
                     <td className="px-4 py-2 text-sm">{s.external_id || `#${s.id}`}</td>
                     <td className="px-4 py-2 text-sm text-gray-500">{s.experiment_name}</td>
-                    <td className="px-4 py-2 text-sm text-gray-500">{s.organism || "—"}</td>
-                    <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || "—"}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{s.organism || NOT_SET}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || NOT_SET}</td>
                     <td className="px-4 py-2">
-                      {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
+                      {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : NOT_SET}
                     </td>
                   </tr>
                 ))}

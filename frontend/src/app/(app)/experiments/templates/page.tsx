@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState } from "react";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { TemplateSheetImportModal } from "@/components/experiments/TemplateSheetImportModal";
@@ -270,7 +271,7 @@ export default function ExperimentTemplatesPage() {
                   <h3 className="font-semibold">{t.name}</h3>
                   {t.description && <p className="text-sm text-gray-500">{t.description}</p>}
                   <p className="text-xs text-gray-500 mt-1">
-                    Created by {t.created_by?.name || t.created_by?.email || "—"} on {new Date(t.created_at).toLocaleDateString()}
+                    Created by {t.created_by?.name || t.created_by?.email || NOT_SET} on {new Date(t.created_at).toLocaleDateString()}
                   </p>
                 </div>
                 <button

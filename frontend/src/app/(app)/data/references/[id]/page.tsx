@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useToast } from "@/components/shared/Toast";
 import { Modal } from "@/components/shared/Modal";
 import { useEffect, useRef, useState } from "react";
@@ -21,7 +22,7 @@ import type {
 const IMPORT_POLL_INTERVAL_MS = 5000;
 
 function formatBytes(bytes: number | null): string {
-  if (bytes == null) return "—";
+  if (bytes == null) return NOT_SET;
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -426,10 +427,10 @@ export default function DataReferenceDetailPage() {
               {reference.files.map((file) => (
                 <tr key={file.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">{file.filename}</td>
-                  <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || "—"}</td>
+                  <td className="px-6 py-4 text-sm text-gray-500">{file.file_type || NOT_SET}</td>
                   <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(file.size_bytes)}</td>
                   <td className="px-6 py-4 text-sm text-gray-500 font-mono text-xs">
-                    {file.md5_checksum || "—"}
+                    {file.md5_checksum || NOT_SET}
                   </td>
                 </tr>
               ))}
@@ -500,7 +501,7 @@ export default function DataReferenceDetailPage() {
                         {new Date(v.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
-                        {v.deprecation_note ?? "—"}
+                        {v.deprecation_note ?? NOT_SET}
                         {v.superseded_by_id && (
                           <span> (superseded by #{v.superseded_by_id})</span>
                         )}
@@ -562,12 +563,12 @@ export default function DataReferenceDetailPage() {
                           {...clickableRow(() => router.push(`/pipelines/runs/${run.pipeline_run_id}`))}
                         >
                           <td className="px-6 py-4 text-sm font-medium text-gray-900">{run.pipeline_name}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || "—"}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.experiment_name || "—"}</td>
+                          <td className="px-6 py-4 text-sm text-gray-500">{run.pipeline_version || NOT_SET}</td>
+                          <td className="px-6 py-4 text-sm text-gray-500">{run.experiment_name || NOT_SET}</td>
                           <td className="px-6 py-4 text-sm text-gray-500">{run.status}</td>
-                          <td className="px-6 py-4 text-sm text-gray-500">{run.review_verdict || "—"}</td>
+                          <td className="px-6 py-4 text-sm text-gray-500">{run.review_verdict || NOT_SET}</td>
                           <td className="px-6 py-4 text-sm text-gray-500">
-                            {run.completed_at ? new Date(run.completed_at).toLocaleDateString() : "—"}
+                            {run.completed_at ? new Date(run.completed_at).toLocaleDateString() : NOT_SET}
                           </td>
                         </tr>
                       ))}
@@ -599,7 +600,7 @@ export default function DataReferenceDetailPage() {
               <dd className="text-sm">
                 {reference.uploaded_by
                   ? reference.uploaded_by.name || reference.uploaded_by.email
-                  : "—"}
+                  : NOT_SET}
               </dd>
             </div>
             {reference.approved_by && (
@@ -623,7 +624,7 @@ export default function DataReferenceDetailPage() {
                     {reference.source_url}
                   </a>
                 ) : (
-                  "—"
+                  NOT_SET
                 )}
               </dd>
             </div>
@@ -637,7 +638,7 @@ export default function DataReferenceDetailPage() {
             </div>
             <div>
               <dt className="text-sm text-gray-500">File Count</dt>
-              <dd className="text-sm">{reference.file_count ?? "—"}</dd>
+              <dd className="text-sm">{reference.file_count ?? NOT_SET}</dd>
             </div>
             <div>
               <dt className="text-sm text-gray-500">Created</dt>

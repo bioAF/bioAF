@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { Suspense, useEffect, useState } from "react";
 import { Modal } from "@/components/shared/Modal";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -502,7 +503,7 @@ function SettingsUsersPageInner() {
                 >
                   <td className="px-4 py-3 text-sm">{user.email}</td>
                   <td className="px-4 py-3 text-sm text-gray-500">
-                    {user.name || "Not set"}
+                    {user.name || NOT_SET}
                   </td>
                   <td className="px-4 py-3 text-sm">
                     <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
@@ -521,7 +522,7 @@ function SettingsUsersPageInner() {
                         &#10003;
                       </span>
                     ) : (
-                      <span className="text-gray-500 text-sm">Not set</span>
+                      <span className="text-gray-500 text-sm">{NOT_SET}</span>
                     )}
                   </td>
                 </tr>

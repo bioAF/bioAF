@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState, useCallback } from "react";
@@ -599,9 +600,9 @@ export default function WorkNodesPage() {
             <tbody className="divide-y divide-gray-200">
               {nodes.map((node) => (
                 <tr key={node.id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => setViewingNode(node))}>
-                  <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || "\u2014"}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? "\u2014"}</td>
-                  <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || "\u2014"}</td>
+                  <td className="px-4 py-3 text-sm">{node.user?.name || node.user?.email || NOT_SET}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ project: node.project }) ?? NOT_SET}</td>
+                  <td className="px-4 py-3 text-sm text-gray-900">{node.machine_type || NOT_SET}</td>
                   <td className="px-4 py-3 text-sm text-gray-600">{node.cpu_cores} CPU / {node.memory_gb} GB</td>
                   <td className="px-4 py-3">
                     {stoppingNodes.has(node.id) ? (
@@ -616,7 +617,7 @@ export default function WorkNodesPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-600">
-                    {node.started_at ? new Date(node.started_at).toLocaleString() : "\u2014"}
+                    {node.started_at ? new Date(node.started_at).toLocaleString() : NOT_SET}
                   </td>
                   <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
                     {node.access_url && node.status === "running" ? (
@@ -627,7 +628,7 @@ export default function WorkNodesPage() {
                       >
                         {extractSshCommand(node.access_url)}
                       </button>
-                    ) : "\u2014"}
+                    ) : NOT_SET}
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-2">
@@ -695,7 +696,7 @@ export default function WorkNodesPage() {
             )}
             <div className="flex justify-between">
               <span className="text-gray-500">User</span>
-              <span>{viewingNode.user?.name || viewingNode.user?.email || "\u2014"}</span>
+              <span>{viewingNode.user?.name || viewingNode.user?.email || NOT_SET}</span>
             </div>
             {formatLinkedTo({ project: viewingNode.project }) && (
               <div className="flex justify-between">

@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type { AnalysisSnapshot } from "@/lib/types";
@@ -176,8 +177,8 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
                 {/* Counts */}
                 <div className="text-xs text-gray-500 text-right whitespace-nowrap">
-                  <div>{snap.cell_count?.toLocaleString() ?? "—"} cells</div>
-                  <div>{snap.cluster_count ?? "—"} clusters</div>
+                  <div>{snap.cell_count?.toLocaleString() ?? NOT_SET} cells</div>
+                  <div>{snap.cluster_count ?? NOT_SET} clusters</div>
                 </div>
 
                 {/* Figure thumbnail */}

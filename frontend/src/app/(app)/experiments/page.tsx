@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -160,11 +161,11 @@ export default function ExperimentsPage() {
                   >
                     <td className="px-6 py-4 text-sm font-medium text-ink">{exp.name}</td>
                     <td className="px-6 py-4 text-sm text-ink-subtle font-mono">{exp.external_id || exp.code || "-"}</td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.project?.name || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.project?.name || NOT_SET}</td>
                     <td className="px-6 py-4">
                       <ExperimentStatusBadge status={exp.status} />
                     </td>
-                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || NOT_SET}</td>
                     <td className="px-6 py-4 text-sm text-ink-subtle">{exp.sample_count}</td>
                     <td className="px-6 py-4 text-sm text-ink-subtle">
                       {new Date(exp.created_at).toLocaleDateString()}

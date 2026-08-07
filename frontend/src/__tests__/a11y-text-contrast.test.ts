@@ -144,3 +144,28 @@ test("no text uses a shade that fails AA on its own background", () => {
   }
   expect(offenders).toEqual([]);
 });
+
+/**
+ * A dash is not a word. 69 places rendered an em-dash where a value was
+ * missing, which cannot be told apart from "failed to load", from a rendering
+ * bug, or from a value that is itself a dash. The owner's ruling was a text
+ * placeholder in caps; NOT_SET in src/lib/placeholders.ts is where it lives.
+ */
+test("nothing renders an em-dash as a missing-value placeholder", () => {
+  const walk = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return entry.name === "node_modules" ? [] : walk(path);
+      return (path.endsWith(".tsx") || path.endsWith(".ts")) && !path.includes(".test.")
+        ? [path]
+        : [];
+    });
+
+  const offenders = walk(SRC).filter((file) => {
+    const src = readFileSync(file, "utf8");
+    // The literal, the HTML entities, and the escaped form that evaded both.
+    return /"\u2014"|&mdash;|&#8212;|&#x2014;|"\\u2014"/.test(src);
+  });
+
+  expect(offenders.map((f) => f.replace(SRC, "src"))).toEqual([]);
+});

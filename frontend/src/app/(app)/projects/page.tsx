@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
@@ -179,7 +180,7 @@ function ProjectsPageInner() {
                     <td className="px-6 py-4">
                       <StatusBadge status={p.status || "active"} />
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{p.owner_name || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{p.owner_name || NOT_SET}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{p.sample_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{p.experiment_count}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{p.pipeline_run_count}</td>

@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState, Suspense } from "react";
 import { Modal } from "@/components/shared/Modal";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
@@ -713,14 +714,14 @@ function ExperimentDetailPageInner() {
               </div>
             ) : (
               <dl className="space-y-3">
-                <div><dt className="text-sm text-ink-subtle">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Project</dt><dd className="text-sm">{experiment.project?.name || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Template</dt><dd className="text-sm">{experiment.template_name || NOT_SET}</dd></div>
                 <div>
                   <dt className="text-sm text-ink-subtle">Naming Profile</dt>
                   <dd className="text-sm">
                     {(() => {
                       const eff = experiment.effective_naming_profile_id;
-                      if (eff == null) return "—";
+                      if (eff == null) return NOT_SET;
                       const profile = namingProfiles.find((p) => p.id === eff);
                       const label = profile?.name ?? `#${eff}`;
                       const overriding = experiment.naming_profile_id != null;
@@ -728,12 +729,12 @@ function ExperimentDetailPageInner() {
                     })()}
                   </dd>
                 </div>
-                <div><dt className="text-sm text-ink-subtle">Design Type</dt><dd className="text-sm">{experiment.design_type || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Start Date</dt><dd className="text-sm">{experiment.start_date || "—"}</dd></div>
-                <div><dt className="text-sm text-ink-subtle">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Design Type</dt><dd className="text-sm">{experiment.design_type || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Description</dt><dd className="text-sm">{experiment.description || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Start Date</dt><dd className="text-sm">{experiment.start_date || NOT_SET}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? NOT_SET}</dd></div>
                 <div><dt className="text-sm text-ink-subtle">Actual Samples</dt><dd className="text-sm">{experiment.sample_count}</dd></div>
                 <div><dt className="text-sm text-ink-subtle">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
               </dl>
@@ -769,7 +770,7 @@ function ExperimentDetailPageInner() {
                   {experiment.custom_fields.map((cf) => (
                     <div key={cf.id} className="flex items-center gap-2">
                       <dt className="text-sm text-ink-subtle">{cf.field_name}</dt>
-                      <dd className="text-sm text-ink-subtle">{cf.field_value || "—"}</dd>
+                      <dd className="text-sm text-ink-subtle">{cf.field_value || NOT_SET}</dd>
                       {cf.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
                     </div>
                   ))}
@@ -787,7 +788,7 @@ function ExperimentDetailPageInner() {
                     return (
                       <div key={fd.id} className="flex items-center gap-2">
                         <dt className="text-sm text-ink-subtle">{label}</dt>
-                        <dd className="text-sm text-gray-600">{fd.default_value || "—"}</dd>
+                        <dd className="text-sm text-gray-600">{fd.default_value || NOT_SET}</dd>
                         {fd.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
                       </div>
                     );
@@ -1319,9 +1320,9 @@ function ExperimentDetailPageInner() {
                               </div>
                               <span className="text-xs">{Math.round(r.progress.percent_complete)}%</span>
                             </div>
-                          ) : "—"}
+                          ) : NOT_SET}
                         </td>
-                        <td className="px-4 py-3 text-sm text-ink-subtle">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
+                        <td className="px-4 py-3 text-sm text-ink-subtle">{r.started_at ? new Date(r.started_at).toLocaleString() : NOT_SET}</td>
                         <td className="px-4 py-3">
                           <button onClick={() => router.push(`/pipelines/runs/${r.id}`)} className="text-bioaf-600 text-sm hover:underline">View</button>
                         </td>
@@ -1378,7 +1379,7 @@ function ExperimentDetailPageInner() {
                             {JSON.stringify(e.details, null, 2)}
                           </pre>
                         </details>
-                      ) : "—"}
+                      ) : NOT_SET}
                     </td>
                   </tr>
                 ))}

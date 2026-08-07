@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
@@ -13,7 +14,7 @@ import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types
 import { clickableRow } from "@/lib/a11y";
 
 function formatBytes(bytes: number | null): string {
-  if (bytes == null) return "—";
+  if (bytes == null) return NOT_SET;
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -204,7 +205,7 @@ export default function DataReferencesPage() {
                     <td className="px-6 py-4">
                       <ReferenceStatusBadge status={ref.status} />
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? "—"}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{ref.file_count ?? NOT_SET}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">{formatBytes(ref.total_size_bytes)}</td>
                     <td className="px-6 py-4 text-sm text-gray-500">
                       {new Date(ref.created_at).toLocaleDateString()}

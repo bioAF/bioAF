@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
@@ -285,13 +286,13 @@ export default function PipelineLauncherPage() {
                     <input type="checkbox" aria-label={`Select sample ${s.external_id || `#${s.id}`}`} checked={selectedSampleIds.includes(s.id)} onChange={() => toggleSample(s.id)} />
                   </td>
                   <td className="px-4 py-3 text-sm">{s.external_id || `#${s.id}`}</td>
-                  <td className="px-4 py-3 text-sm">{s.organism || "—"}</td>
-                  <td className="px-4 py-3 text-sm">{s.tissue_type || "—"}</td>
+                  <td className="px-4 py-3 text-sm">{s.organism || NOT_SET}</td>
+                  <td className="px-4 py-3 text-sm">{s.tissue_type || NOT_SET}</td>
                   <td className="px-4 py-3 text-sm">
                     {s.qc_status === "fail" && <span className="text-red-600 font-medium">FAIL</span>}
                     {s.qc_status === "warning" && <span className="text-yellow-600">Warning</span>}
                     {s.qc_status === "pass" && <span className="text-green-600">Pass</span>}
-                    {!s.qc_status && "—"}
+                    {!s.qc_status && NOT_SET}
                   </td>
                 </tr>
               ))}

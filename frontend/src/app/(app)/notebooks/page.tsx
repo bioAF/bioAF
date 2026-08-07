@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
@@ -468,8 +469,8 @@ export default function NotebooksPage() {
               {sessions.map((s) => (
                 <tr key={s.id} className={`cursor-pointer ${s.status === "idle" ? "bg-yellow-50 hover:bg-yellow-100" : "hover:bg-gray-50"}`} {...clickableRow(() => setViewingSession(s))}>
                   <td className="px-4 py-3 text-sm capitalize font-medium">{s.session_type}</td>
-                  <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || "\u2014"}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ experiment: s.experiment, project: s.project }) ?? "\u2014"}</td>
+                  <td className="px-4 py-3 text-sm">{s.user?.name || s.user?.email || NOT_SET}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{formatLinkedTo({ experiment: s.experiment, project: s.project }) ?? NOT_SET}</td>
                   <td className="px-4 py-3 text-sm">{s.cpu_cores} CPU / {s.memory_gb} GB</td>
                   <td className="px-4 py-3">
                     {stoppingSessions.has(s.id) ? (
@@ -489,14 +490,14 @@ export default function NotebooksPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-sm">
-                    {s.started_at ? new Date(s.started_at).toLocaleString() : "\u2014"}
+                    {s.started_at ? new Date(s.started_at).toLocaleString() : NOT_SET}
                   </td>
                   <td className="px-4 py-3 text-sm font-mono" onClick={(e) => e.stopPropagation()}>
                     {s.proxy_url && s.status === "running" ? (
                       <a href={s.proxy_url} target="_blank" rel="noopener noreferrer" className="text-bioaf-600 hover:underline">
                         {s.proxy_url.replace("http://", "")}
                       </a>
-                    ) : "\u2014"}
+                    ) : NOT_SET}
                   </td>
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-2">

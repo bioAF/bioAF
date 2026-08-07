@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type {
@@ -130,7 +131,7 @@ function ParameterDiffTable({
                   <td key={snap.id} className="px-3 py-2 text-xs">
                     {diff.values[snap.id] !== null && diff.values[snap.id] !== undefined
                       ? String(diff.values[snap.id])
-                      : <span className="text-gray-500">Not set</span>}
+                      : <span className="text-gray-500">{NOT_SET}</span>}
                   </td>
                 ))}
               </tr>
@@ -257,7 +258,7 @@ function CommandLogDiffTable({
                         <span className="text-green-600">&#10003;</span>
                       )
                     ) : (
-                      <span className="text-gray-500">Not set</span>
+                      <span className="text-gray-500">{NOT_SET}</span>
                     )}
                   </td>
                 ))}

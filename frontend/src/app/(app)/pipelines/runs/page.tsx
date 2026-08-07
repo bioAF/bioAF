@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -45,7 +46,7 @@ export default function PipelineRunsPage() {
   }
 
   function formatDuration(startedAt: string | null, completedAt: string | null): string {
-    if (!startedAt) return "—";
+    if (!startedAt) return NOT_SET;
     const start = new Date(startedAt).getTime();
     const end = completedAt ? new Date(completedAt).getTime() : Date.now();
     const seconds = Math.floor((end - start) / 1000);
@@ -55,7 +56,7 @@ export default function PipelineRunsPage() {
   }
 
   function formatDateTime(dateStr: string | null): string {
-    if (!dateStr) return "—";
+    if (!dateStr) return NOT_SET;
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) + " " +
       d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -132,7 +133,7 @@ export default function PipelineRunsPage() {
               <tr key={r.id} className="hover:bg-surface-muted cursor-pointer" {...clickableRow(() => router.push(`/pipelines/runs/${r.id}`))}>
                 <td className="px-4 py-3 text-sm font-mono">#{r.id}</td>
                 <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
-                <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
+                <td className="px-4 py-3 text-sm">{r.experiment?.name || NOT_SET}</td>
                 <td className="px-4 py-3">
                   <span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span>
                   {r.status === "failed" && r.failure_reason === "oom" && (
@@ -155,10 +156,10 @@ export default function PipelineRunsPage() {
                     </div>
                   ) : <span className="text-xs text-ink-subtle">—</span>}
                 </td>
-                <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
+                <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || NOT_SET}</td>
                 <td className="px-4 py-3 text-sm text-ink-subtle">{formatDateTime(r.started_at)}</td>
                 <td className="px-4 py-3 text-sm text-ink-subtle">{formatDuration(r.started_at, r.completed_at)}</td>
-                {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
+                {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : NOT_SET}</td>}
               </tr>
             ))}
             {loadError ? (

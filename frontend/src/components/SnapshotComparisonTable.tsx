@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useMemo } from "react";
 import type { AnalysisSnapshot } from "@/lib/types";
 import { clickableRow } from "@/lib/a11y";
@@ -131,9 +132,9 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
                     {snap.object_type === "anndata" ? "AnnData" : "Seurat"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right">{snap.cell_count?.toLocaleString() ?? "—"}</td>
-                <td className="px-3 py-2 text-right">{snap.gene_count?.toLocaleString() ?? "—"}</td>
-                <td className="px-3 py-2 text-right">{snap.cluster_count ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{snap.cell_count?.toLocaleString() ?? NOT_SET}</td>
+                <td className="px-3 py-2 text-right">{snap.gene_count?.toLocaleString() ?? NOT_SET}</td>
+                <td className="px-3 py-2 text-right">{snap.cluster_count ?? NOT_SET}</td>
                 <td className="px-3 py-2">
                   {snap.figure_url && (
                     <div className="w-8 h-8 rounded border overflow-hidden">

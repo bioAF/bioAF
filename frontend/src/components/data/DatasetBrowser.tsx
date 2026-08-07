@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -281,7 +282,7 @@ export function DatasetBrowser() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {ds.organism || "\u2014"}
+                      {ds.organism || NOT_SET}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {ds.sample_count}

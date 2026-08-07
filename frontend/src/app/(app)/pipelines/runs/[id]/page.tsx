@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState, useCallback } from "react";
@@ -401,14 +402,14 @@ export default function PipelineRunDetailPage() {
   }
 
   function formatDateTime(dateStr: string | null | undefined): string {
-    if (!dateStr) return "—";
+    if (!dateStr) return NOT_SET;
     const d = new Date(dateStr);
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) + " " +
       d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" });
   }
 
   function formatDuration(startedAt: string | null | undefined, completedAt: string | null | undefined): string {
-    if (!startedAt) return "—";
+    if (!startedAt) return NOT_SET;
     const start = new Date(startedAt).getTime();
     const end = completedAt ? new Date(completedAt).getTime() : Date.now();
     const seconds = Math.floor((end - start) / 1000);
