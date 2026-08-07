@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
 
@@ -71,6 +72,10 @@ export function LabDocumentBrowser() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
 
   const [showUpload, setShowUpload] = useState(false);
 
@@ -89,7 +94,7 @@ export function LabDocumentBrowser() {
     const params = new URLSearchParams();
     for (const id of selectedTagIds) params.append("tag_ids", String(id));
     if (includeArchived) params.set("include_archived", "true");
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     try {
       const data = await api.get<ListResponse>(`${API_BASE}/documents?${params.toString()}`);
       setDocuments(data.documents);
@@ -98,7 +103,7 @@ export function LabDocumentBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [selectedTagIds, includeArchived, query]);
+  }, [selectedTagIds, includeArchived, settledQuery]);
 
   useEffect(() => {
     fetchTags();

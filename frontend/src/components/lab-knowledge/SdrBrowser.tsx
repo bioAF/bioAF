@@ -4,6 +4,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
@@ -98,6 +99,10 @@ export function SdrBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [sort, setSort] = useState("number");
@@ -110,7 +115,7 @@ export function SdrBrowser() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     if (statusFilter) params.set("status", statusFilter);
     if (categoryFilter) params.set("category_id", categoryFilter);
     if (sort) params.set("sort", sort);
@@ -123,7 +128,7 @@ export function SdrBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [query, statusFilter, categoryFilter, sort, showHistorical]);
+  }, [settledQuery, statusFilter, categoryFilter, sort, showHistorical]);
 
   const fetchCategories = useCallback(async () => {
     try {

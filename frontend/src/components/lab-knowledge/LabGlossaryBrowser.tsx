@@ -3,6 +3,7 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableCard } from "@/lib/a11y";
@@ -79,6 +80,10 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
   const [sourceFilter, setSourceFilter] = useState("");
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingJobIds, setPendingJobIds] = useState<number[]>([]);
@@ -95,7 +100,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     if (sourceFilter) params.set("source", sourceFilter);
     try {
       const data = await api.get<TermListResponse>(`${API_BASE}/glossary?${params.toString()}`);
@@ -105,7 +110,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     } finally {
       setLoading(false);
     }
-  }, [query, sourceFilter]);
+  }, [settledQuery, sourceFilter]);
 
   const fetchPending = useCallback(async () => {
     try {

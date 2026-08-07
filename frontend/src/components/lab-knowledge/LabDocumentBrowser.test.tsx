@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { LabDocumentBrowser } from "./LabDocumentBrowser";
 
 let canAccessImpl = (_resource: string, _action: string) => true;
@@ -206,4 +206,32 @@ test("search box survives typing: the input stays mounted and keeps focus betwee
   expect(document.activeElement).toBe(
     screen.getByPlaceholderText("Search documents..."),
   );
+});
+
+test("a typed word is one request, not one per keystroke", async () => {
+  jest.useFakeTimers();
+  try {
+    mockGet.mockResolvedValue({ documents: [] });
+    render(<LabDocumentBrowser />);
+    await waitFor(() => expect(screen.getByPlaceholderText("Search documents...")).toBeInTheDocument());
+
+    const input = screen.getByPlaceholderText("Search documents...") as HTMLInputElement;
+    const before = mockGet.mock.calls.filter((c) => String(c[0]).includes("/documents?")).length;
+
+    for (const value of ["b", "br", "brc", "brca"]) {
+      fireEvent.change(input, { target: { value } });
+    }
+    const during = mockGet.mock.calls.filter((c) => String(c[0]).includes("/documents?")).length;
+    expect(during).toBe(before);
+
+    await act(async () => {
+      jest.advanceTimersByTime(300);
+    });
+
+    const after = mockGet.mock.calls.filter((c) => String(c[0]).includes("/documents?"));
+    expect(after.length).toBe(before + 1);
+    expect(String(after[after.length - 1][0])).toContain("q=brca");
+  } finally {
+    jest.useRealTimers();
+  }
 });
