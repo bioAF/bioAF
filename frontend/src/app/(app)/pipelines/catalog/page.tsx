@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -14,7 +14,20 @@ import { clickableCard } from "@/lib/a11y";
 
 export default function PipelineCatalogPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { canAccess, loading: permsLoading } = usePermissions();
+
+  // The catalog is a way-station: "Launch Pipeline" on an experiment sends the
+  // user here with ?experiment=, and the launch wizard on the far side reads it
+  // back. Losing it in the middle makes the user choose the experiment again on
+  // a page they reached from that very experiment.
+  const experimentParam = searchParams.get("experiment");
+  const experimentId = experimentParam && /^\d+$/.test(experimentParam) ? experimentParam : null;
+
+  function withExperiment(path: string) {
+    if (!experimentId) return path;
+    return `${path}${path.includes("?") ? "&" : "?"}experiment=${experimentId}`;
+  }
 
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -38,18 +51,18 @@ export default function PipelineCatalogPage() {
 
   function launchPipeline(p: PipelineCatalog) {
     if (p.source_type === "custom" && p.custom_pipeline_id != null) {
-      router.push(`/pipelines/custom/${p.custom_pipeline_id}?launch=1`);
+      router.push(withExperiment(`/pipelines/custom/${p.custom_pipeline_id}?launch=1`));
       return;
     }
-    router.push(`/pipelines/launch/${encodeURIComponent(p.pipeline_key)}`);
+    router.push(withExperiment(`/pipelines/launch/${encodeURIComponent(p.pipeline_key)}`));
   }
 
   function openPipeline(p: PipelineCatalog) {
     if (p.source_type === "custom" && p.custom_pipeline_id != null) {
-      router.push(`/pipelines/custom/${p.custom_pipeline_id}`);
+      router.push(withExperiment(`/pipelines/custom/${p.custom_pipeline_id}`));
       return;
     }
-    router.push(`/pipelines/launch/${encodeURIComponent(p.pipeline_key)}`);
+    router.push(withExperiment(`/pipelines/launch/${encodeURIComponent(p.pipeline_key)}`));
   }
 
   const canCreateCustom = !permsLoading && canAccess("custom_pipelines", "create");
