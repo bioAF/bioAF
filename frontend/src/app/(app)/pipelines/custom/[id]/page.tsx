@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/shared/Toast";
+import { Modal } from "@/components/shared/Modal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -753,32 +754,34 @@ export default function CustomPipelineDetailPage() {
             />
           )}
 
-          {showDeleteConfirm && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-                <h3 className="font-semibold text-lg mb-4">Delete Pipeline</h3>
-                <p className="text-sm text-gray-600 mb-4">
-                  This will soft-delete <strong>{pipeline.name}</strong>. Existing pipeline
-                  runs are preserved.
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleDelete}
-                    disabled={deleting}
-                    className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-                  >
-                    {deleting ? "Deleting..." : "Delete"}
-                  </button>
-                  <button
-                    onClick={() => setShowDeleteConfirm(false)}
-                    className="flex-1 border py-2 rounded text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+          <Modal
+            open={showDeleteConfirm}
+            title="Delete Pipeline"
+            onClose={() => setShowDeleteConfirm(false)}
+            size="sm"
+            footer={
+              <>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="border py-2 rounded text-sm"
+              >
+                Cancel
+              </button>
+              </>
+            }
+          >
+            <p className="text-sm text-gray-600 mb-4">
+              This will soft-delete <strong>{pipeline.name}</strong>. Existing pipeline
+              runs are preserved.
+            </p>
+          </Modal>
         </>
       )}
     </main>

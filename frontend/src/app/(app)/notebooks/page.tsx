@@ -1,6 +1,7 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -549,389 +550,382 @@ export default function NotebooksPage() {
 
       {/* Session Detail Modal */}
       {viewingSession && (
-        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => { setViewingSession(null); setProvenance(null); }}>
-          <div className="bg-white rounded-lg shadow-xl w-[600px] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b flex items-center justify-between">
-              <h3 className="text-lg font-semibold">
-                {viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session
-              </h3>
-              <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-3">
-              {viewingSession.status === "failed" && viewingSession.failure_message && (
-                <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700 mb-2">
-                  <div className="font-medium mb-1">
-                    {formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason })}
-                  </div>
-                  <div className="font-mono whitespace-pre-wrap break-words">{viewingSession.failure_message}</div>
-                </div>
-              )}
-              {(() => {
-                // Resolve environment name from loaded environments
-                let envLabel: string | null = null;
-                if (viewingSession.environment_version_id) {
-                  for (const env of environments) {
-                    const v = env.latest_version;
-                    if (v && v.id === viewingSession.environment_version_id) {
-                      envLabel = `${env.name} v${v.version_number}.${v.build_number}`;
-                      break;
-                    }
-                  }
-                  if (!envLabel) {
-                    envLabel = `Version ID ${viewingSession.environment_version_id}`;
-                  }
-                }
-                // Compute uptime
-                let uptimeLabel: string | null = null;
-                if (viewingSession.started_at && viewingSession.status === "running") {
-                  const diff = Date.now() - new Date(viewingSession.started_at).getTime();
-                  const hours = Math.floor(diff / 3600000);
-                  const minutes = Math.floor((diff % 3600000) / 60000);
-                  uptimeLabel = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
-                }
-                return [
-                  { label: "Type", value: viewingSession.session_type },
-                  { label: "Status", value: formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason }) },
-                  { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
-                  { label: "Environment", value: envLabel },
-                  { label: "Resources", value: `${viewingSession.cpu_cores} CPU / ${viewingSession.memory_gb} GB RAM` },
-                  { label: "Disk Size", value: viewingSession.requested_disk_gb != null ? `${viewingSession.requested_disk_gb} GB` : null },
-                  { label: "Linked to", value: formatLinkedTo({ experiment: viewingSession.experiment, project: viewingSession.project }) },
-                  { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
-                  { label: "Uptime", value: uptimeLabel },
-                  { label: "Access URL", value: viewingSession.proxy_url || null },
-                  { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
-                  { label: "Git Branch", value: viewingSession.git_branch_name || null },
-                  { label: "Git Commit", value: viewingSession.git_commit_hash || null },
-                ];
-              })().filter((f) => f.value != null).map((f) => (
-                <div key={f.label} className="flex justify-between text-sm">
-                  <span className="text-gray-500">{f.label}</span>
-                  <span className="font-medium">{String(f.value)}</span>
-                </div>
-              ))}
-
-              {/* Provenance section for stopped sessions */}
-              {viewingSession.status === "stopped" && (
-                <div className="mt-4 pt-4 border-t">
-                  {!provenance ? (
-                    <button
-                      onClick={async () => {
-                        try {
-                          const p = await api.get<SessionProvenance>(`/api/v1/notebooks/sessions/${viewingSession.id}/provenance`);
-                          setProvenance(p);
-                        } catch (e) {
-                          logError("loading session provenance", e);
-                          toast.error(loadFailureMessage("Provenance"));
-                        }
-                      }}
-                      className="text-sm text-bioaf-600 hover:underline"
-                    >
-                      View provenance
-                    </button>
-                  ) : (
-                    <div className="space-y-3">
-                      <h4 className="text-sm font-semibold text-gray-700">Provenance</h4>
-                      {provenance.environment && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Environment</p>
-                          <p className="text-sm">
-                            {provenance.environment.environment_name} v{provenance.environment.version_number}.{provenance.environment.build_number}
-                            <span className="text-gray-500 ml-1">({provenance.environment.definition_format})</span>
-                          </p>
-                        </div>
-                      )}
-                      {provenance.input_files.length > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Input files ({provenance.input_files.length})</p>
-                          <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
-                            {provenance.input_files.map((f) => (
-                              <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {provenance.output_files.length > 0 && (
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Output files ({provenance.output_files.length})</p>
-                          <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
-                            {provenance.output_files.map((f) => (
-                              <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {provenance.input_files.length === 0 && provenance.output_files.length === 0 && (
-                        <p className="text-sm text-gray-500">No input or output files recorded</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            <div className="p-4 border-t bg-gray-50 flex gap-2 justify-end">
-              {viewingSession.proxy_url && viewingSession.status === "running" && (
-                <a href={viewingSession.proxy_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
-                  Open
-                </a>
-              )}
-              {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
-                <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); setProvenance(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">
-                  Stop
-                </button>
-              )}
-            </div>
+        <Modal
+          open
+          title={`${viewingSession.session_type.charAt(0).toUpperCase() + viewingSession.session_type.slice(1)} Session`}
+          onClose={() => setViewingSession(null)}
+          size="md"
+          footer={
+            <>
+            {viewingSession.proxy_url && viewingSession.status === "running" && (
+              <a href={viewingSession.proxy_url} target="_blank" rel="noopener noreferrer" className="px-3 py-1.5 border border-bioaf-600 text-bioaf-600 rounded text-sm hover:bg-bioaf-50">
+                Open
+              </a>
+            )}
+            {["pending", "starting", "running", "idle"].includes(viewingSession.status) && (
+              <button onClick={() => { handleStop(viewingSession.id); setViewingSession(null); setProvenance(null); }} className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50">
+                Stop
+              </button>
+            )}
+            </>
+          }
+        >
+          <div className="p-6 border-b flex items-center justify-between">
+            <button onClick={() => { setViewingSession(null); setProvenance(null); }} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
           </div>
-        </div>
+          <div className="p-6 space-y-3">
+            {viewingSession.status === "failed" && viewingSession.failure_message && (
+              <div className="bg-red-50 border border-red-200 rounded p-3 text-xs text-red-700 mb-2">
+                <div className="font-medium mb-1">
+                  {formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason })}
+                </div>
+                <div className="font-mono whitespace-pre-wrap break-words">{viewingSession.failure_message}</div>
+              </div>
+            )}
+            {(() => {
+              // Resolve environment name from loaded environments
+              let envLabel: string | null = null;
+              if (viewingSession.environment_version_id) {
+                for (const env of environments) {
+                  const v = env.latest_version;
+                  if (v && v.id === viewingSession.environment_version_id) {
+                    envLabel = `${env.name} v${v.version_number}.${v.build_number}`;
+                    break;
+                  }
+                }
+                if (!envLabel) {
+                  envLabel = `Version ID ${viewingSession.environment_version_id}`;
+                }
+              }
+              // Compute uptime
+              let uptimeLabel: string | null = null;
+              if (viewingSession.started_at && viewingSession.status === "running") {
+                const diff = Date.now() - new Date(viewingSession.started_at).getTime();
+                const hours = Math.floor(diff / 3600000);
+                const minutes = Math.floor((diff % 3600000) / 60000);
+                uptimeLabel = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+              }
+              return [
+                { label: "Type", value: viewingSession.session_type },
+                { label: "Status", value: formatSessionStatusLabel({ status: viewingSession.status, failure_reason: viewingSession.failure_reason }) },
+                { label: "User", value: viewingSession.user?.name || viewingSession.user?.email },
+                { label: "Environment", value: envLabel },
+                { label: "Resources", value: `${viewingSession.cpu_cores} CPU / ${viewingSession.memory_gb} GB RAM` },
+                { label: "Disk Size", value: viewingSession.requested_disk_gb != null ? `${viewingSession.requested_disk_gb} GB` : null },
+                { label: "Linked to", value: formatLinkedTo({ experiment: viewingSession.experiment, project: viewingSession.project }) },
+                { label: "Started", value: viewingSession.started_at ? new Date(viewingSession.started_at).toLocaleString() : null },
+                { label: "Uptime", value: uptimeLabel },
+                { label: "Access URL", value: viewingSession.proxy_url || null },
+                { label: "Idle Since", value: viewingSession.idle_since ? new Date(viewingSession.idle_since).toLocaleString() : null },
+                { label: "Git Branch", value: viewingSession.git_branch_name || null },
+                { label: "Git Commit", value: viewingSession.git_commit_hash || null },
+              ];
+            })().filter((f) => f.value != null).map((f) => (
+              <div key={f.label} className="flex justify-between text-sm">
+                <span className="text-gray-500">{f.label}</span>
+                <span className="font-medium">{String(f.value)}</span>
+              </div>
+            ))}
+  
+            {/* Provenance section for stopped sessions */}
+            {viewingSession.status === "stopped" && (
+              <div className="mt-4 pt-4 border-t">
+                {!provenance ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const p = await api.get<SessionProvenance>(`/api/v1/notebooks/sessions/${viewingSession.id}/provenance`);
+                        setProvenance(p);
+                      } catch (e) {
+                        logError("loading session provenance", e);
+                        toast.error(loadFailureMessage("Provenance"));
+                      }
+                    }}
+                    className="text-sm text-bioaf-600 hover:underline"
+                  >
+                    View provenance
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-gray-700">Provenance</h4>
+                    {provenance.environment && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Environment</p>
+                        <p className="text-sm">
+                          {provenance.environment.environment_name} v{provenance.environment.version_number}.{provenance.environment.build_number}
+                          <span className="text-gray-500 ml-1">({provenance.environment.definition_format})</span>
+                        </p>
+                      </div>
+                    )}
+                    {provenance.input_files.length > 0 && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Input files ({provenance.input_files.length})</p>
+                        <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
+                          {provenance.input_files.map((f) => (
+                            <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {provenance.output_files.length > 0 && (
+                      <div>
+                        <p className="text-xs text-gray-500 mb-1">Output files ({provenance.output_files.length})</p>
+                        <ul className="text-sm space-y-0.5 max-h-32 overflow-y-auto">
+                          {provenance.output_files.map((f) => (
+                            <li key={f.id} className="text-gray-700 truncate" title={f.storage_uri}>{f.filename}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {provenance.input_files.length === 0 && provenance.output_files.length === 0 && (
+                      <p className="text-sm text-gray-500">No input or output files recorded</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* Launch Modal */}
-      {showLaunchModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-[800px] max-h-[85vh] flex flex-col">
-            <div className="p-6 border-b flex items-center justify-between shrink-0">
-              <h3 className="text-lg font-semibold">Launch Notebook Session</h3>
-              <button onClick={() => setShowLaunchModal(false)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
-            </div>
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-              {/* Resource Profile */}
-              <div>
-                <label className="text-sm text-gray-500 mb-2 block">Resource Profile</label>
-                <div className="space-y-2">
-                  {PROFILE_ORDER.map((profile) => {
-                    const specs = RESOURCE_PROFILES[profile];
-                    const meta = PROFILE_META[profile];
-                    const selected = selectedProfile === profile;
-                    // Unknown availability (e.g. before the fetch resolves) defaults to
-                    // enabled so the picker never blocks the supported tiers.
-                    const available = profileAvailability[profile] !== false;
-                    const onProfileClick = () => {
-                      if (available) {
-                        setSelectedProfile(profile);
-                        setProfileNotice("");
-                      } else {
-                        setProfileNotice(
-                          `${meta.label} (${specs.cpu} CPU / ${specs.memory} GB) needs a larger interactive pool than the current ${poolMachineType || "pool"}. Ask your admin to increase the interactive pool machine type in Infrastructure > Components.`
-                        );
-                      }
-                    };
-                    return (
-                      <button
-                        key={profile}
-                        type="button"
-                        onClick={onProfileClick}
-                        aria-pressed={selected}
-                        aria-disabled={!available}
-                        className={`w-full text-left p-3 border rounded-lg transition-colors ${
-                          !available
-                            ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
-                            : selected
-                            ? "border-bioaf-500 bg-bioaf-50"
-                            : "border-gray-200 hover:border-gray-300"
-                        }`}
-                      >
-                        <div className="flex justify-between items-center">
-                          <span className="font-semibold flex items-center gap-2">
-                            {meta.label}
-                            {!available && (
-                              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
-                                Admin upgrade required
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-xs text-gray-500">{specs.cpu} CPU / {specs.memory} GB RAM</span>
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">{meta.description}</div>
-                      </button>
+      <Modal
+        open={showLaunchModal}
+        title="Launch Notebook Session"
+        onClose={() => setShowLaunchModal(false)}
+        size="md"
+        footer={
+          <>
+          {rstudioEnabled && (
+            <button
+              onClick={() => handleLaunch("rstudio")}
+              disabled={launching}
+              className="bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              {launching ? "Launching..." : "Launch RStudio"}
+            </button>
+          )}
+          {jupyterEnabled && (
+            <button
+              onClick={() => handleLaunch("jupyter")}
+              disabled={launching}
+              className="bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              {launching ? "Launching..." : "Launch Jupyter"}
+            </button>
+          )}
+          <button
+            onClick={() => setShowLaunchModal(false)}
+            className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+          </>
+        }
+      >
+        <div className="p-6 border-b flex items-center justify-between shrink-0">
+          <button onClick={() => setShowLaunchModal(false)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
+        </div>
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+          {/* Resource Profile */}
+          <div>
+            <label className="text-sm text-gray-500 mb-2 block">Resource Profile</label>
+            <div className="space-y-2">
+              {PROFILE_ORDER.map((profile) => {
+                const specs = RESOURCE_PROFILES[profile];
+                const meta = PROFILE_META[profile];
+                const selected = selectedProfile === profile;
+                // Unknown availability (e.g. before the fetch resolves) defaults to
+                // enabled so the picker never blocks the supported tiers.
+                const available = profileAvailability[profile] !== false;
+                const onProfileClick = () => {
+                  if (available) {
+                    setSelectedProfile(profile);
+                    setProfileNotice("");
+                  } else {
+                    setProfileNotice(
+                      `${meta.label} (${specs.cpu} CPU / ${specs.memory} GB) needs a larger interactive pool than the current ${poolMachineType || "pool"}. Ask your admin to increase the interactive pool machine type in Infrastructure > Components.`
                     );
-                  })}
-                </div>
-                {profileNotice && (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
-                    {profileNotice}
-                  </p>
-                )}
-              </div>
-
-              {/* Environment */}
-              <div>
-                <label htmlFor="environment" className="text-sm text-gray-500 mb-2 block">Environment</label>
-                <div className="flex gap-3">
-                  <select id="environment"
-                    value={selectedEnvId || ""}
-                    onChange={(e) => e.target.value ? handleEnvChange(Number(e.target.value)) : null}
-                    className="border rounded px-3 py-2 text-sm flex-1"
+                  }
+                };
+                return (
+                  <button
+                    key={profile}
+                    type="button"
+                    onClick={onProfileClick}
+                    aria-pressed={selected}
+                    aria-disabled={!available}
+                    className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                      !available
+                        ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                        : selected
+                        ? "border-bioaf-500 bg-bioaf-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
                   >
-                    <option value="">Select environment</option>
-                    {environments.map((env) => (
-                      <option key={env.id} value={env.id}>
-                        {env.name}
-                        {env.latest_version ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})` : " (no versions)"}
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold flex items-center gap-2">
+                        {meta.label}
+                        {!available && (
+                          <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
+                            Admin upgrade required
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-xs text-gray-500">{specs.cpu} CPU / {specs.memory} GB RAM</span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-0.5">{meta.description}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {profileNotice && (
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                {profileNotice}
+              </p>
+            )}
+          </div>
+
+          {/* Environment */}
+          <div>
+            <label htmlFor="environment" className="text-sm text-gray-500 mb-2 block">Environment</label>
+            <div className="flex gap-3">
+              <select id="environment"
+                value={selectedEnvId || ""}
+                onChange={(e) => e.target.value ? handleEnvChange(Number(e.target.value)) : null}
+                className="border rounded px-3 py-2 text-sm flex-1"
+              >
+                <option value="">Select environment</option>
+                {environments.map((env) => (
+                  <option key={env.id} value={env.id}>
+                    {env.name}
+                    {env.latest_version ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})` : " (no versions)"}
+                  </option>
+                ))}
+              </select>
+              {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
+                <select
+                  aria-label="Environment version"
+                  value={selectedVersionId || ""}
+                  onChange={(e) => {
+                    const vid = e.target.value ? Number(e.target.value) : null;
+                    setSelectedVersionId(vid);
+                    const v = selectedEnvDetail?.versions.find((ver) => ver.id === vid);
+                    setSelectedVersionImageUri(v?.image_uri || null);
+                  }}
+                  className="border rounded px-3 py-2 text-sm flex-1"
+                >
+                  {selectedEnvDetail.versions
+                    .filter((v) => v.status === "ready" && v.image_uri)
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        v{v.version_number}.{v.build_number} ({v.definition_format})
                       </option>
                     ))}
-                  </select>
-                  {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
-                    <select
-                      aria-label="Environment version"
-                      value={selectedVersionId || ""}
-                      onChange={(e) => {
-                        const vid = e.target.value ? Number(e.target.value) : null;
-                        setSelectedVersionId(vid);
-                        const v = selectedEnvDetail?.versions.find((ver) => ver.id === vid);
-                        setSelectedVersionImageUri(v?.image_uri || null);
-                      }}
-                      className="border rounded px-3 py-2 text-sm flex-1"
-                    >
-                      {selectedEnvDetail.versions
-                        .filter((v) => v.status === "ready" && v.image_uri)
-                        .map((v) => (
-                          <option key={v.id} value={v.id}>
-                            v{v.version_number}.{v.build_number} ({v.definition_format})
-                          </option>
-                        ))}
-                    </select>
-                  )}
-                </div>
-              </div>
-
-              {/* Scope: Experiment or Project */}
-              <div>
-                <label className="text-sm text-gray-500 mb-2 block">Link to (optional)</label>
-                <div className="flex gap-2 mb-2">
-                  <button
-                    onClick={() => { setScopeType("experiment"); setSelectedProject(null); }}
-                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "experiment" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
-                  >
-                    Experiment
-                  </button>
-                  <button
-                    onClick={() => { setScopeType("project"); setSelectedExperiment(null); setExperimentFiles([]); setSelectedFileIds([]); }}
-                    className={`px-3 py-1.5 text-sm rounded ${scopeType === "project" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
-                  >
-                    Project
-                  </button>
-                </div>
-                {scopeType === "experiment" ? (
-                  <select
-                    aria-label="Experiment"
-                    value={selectedExperiment || ""}
-                    onChange={(e) => handleExperimentChange(e.target.value ? Number(e.target.value) : null)}
-                    className="border rounded px-3 py-2 text-sm w-full"
-                  >
-                    <option value="">No experiment</option>
-                    {experiments.map((exp) => (
-                      <option key={exp.id} value={exp.id}>{exp.name}{exp.code ? ` (${exp.code})` : ""}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <select
-                    aria-label="Project"
-                    value={selectedProject || ""}
-                    onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
-                    className="border rounded px-3 py-2 text-sm w-full"
-                  >
-                    <option value="">No project</option>
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-
-              {scopeType === "experiment" && selectedExperiment && (
-                <div>
-                  <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
-                  {experimentFiles.length === 0 ? (
-                    <p className="text-xs text-gray-500">
-                      No files found for this experiment.
-                    </p>
-                  ) : (
-                    <FileTreeSelector
-                      files={experimentFiles}
-                      sampleNames={sampleNames}
-                      onSelectionChange={setSelectedFileIds}
-                    />
-                  )}
-                </div>
+                </select>
               )}
-
-              {/* Branch conflict warning */}
-              {activeBranchCount > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  <p className="text-sm text-amber-800">
-                    There {activeBranchCount === 1 ? "is" : "are"} {activeBranchCount} active notebook{" "}
-                    {activeBranchCount === 1 ? "branch" : "branches"} for this experiment.
-                    You may need to merge changes on GitHub after your session.
-                  </p>
-                </div>
-              )}
-
-              {/* Error */}
-              {launchError && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                  <p className="text-sm text-red-800">{launchError}</p>
-                  {launchError.toLowerCase().includes("session credentials") && (
-                    <p className="text-sm text-red-800 mt-1">
-                      <Link href="/profile" className="underline font-medium">
-                        Go to Profile Settings
-                      </Link>{" "}
-                      to configure your session credentials.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Launch buttons */}
-            <div className="p-6 border-t bg-gray-50 flex gap-3 shrink-0">
-              {rstudioEnabled && (
-                <button
-                  onClick={() => handleLaunch("rstudio")}
-                  disabled={launching}
-                  className="flex-1 bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {launching ? "Launching..." : "Launch RStudio"}
-                </button>
-              )}
-              {jupyterEnabled && (
-                <button
-                  onClick={() => handleLaunch("jupyter")}
-                  disabled={launching}
-                  className="flex-1 bg-bioaf-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {launching ? "Launching..." : "Launch Jupyter"}
-                </button>
-              )}
-              <button
-                onClick={() => setShowLaunchModal(false)}
-                className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
             </div>
           </div>
+
+          {/* Scope: Experiment or Project */}
+          <div>
+            <label className="text-sm text-gray-500 mb-2 block">Link to (optional)</label>
+            <div className="flex gap-2 mb-2">
+              <button
+                onClick={() => { setScopeType("experiment"); setSelectedProject(null); }}
+                className={`px-3 py-1.5 text-sm rounded ${scopeType === "experiment" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
+              >
+                Experiment
+              </button>
+              <button
+                onClick={() => { setScopeType("project"); setSelectedExperiment(null); setExperimentFiles([]); setSelectedFileIds([]); }}
+                className={`px-3 py-1.5 text-sm rounded ${scopeType === "project" ? "bg-bioaf-100 text-bioaf-700 font-medium" : "text-gray-600 hover:bg-gray-100"}`}
+              >
+                Project
+              </button>
+            </div>
+            {scopeType === "experiment" ? (
+              <select
+                aria-label="Experiment"
+                value={selectedExperiment || ""}
+                onChange={(e) => handleExperimentChange(e.target.value ? Number(e.target.value) : null)}
+                className="border rounded px-3 py-2 text-sm w-full"
+              >
+                <option value="">No experiment</option>
+                {experiments.map((exp) => (
+                  <option key={exp.id} value={exp.id}>{exp.name}{exp.code ? ` (${exp.code})` : ""}</option>
+                ))}
+              </select>
+            ) : (
+              <select
+                aria-label="Project"
+                value={selectedProject || ""}
+                onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
+                className="border rounded px-3 py-2 text-sm w-full"
+              >
+                <option value="">No project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {scopeType === "experiment" && selectedExperiment && (
+            <div>
+              <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
+              {experimentFiles.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  No files found for this experiment.
+                </p>
+              ) : (
+                <FileTreeSelector
+                  files={experimentFiles}
+                  sampleNames={sampleNames}
+                  onSelectionChange={setSelectedFileIds}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Branch conflict warning */}
+          {activeBranchCount > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-sm text-amber-800">
+                There {activeBranchCount === 1 ? "is" : "are"} {activeBranchCount} active notebook{" "}
+                {activeBranchCount === 1 ? "branch" : "branches"} for this experiment.
+                You may need to merge changes on GitHub after your session.
+              </p>
+            </div>
+          )}
+
+          {/* Error */}
+          {launchError && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+              <p className="text-sm text-red-800">{launchError}</p>
+              {launchError.toLowerCase().includes("session credentials") && (
+                <p className="text-sm text-red-800 mt-1">
+                  <Link href="/profile" className="underline font-medium">
+                    Go to Profile Settings
+                  </Link>{" "}
+                  to configure your session credentials.
+                </p>
+              )}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Launch buttons */}
+      </Modal>
 
       {pendingLaunch && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Launch without inputs"
-          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center"
-        >
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold mb-2">Launch without inputs?</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              You haven&apos;t added the following to this session:
-            </p>
-            <ul className="text-sm text-gray-700 list-disc list-inside mb-4">
-              <li>No input files attached to /data/</li>
-            </ul>
-            <p className="text-sm text-gray-600 mb-4">
-              You can launch without them, or go back and add them now.
-            </p>
-            <div className="flex justify-end gap-2">
+        <Modal
+          open
+          title="Launch without inputs?"
+          onClose={() => setPendingLaunch(null)}
+          size="sm"
+          footer={
+            <>
               <button
                 type="button"
                 onClick={() => setPendingLaunch(null)}
@@ -946,9 +940,19 @@ export default function NotebooksPage() {
               >
                 Launch anyway
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 mb-3">
+            You haven&apos;t added the following to this session:
+          </p>
+          <ul className="text-sm text-gray-700 list-disc list-inside mb-4">
+            <li>No input files attached to /data/</li>
+          </ul>
+          <p className="text-sm text-gray-600">
+            You can launch without them, or go back and add them now.
+          </p>
+        </Modal>
       )}
     </main>
   );

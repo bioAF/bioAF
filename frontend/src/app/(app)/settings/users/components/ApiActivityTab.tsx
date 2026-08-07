@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import { ApiActivityRow, integrationsApi } from "@/lib/integrationsApi";
 import { ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -86,34 +87,30 @@ export function ApiActivityTab() {
         </div>
       )}
 
-      {selected && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-lg font-semibold">
-                  {selected.action} on {selected.entity_type}/{selected.entity_id}
-                </h2>
-                <p className="text-xs text-gray-500 mt-1">
-                  {new Date(selected.timestamp).toLocaleString()}
-                </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  <span className="font-medium">{keyLabel(selected)}</span>
-                </p>
-              </div>
-              <button
-                onClick={() => setSelected(null)}
-                className="text-gray-500 hover:text-gray-600"
-              >
-                Close
-              </button>
-            </div>
+      <Modal
+        open={!!selected}
+        title={
+          selected
+            ? `${selected.action} on ${selected.entity_type}/${selected.entity_id}`
+            : ""
+        }
+        onClose={() => setSelected(null)}
+        size="lg"
+      >
+        {selected && (
+          <>
+            <p className="text-xs text-gray-500">
+              {new Date(selected.timestamp).toLocaleString()}
+            </p>
+            <p className="mb-4 text-xs text-gray-600">
+              <span className="font-medium">{keyLabel(selected)}</span>
+            </p>
             <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs whitespace-pre-wrap break-all">
               {JSON.stringify(selected.details_json ?? {}, null, 2)}
             </pre>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

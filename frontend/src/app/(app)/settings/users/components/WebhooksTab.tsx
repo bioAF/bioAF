@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import {
   WebhookDelivery,
   WebhookSubscription,
@@ -225,235 +226,243 @@ export function WebhooksTab() {
       )}
 
       {/* Create Webhook modal */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg w-full">
-            <h2 className="text-lg font-semibold mb-4">Create Webhook</h2>
-            <label htmlFor="name" className="block text-sm font-medium mb-1">Name</label>
-            <input id="name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm mb-3"
-              placeholder="LIMS bridge"
-            />
-            <label htmlFor="url" className="block text-sm font-medium mb-1">URL</label>
-            <input id="url"
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm mb-3"
-              placeholder="https://lims.example.com/hooks/bioaf"
-            />
-            <label className="block text-sm font-medium mb-2">Events</label>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              {VALID_EVENTS.map((e) => (
-                <label key={e} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={newEvents.has(e)}
-                    onChange={(ev) => {
-                      const next = new Set(newEvents);
-                      if (ev.target.checked) next.add(e);
-                      else next.delete(e);
-                      setNewEvents(next);
-                    }}
-                  />
-                  <span>{e}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowCreate(false)}
-                className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={!newName.trim() || !newUrl.trim() || newEvents.size === 0}
-                className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Create
-              </button>
-            </div>
-          </div>
+      <Modal
+        open={showCreate}
+        title="Create Webhook"
+        onClose={() => setShowCreate(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowCreate(false)}
+            className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreate}
+            disabled={!newName.trim() || !newUrl.trim() || newEvents.size === 0}
+            className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            Create
+          </button>
+          </>
+        }
+      >
+        <label htmlFor="name" className="block text-sm font-medium mb-1">Name</label>
+        <input id="name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm mb-3"
+          placeholder="LIMS bridge"
+        />
+        <label htmlFor="url" className="block text-sm font-medium mb-1">URL</label>
+        <input id="url"
+          value={newUrl}
+          onChange={(e) => setNewUrl(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm mb-3"
+          placeholder="https://lims.example.com/hooks/bioaf"
+        />
+        <label className="block text-sm font-medium mb-2">Events</label>
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          {VALID_EVENTS.map((e) => (
+            <label key={e} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={newEvents.has(e)}
+                onChange={(ev) => {
+                  const next = new Set(newEvents);
+                  if (ev.target.checked) next.add(e);
+                  else next.delete(e);
+                  setNewEvents(next);
+                }}
+              />
+              <span>{e}</span>
+            </label>
+          ))}
         </div>
-      )}
+      </Modal>
 
       {/* Detail modal */}
       {selectedSub && !editingSub && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-lg font-semibold">{selectedSub.name}</h2>
-                <p className="text-xs text-gray-500 break-all">{selectedSub.url}</p>
-                <p className="text-xs text-gray-600 mt-1">
-                  {selectedSub.events.length} event{selectedSub.events.length === 1 ? "" : "s"}{" "}
-                  &middot; {selectedSub.is_active ? "active" : "disabled"}
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedSub(null)}
-                className="text-gray-500 hover:text-gray-600"
-              >
-                Close
-              </button>
+        <Modal
+          open
+          title={selectedSub.name ?? ""}
+          onClose={() => setSelectedSub(null)}
+          size="md"
+        >
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <p className="text-xs text-gray-500 break-all">{selectedSub.url}</p>
+              <p className="text-xs text-gray-600 mt-1">
+                {selectedSub.events.length} event{selectedSub.events.length === 1 ? "" : "s"}{" "}
+                &middot; {selectedSub.is_active ? "active" : "disabled"}
+              </p>
             </div>
-
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button
-                onClick={() => openEdit(selectedSub)}
-                className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => handleTest(selectedSub.id)}
-                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
-              >
-                Send test event
-              </button>
-              <button
-                onClick={() => setPendingRotate(selectedSub)}
-                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
-              >
-                Rotate secret
-              </button>
-              <button
-                onClick={() => setPendingDisable(selectedSub)}
-                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
-              >
-                Disable Webhook
-              </button>
-            </div>
-
-            <div className="mb-3 flex items-center gap-2">
-              <label htmlFor="status-filter" className="text-xs text-gray-500">Status filter:</label>
-              <select id="status-filter"
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="text-xs border rounded px-2 py-1"
-              >
-                <option value="">All</option>
-                <option value="pending">pending</option>
-                <option value="delivered">delivered</option>
-                <option value="failed">failed</option>
-                <option value="dead_letter">dead_letter</option>
-              </select>
-            </div>
-
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
+            <button
+              onClick={() => setSelectedSub(null)}
+              className="text-gray-500 hover:text-gray-600"
+            >
+              Close
+            </button>
+          </div>
+  
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button
+              onClick={() => openEdit(selectedSub)}
+              className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => handleTest(selectedSub.id)}
+              className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
+            >
+              Send test event
+            </button>
+            <button
+              onClick={() => setPendingRotate(selectedSub)}
+              className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
+            >
+              Rotate secret
+            </button>
+            <button
+              onClick={() => setPendingDisable(selectedSub)}
+              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
+            >
+              Disable Webhook
+            </button>
+          </div>
+  
+          <div className="mb-3 flex items-center gap-2">
+            <label htmlFor="status-filter" className="text-xs text-gray-500">Status filter:</label>
+            <select id="status-filter"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="text-xs border rounded px-2 py-1"
+            >
+              <option value="">All</option>
+              <option value="pending">pending</option>
+              <option value="delivered">delivered</option>
+              <option value="failed">failed</option>
+              <option value="dead_letter">dead_letter</option>
+            </select>
+          </div>
+  
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
+                <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Attempts</th>
+                <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last Status</th>
+                <th scope="col" className="px-2 py-2"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {deliveries.length === 0 ? (
                 <tr>
-                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Event</th>
-                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Attempts</th>
-                  <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Last Status</th>
-                  <th scope="col" className="px-2 py-2"></th>
+                  <td colSpan={5} className="px-2 py-4 text-xs text-gray-500 text-center">
+                    No deliveries yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {deliveries.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-2 py-4 text-xs text-gray-500 text-center">
-                      No deliveries yet.
+              ) : (
+                deliveries.map((d) => (
+                  <tr key={d.id}>
+                    <td className="px-2 py-2 text-xs">{d.event_type}</td>
+                    <td className="px-2 py-2 text-xs">{d.status}</td>
+                    <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
+                    <td className="px-2 py-2 text-xs">{d.last_response_status ?? "-"}</td>
+                    <td className="px-2 py-2 text-xs">
+                      <button
+                        onClick={() => handleReplay(d.id)}
+                        className="text-xs text-bioaf-600 hover:underline"
+                      >
+                        Replay
+                      </button>
                     </td>
                   </tr>
-                ) : (
-                  deliveries.map((d) => (
-                    <tr key={d.id}>
-                      <td className="px-2 py-2 text-xs">{d.event_type}</td>
-                      <td className="px-2 py-2 text-xs">{d.status}</td>
-                      <td className="px-2 py-2 text-xs">{d.attempt_count}</td>
-                      <td className="px-2 py-2 text-xs">{d.last_response_status ?? "-"}</td>
-                      <td className="px-2 py-2 text-xs">
-                        <button
-                          onClick={() => handleReplay(d.id)}
-                          className="text-xs text-bioaf-600 hover:underline"
-                        >
-                          Replay
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                ))
+              )}
+            </tbody>
+          </table>
+        </Modal>
       )}
 
       {/* Edit Webhook modal */}
       {editingSub && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6">
-            <h3 className="text-lg font-semibold mb-4">Edit {editingSub.name}</h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="name-2" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input id="name-2"
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-                />
-              </div>
-              <div>
-                <label htmlFor="url-2" className="block text-sm font-medium text-gray-700 mb-1">URL</label>
-                <input id="url-2"
-                  type="text"
-                  value={editUrl}
-                  onChange={(e) => setEditUrl(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Events</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {VALID_EVENTS.map((e) => (
-                    <label key={e} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={editEvents.has(e)}
-                        onChange={(ev) => {
-                          const next = new Set(editEvents);
-                          if (ev.target.checked) next.add(e);
-                          else next.delete(e);
-                          setEditEvents(next);
-                        }}
-                      />
-                      <span>{e}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={editActive}
-                  onChange={(e) => setEditActive(e.target.checked)}
-                />
-                <span>Active (deliveries will be queued for this subscription)</span>
-              </label>
+        <Modal
+          open
+          title={`Edit ${editingSub.name}`}
+          onClose={() => setEditingSub(null)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => setEditingSub(null)}
+              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditSave}
+              disabled={!editName.trim() || !editUrl.trim() || editEvents.size === 0}
+              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              Save Changes
+            </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="name-2" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+              <input id="name-2"
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+              />
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setEditingSub(null)}
-                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleEditSave}
-                disabled={!editName.trim() || !editUrl.trim() || editEvents.size === 0}
-                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Save Changes
-              </button>
+            <div>
+              <label htmlFor="url-2" className="block text-sm font-medium text-gray-700 mb-1">URL</label>
+              <input id="url-2"
+                type="text"
+                value={editUrl}
+                onChange={(e) => setEditUrl(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+              />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Events</label>
+              <div className="grid grid-cols-2 gap-2">
+                {VALID_EVENTS.map((e) => (
+                  <label key={e} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={editEvents.has(e)}
+                      onChange={(ev) => {
+                        const next = new Set(editEvents);
+                        if (ev.target.checked) next.add(e);
+                        else next.delete(e);
+                        setEditEvents(next);
+                      }}
+                    />
+                    <span>{e}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={editActive}
+                onChange={(e) => setEditActive(e.target.checked)}
+              />
+              <span>Active (deliveries will be queued for this subscription)</span>
+            </label>
           </div>
-        </div>
+        </Modal>
       )}
 
       {pendingDisable && (

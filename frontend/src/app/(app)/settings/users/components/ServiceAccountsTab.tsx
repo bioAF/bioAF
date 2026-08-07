@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import {
   ApiKey,
   ServiceAccount,
@@ -264,244 +265,256 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
       )}
 
       {/* Create Service Account modal */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-40 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-            <h2 className="text-lg font-semibold mb-4">Create Service Account</h2>
-            <label htmlFor="display-name" className="block text-sm font-medium mb-1">Display name</label>
-            <input id="display-name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm mb-3"
-              placeholder="Benchling Sync"
-            />
-            <label htmlFor="role" className="block text-sm font-medium mb-1">Role</label>
-            <div className="flex items-center gap-2 mb-2">
-              <select id="role"
-                value={newRoleId ?? ""}
-                onChange={(e) => setNewRoleId(Number(e.target.value) || null)}
-                className="flex-1 border rounded px-3 py-2 text-sm"
-              >
-                <option value="">Select a role</option>
-                {roles.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingRoleTarget("create");
-                  setShowRoleEditor(true);
-                }}
-                className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
-              >
-                Create custom role
-              </button>
-            </div>
-            <p className="text-xs text-gray-500 mb-4">
-              The role determines what every key minted under this account can do. You can change
-              it later by editing the service account.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowCreate(false)}
-                className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateSa}
-                disabled={!newName.trim() || !newRoleId}
-                className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Create
-              </button>
-            </div>
-          </div>
+      <Modal
+        open={showCreate}
+        title="Create Service Account"
+        onClose={() => setShowCreate(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowCreate(false)}
+            className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleCreateSa}
+            disabled={!newName.trim() || !newRoleId}
+            className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            Create
+          </button>
+          </>
+        }
+      >
+        <label htmlFor="display-name" className="block text-sm font-medium mb-1">Display name</label>
+        <input id="display-name"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          className="w-full border rounded px-3 py-2 text-sm mb-3"
+          placeholder="Benchling Sync"
+        />
+        <label htmlFor="role" className="block text-sm font-medium mb-1">Role</label>
+        <div className="flex items-center gap-2 mb-2">
+          <select id="role"
+            value={newRoleId ?? ""}
+            onChange={(e) => setNewRoleId(Number(e.target.value) || null)}
+            className="flex-1 border rounded px-3 py-2 text-sm"
+          >
+            <option value="">Select a role</option>
+            {roles.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              setPendingRoleTarget("create");
+              setShowRoleEditor(true);
+            }}
+            className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
+          >
+            Create custom role
+          </button>
         </div>
-      )}
+        <p className="text-xs text-gray-500 mb-4">
+          The role determines what every key minted under this account can do. You can change
+          it later by editing the service account.
+        </p>
+      </Modal>
 
       {/* Detail modal */}
       {selectedSa && !editingSa && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-30 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
-            <div className="flex justify-between items-start mb-4">
-              <div>
-                <h2 className="text-lg font-semibold">{selectedSa.display_name}</h2>
-                <p className="text-xs text-gray-500 font-mono">{selectedSa.email}</p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Role: <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
-                  <span className="text-gray-500">({selectedSaScopeCount} permissions)</span>
-                </p>
-              </div>
-              <button
-                onClick={() => setSelectedSa(null)}
-                className="text-gray-500 hover:text-gray-600"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="flex gap-2 mb-4">
-              <button
-                onClick={() => openEdit(selectedSa)}
-                className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => {
-                  setNewKeyName("");
-                  setShowMintKey(true);
-                }}
-                className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
-              >
-                Mint key
-              </button>
-              <button
-                onClick={() => setPendingDisable(selectedSa)}
-                className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
-              >
-                Disable Service Account
-              </button>
-            </div>
-
+        <Modal
+          open
+          title={selectedSa.display_name ?? ""}
+          onClose={() => setSelectedSa(null)}
+          size="md"
+        >
+          <div className="flex justify-between items-start mb-4">
             <div>
-              <h3 className="text-sm font-semibold mb-2">API Keys</h3>
-              {keysLoading ? (
-                <LoadingSpinner size="sm" />
-              ) : keys.length === 0 ? (
-                <p className="text-sm text-gray-500">No keys yet. Click <strong>Mint key</strong> above.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Prefix</th>
-                      <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                      <th scope="col" className="px-2 py-2"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {keys.map((k) => (
-                      <tr key={k.id}>
-                        <td className="px-2 py-2">{k.name}</td>
-                        <td className="px-2 py-2 font-mono text-xs">biokey_{k.key_prefix}</td>
-                        <td className="px-2 py-2">{k.revoked_at ? "revoked" : "active"}</td>
-                        <td className="px-2 py-2 text-right">
-                          {!k.revoked_at && (
-                            <button
-                              onClick={() => setPendingRevoke(k.id)}
-                              className="text-xs text-red-600 hover:underline"
-                            >
-                              Revoke
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <p className="text-xs text-gray-500 font-mono">{selectedSa.email}</p>
+              <p className="text-xs text-gray-600 mt-1">
+                Role: <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
+                <span className="text-gray-500">({selectedSaScopeCount} permissions)</span>
+              </p>
             </div>
+            <button
+              onClick={() => setSelectedSa(null)}
+              className="text-gray-500 hover:text-gray-600"
+            >
+              Close
+            </button>
           </div>
-        </div>
+  
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => openEdit(selectedSa)}
+              className="px-3 py-1.5 text-xs bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => {
+                setNewKeyName("");
+                setShowMintKey(true);
+              }}
+              className="px-3 py-1.5 text-xs bg-gray-100 border rounded hover:bg-gray-200"
+            >
+              Mint key
+            </button>
+            <button
+              onClick={() => setPendingDisable(selectedSa)}
+              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 ml-auto"
+            >
+              Disable Service Account
+            </button>
+          </div>
+  
+          <div>
+            <h3 className="text-sm font-semibold mb-2">API Keys</h3>
+            {keysLoading ? (
+              <LoadingSpinner size="sm" />
+            ) : keys.length === 0 ? (
+              <p className="text-sm text-gray-500">No keys yet. Click <strong>Mint key</strong> above.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Prefix</th>
+                    <th scope="col" className="px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th scope="col" className="px-2 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {keys.map((k) => (
+                    <tr key={k.id}>
+                      <td className="px-2 py-2">{k.name}</td>
+                      <td className="px-2 py-2 font-mono text-xs">biokey_{k.key_prefix}</td>
+                      <td className="px-2 py-2">{k.revoked_at ? "revoked" : "active"}</td>
+                      <td className="px-2 py-2 text-right">
+                        {!k.revoked_at && (
+                          <button
+                            onClick={() => setPendingRevoke(k.id)}
+                            className="text-xs text-red-600 hover:underline"
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* Edit Service Account modal */}
       {editingSa && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h3 className="text-lg font-semibold mb-4">Edit {editingSa.display_name}</h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="display-name-2" className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
-                <input id="display-name-2"
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-                />
-              </div>
-              <div>
-                <label htmlFor="role-2" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
-                <div className="flex items-center gap-2">
-                  <select id="role-2"
-                    value={editRoleId ?? ""}
-                    onChange={(e) => setEditRoleId(Number(e.target.value) || null)}
-                    className="flex-1 px-3 py-2 border rounded-md text-sm"
-                  >
-                    {roles.map((r) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPendingRoleTarget("edit");
-                      setShowRoleEditor(true);
-                    }}
-                    className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
-                  >
-                    Create custom role
-                  </button>
-                </div>
-              </div>
+        <Modal
+          open
+          title={`Edit ${editingSa.display_name}`}
+          onClose={() => setEditingSa(null)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => setEditingSa(null)}
+              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditSave}
+              disabled={!editName.trim() || !editRoleId}
+              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              Save Changes
+            </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="display-name-2" className="block text-sm font-medium text-gray-700 mb-1">Display name</label>
+              <input id="display-name-2"
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+              />
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setEditingSa(null)}
-                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleEditSave}
-                disabled={!editName.trim() || !editRoleId}
-                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Save Changes
-              </button>
+            <div>
+              <label htmlFor="role-2" className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <div className="flex items-center gap-2">
+                <select id="role-2"
+                  value={editRoleId ?? ""}
+                  onChange={(e) => setEditRoleId(Number(e.target.value) || null)}
+                  className="flex-1 px-3 py-2 border rounded-md text-sm"
+                >
+                  {roles.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPendingRoleTarget("edit");
+                    setShowRoleEditor(true);
+                  }}
+                  className="px-3 py-2 text-xs border border-bioaf-600 text-bioaf-600 rounded hover:bg-bioaf-50 whitespace-nowrap"
+                >
+                  Create custom role
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Mint API Key modal (scopes derived from the SA's role) */}
       {showMintKey && selectedSa && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
-            <h2 className="text-lg font-semibold mb-1">Mint API Key</h2>
-            <p className="text-xs text-gray-500 mb-4">
-              Permissions are inherited from the service account&apos;s role:{" "}
-              <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
-              ({selectedSaScopeCount} permissions).
-              To change what the key can do, edit the service account&apos;s role.
-            </p>
-            <label htmlFor="key-name" className="block text-sm font-medium mb-1">Key name</label>
-            <input id="key-name"
-              value={newKeyName}
-              onChange={(e) => setNewKeyName(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm mb-4"
-              placeholder="Primary"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowMintKey(false)}
-                className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleMintKey}
-                disabled={!newKeyName.trim() || selectedSaScopeCount === 0}
-                className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Mint
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          open
+          title="Mint API Key"
+          onClose={() => setShowMintKey(false)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => setShowMintKey(false)}
+              className="px-3 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleMintKey}
+              disabled={!newKeyName.trim() || selectedSaScopeCount === 0}
+              className="px-3 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              Mint
+            </button>
+            </>
+          }
+        >
+          <p className="text-xs text-gray-500 mb-4">
+            Permissions are inherited from the service account&apos;s role:{" "}
+            <span className="font-medium">{roleName(selectedSa.role_id)}</span>{" "}
+            ({selectedSaScopeCount} permissions).
+            To change what the key can do, edit the service account&apos;s role.
+          </p>
+          <label htmlFor="key-name" className="block text-sm font-medium mb-1">Key name</label>
+          <input id="key-name"
+            value={newKeyName}
+            onChange={(e) => setNewKeyName(e.target.value)}
+            className="w-full border rounded px-3 py-2 text-sm mb-4"
+            placeholder="Primary"
+          />
+        </Modal>
       )}
 
       {showRoleEditor && (

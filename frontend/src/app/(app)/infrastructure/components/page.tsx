@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/shared/Toast";
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
 import { StorageSection } from "@/components/components/StorageSection";
 import { BootstrapCard } from "@/components/infrastructure/BootstrapCard";
@@ -1172,161 +1173,165 @@ export default function InfraComponentsPage() {
       )}
 
       {/* Deploy Confirmation Modal - Region/Zone Selection */}
-      {showDeployConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-4">Deploy Compute Infrastructure</h2>
+      <Modal
+        open={showDeployConfirm}
+        title="Deploy Compute Infrastructure"
+        onClose={() => setShowDeployConfirm(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowDeployConfirm(false)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirmDeploy}
+            disabled={deployLoading}
+            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
+            {deployLoading ? "Starting..." : "Deploy"}
+          </button>
+          </>
+        }
+      >
 
-            {isAws ? (
-              /* AWS (EKS): regional cluster, no per-deploy region/zone choice.
-                 EKS spans availability zones automatically, so there is no GKE-
-                 style zone selector or cross-region GCP cost warning. */
-              <div className="mb-4">
-                <label htmlFor="region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-                <input id="region"
-                  type="text"
-                  value={deployRegion}
-                  readOnly
-                  className="w-full px-3 py-2 border rounded text-sm bg-gray-50 text-gray-600"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  The cluster deploys in your install region and spans multiple availability
-                  zones for resilience.
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* Region (GCP) */}
-                <div className="mb-4">
-                  <label htmlFor="region-2" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
-                  <select id="region-2"
-                    value={deployRegion}
-                    onChange={(e) => {
-                      setDeployRegion(e.target.value);
-                      setDeployZone(zonesForRegion(e.target.value)[0]);
-                    }}
-                    className="w-full px-3 py-2 border rounded text-sm"
-                  >
-                    {GCP_REGIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}{r === defaultRegion ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  {deployRegion !== defaultRegion && (
-                    <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
-                      <span className="mt-0.5">&#9888;</span>
-                      Your storage is in {defaultRegion}. Deploying compute in {deployRegion} may
-                      incur cross-region network costs in GCP.
-                    </p>
-                  )}
-                </div>
-
-                {/* Zone toggle (GCP) */}
-                <div className="mb-4">
-                  <label id="lbl-page-1" className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useSpecificZone}
-                      onChange={(e) => setUseSpecificZone(e.target.checked)}
-                    />
-                    <span className="text-sm text-gray-700">Deploy to a specific zone</span>
-                    <span
-                      className="text-gray-500 cursor-help"
-                      title="Without a specific zone, GKE creates a multi-zonal cluster with nodes distributed across availability zones. This provides better resilience but may cost slightly more."
-                    >
-                      &#9432;
-                    </span>
-                  </label>
-                  {useSpecificZone && (
-                    <select aria-labelledby="lbl-page-1"
-                      value={deployZone}
-                      onChange={(e) => setDeployZone(e.target.value)}
-                      className="w-full px-3 py-2 border rounded text-sm mt-2"
-                    >
-                      {zonesForRegion(deployRegion).map((z) => (
-                        <option key={z} value={z}>{z}</option>
-                      ))}
-                    </select>
-                  )}
-                  {!useSpecificZone && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Multi-zonal deployment across {deployRegion}. Greater flexibility,
-                      slightly higher GCP cost.
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowDeployConfirm(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmDeploy}
-                disabled={deployLoading}
-                className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                {deployLoading ? "Starting..." : "Deploy"}
-              </button>
-            </div>
+        {isAws ? (
+          /* AWS (EKS): regional cluster, no per-deploy region/zone choice.
+             EKS spans availability zones automatically, so there is no GKE-
+             style zone selector or cross-region GCP cost warning. */
+          <div className="mb-4">
+            <label htmlFor="region" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+            <input id="region"
+              type="text"
+              value={deployRegion}
+              readOnly
+              className="w-full px-3 py-2 border rounded text-sm bg-gray-50 text-gray-600"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              The cluster deploys in your install region and spans multiple availability
+              zones for resilience.
+            </p>
           </div>
-        </div>
-      )}
+        ) : (
+          <>
+            {/* Region (GCP) */}
+            <div className="mb-4">
+              <label htmlFor="region-2" className="block text-sm font-medium text-gray-700 mb-1">Region</label>
+              <select id="region-2"
+                value={deployRegion}
+                onChange={(e) => {
+                  setDeployRegion(e.target.value);
+                  setDeployZone(zonesForRegion(e.target.value)[0]);
+                }}
+                className="w-full px-3 py-2 border rounded text-sm"
+              >
+                {GCP_REGIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}{r === defaultRegion ? " (default)" : ""}
+                  </option>
+                ))}
+              </select>
+              {deployRegion !== defaultRegion && (
+                <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
+                  <span className="mt-0.5">&#9888;</span>
+                  Your storage is in {defaultRegion}. Deploying compute in {deployRegion} may
+                  incur cross-region network costs in GCP.
+                </p>
+              )}
+            </div>
+
+            {/* Zone toggle (GCP) */}
+            <div className="mb-4">
+              <label id="lbl-page-1" className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useSpecificZone}
+                  onChange={(e) => setUseSpecificZone(e.target.checked)}
+                />
+                <span className="text-sm text-gray-700">Deploy to a specific zone</span>
+                <span
+                  className="text-gray-500 cursor-help"
+                  title="Without a specific zone, GKE creates a multi-zonal cluster with nodes distributed across availability zones. This provides better resilience but may cost slightly more."
+                >
+                  &#9432;
+                </span>
+              </label>
+              {useSpecificZone && (
+                <select aria-labelledby="lbl-page-1"
+                  value={deployZone}
+                  onChange={(e) => setDeployZone(e.target.value)}
+                  className="w-full px-3 py-2 border rounded text-sm mt-2"
+                >
+                  {zonesForRegion(deployRegion).map((z) => (
+                    <option key={z} value={z}>{z}</option>
+                  ))}
+                </select>
+              )}
+              {!useSpecificZone && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Multi-zonal deployment across {deployRegion}. Greater flexibility,
+                  slightly higher GCP cost.
+                </p>
+              )}
+            </div>
+          </>
+        )}
+
+      </Modal>
 
       {/* Teardown Confirmation Modal */}
-      {showTeardownModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-4">Teardown Compute Stack</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              This will destroy the Kubernetes cluster and all node pools. Active pipeline
-              runs and notebook sessions will be terminated. Storage buckets and your data
-              will NOT be affected.
-            </p>
-            <label className="flex items-start gap-2 mb-4 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={teardownChecked}
-                onChange={(e) => setTeardownChecked(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-sm text-gray-700">
-                I understand this will terminate all running workloads
-              </span>
-            </label>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowTeardownModal(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={!teardownChecked}
-                onClick={async () => {
-                  setShowTeardownModal(false);
-                  try {
-                    await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
-                    setDeployStarted(true);
-                    setShowTeardownProgress(true);
-                  } catch (e: unknown) {
-                    const msg = e instanceof Error ? e.message : "Teardown failed to start";
-                    toast.error(msg);
-                  }
-                }}
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Teardown
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showTeardownModal}
+        title="Teardown Compute Stack"
+        onClose={() => setShowTeardownModal(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowTeardownModal(false)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!teardownChecked}
+            onClick={async () => {
+              setShowTeardownModal(false);
+              try {
+                await api.post("/api/v1/infrastructure/stack/teardown-background", { confirm: true });
+                setDeployStarted(true);
+                setShowTeardownProgress(true);
+              } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : "Teardown failed to start";
+                toast.error(msg);
+              }
+            }}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Teardown
+          </button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600 mb-4">
+          This will destroy the Kubernetes cluster and all node pools. Active pipeline
+          runs and notebook sessions will be terminated. Storage buckets and your data
+          will NOT be affected.
+        </p>
+        <label className="flex items-start gap-2 mb-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={teardownChecked}
+            onChange={(e) => setTeardownChecked(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-gray-700">
+            I understand this will terminate all running workloads
+          </span>
+        </label>
+      </Modal>
 
       {/* Teardown Progress Modal */}
       {showTeardownProgress && (
@@ -1349,75 +1354,77 @@ export default function InfraComponentsPage() {
       )}
 
       {/* Destroy Storage Confirmation Modal */}
-      {showDestroyStorageModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-3">Destroy Storage Infrastructure</h2>
+      <Modal
+        open={showDestroyStorageModal}
+        title="Destroy Storage Infrastructure"
+        onClose={() => setShowDestroyStorageModal(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowDestroyStorageModal(false)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE}
+            onClick={async () => {
+              setShowDestroyStorageModal(false);
+              try {
+                await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
+                setDeployStarted(true);
+                setShowDestroyStorageProgress(true);
+              } catch (e: unknown) {
+                const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
+                toast.error(msg);
+              }
+            }}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Destroy Storage
+          </button>
+          </>
+        }
+      >
 
-            <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-              <p className="text-sm font-medium text-red-800 mb-1">
-                All data will be permanently deleted
-              </p>
-              <p className="text-xs text-red-700">
-                This will permanently destroy all {storageLabel} buckets and their
-                contents, including raw sample data, processed pipeline outputs, and
-                results. This action cannot be undone.
-              </p>
-            </div>
-
-            <label className="flex items-start gap-2 mb-4 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={destroyStorageChecked}
-                onChange={(e) => setDestroyStorageChecked(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="text-sm text-gray-700">
-                I understand all files stored in {storageLabel} will be permanently lost
-              </span>
-            </label>
-
-            <div className="mb-4">
-              <label htmlFor="type-delete-my-data-to-confirm" className="text-xs text-gray-500 block mb-1">
-                Type <span className="font-mono font-medium text-gray-700">delete my data</span> to confirm
-              </label>
-              <input id="type-delete-my-data-to-confirm"
-                type="text"
-                value={destroyStoragePhrase}
-                onChange={(e) => setDestroyStoragePhrase(e.target.value)}
-                placeholder="delete my data"
-                className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
-              />
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowDestroyStorageModal(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE}
-                onClick={async () => {
-                  setShowDestroyStorageModal(false);
-                  try {
-                    await api.post("/api/v1/infrastructure/stack/destroy-storage-background", { confirm: true });
-                    setDeployStarted(true);
-                    setShowDestroyStorageProgress(true);
-                  } catch (e: unknown) {
-                    const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
-                    toast.error(msg);
-                  }
-                }}
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Destroy Storage
-              </button>
-            </div>
-          </div>
+        <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+          <p className="text-sm font-medium text-red-800 mb-1">
+            All data will be permanently deleted
+          </p>
+          <p className="text-xs text-red-700">
+            This will permanently destroy all {storageLabel} buckets and their
+            contents, including raw sample data, processed pipeline outputs, and
+            results. This action cannot be undone.
+          </p>
         </div>
-      )}
+
+        <label className="flex items-start gap-2 mb-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={destroyStorageChecked}
+            onChange={(e) => setDestroyStorageChecked(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="text-sm text-gray-700">
+            I understand all files stored in {storageLabel} will be permanently lost
+          </span>
+        </label>
+
+        <div className="mb-4">
+          <label htmlFor="type-delete-my-data-to-confirm" className="text-xs text-gray-500 block mb-1">
+            Type <span className="font-mono font-medium text-gray-700">delete my data</span> to confirm
+          </label>
+          <input id="type-delete-my-data-to-confirm"
+            type="text"
+            value={destroyStoragePhrase}
+            onChange={(e) => setDestroyStoragePhrase(e.target.value)}
+            placeholder="delete my data"
+            className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+          />
+        </div>
+
+      </Modal>
 
       {/* Destroy Storage Progress Modal */}
       {showDestroyStorageProgress && (
@@ -1440,82 +1447,86 @@ export default function InfraComponentsPage() {
       )}
 
       {/* Abort Deployment Confirmation Modal */}
-      {showAbortConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-3">Abort Deployment</h2>
+      <Modal
+        open={showAbortConfirm}
+        title="Abort Deployment"
+        onClose={() => setShowAbortConfirm(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowAbortConfirm(false)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Continue Deploying
+          </button>
+          <button
+            onClick={handleAbortDeploy}
+            disabled={abortLoading}
+            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+          >
+            {abortLoading ? "Aborting..." : "Abort Deployment"}
+          </button>
+          </>
+        }
+      >
 
-            <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-              <p className="text-sm font-medium text-amber-800 mb-1">
-                This may leave infrastructure in an unexpected state
-              </p>
-              <p className="text-xs text-amber-700">
-                Aborting will cancel the current deployment. Some resources may
-                have already been created and will need to be cleaned up manually
-                or by re-running the deployment.
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowAbortConfirm(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Continue Deploying
-              </button>
-              <button
-                onClick={handleAbortDeploy}
-                disabled={abortLoading}
-                className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-              >
-                {abortLoading ? "Aborting..." : "Abort Deployment"}
-              </button>
-            </div>
-          </div>
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+          <p className="text-sm font-medium text-amber-800 mb-1">
+            This may leave infrastructure in an unexpected state
+          </p>
+          <p className="text-xs text-amber-700">
+            Aborting will cancel the current deployment. Some resources may
+            have already been created and will need to be cleaned up manually
+            or by re-running the deployment.
+          </p>
         </div>
-      )}
+
+      </Modal>
 
       {/* Abandon Run Confirmation Modal */}
-      {showAbandonModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-3">Abandon Terraform Operation</h2>
+      <Modal
+        open={showAbandonModal}
+        title="Abandon Terraform Operation"
+        onClose={() => setShowAbandonModal(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => setShowAbandonModal(false)}
+            className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
+          >
+            Keep Running
+          </button>
+          <button
+            onClick={handleAbandonRun}
+            disabled={abandonLoading}
+            className="px-4 py-2 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
+          >
+            {abandonLoading ? "Abandoning..." : "Abandon Operation"}
+          </button>
+          </>
+        }
+      >
 
-            <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-              <p className="text-sm font-medium text-amber-800 mb-1">
-                This may leave infrastructure in a partial state
-              </p>
-              <p className="text-xs text-amber-700">
-                Abandoning a running operation releases the Terraform state lock
-                so you can start a new operation. If Terraform was mid-apply,
-                some resources may have been created or modified. You can re-run
-                the operation to reconcile.
-              </p>
-            </div>
-
-            <p className="text-sm text-gray-600 mb-4">
-              Run <span className="font-mono font-medium">#{tfStatus?.active_run_id}</span>{" "}
-              ({tfStatus?.active_run_status}) will be marked as cancelled.
-            </p>
-
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowAbandonModal(false)}
-                className="px-4 py-2 text-sm border border-gray-300 rounded hover:bg-gray-50"
-              >
-                Keep Running
-              </button>
-              <button
-                onClick={handleAbandonRun}
-                disabled={abandonLoading}
-                className="px-4 py-2 text-sm bg-amber-600 text-white rounded hover:bg-amber-700 disabled:opacity-50"
-              >
-                {abandonLoading ? "Abandoning..." : "Abandon Operation"}
-              </button>
-            </div>
-          </div>
+        <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+          <p className="text-sm font-medium text-amber-800 mb-1">
+            This may leave infrastructure in a partial state
+          </p>
+          <p className="text-xs text-amber-700">
+            Abandoning a running operation releases the Terraform state lock
+            so you can start a new operation. If Terraform was mid-apply,
+            some resources may have been created or modified. You can re-run
+            the operation to reconcile.
+          </p>
         </div>
-      )}
+
+        <p className="text-sm text-gray-600 mb-4">
+          Run <span className="font-mono font-medium">#{tfStatus?.active_run_id}</span>{" "}
+          ({tfStatus?.active_run_status}) will be marked as cancelled.
+        </p>
+
+      </Modal>
       {/* Gate on the cluster redeploy. This is client-side only: the endpoint
           still plans and auto-applies in one request, so the two-step
           awaiting_confirmation flow that e4ed8f9 removed stays removed. */}

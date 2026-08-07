@@ -1,6 +1,7 @@
 "use client";
 
 import { useConfirm } from "@/hooks/useConfirm";
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -663,575 +664,549 @@ export default function WorkNodesPage() {
 
       {/* Detail panel */}
       {viewingNode && (
-        <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center" onClick={() => setViewingNode(null)}>
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold">Work Node Details</h2>
-              <button onClick={() => setViewingNode(null)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
+        <Modal
+          open
+          title="Work Node Details"
+          onClose={() => setViewingNode(null)}
+          size="md"
+        >
+          <div className="flex justify-between items-center mb-4">
+            <button onClick={() => setViewingNode(null)} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
+          </div>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-gray-500">Status</span>
+              <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusBadgeClass("computeSession", viewingNode.status)}`}>
+                {statusLabel(viewingNode)}
+              </span>
             </div>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-500">Status</span>
-                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${statusBadgeClass("computeSession", viewingNode.status)}`}>
-                  {statusLabel(viewingNode)}
-                </span>
+            {viewingNode.status === "failed" && viewingNode.failure_message && (
+              <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                <div className="font-medium mb-1">
+                  {formatSessionStatusLabel({ status: viewingNode.status, failure_reason: viewingNode.failure_reason })}
+                </div>
+                <div className="font-mono whitespace-pre-wrap break-words">{viewingNode.failure_message}</div>
               </div>
-              {viewingNode.status === "failed" && viewingNode.failure_message && (
-                <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
-                  <div className="font-medium mb-1">
-                    {formatSessionStatusLabel({ status: viewingNode.status, failure_reason: viewingNode.failure_reason })}
-                  </div>
-                  <div className="font-mono whitespace-pre-wrap break-words">{viewingNode.failure_message}</div>
-                </div>
-              )}
-              {viewingNode.status === "failed" && !viewingNode.failure_message && !viewingNode.access_url && (
-                <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
-                  GCP Resources Unavailable -- the VM could not be created. Try again later or choose a different machine type.
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-gray-500">User</span>
-                <span>{viewingNode.user?.name || viewingNode.user?.email || "\u2014"}</span>
+            )}
+            {viewingNode.status === "failed" && !viewingNode.failure_message && !viewingNode.access_url && (
+              <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
+                GCP Resources Unavailable -- the VM could not be created. Try again later or choose a different machine type.
               </div>
-              {formatLinkedTo({ project: viewingNode.project }) && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Linked to</span>
-                  <span>{formatLinkedTo({ project: viewingNode.project })}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-gray-500">Machine Type</span>
-                <span>{viewingNode.machine_type || "-"}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500">Resources</span>
-                <span>{viewingNode.cpu_cores} CPU / {viewingNode.memory_gb} GB RAM</span>
-              </div>
-              {viewingNode.requested_disk_gb !== null && viewingNode.requested_disk_gb !== undefined && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Disk Size</span>
-                  <span>{viewingNode.requested_disk_gb} GB</span>
-                </div>
-              )}
-              {viewingNode.gce_instance_name && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">VM Instance</span>
-                  <span className="font-mono text-xs">{viewingNode.gce_instance_name}</span>
-                </div>
-              )}
-              {viewingNode.gce_zone && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Zone</span>
-                  <span>{viewingNode.gce_zone}</span>
-                </div>
-              )}
-              {viewingNode.access_url && viewingNode.status === "running" && (
-                <div>
-                  <span className="text-gray-500 block mb-1">SSH Command</span>
-                  <div className="bg-gray-900 text-green-400 rounded p-3 font-mono text-xs flex items-center justify-between">
-                    <code>{extractSshCommand(viewingNode.access_url)}</code>
-                    <button
-                      onClick={() => navigator.clipboard.writeText(extractSshCommand(viewingNode.access_url))}
-                      className="ml-2 text-gray-500 hover:text-white text-xs"
-                    >
-                      Copy
-                    </button>
-                  </div>
-                </div>
-              )}
-              {viewingNode.github_repo_ids && viewingNode.github_repo_ids.length > 0 && (
-                <div>
-                  <span className="text-gray-500 block mb-1">Cloned Repos</span>
-                  <ul className="text-xs text-gray-700 space-y-1">
-                    {viewingNode.github_repo_ids.map((repoId) => {
-                      const repo = repos.find((r) => r.id === repoId);
-                      return (
-                        <li key={repoId} className="font-mono bg-gray-50 px-2 py-1 rounded">
-                          ~/repos/{repo?.display_name || `repo-${repoId}`}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              )}
-              {viewingNode.input_file_ids && viewingNode.input_file_ids.length > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Input Files</span>
-                  <span>{viewingNode.input_file_ids.length} file(s) in /data/</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-gray-500">Started</span>
-                <span>{formatTimestamp(viewingNode.started_at)}</span>
-              </div>
-              {viewingNode.status === "running" && viewingNode.started_at && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Uptime</span>
-                  <span>{formatUptime(viewingNode.started_at)}</span>
-                </div>
-              )}
-              <div className="flex justify-between">
-                <span className="text-gray-500">Last Heartbeat</span>
-                <span>{viewingNode.heartbeat_at ? formatTimestamp(viewingNode.heartbeat_at) : "-"}</span>
-              </div>
-              {viewingNode.stopped_at && (
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Stopped</span>
-                  <span>{formatTimestamp(viewingNode.stopped_at)}</span>
-                </div>
-              )}
+            )}
+            <div className="flex justify-between">
+              <span className="text-gray-500">User</span>
+              <span>{viewingNode.user?.name || viewingNode.user?.email || "\u2014"}</span>
             </div>
-            {canAccess("work_nodes", "stop") && viewingNode.status === "running" && (
-              <div className="mt-4 pt-4 border-t">
-                <button
-                  onClick={() => handleStop(viewingNode.id)}
-                  className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-                >
-                  Stop Work Node
-                </button>
-                <p className="text-xs text-gray-500 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
+            {formatLinkedTo({ project: viewingNode.project }) && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Linked to</span>
+                <span>{formatLinkedTo({ project: viewingNode.project })}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-gray-500">Machine Type</span>
+              <span>{viewingNode.machine_type || "-"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-gray-500">Resources</span>
+              <span>{viewingNode.cpu_cores} CPU / {viewingNode.memory_gb} GB RAM</span>
+            </div>
+            {viewingNode.requested_disk_gb !== null && viewingNode.requested_disk_gb !== undefined && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Disk Size</span>
+                <span>{viewingNode.requested_disk_gb} GB</span>
+              </div>
+            )}
+            {viewingNode.gce_instance_name && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">VM Instance</span>
+                <span className="font-mono text-xs">{viewingNode.gce_instance_name}</span>
+              </div>
+            )}
+            {viewingNode.gce_zone && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Zone</span>
+                <span>{viewingNode.gce_zone}</span>
+              </div>
+            )}
+            {viewingNode.access_url && viewingNode.status === "running" && (
+              <div>
+                <span className="text-gray-500 block mb-1">SSH Command</span>
+                <div className="bg-gray-900 text-green-400 rounded p-3 font-mono text-xs flex items-center justify-between">
+                  <code>{extractSshCommand(viewingNode.access_url)}</code>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(extractSshCommand(viewingNode.access_url))}
+                    className="ml-2 text-gray-500 hover:text-white text-xs"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
+            {viewingNode.github_repo_ids && viewingNode.github_repo_ids.length > 0 && (
+              <div>
+                <span className="text-gray-500 block mb-1">Cloned Repos</span>
+                <ul className="text-xs text-gray-700 space-y-1">
+                  {viewingNode.github_repo_ids.map((repoId) => {
+                    const repo = repos.find((r) => r.id === repoId);
+                    return (
+                      <li key={repoId} className="font-mono bg-gray-50 px-2 py-1 rounded">
+                        ~/repos/{repo?.display_name || `repo-${repoId}`}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+            {viewingNode.input_file_ids && viewingNode.input_file_ids.length > 0 && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Input Files</span>
+                <span>{viewingNode.input_file_ids.length} file(s) in /data/</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-gray-500">Started</span>
+              <span>{formatTimestamp(viewingNode.started_at)}</span>
+            </div>
+            {viewingNode.status === "running" && viewingNode.started_at && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Uptime</span>
+                <span>{formatUptime(viewingNode.started_at)}</span>
+              </div>
+            )}
+            <div className="flex justify-between">
+              <span className="text-gray-500">Last Heartbeat</span>
+              <span>{viewingNode.heartbeat_at ? formatTimestamp(viewingNode.heartbeat_at) : "-"}</span>
+            </div>
+            {viewingNode.stopped_at && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Stopped</span>
+                <span>{formatTimestamp(viewingNode.stopped_at)}</span>
               </div>
             )}
           </div>
-        </div>
+          {canAccess("work_nodes", "stop") && viewingNode.status === "running" && (
+            <div className="mt-4 pt-4 border-t">
+              <button
+                onClick={() => handleStop(viewingNode.id)}
+                className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
+              >
+                Stop Work Node
+              </button>
+              <p className="text-xs text-gray-500 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
+            </div>
+          )}
+        </Modal>
       )}
 
       {/* Launch dialog -- 2 steps */}
       {showLaunch && (
-        <div
-          className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center"
-          onClick={() => setShowLaunch(false)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl w-[800px] max-w-full mx-4 max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-6 border-b flex items-center justify-between shrink-0">
-              <h2 className="text-lg font-semibold">Launch Work Node</h2>
-              <button onClick={() => setShowLaunch(false)} className="text-gray-500 hover:text-gray-600 text-xl">
-                &times;
+        <Modal
+          open
+          title="Launch Work Node"
+          onClose={() => setShowLaunch(false)}
+          size="xl"
+          footer={
+            <>
+          {launchStep === 1 ? (
+            <button
+              type="button"
+              onClick={() => setLaunchStep(2)}
+              disabled={!scopeSelected || !selectedVersionId || !selectedMachineType}
+              className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
+            >
+              Next: Review
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setLaunchStep(1)}
+                className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+              >
+                Back
               </button>
+              <button
+                type="button"
+                onClick={handleLaunch}
+                disabled={launching}
+                className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
+              >
+                Launch Work Node
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowLaunch(false)}
+            className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+          >
+            Cancel
+          </button>
+            </>
+          }
+        >
+          {/* Step indicator: 2 steps */}
+          <div className="mb-4 flex gap-2">
+            {[1, 2].map((s) => (
+              <div
+                key={s}
+                className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-indigo-600" : "bg-gray-200"}`}
+              />
+            ))}
+          </div>
+          {launchError && (
+            <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+              {launchError}
             </div>
+          )}
 
-            {/* Step indicator: 2 steps */}
-            <div className="px-6 pt-4 flex gap-2 shrink-0">
-              {[1, 2].map((s) => (
-                <div
-                  key={s}
-                  className={`h-1 flex-1 rounded ${s <= launchStep ? "bg-indigo-600" : "bg-gray-200"}`}
-                />
-              ))}
-            </div>
-
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-              {launchError && (
-                <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
-                  {launchError}
-                </div>
-              )}
-
-              {launchStep === 1 && (
-                <>
-                  <section aria-labelledby="wn-machine-profile-heading">
-                    <h3 id="wn-machine-profile-heading" className="text-sm font-medium text-gray-700 mb-2">
-                      Machine Profile
-                    </h3>
-                    <div role="group" aria-label="Machine Profile" className="space-y-2">
-                      {workNodeProfiles.map((profile) => {
-                        const available = profile.machineType !== null;
-                        const selected =
-                          available && selectedMachineType === profile.machineType?.name;
-                        return (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            disabled={!available}
-                            aria-pressed={selected}
-                            onClick={() => {
-                              if (profile.machineType) {
-                                setSelectedMachineType(profile.machineType.name);
-                              }
-                            }}
-                            className={`w-full text-left p-3 border rounded-lg transition-colors ${
-                              !available
-                                ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
-                                : selected
-                                ? "border-indigo-500 bg-indigo-50"
-                                : "border-gray-200 hover:border-gray-300"
-                            }`}
-                          >
-                            <div className="flex justify-between items-center">
-                              <span className="font-semibold text-sm flex items-center gap-2">
-                                {profile.label}
-                                {!available && (
-                                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
-                                    Unavailable
-                                  </span>
-                                )}
-                              </span>
-                              {profile.machineType && (
-                                <span className="text-xs text-gray-500">
-                                  {profile.machineType.cpu} CPU /{" "}
-                                  {profile.machineType.memory_gb} GB
-                                  {profile.machineType.gpu
-                                    ? ` / ${profile.machineType.gpu}`
-                                    : ""}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-0.5">
-                              {profile.description}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-3">
+          {launchStep === 1 && (
+            <>
+              <section aria-labelledby="wn-machine-profile-heading">
+                <h3 id="wn-machine-profile-heading" className="text-sm font-medium text-gray-700 mb-2">
+                  Machine Profile
+                </h3>
+                <div role="group" aria-label="Machine Profile" className="space-y-2">
+                  {workNodeProfiles.map((profile) => {
+                    const available = profile.machineType !== null;
+                    const selected =
+                      available && selectedMachineType === profile.machineType?.name;
+                    return (
                       <button
+                        key={profile.id}
                         type="button"
-                        onClick={() => setShowAdvancedMachines(!showAdvancedMachines)}
-                        aria-expanded={showAdvancedMachines}
-                        className="text-xs text-indigo-600 hover:underline"
+                        disabled={!available}
+                        aria-pressed={selected}
+                        onClick={() => {
+                          if (profile.machineType) {
+                            setSelectedMachineType(profile.machineType.name);
+                          }
+                        }}
+                        className={`w-full text-left p-3 border rounded-lg transition-colors ${
+                          !available
+                            ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                            : selected
+                            ? "border-indigo-500 bg-indigo-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
                       >
-                        Advanced: choose a specific machine type{" "}
-                        {showAdvancedMachines ? "▼" : "▶"}
-                      </button>
-                      {showAdvancedMachines && (
-                        <div className="mt-2 space-y-3">
-                          {Object.entries(
-                            machineTypes.reduce<Record<string, MachineType[]>>(
-                              (groups, mt) => {
-                                (groups[mt.category] = groups[mt.category] || []).push(mt);
-                                return groups;
-                              },
-                              {}
-                            )
-                          ).map(([category, types]) => (
-                            <div key={category}>
-                              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                {CATEGORY_LABELS[category] || category}
-                              </h4>
-                              <div className="space-y-1">
-                                {types.map((mt) => (
-                                  <button
-                                    key={mt.name}
-                                    type="button"
-                                    onClick={() => setSelectedMachineType(mt.name)}
-                                    className={`w-full text-left p-2 border rounded-lg text-xs transition-colors ${
-                                      selectedMachineType === mt.name
-                                        ? "border-indigo-500 bg-indigo-50"
-                                        : "border-gray-200 hover:border-gray-300"
-                                    }`}
-                                  >
-                                    <div className="flex justify-between items-center">
-                                      <span className="font-mono">{mt.name}</span>
-                                      <span className="text-gray-500">
-                                        {mt.cpu} CPU / {mt.memory_gb} GB
-                                        {mt.gpu ? ` / ${mt.gpu}` : ""}
-                                      </span>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
+                        <div className="flex justify-between items-center">
+                          <span className="font-semibold text-sm flex items-center gap-2">
+                            {profile.label}
+                            {!available && (
+                              <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500 border border-gray-300 rounded px-1.5 py-0.5">
+                                Unavailable
+                              </span>
+                            )}
+                          </span>
+                          {profile.machineType && (
+                            <span className="text-xs text-gray-500">
+                              {profile.machineType.cpu} CPU /{" "}
+                              {profile.machineType.memory_gb} GB
+                              {profile.machineType.gpu
+                                ? ` / ${profile.machineType.gpu}`
+                                : ""}
+                            </span>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  </section>
+                        <div className="text-xs text-gray-500 mt-0.5">
+                          {profile.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                  <section>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
-                    {environments.length === 0 ? (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
-                        No work node environments found. Create one from the{" "}
-                        <a href="/environments" className="underline font-medium">
-                          Environments
-                        </a>{" "}
-                        page with type &quot;Work Node&quot;.
-                      </div>
-                    ) : (
-                      <div className="flex gap-3">
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedMachines(!showAdvancedMachines)}
+                    aria-expanded={showAdvancedMachines}
+                    className="text-xs text-indigo-600 hover:underline"
+                  >
+                    Advanced: choose a specific machine type{" "}
+                    {showAdvancedMachines ? "▼" : "▶"}
+                  </button>
+                  {showAdvancedMachines && (
+                    <div className="mt-2 space-y-3">
+                      {Object.entries(
+                        machineTypes.reduce<Record<string, MachineType[]>>(
+                          (groups, mt) => {
+                            (groups[mt.category] = groups[mt.category] || []).push(mt);
+                            return groups;
+                          },
+                          {}
+                        )
+                      ).map(([category, types]) => (
+                        <div key={category}>
+                          <h4 className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                            {CATEGORY_LABELS[category] || category}
+                          </h4>
+                          <div className="space-y-1">
+                            {types.map((mt) => (
+                              <button
+                                key={mt.name}
+                                type="button"
+                                onClick={() => setSelectedMachineType(mt.name)}
+                                className={`w-full text-left p-2 border rounded-lg text-xs transition-colors ${
+                                  selectedMachineType === mt.name
+                                    ? "border-indigo-500 bg-indigo-50"
+                                    : "border-gray-200 hover:border-gray-300"
+                                }`}
+                              >
+                                <div className="flex justify-between items-center">
+                                  <span className="font-mono">{mt.name}</span>
+                                  <span className="text-gray-500">
+                                    {mt.cpu} CPU / {mt.memory_gb} GB
+                                    {mt.gpu ? ` / ${mt.gpu}` : ""}
+                                  </span>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
+                {environments.length === 0 ? (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
+                    No work node environments found. Create one from the{" "}
+                    <a href="/environments" className="underline font-medium">
+                      Environments
+                    </a>{" "}
+                    page with type &quot;Work Node&quot;.
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <select
+                      aria-label="Environment"
+                      value={selectedEnvId || ""}
+                      onChange={(e) =>
+                        e.target.value ? handleEnvSelect(Number(e.target.value)) : null
+                      }
+                      className="border rounded px-3 py-2 text-sm flex-1"
+                    >
+                      <option value="">Select environment</option>
+                      {environments.map((env) => (
+                        <option key={env.id} value={env.id}>
+                          {env.name}
+                          {env.latest_version
+                            ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})`
+                            : " (no versions)"}
+                        </option>
+                      ))}
+                    </select>
+                    {envDetail &&
+                      envDetail.versions.filter(
+                        (v) => v.status === "ready" && v.image_uri
+                      ).length > 0 && (
                         <select
-                          aria-label="Environment"
-                          value={selectedEnvId || ""}
+                          aria-label="Version"
+                          value={selectedVersionId || ""}
                           onChange={(e) =>
-                            e.target.value ? handleEnvSelect(Number(e.target.value)) : null
+                            setSelectedVersionId(
+                              e.target.value ? Number(e.target.value) : null
+                            )
                           }
                           className="border rounded px-3 py-2 text-sm flex-1"
                         >
-                          <option value="">Select environment</option>
-                          {environments.map((env) => (
-                            <option key={env.id} value={env.id}>
-                              {env.name}
-                              {env.latest_version
-                                ? ` (v${env.latest_version.version_number} - ${env.latest_version.status})`
-                                : " (no versions)"}
-                            </option>
-                          ))}
+                          {envDetail.versions
+                            .filter((v) => v.status === "ready" && v.image_uri)
+                            .map((v) => (
+                              <option key={v.id} value={v.id}>
+                                v{v.version_number}.{v.build_number} (ready)
+                              </option>
+                            ))}
                         </select>
-                        {envDetail &&
-                          envDetail.versions.filter(
-                            (v) => v.status === "ready" && v.image_uri
-                          ).length > 0 && (
-                            <select
-                              aria-label="Version"
-                              value={selectedVersionId || ""}
-                              onChange={(e) =>
-                                setSelectedVersionId(
-                                  e.target.value ? Number(e.target.value) : null
-                                )
-                              }
-                              className="border rounded px-3 py-2 text-sm flex-1"
-                            >
-                              {envDetail.versions
-                                .filter((v) => v.status === "ready" && v.image_uri)
-                                .map((v) => (
-                                  <option key={v.id} value={v.id}>
-                                    v{v.version_number}.{v.build_number} (ready)
-                                  </option>
-                                ))}
-                            </select>
-                          )}
-                      </div>
-                    )}
-                  </section>
-
-                  <section role="group" aria-label="Link to">
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Link to</h3>
-                    <div className="flex gap-2 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => handleScopeChange("experiment")}
-                        aria-pressed={scopeType === "experiment"}
-                        className={`px-3 py-1.5 text-sm rounded ${
-                          scopeType === "experiment"
-                            ? "bg-bioaf-100 text-bioaf-700 font-medium"
-                            : "text-gray-600 hover:bg-gray-100"
-                        }`}
-                      >
-                        Experiment
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleScopeChange("project")}
-                        aria-pressed={scopeType === "project"}
-                        className={`px-3 py-1.5 text-sm rounded ${
-                          scopeType === "project"
-                            ? "bg-bioaf-100 text-bioaf-700 font-medium"
-                            : "text-gray-600 hover:bg-gray-100"
-                        }`}
-                      >
-                        Project
-                      </button>
-                    </div>
-                    {scopeType === "experiment" ? (
-                      <select
-                        aria-label="Select experiment"
-                        value={selectedExperimentId || ""}
-                        onChange={(e) =>
-                          e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
-                        }
-                        className="border rounded px-3 py-2 text-sm w-full"
-                      >
-                        <option value="">No experiment</option>
-                        {experiments.map((exp) => (
-                          <option key={exp.id} value={exp.id}>
-                            {exp.name}
-                            {exp.code ? ` (${exp.code})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <select
-                        aria-label="Select project"
-                        value={selectedProjectId || ""}
-                        onChange={(e) =>
-                          e.target.value ? handleProjectSelect(Number(e.target.value)) : null
-                        }
-                        className="border rounded px-3 py-2 text-sm w-full"
-                      >
-                        <option value="">No project</option>
-                        {projects.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                            {p.code ? ` (${p.code})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </section>
-
-                  {scopeType === "experiment" && selectedExperimentId && (
-                    <section>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files</h3>
-                      {experimentFiles.length === 0 ? (
-                        <p className="text-xs text-gray-500">
-                          No files found for this experiment.
-                        </p>
-                      ) : (
-                        <FileTreeSelector
-                          files={experimentFiles}
-                          sampleNames={sampleNames}
-                          onSelectionChange={setSelectedFileIds}
-                        />
                       )}
-                    </section>
-                  )}
-
-                  <section>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">
-                      GitHub Repos (optional)
-                    </h3>
-                    <p className="text-xs text-gray-500 mb-2">
-                      Cloned into ~/repos/ when the node boots.
-                    </p>
-                    {repos.length === 0 ? (
-                      <p className="text-xs text-gray-500">
-                        No repos configured. Add one from the GitHub Repos section below.
-                      </p>
-                    ) : (
-                      <div className="space-y-1">
-                        {repos.map((repo) => (
-                          <label
-                            key={repo.id}
-                            className="flex items-start gap-3 p-2 border rounded-lg hover:bg-gray-50 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedRepoIds.includes(repo.id)}
-                              onChange={() => toggleRepo(repo.id)}
-                              className="mt-0.5"
-                            />
-                            <div>
-                              <div className="text-sm font-medium">{repo.display_name}</div>
-                              <div className="text-xs text-gray-500 font-mono mt-0.5">
-                                {repo.git_ssh_url}
-                              </div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                </>
-              )}
-
-              {launchStep === 2 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Review</h3>
-                  <div className="space-y-2 text-sm bg-gray-50 rounded-lg p-4">
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">{scopeType === "experiment" ? "Experiment" : "Project"}</span>
-                      <span>
-                        {scopeType === "experiment"
-                          ? experiments.find((e) => e.id === selectedExperimentId)?.name
-                          : projects.find((p) => p.id === selectedProjectId)?.name}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Input Files</span>
-                      <span>
-                        {selectedFileIds.length > 0 ? selectedFileIds.length + " files" : "None"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Environment</span>
-                      <span>{environments.find((e) => e.id === selectedEnvId)?.name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Repos</span>
-                      <span>
-                        {selectedRepoIds.length > 0 ? selectedRepoIds.length + " repos" : "None"}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Machine Type</span>
-                      <span className="font-mono">{selectedMachineType}</span>
-                    </div>
-                    {(() => {
-                      const mt = machineTypes.find((m) => m.name === selectedMachineType);
-                      return mt ? (
-                        <div className="flex justify-between">
-                          <span className="text-gray-500">Resources</span>
-                          <span>
-                            {mt.cpu} CPU / {mt.memory_gb} GB
-                            {mt.gpu ? ` / ${mt.gpu}` : ""}
-                          </span>
-                        </div>
-                      ) : null;
-                    })()}
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </section>
 
-            <div className="p-6 border-t bg-gray-50 flex gap-3 shrink-0">
-              {launchStep === 1 ? (
-                <button
-                  type="button"
-                  onClick={() => setLaunchStep(2)}
-                  disabled={!scopeSelected || !selectedVersionId || !selectedMachineType}
-                  className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
-                >
-                  Next: Review
-                </button>
-              ) : (
-                <>
+              <section role="group" aria-label="Link to">
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Link to</h3>
+                <div className="flex gap-2 mb-2">
                   <button
                     type="button"
-                    onClick={() => setLaunchStep(1)}
-                    className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
+                    onClick={() => handleScopeChange("experiment")}
+                    aria-pressed={scopeType === "experiment"}
+                    className={`px-3 py-1.5 text-sm rounded ${
+                      scopeType === "experiment"
+                        ? "bg-bioaf-100 text-bioaf-700 font-medium"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
                   >
-                    Back
+                    Experiment
                   </button>
                   <button
                     type="button"
-                    onClick={handleLaunch}
-                    disabled={launching}
-                    className="flex-1 bg-indigo-600 text-white px-6 py-2.5 rounded-md text-sm hover:bg-indigo-700 disabled:opacity-50"
+                    onClick={() => handleScopeChange("project")}
+                    aria-pressed={scopeType === "project"}
+                    className={`px-3 py-1.5 text-sm rounded ${
+                      scopeType === "project"
+                        ? "bg-bioaf-100 text-bioaf-700 font-medium"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
                   >
-                    Launch Work Node
+                    Project
                   </button>
-                </>
+                </div>
+                {scopeType === "experiment" ? (
+                  <select
+                    aria-label="Select experiment"
+                    value={selectedExperimentId || ""}
+                    onChange={(e) =>
+                      e.target.value ? handleExperimentSelect(Number(e.target.value)) : null
+                    }
+                    className="border rounded px-3 py-2 text-sm w-full"
+                  >
+                    <option value="">No experiment</option>
+                    {experiments.map((exp) => (
+                      <option key={exp.id} value={exp.id}>
+                        {exp.name}
+                        {exp.code ? ` (${exp.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <select
+                    aria-label="Select project"
+                    value={selectedProjectId || ""}
+                    onChange={(e) =>
+                      e.target.value ? handleProjectSelect(Number(e.target.value)) : null
+                    }
+                    className="border rounded px-3 py-2 text-sm w-full"
+                  >
+                    <option value="">No project</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                        {p.code ? ` (${p.code})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </section>
+
+              {scopeType === "experiment" && selectedExperimentId && (
+                <section>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files</h3>
+                  {experimentFiles.length === 0 ? (
+                    <p className="text-xs text-gray-500">
+                      No files found for this experiment.
+                    </p>
+                  ) : (
+                    <FileTreeSelector
+                      files={experimentFiles}
+                      sampleNames={sampleNames}
+                      onSelectionChange={setSelectedFileIds}
+                    />
+                  )}
+                </section>
               )}
-              <button
-                type="button"
-                onClick={() => setShowLaunch(false)}
-                className="px-4 py-2.5 border rounded-md text-sm text-gray-600 hover:bg-gray-100"
-              >
-                Cancel
-              </button>
+
+              <section>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">
+                  GitHub Repos (optional)
+                </h3>
+                <p className="text-xs text-gray-500 mb-2">
+                  Cloned into ~/repos/ when the node boots.
+                </p>
+                {repos.length === 0 ? (
+                  <p className="text-xs text-gray-500">
+                    No repos configured. Add one from the GitHub Repos section below.
+                  </p>
+                ) : (
+                  <div className="space-y-1">
+                    {repos.map((repo) => (
+                      <label
+                        key={repo.id}
+                        className="flex items-start gap-3 p-2 border rounded-lg hover:bg-gray-50 cursor-pointer"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedRepoIds.includes(repo.id)}
+                          onChange={() => toggleRepo(repo.id)}
+                          className="mt-0.5"
+                        />
+                        <div>
+                          <div className="text-sm font-medium">{repo.display_name}</div>
+                          <div className="text-xs text-gray-500 font-mono mt-0.5">
+                            {repo.git_ssh_url}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+
+          {launchStep === 2 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Review</h3>
+              <div className="space-y-2 text-sm bg-gray-50 rounded-lg p-4">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">{scopeType === "experiment" ? "Experiment" : "Project"}</span>
+                  <span>
+                    {scopeType === "experiment"
+                      ? experiments.find((e) => e.id === selectedExperimentId)?.name
+                      : projects.find((p) => p.id === selectedProjectId)?.name}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Input Files</span>
+                  <span>
+                    {selectedFileIds.length > 0 ? selectedFileIds.length + " files" : "None"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Environment</span>
+                  <span>{environments.find((e) => e.id === selectedEnvId)?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Repos</span>
+                  <span>
+                    {selectedRepoIds.length > 0 ? selectedRepoIds.length + " repos" : "None"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Machine Type</span>
+                  <span className="font-mono">{selectedMachineType}</span>
+                </div>
+                {(() => {
+                  const mt = machineTypes.find((m) => m.name === selectedMachineType);
+                  return mt ? (
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Resources</span>
+                      <span>
+                        {mt.cpu} CPU / {mt.memory_gb} GB
+                        {mt.gpu ? ` / ${mt.gpu}` : ""}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
             </div>
-          </div>
-        </div>
+          )}
+        </Modal>
       )}
 
       {showConfirmLaunch && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Launch without inputs"
-          className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center"
-        >
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold mb-2">Launch without inputs?</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              You haven&apos;t added the following to this work node:
-            </p>
-            <ul className="text-sm text-gray-700 list-disc list-inside mb-4 space-y-1">
-              {selectedFileIds.length === 0 && (
-                <li>No input files attached to /data/</li>
-              )}
-              {repos.length > 0 && selectedRepoIds.length === 0 && (
-                <li>No GitHub repos cloned into ~/repos/</li>
-              )}
-            </ul>
-            <p className="text-sm text-gray-600 mb-4">
-              You can launch without them, or go back and add them now.
-            </p>
-            <div className="flex justify-end gap-2">
+        <Modal
+          open
+          title="Launch without inputs?"
+          onClose={() => setShowConfirmLaunch(false)}
+          size="sm"
+          footer={
+            <>
               <button
                 type="button"
                 onClick={() => setShowConfirmLaunch(false)}
@@ -1246,9 +1221,24 @@ export default function WorkNodesPage() {
               >
                 Launch anyway
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 mb-3">
+            You haven&apos;t added the following to this work node:
+          </p>
+          <ul className="text-sm text-gray-700 list-disc list-inside mb-4 space-y-1">
+            {selectedFileIds.length === 0 && (
+              <li>No input files attached to /data/</li>
+            )}
+            {repos.length > 0 && selectedRepoIds.length === 0 && (
+              <li>No GitHub repos cloned into ~/repos/</li>
+            )}
+          </ul>
+          <p className="text-sm text-gray-600">
+            You can launch without them, or go back and add them now.
+          </p>
+        </Modal>
       )}
     </main>
   );

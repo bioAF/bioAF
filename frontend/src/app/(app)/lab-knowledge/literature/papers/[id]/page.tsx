@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import { useParams, useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
@@ -714,76 +715,82 @@ export default function PaperDetailPage() {
         onCancel={() => setDismissOpen(false)}
       />
 
-      {confirmingDelete && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-[28rem]">
-            <h3 className="font-semibold mb-2">Delete this paper?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              This deletes the uploaded PDF and any stored files from cloud
-              storage, and dismisses the paper org-wide. It leaves your active
-              Library and is excluded from AI Literature Review. The abstract,
-              metadata, comments, and history are kept; an admin can reverse the
-              dismissal, but the deleted PDF would need to be uploaded again.
-            </p>
-            {deleteError && (
-              <p className="text-sm text-red-700 mb-4">{deleteError}</p>
-            )}
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setDeleteError(null);
-                  setConfirmingDelete(false);
-                }}
-                disabled={deleting}
-                className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={deletePaper}
-                disabled={deleting}
-                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleting ? "Deleting..." : "Delete paper"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={confirmingDelete}
+        title="Delete this paper?"
+        onClose={() => setConfirmingDelete(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmingDelete(false);
+            }}
+            disabled={deleting}
+            className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={deletePaper}
+            disabled={deleting}
+            className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+          >
+            {deleting ? "Deleting..." : "Delete paper"}
+          </button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600 mb-4">
+          This deletes the uploaded PDF and any stored files from cloud
+          storage, and dismisses the paper org-wide. It leaves your active
+          Library and is excluded from AI Literature Review. The abstract,
+          metadata, comments, and history are kept; an admin can reverse the
+          dismissal, but the deleted PDF would need to be uploaded again.
+        </p>
+        {deleteError && (
+          <p className="text-sm text-red-700 mb-4">{deleteError}</p>
+        )}
+      </Modal>
 
       {conflict && pendingPdf && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-[28rem]">
-            <h3 className="font-semibold mb-2">A paper with this DOI exists</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Another library entry already uses DOI{" "}
-              <span className="font-mono">{conflict.doi}</span>:{" "}
-              <span className="font-medium">{conflict.other_paper_title}</span>.
-              Replacing will merge that entry&apos;s comments, AI Lit Review
-              notes, and associations into this paper, attach the uploaded PDF
-              here, and delete the duplicate. This cannot be undone.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  setConflict(null);
-                  setPendingPdf(null);
-                }}
-                disabled={uploadingPdf}
-                className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => doUpload(pendingPdf, true)}
-                disabled={uploadingPdf}
-                className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {uploadingPdf ? "Merging..." : "Replace and merge"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          open
+          title="A paper with this DOI exists"
+          onClose={() => setConflict(null)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => {
+                setConflict(null);
+                setPendingPdf(null);
+              }}
+              disabled={uploadingPdf}
+              className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => doUpload(pendingPdf, true)}
+              disabled={uploadingPdf}
+              className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
+            >
+              {uploadingPdf ? "Merging..." : "Replace and merge"}
+            </button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 mb-4">
+            Another library entry already uses DOI{" "}
+            <span className="font-mono">{conflict.doi}</span>:{" "}
+            <span className="font-medium">{conflict.other_paper_title}</span>.
+            Replacing will merge that entry&apos;s comments, AI Lit Review
+            notes, and associations into this paper, attach the uploaded PDF
+            here, and delete the duplicate. This cannot be undone.
+          </p>
+        </Modal>
       )}
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -224,36 +225,38 @@ export default function InfraCostCenterPage() {
         />
       )}
 
-      {showTeardownConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md mx-4 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-3">Teardown Billing Export</h2>
-            <p className="text-sm text-gray-600 mb-2">
-              This will destroy the BigQuery billing export dataset and all associated IAM bindings via Terraform.
-            </p>
-            <p className="text-sm text-gray-600 mb-4">
-              You can re-create it afterward using the setup flow. Any billing export configuration in the Google Cloud Console will need to be re-pointed to the new dataset.
-            </p>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setShowTeardownConfirm(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  setShowTeardownConfirm(false);
-                  setShowTeardownModal(true);
-                }}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
-              >
-                Confirm Teardown
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showTeardownConfirm}
+        title="Teardown Billing Export"
+        onClose={() => setShowTeardownConfirm(false)}
+        size="sm"
+        footer={
+          <>
+          <button
+            onClick={() => setShowTeardownConfirm(false)}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              setShowTeardownConfirm(false);
+              setShowTeardownModal(true);
+            }}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
+          >
+            Confirm Teardown
+          </button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-600 mb-2">
+          This will destroy the BigQuery billing export dataset and all associated IAM bindings via Terraform.
+        </p>
+        <p className="text-sm text-gray-600 mb-4">
+          You can re-create it afterward using the setup flow. Any billing export configuration in the Google Cloud Console will need to be re-pointed to the new dataset.
+        </p>
+      </Modal>
 
       {showTeardownModal && (
         <TerraformProgressModal

@@ -14,6 +14,8 @@ import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/shared/Modal";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
 import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCStatus } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -497,93 +499,93 @@ export default function ProjectDetailPage() {
         )}
       </main>
 
-      {/* Sample Picker Modal */}
-      {showSamplePicker && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
-            <div className="p-4 border-b">
-              <h2 className="text-lg font-bold">Add Samples to Project</h2>
-              <input aria-label="Search by sample ID, experiment, or organism"
-                type="text"
-                placeholder="Search by sample ID, experiment, or organism..."
-                value={sampleSearch}
-                onChange={(e) => setSampleSearch(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm mt-3"
-              />
-            </div>
-            <div className="flex-1 overflow-y-auto p-4">
-              {filteredAvailable.length === 0 ? (
-                <p className="text-gray-500 text-center py-8">No matching samples available.</p>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {filteredAvailable.map((s) => (
-                      <tr
-                        key={s.id}
-                        {...clickableRow(() => toggleSample(s.id))}
-                        className={`cursor-pointer ${
-                          selectedSampleIds.has(s.id) ? "bg-bioaf-50" : "hover:bg-gray-50"
-                        }`}
-                      >
-                        <td className="px-4 py-2">
-                          <input
-                            type="checkbox"
-                            aria-label={`Select sample ${s.external_id ?? s.id}`}
-                        checked={selectedSampleIds.has(s.id)}
-                            onChange={() => toggleSample(s.id)}
-                            className="rounded"
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-sm">{s.external_id || `#${s.id}`}</td>
-                        <td className="px-4 py-2 text-sm text-gray-500">{s.experiment_name}</td>
-                        <td className="px-4 py-2 text-sm text-gray-500">{s.organism || "—"}</td>
-                        <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || "—"}</td>
-                        <td className="px-4 py-2">
-                          {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-            <div className="p-4 border-t flex justify-between items-center">
-              <span className="text-sm text-gray-500">
-                {selectedSampleIds.size} sample{selectedSampleIds.size !== 1 ? "s" : ""} selected
-              </span>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => {
-                    setShowSamplePicker(false);
-                    setSelectedSampleIds(new Set());
-                    setSampleSearch("");
-                  }}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleAddSamples}
-                  disabled={selectedSampleIds.size === 0 || adding}
-                  className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {adding ? "Adding..." : "Add to Project"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        open={showSamplePicker}
+        title="Add Samples to Project"
+        onClose={() => {
+          setShowSamplePicker(false);
+          setSelectedSampleIds(new Set());
+          setSampleSearch("");
+        }}
+        size="xl"
+        footer={
+          <>
+            <span className="mr-auto text-sm text-gray-500">
+              {selectedSampleIds.size} sample{selectedSampleIds.size !== 1 ? "s" : ""} selected
+            </span>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setShowSamplePicker(false);
+                setSelectedSampleIds(new Set());
+                setSampleSearch("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddSamples}
+              disabled={selectedSampleIds.size === 0}
+              busy={adding}
+              busyLabel="Adding..."
+            >
+              Add to Project
+            </Button>
+          </>
+        }
+      >
+        <input aria-label="Search by sample ID, experiment, or organism"
+          type="text"
+          placeholder="Search by sample ID, experiment, or organism..."
+          value={sampleSearch}
+          onChange={(e) => setSampleSearch(e.target.value)}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm mb-3"
+        />
+          {filteredAvailable.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">No matching samples available.</p>
+          ) : (
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
+                  <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {filteredAvailable.map((s) => (
+                  <tr
+                    key={s.id}
+                    {...clickableRow(() => toggleSample(s.id))}
+                    className={`cursor-pointer ${
+                      selectedSampleIds.has(s.id) ? "bg-bioaf-50" : "hover:bg-gray-50"
+                    }`}
+                  >
+                    <td className="px-4 py-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select sample ${s.external_id ?? s.id}`}
+                    checked={selectedSampleIds.has(s.id)}
+                        onChange={() => toggleSample(s.id)}
+                        className="rounded"
+                      />
+                    </td>
+                    <td className="px-4 py-2 text-sm">{s.external_id || `#${s.id}`}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{s.experiment_name}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{s.organism || "—"}</td>
+                    <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || "—"}</td>
+                    <td className="px-4 py-2">
+                      {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+      </Modal>
       <ProjectExportModal
         projectId={Number(projectId)}
         projectName={project?.name ?? ""}

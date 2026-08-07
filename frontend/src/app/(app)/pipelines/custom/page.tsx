@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import { useRouter } from "next/navigation";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -221,69 +222,71 @@ export default function CustomPipelineListPage() {
             </table>
           </div>
 
-          {showCreateModal && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg shadow-xl p-6 w-[480px]">
-                <h3 className="font-semibold text-lg mb-1">Create Custom Pipeline</h3>
-                <p className="text-xs text-gray-500 mb-4">
-                  Step 1 of 2: name your pipeline. Next, you&apos;ll define a version
-                  with the code, entrypoint command, environment, and variables.
-                </p>
-                <div className="space-y-3">
-                  <div>
-                    <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
-                    <input id="name"
-                      value={createForm.name}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, name: e.target.value })
-                      }
-                      placeholder="my-pipeline"
-                      className="w-full border rounded px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="description" className="text-sm text-gray-500 block mb-1">
-                      Description
-                    </label>
-                    <input id="description"
-                      value={createForm.description ?? ""}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, description: e.target.value })
-                      }
-                      placeholder="Optional description"
-                      className="w-full border rounded px-3 py-2 text-sm"
-                    />
-                  </div>
-                  {createError && (
-                    <p className="text-sm text-red-600">{createError}</p>
-                  )}
-                  <p className="text-xs text-gray-500">
-                    After clicking Create, you&apos;ll be taken to the version form to
-                    provide the code source, entrypoint command (e.g.{" "}
-                    <code>bash run.sh</code>), pipeline environment, and any variables.
-                  </p>
-                </div>
-                <div className="flex gap-2 mt-6">
-                  <button
-                    onClick={handleCreate}
-                    disabled={creating || !createForm.name}
-                    className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                  >
-                    {creating ? "Creating..." : "Create"}
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowCreateModal(false);
-                      setCreateError(null);
-                    }}
-                    className="flex-1 border py-2 rounded text-sm"
-                  >
-                    Cancel
-                  </button>
-                </div>
+          <Modal
+            open={showCreateModal}
+            title="Create Custom Pipeline"
+            onClose={() => setShowCreateModal(false)}
+            size="md"
+            footer={
+              <>
+              <button
+                onClick={handleCreate}
+                disabled={creating || !createForm.name}
+                className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {creating ? "Creating..." : "Create"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setCreateError(null);
+                }}
+                className="border py-2 rounded text-sm"
+              >
+                Cancel
+              </button>
+              </>
+            }
+          >
+            <p className="text-xs text-gray-500 mb-4">
+              Step 1 of 2: name your pipeline. Next, you&apos;ll define a version
+              with the code, entrypoint command, environment, and variables.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+                <input id="name"
+                  value={createForm.name}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, name: e.target.value })
+                  }
+                  placeholder="my-pipeline"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
               </div>
+              <div>
+                <label htmlFor="description" className="text-sm text-gray-500 block mb-1">
+                  Description
+                </label>
+                <input id="description"
+                  value={createForm.description ?? ""}
+                  onChange={(e) =>
+                    setCreateForm({ ...createForm, description: e.target.value })
+                  }
+                  placeholder="Optional description"
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              {createError && (
+                <p className="text-sm text-red-600">{createError}</p>
+              )}
+              <p className="text-xs text-gray-500">
+                After clicking Create, you&apos;ll be taken to the version form to
+                provide the code source, entrypoint command (e.g.{" "}
+                <code>bash run.sh</code>), pipeline environment, and any variables.
+              </p>
             </div>
-          )}
+          </Modal>
         </>
       )}
     </main>

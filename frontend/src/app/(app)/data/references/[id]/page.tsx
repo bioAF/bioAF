@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/shared/Toast";
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
@@ -647,73 +648,75 @@ export default function DataReferenceDetailPage() {
       )}
 
       {/* Deprecation Modal */}
-      {showDeprecateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-6">
-            <h2 className="text-lg font-semibold mb-4">Deprecate Reference Dataset</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              This will mark &quot;{reference.name}&quot; as pending deprecation approval.
+      <Modal
+        open={showDeprecateModal}
+        title="Deprecate Reference Dataset"
+        onClose={() => setShowDeprecateModal(false)}
+        size="md"
+        footer={
+          <>
+          <button
+            onClick={() => {
+              setShowDeprecateModal(false);
+              setDeprecationNote("");
+              setSupersededById("");
+            }}
+            className="border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDeprecate}
+            disabled={submitting}
+            className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
+          >
+            {submitting ? "Submitting..." : "Deprecate"}
+          </button>
+          </>
+        }
+      >
+        <p className="text-sm text-gray-500 mb-4">
+          This will mark &quot;{reference.name}&quot; as pending deprecation approval.
+        </p>
+        {impact && impact.total_pipeline_runs > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
+            <p className="text-sm text-amber-800 font-medium">
+              {impact.total_pipeline_runs} pipeline run{impact.total_pipeline_runs !== 1 ? "s" : ""} across {impact.total_experiments} experiment{impact.total_experiments !== 1 ? "s" : ""} use this reference and will be impacted.
             </p>
-            {impact && impact.total_pipeline_runs > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
-                <p className="text-sm text-amber-800 font-medium">
-                  {impact.total_pipeline_runs} pipeline run{impact.total_pipeline_runs !== 1 ? "s" : ""} across {impact.total_experiments} experiment{impact.total_experiments !== 1 ? "s" : ""} use this reference and will be impacted.
-                </p>
-              </div>
-            )}
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="deprecation-note" className="block text-sm font-medium text-gray-700 mb-1">
-                  Deprecation Note
-                </label>
-                <textarea id="deprecation-note"
-                  value={deprecationNote}
-                  onChange={(e) => setDeprecationNote(e.target.value)}
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  placeholder="Reason for deprecation..."
-                />
-              </div>
-              <div>
-                <label htmlFor="superseded-by-optional" className="block text-sm font-medium text-gray-700 mb-1">
-                  Superseded By (optional)
-                </label>
-                <select id="superseded-by-optional"
-                  value={supersededById}
-                  onChange={(e) => setSupersededById(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                >
-                  <option value="">None</option>
-                  {activeRefs.map((r) => (
-                    <option key={r.id} value={String(r.id)}>
-                      {r.name} v{r.version}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowDeprecateModal(false);
-                  setDeprecationNote("");
-                  setSupersededById("");
-                }}
-                className="border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleDeprecate}
-                disabled={submitting}
-                className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Deprecate"}
-              </button>
-            </div>
+          </div>
+        )}
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="deprecation-note" className="block text-sm font-medium text-gray-700 mb-1">
+              Deprecation Note
+            </label>
+            <textarea id="deprecation-note"
+              value={deprecationNote}
+              onChange={(e) => setDeprecationNote(e.target.value)}
+              rows={3}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              placeholder="Reason for deprecation..."
+            />
+          </div>
+          <div>
+            <label htmlFor="superseded-by-optional" className="block text-sm font-medium text-gray-700 mb-1">
+              Superseded By (optional)
+            </label>
+            <select id="superseded-by-optional"
+              value={supersededById}
+              onChange={(e) => setSupersededById(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">None</option>
+              {activeRefs.map((r) => (
+                <option key={r.id} value={String(r.id)}>
+                  {r.name} v{r.version}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
-      )}
+      </Modal>
     </main>
   );
 }

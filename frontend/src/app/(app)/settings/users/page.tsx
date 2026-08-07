@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import { Modal } from "@/components/shared/Modal";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { InviteForm } from "@/components/auth/InviteForm";
@@ -554,93 +555,99 @@ function SettingsUsersPageInner() {
 
       {/* Change password form modal */}
       {showTempPasswordForm && tempPasswordUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold mb-2">Change Password</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Set a new password for {tempPasswordUser.email}. They should change
-              it after logging in.
-            </p>
-            <input aria-label="Enter new password"
-              type="password"
-              value={tempPassword}
-              onChange={(e) => setTempPassword(e.target.value)}
-              placeholder="Enter new password"
-              className="w-full px-3 py-2 border rounded-md text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-            />
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowTempPasswordForm(false);
-                  setTempPasswordUser(null);
-                  setTempPassword("");
-                }}
-                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSetTempPassword}
-                disabled={!tempPassword}
-                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Set Password
-              </button>
-            </div>
-          </div>
-        </div>
+        <Modal
+          open
+          title="Change Password"
+          onClose={() => setShowTempPasswordForm(false)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => {
+                setShowTempPasswordForm(false);
+                setTempPasswordUser(null);
+                setTempPassword("");
+              }}
+              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSetTempPassword}
+              disabled={!tempPassword}
+              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              Set Password
+            </button>
+            </>
+          }
+        >
+          <p className="text-sm text-gray-600 mb-4">
+            Set a new password for {tempPasswordUser.email}. They should change
+            it after logging in.
+          </p>
+          <input aria-label="Enter new password"
+            type="password"
+            value={tempPassword}
+            onChange={(e) => setTempPassword(e.target.value)}
+            placeholder="Enter new password"
+            className="w-full px-3 py-2 border rounded-md text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+          />
+        </Modal>
       )}
 
       {/* Edit user modal */}
       {editingUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold mb-4">
-              Edit {editingUser.email}
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                  Name
-                </label>
-                <input id="name"
-                  type="text"
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
-                />
-              </div>
-              <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
-                  Role
-                </label>
-                <select id="role"
-                  value={editRole}
-                  onChange={(e) => setEditRole(e.target.value)}
-                  className="w-full px-3 py-2 border rounded-md text-sm"
-                >
-                  {roles.map((r) => (
-                    <option key={r.id} value={r.name}>{r.name}</option>
-                  ))}
-                </select>
-              </div>
+        <Modal
+          open
+          title={`Edit ${editingUser.email}`}
+          onClose={() => setEditingUser(null)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={() => setEditingUser(null)}
+              className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleEditSave}
+              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700"
+            >
+              Save Changes
+            </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+                Name
+              </label>
+              <input id="name"
+                type="text"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
+              />
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setEditingUser(null)}
-                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded hover:bg-gray-200"
+            <div>
+              <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-1">
+                Role
+              </label>
+              <select id="role"
+                value={editRole}
+                onChange={(e) => setEditRole(e.target.value)}
+                className="w-full px-3 py-2 border rounded-md text-sm"
               >
-                Cancel
-              </button>
-              <button
-                onClick={handleEditSave}
-                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700"
-              >
-                Save Changes
-              </button>
+                {roles.map((r) => (
+                  <option key={r.id} value={r.name}>{r.name}</option>
+                ))}
+              </select>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Detail modal */}

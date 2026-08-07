@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/shared/Toast";
+import { Modal } from "@/components/shared/Modal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -568,177 +569,187 @@ export default function EnvironmentsPage() {
         )}
 
         {/* Create Environment Modal */}
-        {showCreateModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-              <h3 className="font-semibold text-lg mb-4">New Environment</h3>
-              <div className="space-y-3">
-                <div>
-                  <label htmlFor="type" className="text-sm text-gray-500 block mb-1">Type</label>
-                  <select id="type"
-                    value={createForm.environment_type}
-                    onChange={(e) => setCreateForm({ ...createForm, environment_type: e.target.value as "notebook" | "work_node" })}
-                    className="w-full border rounded px-3 py-2 text-sm"
-                  >
-                    <option value="notebook">Notebook</option>
-                    <option value="work_node">Work Node</option>
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    {createForm.environment_type === "work_node"
-                      ? "Work node environments use conda and build as GCE VM images."
-                      : "Notebook environments use Dockerfile or conda and build as container images."}
-                  </p>
-                </div>
-                <div>
-                  <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
-                  <input id="name"
-                    value={createForm.name}
-                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                    placeholder="seurat-gpu"
-                    className="w-full border rounded px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
-                  <input id="description"
-                    value={createForm.description}
-                    onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                    placeholder="Optional description"
-                    className="w-full border rounded px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-6">
-                <button
-                  onClick={handleCreate}
-                  disabled={creating || !createForm.name}
-                  className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {creating ? "Creating..." : "Create"}
-                </button>
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="flex-1 border py-2 rounded text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
+        <Modal
+          open={showCreateModal}
+          title="New Environment"
+          onClose={() => setShowCreateModal(false)}
+          size="md"
+          footer={
+            <>
+            <button
+              onClick={handleCreate}
+              disabled={creating || !createForm.name}
+              className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+            >
+              {creating ? "Creating..." : "Create"}
+            </button>
+            <button
+              onClick={() => setShowCreateModal(false)}
+              className="border py-2 rounded text-sm"
+            >
+              Cancel
+            </button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="type" className="text-sm text-gray-500 block mb-1">Type</label>
+              <select id="type"
+                value={createForm.environment_type}
+                onChange={(e) => setCreateForm({ ...createForm, environment_type: e.target.value as "notebook" | "work_node" })}
+                className="w-full border rounded px-3 py-2 text-sm"
+              >
+                <option value="notebook">Notebook</option>
+                <option value="work_node">Work Node</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                {createForm.environment_type === "work_node"
+                  ? "Work node environments use conda and build as GCE VM images."
+                  : "Notebook environments use Dockerfile or conda and build as container images."}
+              </p>
+            </div>
+            <div>
+              <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+              <input id="name"
+                value={createForm.name}
+                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                placeholder="seurat-gpu"
+                className="w-full border rounded px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
+              <input id="description"
+                value={createForm.description}
+                onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                placeholder="Optional description"
+                className="w-full border rounded px-3 py-2 text-sm"
+              />
             </div>
           </div>
-        )}
+        </Modal>
 
         {/* Rebuild from Latest Template Modal */}
         {showRebuildModal && selectedEnv && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-[500px] max-h-[80vh] overflow-y-auto">
-              <h3 className="font-semibold text-lg mb-4">Rebuild from Latest Template</h3>
-
-              {rebuildLoading && !rebuildTemplateContent ? (
-                <p className="text-sm text-gray-500">Loading template...</p>
-              ) : rebuildTemplateMatch ? (
-                <>
-                  <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-                    <p className="text-sm text-amber-800">
-                      The latest bioAF template matches what was used to create v{selectedEnv.versions[0]?.version_number}.
-                      There are no template changes to pick up.
-                    </p>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Would you like to replace v{selectedEnv.versions[0]?.version_number} (deletes it and rebuilds)
-                    or create a new version?
+          <Modal
+            open
+            title="Rebuild from Latest Template"
+            onClose={() => setShowRebuildModal(false)}
+            size="md"
+            footer={
+              <>
+              <button
+                onClick={handleRebuild}
+                disabled={rebuildLoading}
+                className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+              >
+                {rebuildLoading ? "Working..." : rebuildAction === "replace" ? "Replace and Rebuild" : "Build New Version"}
+              </button>
+              <button
+                onClick={() => setShowRebuildModal(false)}
+                className="border py-2 rounded text-sm"
+              >
+                Cancel
+              </button>
+              </>
+            }
+          >
+  
+            {rebuildLoading && !rebuildTemplateContent ? (
+              <p className="text-sm text-gray-500">Loading template...</p>
+            ) : rebuildTemplateMatch ? (
+              <>
+                <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                  <p className="text-sm text-amber-800">
+                    The latest bioAF template matches what was used to create v{selectedEnv.versions[0]?.version_number}.
+                    There are no template changes to pick up.
                   </p>
-                  <div className="space-y-2 mb-6">
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="radio"
-                        name="rebuild-action"
-                        checked={rebuildAction === "replace"}
-                        onChange={() => setRebuildAction("replace")}
-                      />
-                      <span>
-                        <strong>Replace v{selectedEnv.versions[0]?.version_number}</strong> -- delete and rebuild
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2 text-sm cursor-pointer">
-                      <input
-                        type="radio"
-                        name="rebuild-action"
-                        checked={rebuildAction === "new"}
-                        onChange={() => setRebuildAction("new")}
-                      />
-                      <span>
-                        <strong>Build as v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> -- keep existing version
-                      </span>
-                    </label>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-gray-600 mb-4">
-                    This will create <strong>v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> using
-                    the latest bioAF template. The build will run in the background.
-                    {selectedEnv.versions.length > 0 && (
-                      <> You can continue using v{selectedEnv.versions[0]?.version_number} while it builds.</>
-                    )}
+                </div>
+                <p className="text-sm text-gray-600 mb-4">
+                  Would you like to replace v{selectedEnv.versions[0]?.version_number} (deletes it and rebuilds)
+                  or create a new version?
+                </p>
+                <div className="space-y-2 mb-6">
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="rebuild-action"
+                      checked={rebuildAction === "replace"}
+                      onChange={() => setRebuildAction("replace")}
+                    />
+                    <span>
+                      <strong>Replace v{selectedEnv.versions[0]?.version_number}</strong> -- delete and rebuild
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      name="rebuild-action"
+                      checked={rebuildAction === "new"}
+                      onChange={() => setRebuildAction("new")}
+                    />
+                    <span>
+                      <strong>Build as v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> -- keep existing version
+                    </span>
+                  </label>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-600 mb-4">
+                  This will create <strong>v{(selectedEnv.versions[0]?.version_number || 0) + 1}</strong> using
+                  the latest bioAF template. The build will run in the background.
+                  {selectedEnv.versions.length > 0 && (
+                    <> You can continue using v{selectedEnv.versions[0]?.version_number} while it builds.</>
+                  )}
+                </p>
+                <div className="bg-green-50 border border-green-200 rounded p-3 mb-4">
+                  <p className="text-sm text-green-800">
+                    The template has been updated since your last build. The new version will include the latest changes.
                   </p>
-                  <div className="bg-green-50 border border-green-200 rounded p-3 mb-4">
-                    <p className="text-sm text-green-800">
-                      The template has been updated since your last build. The new version will include the latest changes.
-                    </p>
-                  </div>
-                </>
-              )}
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleRebuild}
-                  disabled={rebuildLoading}
-                  className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
-                  {rebuildLoading ? "Working..." : rebuildAction === "replace" ? "Replace and Rebuild" : "Build New Version"}
-                </button>
-                <button
-                  onClick={() => setShowRebuildModal(false)}
-                  className="flex-1 border py-2 rounded text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+                </div>
+              </>
+            )}
+  
+          </Modal>
         )}
 
         {/* Delete Version Modal */}
         {showDeleteVersionModal && selectedEnv && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-              <h3 className="font-semibold text-lg mb-4">Delete Version</h3>
-              <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-                <p className="text-sm text-red-800">
-                  This will permanently delete <strong>v{showDeleteVersionModal.version_number}</strong> and
-                  its container image. Users will no longer be able to launch sessions with this version.
-                </p>
-              </div>
-              <p className="text-sm text-gray-600 mb-4">
-                This action cannot be undone.
+          <Modal
+            open
+            title="Delete Version"
+            onClose={() => setShowDeleteVersionModal(null)}
+            size="md"
+            footer={
+              <>
+              <button
+                onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
+                disabled={deletingVersion}
+                className="bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+              >
+                {deletingVersion ? "Deleting..." : "Delete Version"}
+              </button>
+              <button
+                onClick={() => setShowDeleteVersionModal(null)}
+                className="border py-2 rounded text-sm"
+              >
+                Cancel
+              </button>
+              </>
+            }
+          >
+            <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+              <p className="text-sm text-red-800">
+                This will permanently delete <strong>v{showDeleteVersionModal.version_number}</strong> and
+                its container image. Users will no longer be able to launch sessions with this version.
               </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
-                  disabled={deletingVersion}
-                  className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-                >
-                  {deletingVersion ? "Deleting..." : "Delete Version"}
-                </button>
-                <button
-                  onClick={() => setShowDeleteVersionModal(null)}
-                  className="flex-1 border py-2 rounded text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
             </div>
-          </div>
+            <p className="text-sm text-gray-600 mb-4">
+              This action cannot be undone.
+            </p>
+          </Modal>
         )}
         </>
         )}

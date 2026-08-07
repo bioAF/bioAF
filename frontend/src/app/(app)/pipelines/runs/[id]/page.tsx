@@ -7,6 +7,7 @@ import { useRouter, useParams } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { Modal } from "@/components/shared/Modal";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
@@ -965,47 +966,31 @@ export default function PipelineRunDetailPage() {
         )}
       </main>
 
-      {showRetriesModal && run?.progress?.retries && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowRetriesModal(false)}
-          data-testid="retries-modal"
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="border-b px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Step retries</h2>
-              <button
-                onClick={() => setShowRetriesModal(false)}
-                className="text-gray-500 hover:text-gray-600 text-xl"
-                aria-label="Close"
+      <Modal
+        open={!!(showRetriesModal && run?.progress?.retries)}
+        title="Step retries"
+        onClose={() => setShowRetriesModal(false)}
+        size="md"
+      >
+        <div data-testid="retries-modal">
+          <p className="text-sm text-gray-600 mb-4">
+            The following steps were retried during this run. Each ran more
+            than once before producing its output (typically because the
+            first attempt was interrupted by Spot preemption).
+          </p>
+          <ul className="space-y-2">
+            {(run?.progress?.retries ?? []).map((r) => (
+              <li
+                key={r.name}
+                className="flex items-center justify-between bg-gray-50 rounded px-3 py-2 text-sm"
               >
-                &times;
-              </button>
-            </div>
-            <div className="p-6">
-              <p className="text-sm text-gray-600 mb-4">
-                The following steps were retried during this run. Each ran more
-                than once before producing its output (typically because the
-                first attempt was interrupted by Spot preemption).
-              </p>
-              <ul className="space-y-2">
-                {run.progress.retries.map((r) => (
-                  <li
-                    key={r.name}
-                    className="flex items-center justify-between bg-gray-50 rounded px-3 py-2 text-sm"
-                  >
-                    <span className="font-mono text-gray-800">{r.name}</span>
-                    <span className="text-gray-500">{r.attempts} attempts</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+                <span className="font-mono text-gray-800">{r.name}</span>
+                <span className="text-gray-500">{r.attempts} attempts</span>
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
+      </Modal>
     </>
   );
 }

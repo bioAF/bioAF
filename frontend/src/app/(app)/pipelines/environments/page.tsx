@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/shared/Toast";
+import { Modal } from "@/components/shared/Modal";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useRef, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
@@ -628,102 +629,108 @@ export default function PipelineEnvironmentsPage() {
               </div>
             )}
 
-            {showCreateModal && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg shadow-xl p-6 w-[640px] max-h-[90vh] overflow-y-auto">
-                  <h3 className="font-semibold text-lg mb-4">New Pipeline Environment</h3>
-                  <div className="space-y-3">
-                    <div>
-                      <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
-                      <input id="name"
-                        value={createForm.name}
-                        onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                        placeholder="rnaseq-pipeline"
-                        className="w-full border rounded px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
-                      <input id="description"
-                        value={createForm.description}
-                        onChange={(e) =>
-                          setCreateForm({ ...createForm, description: e.target.value })
-                        }
-                        placeholder="Optional description"
-                        className="w-full border rounded px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="environment-yml-2" className="text-sm text-gray-500 block mb-1">
-                        environment.yml
-                      </label>
-                      <textarea id="environment-yml-2"
-                        value={createForm.definition_content}
-                        onChange={(e) =>
-                          setCreateForm({
-                            ...createForm,
-                            definition_content: e.target.value,
-                          })
-                        }
-                        rows={14}
-                        className="w-full border rounded px-3 py-2 text-sm font-mono"
-                      />
-                      <p className="text-xs text-gray-500 mt-1">
-                        The first version is created automatically. You can build it from the
-                        versions list.
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 mt-6">
-                    <button
-                      onClick={handleCreate}
-                      disabled={
-                        creating || !createForm.name || !createForm.definition_content.trim()
-                      }
-                      className="flex-1 bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                    >
-                      {creating ? "Creating..." : "Create"}
-                    </button>
-                    <button
-                      onClick={() => setShowCreateModal(false)}
-                      className="flex-1 border py-2 rounded text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+            <Modal
+              open={showCreateModal}
+              title="New Pipeline Environment"
+              onClose={() => setShowCreateModal(false)}
+              size="md"
+              footer={
+                <>
+                <button
+                  onClick={handleCreate}
+                  disabled={
+                    creating || !createForm.name || !createForm.definition_content.trim()
+                  }
+                  className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
+                >
+                  {creating ? "Creating..." : "Create"}
+                </button>
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="border py-2 rounded text-sm"
+                >
+                  Cancel
+                </button>
+                </>
+              }
+            >
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="name" className="text-sm text-gray-500 block mb-1">Name</label>
+                  <input id="name"
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
+                    placeholder="rnaseq-pipeline"
+                    className="w-full border rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="description" className="text-sm text-gray-500 block mb-1">Description</label>
+                  <input id="description"
+                    value={createForm.description}
+                    onChange={(e) =>
+                      setCreateForm({ ...createForm, description: e.target.value })
+                    }
+                    placeholder="Optional description"
+                    className="w-full border rounded px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="environment-yml-2" className="text-sm text-gray-500 block mb-1">
+                    environment.yml
+                  </label>
+                  <textarea id="environment-yml-2"
+                    value={createForm.definition_content}
+                    onChange={(e) =>
+                      setCreateForm({
+                        ...createForm,
+                        definition_content: e.target.value,
+                      })
+                    }
+                    rows={14}
+                    className="w-full border rounded px-3 py-2 text-sm font-mono"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    The first version is created automatically. You can build it from the
+                    versions list.
+                  </p>
                 </div>
               </div>
-            )}
+            </Modal>
 
             {showDeleteVersionModal && selectedEnv && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-lg shadow-xl p-6 w-96">
-                  <h3 className="font-semibold text-lg mb-4">Delete Version</h3>
-                  <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
-                    <p className="text-sm text-red-800">
-                      This will permanently delete{" "}
-                      <strong>v{showDeleteVersionModal.version_number}</strong> and its
-                      container image. Pipelines pinned to this version will fail to launch.
-                    </p>
-                  </div>
-                  <p className="text-sm text-gray-600 mb-4">This action cannot be undone.</p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
-                      disabled={deletingVersion}
-                      className="flex-1 bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-                    >
-                      {deletingVersion ? "Deleting..." : "Delete Version"}
-                    </button>
-                    <button
-                      onClick={() => setShowDeleteVersionModal(null)}
-                      className="flex-1 border py-2 rounded text-sm"
-                    >
-                      Cancel
-                    </button>
-                  </div>
+              <Modal
+                open
+                title="Delete Version"
+                onClose={() => setShowDeleteVersionModal(null)}
+                size="md"
+                footer={
+                  <>
+                  <button
+                    onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
+                    disabled={deletingVersion}
+                    className="bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {deletingVersion ? "Deleting..." : "Delete Version"}
+                  </button>
+                  <button
+                    onClick={() => setShowDeleteVersionModal(null)}
+                    className="border py-2 rounded text-sm"
+                  >
+                    Cancel
+                  </button>
+                  </>
+                }
+              >
+                <div className="bg-red-50 border border-red-200 rounded p-3 mb-4">
+                  <p className="text-sm text-red-800">
+                    This will permanently delete{" "}
+                    <strong>v{showDeleteVersionModal.version_number}</strong> and its
+                    container image. Pipelines pinned to this version will fail to launch.
+                  </p>
                 </div>
-              </div>
+                <p className="text-sm text-gray-600 mb-4">This action cannot be undone.</p>
+              </Modal>
             )}
           </>
         )}

@@ -7,6 +7,8 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
@@ -192,51 +194,50 @@ function ProjectsPageInner() {
         )}
       </main>
 
-      {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold mb-4">New Project</h2>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
-                <input id="name"
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  placeholder="e.g., GBM vs. Healthy Integration Atlas"
-                />
-              </div>
-              <div>
-                <label htmlFor="hypothesis-optional" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
-                <textarea id="hypothesis-optional"
-                  value={newHypothesis}
-                  onChange={(e) => setNewHypothesis(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-                  rows={3}
-                  placeholder="What are you investigating?"
-                />
-              </div>
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={!newName.trim() || creating}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                {creating ? "Creating..." : "Create Project"}
-              </button>
-            </div>
+      <Modal
+        open={showCreateModal}
+        title="New Project"
+        onClose={() => setShowCreateModal(false)}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCreate}
+              disabled={!newName.trim()}
+              busy={creating}
+              busyLabel="Creating..."
+            >
+              Create Project
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+            <input id="name"
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              placeholder="e.g., GBM vs. Healthy Integration Atlas"
+            />
+          </div>
+          <div>
+            <label htmlFor="hypothesis-optional" className="block text-sm font-medium text-gray-700 mb-1">Hypothesis (optional)</label>
+            <textarea id="hypothesis-optional"
+              value={newHypothesis}
+              onChange={(e) => setNewHypothesis(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              rows={3}
+              placeholder="What are you investigating?"
+            />
           </div>
         </div>
-      )}
+      </Modal>
     </>
   );
 }
