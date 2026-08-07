@@ -641,3 +641,16 @@ describe("Sidebar as a drawer on a narrow screen", () => {
     expect(screen.getByTestId("sidebar")).not.toHaveAttribute("role", "dialog");
   });
 });
+
+// Found on the deployed demo at 375px: the drawer's own brand link goes to the
+// dashboard and left the drawer sitting over the page it had just loaded.
+test("the drawer closes when its brand link is followed too", () => {
+  window.localStorage.clear();
+  mockComponents.mockReturnValue({ components: [], loading: false, refetch: jest.fn() });
+  const onClose = jest.fn();
+
+  render(<Sidebar mobileOpen onMobileClose={onClose} />);
+  fireEvent.click(screen.getByTestId("sidebar-logo").closest("a")!);
+
+  expect(onClose).toHaveBeenCalled();
+});

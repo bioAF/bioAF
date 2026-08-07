@@ -364,7 +364,7 @@ export function Sidebar({
           </button>
         ) : (
           <>
-            <Link href="/dashboard" className="flex items-center gap-2">
+            <Link href="/dashboard" onClick={closeDrawer} className="flex items-center gap-2">
               <span
                 data-testid="sidebar-logo-backdrop"
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"
