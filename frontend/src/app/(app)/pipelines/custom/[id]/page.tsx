@@ -67,6 +67,10 @@ export default function CustomPipelineDetailPage() {
   const pipelineId = Number(params.id);
   const autoLaunch = searchParams.get("launch") === "1";
   const autoNewVersion = searchParams.get("newVersion") === "1";
+  // Carried here by the catalog from the experiment the user pressed Launch on.
+  const experimentParam = searchParams.get("experiment");
+  const launchedFromExperimentId =
+    experimentParam && /^\d+$/.test(experimentParam) ? Number(experimentParam) : null;
   const { canAccess, loading: permsLoading } = usePermissions();
 
   const [pipeline, setPipeline] = useState<CustomPipelineDetail | null>(null);
@@ -740,6 +744,7 @@ export default function CustomPipelineDetailPage() {
               pipeline={pipeline}
               envOptionsById={envOptionsById}
               repoById={repoById}
+              initialExperimentId={launchedFromExperimentId}
               onClose={() => setShowLaunchDialog(false)}
               onLaunched={(runId) => {
                 setShowLaunchDialog(false);

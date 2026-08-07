@@ -2,8 +2,11 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const mockPush = jest.fn();
 const mockGetParam = jest.fn();
+// One router object for the whole file: the page's load effect lists `router`
+// in its dependencies, so a fresh object per render would re-fetch forever.
+const mockRouter = { push: mockPush };
 jest.mock("next/navigation", () => ({
-  useRouter: () => ({ push: mockPush }),
+  useRouter: () => mockRouter,
   useSearchParams: () => ({ get: (k: string) => mockGetParam(k) }),
 }));
 

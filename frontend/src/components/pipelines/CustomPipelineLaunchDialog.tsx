@@ -1,7 +1,7 @@
 "use client";
 
 import { Modal } from "@/components/shared/Modal";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { ReferencePicker } from "@/components/references/ReferencePicker";
@@ -11,6 +11,7 @@ import type {
   CustomPipelineDetail,
   CustomPipelineVariable,
   CustomPipelineVersion,
+  ExperimentDetail,
   ExperimentListResponse,
   FileListResponse,
   FileResponse,
@@ -37,6 +38,11 @@ interface Props {
   repoById: Map<number, RepoLookup>;
   onClose: () => void;
   onLaunched: (runId: number) => void;
+  /**
+   * The experiment the user launched from, carried here as `?experiment=` by
+   * the catalog. Optional: opening the dialog directly still starts empty.
+   */
+  initialExperimentId?: number | null;
 }
 
 interface ProjectOption {
@@ -71,6 +77,7 @@ export function CustomPipelineLaunchDialog({
   repoById,
   onClose,
   onLaunched,
+  initialExperimentId,
 }: Props) {
   const activeVersions = useMemo(
     () => pipeline.versions.filter((v) => v.status === "active"),
@@ -114,6 +121,31 @@ export function CustomPipelineLaunchDialog({
     }
   }, [selectedVersion]);
 
+  // The catalog carries `?experiment=` here from the experiment the user
+  // pressed Launch on. The experiment select is filled per project, so the
+  // project has to be chosen before the experiment can be: the id waits here
+  // until its project's experiments have loaded. A ref rather than state
+  // because the effect that spends it depends on the project, not on this.
+  const pendingExperimentId = useRef<number | null>(initialExperimentId ?? null);
+
+  // Resolve that experiment to its project, which is what the first select
+  // holds. A failure is not worth reporting: the user still has both pickers,
+  // exactly as if they had opened the dialog without a deep link.
+  useEffect(() => {
+    const wanted = pendingExperimentId.current;
+    if (wanted == null) return;
+    void (async () => {
+      try {
+        const experiment = await api.get<ExperimentDetail>(`/api/experiments/${wanted}`);
+        const projectOfExperiment = experiment.project?.id;
+        if (projectOfExperiment == null) pendingExperimentId.current = null;
+        else setProjectId(projectOfExperiment);
+      } catch {
+        pendingExperimentId.current = null;
+      }
+    })();
+  }, []);
+
   // Load projects on open.
   useEffect(() => {
     void (async () => {
@@ -126,7 +158,8 @@ export function CustomPipelineLaunchDialog({
     })();
   }, []);
 
-  // Load experiments when project changes.
+  // Load experiments when project changes, and apply a deep-linked experiment
+  // once its project's list has arrived.
   useEffect(() => {
     setExperimentId(null);
     if (projectId == null) {
@@ -141,7 +174,13 @@ export function CustomPipelineLaunchDialog({
         setExperiments(
           data.experiments.map((e) => ({ id: e.id, name: e.name })),
         );
+        const wanted = pendingExperimentId.current;
+        if (wanted != null) {
+          pendingExperimentId.current = null;
+          if (data.experiments.some((e) => e.id === wanted)) setExperimentId(wanted);
+        }
       } catch {
+        pendingExperimentId.current = null;
         setExperiments([]);
       }
     })();
