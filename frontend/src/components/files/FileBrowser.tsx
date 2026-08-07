@@ -659,7 +659,7 @@ export function FileBrowser({
       )}
 
       {loading ? (
-        <ContentLoading />
+        <ContentLoading variant="table" />
       ) : files.length === 0 && labDocHits.length === 0 ? (
         <p className="text-gray-500 text-sm py-8 text-center">No files found.</p>
       ) : (

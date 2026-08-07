@@ -209,7 +209,7 @@ export default function AuditLogPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="px-4 py-8"><ContentLoading /></td></tr>
+                <tr><td colSpan={5} className="px-4 py-8"><ContentLoading variant="table" /></td></tr>
               ) : loadError ? (
                 <tr><td colSpan={5} className="px-4 py-8">
                   <ErrorState message={loadError} onRetry={() => load()} />

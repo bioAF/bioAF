@@ -284,7 +284,7 @@ export default function EnvironmentsPage() {
     <>
       <main className="flex-1 overflow-y-auto p-6">
         {loading ? (
-          <ContentLoading />
+          <ContentLoading variant="cards" />
         ) : (
         <>
         {loadError && (

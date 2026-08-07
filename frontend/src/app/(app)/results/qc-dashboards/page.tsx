@@ -220,7 +220,7 @@ function QCDashboardsPageInner() {
             onExpandPlot={handleExpandPlot}
           />
         ) : loading ? (
-          <ContentLoading />
+          <ContentLoading variant="cards" />
         ) : loadError ? (
           <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : dashboards.length === 0 ? (

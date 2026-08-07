@@ -74,7 +74,7 @@ export default function PipelineCatalogPage() {
     <>
       <main className="flex-1 overflow-y-auto p-6">
         {loading ? (
-          <ContentLoading />
+          <ContentLoading variant="cards" />
         ) : (
         <>
         <div className="flex items-center justify-between mb-6">

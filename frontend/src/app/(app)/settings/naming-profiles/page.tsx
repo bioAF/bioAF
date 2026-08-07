@@ -152,7 +152,7 @@ export default function SettingsNamingProfilesPage() {
         )}
 
         {loading ? (
-          <ContentLoading />
+          <ContentLoading variant="table" />
         ) : profiles.length === 0 ? (
           <div className="text-center py-12 text-gray-500">
             No active naming profiles yet. Click{" "}

@@ -184,7 +184,7 @@ export default function ActivityFeedPage() {
         {/* Events List */}
         <div className="bg-surface rounded-lg border border-hairline">
           {loading ? (
-            <ContentLoading />
+            <ContentLoading variant="table" />
           ) : loadError ? (
             <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
           ) : events.length === 0 ? (

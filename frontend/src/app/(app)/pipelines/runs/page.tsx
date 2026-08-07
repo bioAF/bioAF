@@ -96,7 +96,7 @@ export default function PipelineRunsPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       {loading ? (
-        <ContentLoading />
+        <ContentLoading variant="table" />
       ) : (
       <>
       <div className="flex items-center justify-between mb-6">

@@ -206,7 +206,7 @@ export default function PlotArchivePage() {
         </div>
 
         {loading ? (
-          <ContentLoading />
+          <ContentLoading variant="table" />
         ) : loadError ? (
           <ErrorState message={loadError} onRetry={() => fetchPlots()} />
         ) : plots.length === 0 ? (

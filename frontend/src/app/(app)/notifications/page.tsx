@@ -111,7 +111,7 @@ export default function NotificationsPage() {
 
       <div className="bg-surface rounded-lg border border-hairline">
         {loading ? (
-          <ContentLoading />
+          <ContentLoading variant="table" />
         ) : loadError ? (
           <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : notifications.length === 0 ? (
