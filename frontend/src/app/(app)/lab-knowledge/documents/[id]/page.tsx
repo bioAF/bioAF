@@ -4,11 +4,21 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { LabDocumentViewer } from "@/components/lab-knowledge/LabDocumentViewer";
+import dynamic from "next/dynamic";
 import { api } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { labDocuments, uploadDocumentFile, type LabDocumentNote } from "@/lib/labDocuments";
+
+// pdf.js reaches for browser globals (`DOMMatrix`) the moment it is imported,
+// and a "use client" page is still rendered on the server for the first
+// response, so a plain import throws there. Loading the viewer in the browser
+// only is what keeps that out of the server log. Held by
+// src/__tests__/browser-only-modules.test.ts.
+const LabDocumentViewer = dynamic(
+  () => import("@/components/lab-knowledge/LabDocumentViewer").then((m) => m.LabDocumentViewer),
+  { ssr: false, loading: () => <LoadingSpinner label="Loading the document viewer" /> },
+);
 
 interface Tag {
   id: number;

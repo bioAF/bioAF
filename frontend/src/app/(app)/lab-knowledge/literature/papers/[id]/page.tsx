@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { InputDialog } from "@/components/shared/InputDialog";
 import { getCurrentUser } from "@/lib/auth";
 import { statusLabel } from "@/lib/statusStyles";
-import { PaperPdfViewer } from "@/components/literature/PaperPdfViewer";
+import dynamic from "next/dynamic";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
 import {
@@ -26,6 +26,16 @@ import {
   formatAuthors,
   formatYear,
 } from "@/lib/literature";
+
+// pdf.js reaches for browser globals (`DOMMatrix`) the moment it is imported,
+// and a "use client" page is still rendered on the server for the first
+// response, so a plain import throws there. Loading the viewer in the browser
+// only is what keeps that out of the server log. Held by
+// src/__tests__/browser-only-modules.test.ts.
+const PaperPdfViewer = dynamic(
+  () => import("@/components/literature/PaperPdfViewer").then((m) => m.PaperPdfViewer),
+  { ssr: false, loading: () => <LoadingSpinner label="Loading the PDF viewer" /> },
+);
 
 export default function PaperDetailPage() {
   const params = useParams<{ id: string }>();
