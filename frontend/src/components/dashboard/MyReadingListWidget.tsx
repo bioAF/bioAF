@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface Paper {
@@ -17,22 +17,14 @@ interface PaperList {
 }
 
 export function MyReadingListWidget() {
-  const [items, setItems] = useState<Paper[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<PaperList>("/api/literature/papers?reading_status=unread&page_size=6")
-      .then((res) => setItems(res.items || []))
-      .catch(() => setError("Failed to load reading list"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<PaperList>("/api/literature/papers?reading_status=unread&page_size=6");
+      return res.items || [];
+    },
+    "Reading list",
+  );
+  const items = data;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-my-reading-list">
@@ -49,7 +41,7 @@ export function MyReadingListWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

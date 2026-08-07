@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface DailyCost {
@@ -25,24 +25,13 @@ function dateStr(offsetDays: number): string {
 }
 
 export function CostTrendWidget() {
-  const [data, setData] = useState<CostHistory | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<CostHistory>(
-        `/api/costs/history?start_date=${dateStr(29)}&end_date=${dateStr(0)}`,
-      )
-      .then((res) => setData({ records: res.records || [], total_amount: res.total_amount ?? 0 }))
-      .catch(() => setError("Failed to load cost trend"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<CostHistory>(`/api/costs/history?start_date=${dateStr(29)}&end_date=${dateStr(0)}`,);
+      return { records: res.records || [], total_amount: res.total_amount ?? 0 };
+    },
+    "Cost trend",
+  );
 
   const records = data?.records ?? [];
   const max = records.reduce((m, r) => Math.max(m, num(r.amount)), 0);
@@ -62,7 +51,7 @@ export function CostTrendWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

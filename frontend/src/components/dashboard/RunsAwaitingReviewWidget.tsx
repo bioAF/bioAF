@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo } from "@/components/dashboard/time";
 
@@ -20,22 +20,14 @@ interface RunList {
 }
 
 export function RunsAwaitingReviewWidget() {
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=20")
-      .then((res) => setRuns(res.runs || []))
-      .catch(() => setError("Failed to load runs"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=20");
+      return res.runs || [];
+    },
+    "Runs",
+  );
+  const runs = data;
 
   // A completed run with no review verdict yet is awaiting review.
   const awaiting = (runs || []).filter((r) => !r.review_verdict);
@@ -55,7 +47,7 @@ export function RunsAwaitingReviewWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo, withinHours } from "@/components/dashboard/time";
 
@@ -26,23 +27,12 @@ const WINDOWS = [
 ];
 
 export function FailedRunsWidget() {
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState(24);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<RunList>("/api/pipeline-runs?status=failed&page_size=20")
-      .then((res) => setRuns(res.runs || []))
-      .catch(() => setError("Failed to load runs"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data: runs, loading, error, retry } = useWidgetData(
+    async () =>
+      (await api.getWithRetry<RunList>("/api/pipeline-runs?status=failed&page_size=20")).runs || [],
+    "Failed runs",
+  );
 
   const windowLabel = WINDOWS.find((w) => w.hours === hours)?.label;
   const visible = (runs || []).filter((r) => withinHours(r.completed_at || r.created_at, hours));
@@ -80,7 +70,7 @@ export function FailedRunsWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

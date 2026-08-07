@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface AutoIngest {
@@ -11,22 +11,13 @@ interface AutoIngest {
 }
 
 export function AutoIngestActivityWidget() {
-  const [data, setData] = useState<AutoIngest | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<AutoIngest>("/api/v1/settings/auto-ingest")
-      .then((res) => setData(res))
-      .catch(() => setError("Failed to load auto-ingest"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<AutoIngest>("/api/v1/settings/auto-ingest");
+      return res;
+    },
+    "Auto-ingest",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-auto-ingest">
@@ -43,7 +34,7 @@ export function AutoIngestActivityWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

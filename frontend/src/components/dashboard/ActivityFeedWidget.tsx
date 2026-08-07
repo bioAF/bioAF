@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusDotClass } from "@/lib/statusStyles";
 
@@ -22,19 +22,13 @@ interface ActivityFeedWidgetProps {
 }
 
 export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=15")
-      .then((data) => setEvents(data.events))
-      .catch(() => setError("Failed to load activity feed"))
-      .finally(() => { clearTimeout(timeout); setLoading(false); });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () =>
+      (await api.getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=15"))
+        .events,
+    "The activity feed",
+  );
+  const events = data ?? [];
 
   function humanize(text: string): string {
     return text.replace(/[a-z0-9]+(_[a-z0-9]+)+/g, (match) =>
@@ -81,7 +75,7 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
       {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
-          <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">
+          <button onClick={retry} className="ml-2 text-bioaf-600 hover:underline">
             Retry
           </button>
         </div>

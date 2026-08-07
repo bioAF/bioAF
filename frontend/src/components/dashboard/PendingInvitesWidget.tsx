@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface User {
@@ -17,22 +17,14 @@ interface UserList {
 }
 
 export function PendingInvitesWidget() {
-  const [invited, setInvited] = useState<User[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<UserList>("/api/users")
-      .then((res) => setInvited((res.users || []).filter((u) => u.status === "invited")))
-      .catch(() => setError("Failed to load users"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<UserList>("/api/users");
+      return (res.users || []).filter((u) => u.status === "invited");
+    },
+    "Users",
+  );
+  const invited = data;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-pending-invites">
@@ -49,7 +41,7 @@ export function PendingInvitesWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

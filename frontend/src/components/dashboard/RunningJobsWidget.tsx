@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface RunStats {
@@ -13,28 +13,28 @@ interface RunStats {
 }
 
 export function RunningJobsWidget() {
-  const [stats, setStats] = useState<RunStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    Promise.all([
-      api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1").catch(() => ({ total: 0 })),
-      api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1").catch(() => ({ total: 0 })),
-    ])
-      .then(([running, pending]) => {
-        setStats({
-          running: running.total,
-          pending: pending.total,
-          completed_today: 0,
-          failed_today: 0,
-        });
-      })
-      .catch(() => setError("Failed to load job stats"))
-      .finally(() => { clearTimeout(timeout); setLoading(false); });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data: stats, loading, error, retry } = useWidgetData<RunStats>(
+    async () => {
+      // Each count falls back to 0 on its own, which is what this widget did
+      // before the retry work. Whether a failed count should say so rather than
+      // read as "no running jobs" is a separate question, not this change.
+      const [running, pending] = await Promise.all([
+        api
+          .getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1")
+          .catch(() => ({ total: 0 })),
+        api
+          .getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1")
+          .catch(() => ({ total: 0 })),
+      ]);
+      return {
+        running: running.total,
+        pending: pending.total,
+        completed_today: 0,
+        failed_today: 0,
+      };
+    },
+    "Job counts",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-running-jobs">
@@ -49,7 +49,7 @@ export function RunningJobsWidget() {
       {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
-          <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">
+          <button onClick={retry} className="ml-2 text-bioaf-600 hover:underline">
             Retry
           </button>
         </div>

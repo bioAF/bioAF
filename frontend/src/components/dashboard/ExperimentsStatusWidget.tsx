@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
@@ -18,22 +18,13 @@ interface ExperimentListResponse {
 }
 
 export function ExperimentsStatusWidget() {
-  const [items, setItems] = useState<ExperimentItem[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<ExperimentListResponse>("/api/experiments?page_size=6")
-      .then((res) => setItems(res.experiments || []))
-      .catch(() => setError("Failed to load experiments"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () =>
+      (await api.getWithRetry<ExperimentListResponse>("/api/experiments?page_size=6"))
+        .experiments || [],
+    "Experiments",
+  );
+  const items = data;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-experiments-status">
@@ -52,10 +43,7 @@ export function ExperimentsStatusWidget() {
       {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
-          <button
-            onClick={() => window.location.reload()}
-            className="ml-2 text-bioaf-600 hover:underline"
-          >
+          <button onClick={retry} className="ml-2 text-bioaf-600 hover:underline">
             Retry
           </button>
         </div>
