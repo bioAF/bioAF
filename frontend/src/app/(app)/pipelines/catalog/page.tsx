@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -79,26 +80,20 @@ export default function PipelineCatalogPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold">Pipeline Catalog</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <p className="text-sm text-ink-subtle mt-1">
               Built-in NF-Core pipelines and your organization&apos;s custom pipelines.
             </p>
           </div>
           <div className="flex items-center gap-2">
             {canBrowseRegistry && (
-              <button
-                onClick={() => setRegistryOpen(true)}
-                className="bg-white border border-gray-300 text-gray-700 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
-              >
+              <Button variant="secondary" onClick={() => setRegistryOpen(true)}>
                 Search Available Pipelines
-              </button>
+              </Button>
             )}
             {canCreateCustom && (
-              <button
-                onClick={() => router.push("/pipelines/custom")}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-              >
+              <Button onClick={() => router.push("/pipelines/custom")}>
                 Manage Custom Pipelines
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -115,7 +110,7 @@ export default function PipelineCatalogPage() {
               <div
                 key={p.id}
                 {...clickableCard(() => openPipeline(p))}
-                className="bg-white rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
+                className="bg-surface rounded-lg shadow p-6 hover:shadow-md transition-shadow cursor-pointer"
               >
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-semibold text-lg">{p.name}</h3>
@@ -127,9 +122,9 @@ export default function PipelineCatalogPage() {
                     {p.source_type}
                   </span>
                 </div>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">{p.description || "No description"}</p>
+                <p className="text-sm text-ink-subtle mb-4 line-clamp-2">{p.description || "No description"}</p>
                 <div className="flex items-center justify-between">
-                  <div className="text-xs text-gray-500">
+                  <div className="text-xs text-ink-subtle">
                     {isCustom && p.created_by_username ? (
                       <>
                         <span>by {p.created_by_username}</span>
@@ -140,13 +135,13 @@ export default function PipelineCatalogPage() {
                       <span>{versionLabel}</span>
                     )}
                   </div>
-                  <button
+                  <Button
+                    size="sm"
                     onClick={(e) => { e.stopPropagation(); launchPipeline(p); }}
                     disabled={isCustom && p.latest_version_number == null}
-                    className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
                   >
                     Launch
-                  </button>
+                  </Button>
                 </div>
               </div>
             );
@@ -157,7 +152,7 @@ export default function PipelineCatalogPage() {
             </div>
           ) : null}
           {!loadError && pipelines.length === 0 && (
-            <div className="col-span-full text-center py-12 text-gray-500">No pipelines available</div>
+            <div className="col-span-full text-center py-12 text-ink-subtle">No pipelines available</div>
           )}
         </div>
         </>

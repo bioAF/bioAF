@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
@@ -98,12 +99,12 @@ export default function ActivityFeedPage() {
     <>
       <Breadcrumb />
       <main className="flex-1 overflow-y-auto p-6" data-testid="activity-feed-page">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Activity Feed</h1>
+        <h1 className="text-2xl font-bold text-ink mb-6">Activity Feed</h1>
 
         {/* Filters */}
         <div className="flex flex-wrap gap-3 mb-4 items-end" data-testid="activity-filters">
           <div>
-            <label htmlFor="event-type" className="block text-xs text-gray-500 mb-1">Event Type</label>
+            <label htmlFor="event-type" className="block text-xs text-ink-subtle mb-1">Event Type</label>
             <select id="event-type"
               value={eventTypeFilter}
               onChange={(e) => { setEventTypeFilter(e.target.value); setPage(1); }}
@@ -123,7 +124,7 @@ export default function ActivityFeedPage() {
             </select>
           </div>
           <div>
-            <label htmlFor="user" className="block text-xs text-gray-500 mb-1">User</label>
+            <label htmlFor="user" className="block text-xs text-ink-subtle mb-1">User</label>
             <input id="user"
               type="text"
               placeholder="Filter by email"
@@ -134,7 +135,7 @@ export default function ActivityFeedPage() {
             />
           </div>
           <div>
-            <label htmlFor="from" className="block text-xs text-gray-500 mb-1">From</label>
+            <label htmlFor="from" className="block text-xs text-ink-subtle mb-1">From</label>
             <input id="from"
               type="date"
               value={dateFrom}
@@ -143,7 +144,7 @@ export default function ActivityFeedPage() {
             />
           </div>
           <div>
-            <label htmlFor="to" className="block text-xs text-gray-500 mb-1">To</label>
+            <label htmlFor="to" className="block text-xs text-ink-subtle mb-1">To</label>
             <input id="to"
               type="date"
               value={dateTo}
@@ -152,7 +153,7 @@ export default function ActivityFeedPage() {
             />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Severity</label>
+            <label className="block text-xs text-ink-subtle mb-1">Severity</label>
             <div className="flex gap-1">
               {["info", "warning", "critical"].map((sev) => (
                 <button
@@ -161,7 +162,7 @@ export default function ActivityFeedPage() {
                   className={`px-2 py-1 rounded text-xs font-medium border ${
                     severityFilter.includes(sev)
                       ? statusBadgeClass("severity", sev) + " border-transparent"
-                      : "bg-white text-gray-500 border-gray-300"
+                      : "bg-surface text-ink-subtle border-gray-300"
                   }`}
                   data-testid={`filter-severity-${sev}`}
                 >
@@ -173,7 +174,7 @@ export default function ActivityFeedPage() {
           {(eventTypeFilter || userFilter || dateFrom || dateTo || severityFilter.length > 0) && (
             <button
               onClick={resetFilters}
-              className="text-xs text-gray-500 hover:text-gray-700 underline pb-1"
+              className="text-xs text-ink-subtle hover:text-ink-muted underline pb-1"
             >
               Clear filters
             </button>
@@ -181,24 +182,24 @@ export default function ActivityFeedPage() {
         </div>
 
         {/* Events List */}
-        <div className="bg-white rounded-lg border border-gray-200">
+        <div className="bg-surface rounded-lg border border-hairline">
           {loading ? (
             <ContentLoading />
           ) : loadError ? (
             <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
           ) : events.length === 0 ? (
-            <div className="p-8 text-center text-gray-500" data-testid="activity-empty">
+            <div className="p-8 text-center text-ink-subtle" data-testid="activity-empty">
               No activity matches your filters.
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
               {events.map((event) => (
-                <div key={event.id} className="px-4 py-3 hover:bg-gray-50" data-testid="activity-event">
+                <div key={event.id} className="px-4 py-3 hover:bg-surface-muted" data-testid="activity-event">
                   <div className="flex items-start gap-3">
                     <div className="w-2 h-2 mt-2 rounded-full bg-bioaf-500 flex-shrink-0" />
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="text-sm text-gray-900">{event.summary}</p>
+                        <p className="text-sm text-ink">{event.summary}</p>
                         {event.severity && (
                           <span
                             className={`px-1.5 py-0.5 rounded text-xs font-medium ${
@@ -211,9 +212,9 @@ export default function ActivityFeedPage() {
                       </div>
                       <div className="flex items-center gap-3 mt-1">
                         {event.user_email && (
-                          <span className="text-xs text-gray-500">{event.user_email}</span>
+                          <span className="text-xs text-ink-subtle">{event.user_email}</span>
                         )}
-                        <span className="text-xs font-mono text-gray-500">{event.event_type}</span>
+                        <span className="text-xs font-mono text-ink-subtle">{event.event_type}</span>
                         {event.entity_type && event.entity_id && (
                           entityLinks[event.entity_type] ? (
                             <Link
@@ -224,12 +225,12 @@ export default function ActivityFeedPage() {
                               {event.entity_type} #{event.entity_id}
                             </Link>
                           ) : (
-                            <span className="text-xs text-gray-500">
+                            <span className="text-xs text-ink-subtle">
                               {event.entity_type} #{event.entity_id}
                             </span>
                           )
                         )}
-                        <span className="text-xs text-gray-500">
+                        <span className="text-xs text-ink-subtle">
                           {new Date(event.created_at).toLocaleString()}
                         </span>
                       </div>
@@ -244,23 +245,15 @@ export default function ActivityFeedPage() {
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex justify-center gap-2 mt-4" data-testid="activity-pagination">
-            <button
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-              className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-            >
+            <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
               Previous
-            </button>
+            </Button>
             <span className="px-3 py-1 text-sm text-gray-600">
               Page {page} of {totalPages}
             </span>
-            <button
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-              className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-            >
+            <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
               Next
-            </button>
+            </Button>
           </div>
         )}
       </main>

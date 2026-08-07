@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 import { NotificationItem } from "@/components/notifications/NotificationItem";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
@@ -73,7 +74,7 @@ export default function NotificationsPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Notifications</h1>
+        <h1 className="text-2xl font-bold text-ink">Notifications</h1>
         <div className="flex items-center gap-3">
           <Link
             href="/profile/notifications"
@@ -81,12 +82,9 @@ export default function NotificationsPage() {
           >
             Preferences
           </Link>
-          <button
-            onClick={handleMarkAllRead}
-            className="text-sm bg-bioaf-600 text-white px-3 py-1.5 rounded hover:bg-bioaf-700"
-          >
+          <Button size="sm" onClick={handleMarkAllRead}>
             Mark all read
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -111,13 +109,13 @@ export default function NotificationsPage() {
         </select>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200">
+      <div className="bg-surface rounded-lg border border-hairline">
         {loading ? (
           <ContentLoading />
         ) : loadError ? (
           <ErrorState message={loadError} onRetry={() => setReloadKey((k) => k + 1)} />
         ) : notifications.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">No notifications</div>
+          <div className="p-8 text-center text-ink-subtle">No notifications</div>
         ) : (
           notifications.map((n) => (
             <NotificationItem
@@ -133,23 +131,15 @@ export default function NotificationsPage() {
 
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-4">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
+          <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
             Previous
-          </button>
+          </Button>
           <span className="px-3 py-1 text-sm text-gray-600">
             Page {page} of {totalPages}
           </span>
-          <button
-            disabled={page >= totalPages}
-            onClick={() => setPage(page + 1)}
-            className="px-3 py-1 border rounded text-sm disabled:opacity-50"
-          >
+          <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
             Next
-          </button>
+          </Button>
         </div>
       )}
     </main>

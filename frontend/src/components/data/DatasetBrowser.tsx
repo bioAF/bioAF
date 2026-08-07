@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { getCurrentUser } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
 import { DetailModal } from "@/components/shared/DetailModal";
 import type {
   DatasetExperimentSummary,
@@ -216,53 +217,50 @@ export function DatasetBrowser() {
           <option value="protein">Protein</option>
         </select>
         {canModify && selectedExperiments.size > 0 && (
-          <button
-            onClick={openProjectModal}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button onClick={openProjectModal}>
             Add to Project ({selectedExperiments.size})
-          </button>
+          </Button>
         )}
       </div>
 
       {loading ? (
-        <p className="text-gray-500 text-sm">Loading...</p>
+        <p className="text-ink-subtle text-sm">Loading...</p>
       ) : loadError ? (
         <ErrorState message={loadError} onRetry={() => fetchDatasets()} />
       ) : datasets.length === 0 ? (
-        <p className="text-gray-500 text-sm">No datasets found.</p>
+        <p className="text-ink-subtle text-sm">No datasets found.</p>
       ) : (
         <>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
                   {canModify && (
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase w-8"></th>
                   )}
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Experiment
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Status
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Organism
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Samples
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Files
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Total Size
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-hairline">
                 {datasets.map((ds) => (
-                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
+                  <tr key={ds.experiment_id} className={`hover:bg-surface-muted cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
                     {canModify && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -274,11 +272,11 @@ export function DatasetBrowser() {
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 text-sm font-medium text-ink">
                       {ds.experiment_name}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700">
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-elevated text-ink-muted">
                         {ds.status}
                       </span>
                     </td>
@@ -300,26 +298,18 @@ export function DatasetBrowser() {
             </table>
           </div>
 
-          <div className="flex justify-between items-center text-sm text-gray-500">
+          <div className="flex justify-between items-center text-sm text-ink-subtle">
             <span>
               Showing {(page - 1) * pageSize + 1}-
               {Math.min(page * pageSize, total)} of {total}
             </span>
             <div className="space-x-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
+              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
                 Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => p + 1)}
-                disabled={page * pageSize >= total}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setPage((p) => p + 1)} disabled={page * pageSize >= total}>
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         </>
@@ -351,14 +341,14 @@ export function DatasetBrowser() {
       {/* Add to Project Modal */}
       {showProjectModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+          <div className="bg-surface rounded-lg shadow-xl p-6 w-full max-w-md">
             <h2 className="text-lg font-bold mb-4">Add to Project</h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-ink-subtle mb-4">
               Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
             </p>
             <div className="space-y-4">
               <div>
-                <label htmlFor="select-project" className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
+                <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
                 <select id="select-project"
                   value={selectedProjectId}
                   onChange={(e) => setSelectedProjectId(e.target.value)}
@@ -373,7 +363,7 @@ export function DatasetBrowser() {
               </div>
               {selectedProjectId === "new" && (
                 <div>
-                  <label htmlFor="new-project-name" className="block text-sm font-medium text-gray-700 mb-1">New Project Name</label>
+                  <label htmlFor="new-project-name" className="block text-sm font-medium text-ink-muted mb-1">New Project Name</label>
                   <input id="new-project-name"
                     type="text"
                     value={newProjectName}
@@ -385,26 +375,26 @@ export function DatasetBrowser() {
               )}
             </div>
             <div className="flex justify-end gap-3 mt-6">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => {
                   setShowProjectModal(false);
                   setSelectedProjectId("");
                   setNewProjectName("");
                 }}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={handleAddToProject}
+                busy={addingToProject}
+                busyLabel="Adding..."
                 disabled={
-                  addingToProject ||
-                  (!selectedProjectId || (selectedProjectId === "new" && !newProjectName.trim()))
+                  !selectedProjectId || (selectedProjectId === "new" && !newProjectName.trim())
                 }
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
               >
-                {addingToProject ? "Adding..." : "Add to Project"}
-              </button>
+                Add to Project
+              </Button>
             </div>
           </div>
         </div>

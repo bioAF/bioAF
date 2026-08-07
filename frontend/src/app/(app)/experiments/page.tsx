@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -81,7 +82,7 @@ export default function ExperimentsPage() {
         </Link>
       </div>
 
-      <div className="bg-white rounded-lg shadow mb-6 p-4">
+      <div className="bg-surface rounded-lg shadow mb-6 p-4">
         <div className="flex flex-wrap gap-4">
           <input aria-label="Search experiments"
             type="text"
@@ -118,16 +119,16 @@ export default function ExperimentsPage() {
           <LoadingSpinner size="lg" />
         </div>
       ) : loadError ? (
-        <div className="bg-white rounded-lg shadow">
+        <div className="bg-surface rounded-lg shadow">
           <ErrorState
             message={loadError}
             onRetry={() => setReloadKey((k) => k + 1)}
           />
         </div>
       ) : experiments.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
-          <h2 className="text-lg font-semibold text-gray-500 mb-2">No experiments found</h2>
-          <p className="text-gray-500 mb-4">Get started by creating your first experiment.</p>
+        <div className="bg-surface rounded-lg shadow p-12 text-center">
+          <h2 className="text-lg font-semibold text-ink-subtle mb-2">No experiments found</h2>
+          <p className="text-ink-subtle mb-4">Get started by creating your first experiment.</p>
           <Link
             href="/experiments/new"
             className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
@@ -137,35 +138,35 @@ export default function ExperimentsPage() {
         </div>
       ) : (
         <>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Samples</th>
-                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Name</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">ID</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Project</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Owner</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Samples</th>
+                  <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Created</th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className="bg-surface divide-y divide-hairline">
                 {experiments.map((exp) => (
                   <tr
                     key={exp.id}
                     {...clickableRow(() => router.push(`/experiments/${exp.id}`))}
-                    className="hover:bg-gray-50 cursor-pointer"
+                    className="hover:bg-surface-muted cursor-pointer"
                   >
-                    <td className="px-6 py-4 text-sm font-medium text-gray-900">{exp.name}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500 font-mono">{exp.external_id || exp.code || "-"}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{exp.project?.name || "—"}</td>
+                    <td className="px-6 py-4 text-sm font-medium text-ink">{exp.name}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle font-mono">{exp.external_id || exp.code || "-"}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.project?.name || "—"}</td>
                     <td className="px-6 py-4">
                       <ExperimentStatusBadge status={exp.status} />
                     </td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{exp.owner?.name || exp.owner?.email || "—"}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{exp.sample_count}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
+                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.owner?.name || exp.owner?.email || "—"}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle">{exp.sample_count}</td>
+                    <td className="px-6 py-4 text-sm text-ink-subtle">
                       {new Date(exp.created_at).toLocaleDateString()}
                     </td>
                   </tr>
@@ -176,24 +177,26 @@ export default function ExperimentsPage() {
 
           {totalPages > 1 && (
             <div className="flex justify-between items-center mt-4">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-ink-subtle">
                 Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
               </p>
               <div className="flex gap-2">
-                <button
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setPage(Math.max(1, page - 1))}
                   disabled={page === 1}
-                  className="px-3 py-1 border rounded text-sm disabled:opacity-50"
                 >
                   Previous
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
                   onClick={() => setPage(Math.min(totalPages, page + 1))}
                   disabled={page === totalPages}
-                  className="px-3 py-1 border rounded text-sm disabled:opacity-50"
                 >
                   Next
-                </button>
+                </Button>
               </div>
             </div>
           )}

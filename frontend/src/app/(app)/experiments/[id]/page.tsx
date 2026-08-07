@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useParams, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 import { ExperimentStatusBadge } from "@/components/experiments/ExperimentStatusBadge";
 import { SampleQCBadge } from "@/components/experiments/SampleQCBadge";
 import { GeoExportModal } from "@/components/experiments/GeoExportModal";
@@ -468,7 +469,7 @@ function ExperimentDetailPageInner() {
   if (!experiment) {
     return (
       <main className="flex-1 flex items-center justify-center">
-        <p className="text-gray-500">Experiment not found</p>
+        <p className="text-ink-subtle">Experiment not found</p>
       </main>
     );
   }
@@ -490,12 +491,12 @@ function ExperimentDetailPageInner() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center gap-4 mb-6">
-        <button onClick={() => router.push("/experiments")} className="text-gray-500 hover:text-gray-700">
+        <button onClick={() => router.push("/experiments")} className="text-ink-subtle hover:text-ink-muted">
           ← Back
         </button>
         <h1 className="text-2xl font-bold">{experiment.name}</h1>
         {experiment.code && (
-          <span className="text-sm font-mono bg-gray-100 text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{experiment.code}</span>
+          <span className="text-sm font-mono bg-elevated text-gray-600 px-2 py-0.5 rounded" title="Internal ID">{experiment.code}</span>
         )}
         {experiment.external_id && (
           <span className="text-sm font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded" title="External ID">{experiment.external_id}</span>
@@ -510,7 +511,7 @@ function ExperimentDetailPageInner() {
               <>
                 <button
                   onClick={() => setShowDataExport(true)}
-                  className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
+                  className="bg-elevated text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
                 >
                   Export Data
                 </button>
@@ -526,7 +527,7 @@ function ExperimentDetailPageInner() {
         </div>
       </div>
 
-      <div className="border-b border-gray-200 mb-6">
+      <div className="border-b border-hairline mb-6">
         <nav className="flex -mb-px space-x-8">
           {tabs.map((tab) => (
             <button
@@ -535,7 +536,7 @@ function ExperimentDetailPageInner() {
               className={`py-2 px-1 border-b-2 text-sm font-medium ${
                 activeTab === tab.key
                   ? "border-bioaf-500 text-bioaf-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                  : "border-transparent text-ink-subtle hover:text-ink-muted hover:border-gray-300"
               }`}
             >
               {tab.label}
@@ -546,7 +547,7 @@ function ExperimentDetailPageInner() {
 
       {activeTab === "overview" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-surface rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Experiment Details</h2>
               {!editingOverview && (
@@ -557,11 +558,11 @@ function ExperimentDetailPageInner() {
             {editingOverview ? (
               <div className="space-y-3">
                 <div>
-                  <label htmlFor="name" className="block text-sm text-gray-500 mb-1">Name</label>
+                  <label htmlFor="name" className="block text-sm text-ink-subtle mb-1">Name</label>
                   <input id="name" value={overviewForm.name ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, name: e.target.value })} className="w-full border rounded px-3 py-1.5 text-sm" />
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-500 mb-1">Design Type</label>
+                  <label className="block text-sm text-ink-subtle mb-1">Design Type</label>
                   <ExtensibleVocabularySelect
                     fieldName="design_type"
                     value={overviewForm.design_type ?? null}
@@ -571,11 +572,11 @@ function ExperimentDetailPageInner() {
                   />
                 </div>
                 <div>
-                  <label htmlFor="hypothesis" className="block text-sm text-gray-500 mb-1">Hypothesis</label>
+                  <label htmlFor="hypothesis" className="block text-sm text-ink-subtle mb-1">Hypothesis</label>
                   <textarea id="hypothesis" value={overviewForm.hypothesis ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, hypothesis: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
                 </div>
                 <div>
-                  <label htmlFor="description" className="block text-sm text-gray-500 mb-1">Description</label>
+                  <label htmlFor="description" className="block text-sm text-ink-subtle mb-1">Description</label>
                   <textarea id="description" value={overviewForm.description ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, description: e.target.value || null })} rows={3} className="w-full border rounded px-3 py-1.5 text-sm" />
                 </div>
                 {(() => {
@@ -603,17 +604,17 @@ function ExperimentDetailPageInner() {
                 })()}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label htmlFor="start-date" className="block text-sm text-gray-500 mb-1">Start Date</label>
+                    <label htmlFor="start-date" className="block text-sm text-ink-subtle mb-1">Start Date</label>
                     <input id="start-date" type="date" value={overviewForm.start_date ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, start_date: e.target.value || null })} className="w-full border rounded px-3 py-1.5 text-sm" />
                   </div>
                   <div>
-                    <label htmlFor="expected-samples" className="block text-sm text-gray-500 mb-1">Expected Samples</label>
+                    <label htmlFor="expected-samples" className="block text-sm text-ink-subtle mb-1">Expected Samples</label>
                     <input id="expected-samples" type="number" min={0} value={overviewForm.expected_sample_count ?? ""} onChange={(e) => setOverviewForm({ ...overviewForm, expected_sample_count: e.target.value ? Number(e.target.value) : null })} className="w-full border rounded px-3 py-1.5 text-sm" />
                   </div>
                 </div>
                 <div className="border-t pt-3 mt-3">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Sample Field Defaults</h3>
-                  <p className="text-xs text-gray-500 mb-2">Default values applied to new samples. Per-sample values override these.</p>
+                  <h3 className="text-sm font-medium text-ink-muted mb-2">Sample Field Defaults</h3>
+                  <p className="text-xs text-ink-subtle mb-2">Default values applied to new samples. Per-sample values override these.</p>
                   <div className="space-y-2">
                     {DEFAULTABLE_FIELDS.map((field) => {
                       const current = editFieldDefaults.find((d) => d.field_name === field.name);
@@ -641,7 +642,7 @@ function ExperimentDetailPageInner() {
                               className="border rounded px-2 py-1 text-sm"
                             />
                           )}
-                          <label className="flex items-center gap-1 text-xs text-gray-500">
+                          <label className="flex items-center gap-1 text-xs text-ink-subtle">
                             <input
                               type="checkbox"
                               checked={current?.is_required ?? false}
@@ -656,7 +657,7 @@ function ExperimentDetailPageInner() {
                   </div>
                 </div>
                 <div className="border-t pt-3 mt-3">
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Custom Fields</h3>
+                  <h3 className="text-sm font-medium text-ink-muted mb-2">Custom Fields</h3>
                   <div className="space-y-2">
                     {editCustomFields.map((cf, idx) => (
                       <div key={idx} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_auto] gap-2 items-center">
@@ -705,16 +706,16 @@ function ExperimentDetailPageInner() {
                 </div>
                 {overviewError && <p className="text-red-600 text-sm">{overviewError}</p>}
                 <div className="flex gap-2 pt-1">
-                  <button onClick={handleSaveOverview} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
+                  <Button size="sm" onClick={handleSaveOverview}>Save</Button>
                   <button onClick={() => { setEditingOverview(false); setOverviewError(""); }} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
                 </div>
               </div>
             ) : (
               <dl className="space-y-3">
-                <div><dt className="text-sm text-gray-500">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Project</dt><dd className="text-sm">{experiment.project?.name || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Template</dt><dd className="text-sm">{experiment.template_name || "—"}</dd></div>
                 <div>
-                  <dt className="text-sm text-gray-500">Naming Profile</dt>
+                  <dt className="text-sm text-ink-subtle">Naming Profile</dt>
                   <dd className="text-sm">
                     {(() => {
                       const eff = experiment.effective_naming_profile_id;
@@ -726,19 +727,19 @@ function ExperimentDetailPageInner() {
                     })()}
                   </dd>
                 </div>
-                <div><dt className="text-sm text-gray-500">Design Type</dt><dd className="text-sm">{experiment.design_type || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Start Date</dt><dd className="text-sm">{experiment.start_date || "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? "—"}</dd></div>
-                <div><dt className="text-sm text-gray-500">Actual Samples</dt><dd className="text-sm">{experiment.sample_count}</dd></div>
-                <div><dt className="text-sm text-gray-500">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Design Type</dt><dd className="text-sm">{experiment.design_type || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Owner</dt><dd className="text-sm">{experiment.owner?.name || experiment.owner?.email || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Hypothesis</dt><dd className="text-sm">{experiment.hypothesis || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Description</dt><dd className="text-sm">{experiment.description || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Start Date</dt><dd className="text-sm">{experiment.start_date || "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Expected Samples</dt><dd className="text-sm">{experiment.expected_sample_count ?? "—"}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Actual Samples</dt><dd className="text-sm">{experiment.sample_count}</dd></div>
+                <div><dt className="text-sm text-ink-subtle">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
               </dl>
             )}
           </div>
 
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-surface rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold mb-4">Status</h2>
             <div className="space-y-3">
               <div className="flex items-center gap-4">
@@ -761,13 +762,13 @@ function ExperimentDetailPageInner() {
               <>
                 <h3 className="text-md font-semibold mt-6 mb-3">Custom Fields</h3>
                 {experiment.template_name && (
-                  <p className="text-xs text-gray-500 mb-3">Controlled by template: {experiment.template_name}</p>
+                  <p className="text-xs text-ink-subtle mb-3">Controlled by template: {experiment.template_name}</p>
                 )}
                 <dl className="space-y-2">
                   {experiment.custom_fields.map((cf) => (
                     <div key={cf.id} className="flex items-center gap-2">
-                      <dt className="text-sm text-gray-500">{cf.field_name}</dt>
-                      <dd className="text-sm text-gray-500">{cf.field_value || "—"}</dd>
+                      <dt className="text-sm text-ink-subtle">{cf.field_name}</dt>
+                      <dd className="text-sm text-ink-subtle">{cf.field_value || "—"}</dd>
                       {cf.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
                     </div>
                   ))}
@@ -778,13 +779,13 @@ function ExperimentDetailPageInner() {
             {experiment.field_defaults.length > 0 && (
               <>
                 <h3 className="text-md font-semibold mt-6 mb-3">Sample Field Defaults</h3>
-                <p className="text-xs text-gray-500 mb-3">Applied to new samples unless overridden per-sample.</p>
+                <p className="text-xs text-ink-subtle mb-3">Applied to new samples unless overridden per-sample.</p>
                 <dl className="space-y-2">
                   {experiment.field_defaults.map((fd) => {
                     const label = DEFAULTABLE_FIELDS.find((f) => f.name === fd.field_name)?.label ?? fd.field_name;
                     return (
                       <div key={fd.id} className="flex items-center gap-2">
-                        <dt className="text-sm text-gray-500">{label}</dt>
+                        <dt className="text-sm text-ink-subtle">{label}</dt>
                         <dd className="text-sm text-gray-600">{fd.default_value || "—"}</dd>
                         {fd.is_required && <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">required</span>}
                       </div>
@@ -823,7 +824,7 @@ function ExperimentDetailPageInner() {
             </button>
             <button
               onClick={() => setShowCsvUpload(true)}
-              className="bg-white border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-gray-50"
+              className="bg-surface border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-surface-muted"
             >
               Import Samples
             </button>
@@ -835,18 +836,17 @@ function ExperimentDetailPageInner() {
                 >
                   Edit Selected ({selectedSampleIds.size})
                 </button>
-                <button
+                <Button variant="danger"
                   onClick={() => setShowDeleteConfirm(true)}
-                  className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700"
                 >
                   Delete Selected ({selectedSampleIds.size})
-                </button>
+                </Button>
               </>
             )}
           </div>
 
           {showSampleForm && (
-            <div className="bg-white rounded-lg shadow p-4 mb-4">
+            <div className="bg-surface rounded-lg shadow p-4 mb-4">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <input aria-label="External Sample ID" placeholder="External Sample ID" value={sampleForm.external_id ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                 <input aria-label="Organism" placeholder="Organism" value={sampleForm.organism ?? ""} onChange={(e) => setSampleForm({ ...sampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm" />
@@ -876,7 +876,7 @@ function ExperimentDetailPageInner() {
                 <p className="text-red-600 text-sm mt-2">{sampleFormError}</p>
               )}
               <div className="flex gap-2 mt-3">
-                <button onClick={handleAddSample} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
+                <Button size="sm" onClick={handleAddSample}>Save</Button>
                 <button onClick={() => { setShowSampleForm(false); setSampleFormError(""); }} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
               </div>
             </div>
@@ -885,7 +885,7 @@ function ExperimentDetailPageInner() {
           {showBulkEdit && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg shadow p-4 mb-4">
               <h3 className="text-sm font-semibold mb-2">Bulk Edit {selectedSampleIds.size} Sample{selectedSampleIds.size > 1 ? "s" : ""}</h3>
-              <p className="text-xs text-gray-500 mb-3">Only fields you fill in will be updated. Blank fields are left unchanged.</p>
+              <p className="text-xs text-ink-subtle mb-3">Only fields you fill in will be updated. Blank fields are left unchanged.</p>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <input aria-label="Organism" placeholder="Organism" value={bulkEditForm.organism ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, organism: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
                 <input aria-label="Tissue Type" placeholder="Tissue Type" value={bulkEditForm.tissue_type ?? ""} onChange={(e) => setBulkEditForm({ ...bulkEditForm, tissue_type: e.target.value || undefined })} className="border rounded px-3 py-2 text-sm" />
@@ -907,8 +907,8 @@ function ExperimentDetailPageInner() {
             </div>
           )}
 
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className="px-2 py-3 text-center">
@@ -919,22 +919,22 @@ function ExperimentDetailPageInner() {
                       className="rounded border-gray-300"
                     />
                   </th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Organism</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tissue</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Molecule</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Treatment</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Prep</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Library Layout</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Files</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">ID</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Organism</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Tissue</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Molecule</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Treatment</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Library Prep</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Library Layout</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Files</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">QC</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
                   <th scope="col" className="px-4 py-3"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-hairline">
                 {samples.map((s) => (
-                  <tr key={s.id} className={`hover:bg-gray-50 cursor-pointer ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`} {...clickableRow(() => setViewingSample(s))}>
+                  <tr key={s.id} className={`hover:bg-surface-muted cursor-pointer ${selectedSampleIds.has(s.id) ? "bg-blue-50/50" : ""}`} {...clickableRow(() => setViewingSample(s))}>
                     <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -965,7 +965,7 @@ function ExperimentDetailPageInner() {
                         <option value="fail">Fail</option>
                       </select>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{s.status.replace(/_/g, " ")}</td>
+                    <td className="px-4 py-3 text-sm text-ink-subtle">{s.status.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <button
                         onClick={() => startEditSample(s)}
@@ -977,7 +977,7 @@ function ExperimentDetailPageInner() {
                   </tr>
                 ))}
                 {samples.length === 0 && (
-                  <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-500">No samples yet</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-8 text-center text-ink-subtle">No samples yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -1031,71 +1031,71 @@ function ExperimentDetailPageInner() {
           {editingSampleId !== null && (
             <div className="fixed inset-0 z-50 flex items-center justify-center">
               <div className="fixed inset-0 bg-black/40" onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} />
-              <div className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+              <div className="relative bg-surface rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold">Edit Sample</h3>
-                  <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="text-gray-500 hover:text-gray-600 text-xl leading-none">&times;</button>
+                  <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="text-ink-subtle hover:text-gray-600 text-xl leading-none">&times;</button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label htmlFor="external-sample-id" className="block text-xs font-medium text-gray-500 mb-1">External Sample ID</label>
+                    <label htmlFor="external-sample-id" className="block text-xs font-medium text-ink-subtle mb-1">External Sample ID</label>
                     <input id="external-sample-id" value={editSampleForm.external_id ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, external_id: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="organism" className="block text-xs font-medium text-gray-500 mb-1">Organism</label>
+                    <label htmlFor="organism" className="block text-xs font-medium text-ink-subtle mb-1">Organism</label>
                     <input id="organism" value={editSampleForm.organism ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, organism: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="tissue-type" className="block text-xs font-medium text-gray-500 mb-1">Tissue Type</label>
+                    <label htmlFor="tissue-type" className="block text-xs font-medium text-ink-subtle mb-1">Tissue Type</label>
                     <input id="tissue-type" value={editSampleForm.tissue_type ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, tissue_type: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="donor-id" className="block text-xs font-medium text-gray-500 mb-1">Donor ID</label>
+                    <label htmlFor="donor-id" className="block text-xs font-medium text-ink-subtle mb-1">Donor ID</label>
                     <input id="donor-id" value={editSampleForm.donor_source ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, donor_source: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="treatment-condition" className="block text-xs font-medium text-gray-500 mb-1">Treatment Condition</label>
+                    <label htmlFor="treatment-condition" className="block text-xs font-medium text-ink-subtle mb-1">Treatment Condition</label>
                     <input id="treatment-condition" value={editSampleForm.treatment_condition ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, treatment_condition: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="chemistry-version" className="block text-xs font-medium text-gray-500 mb-1">Chemistry Version</label>
+                    <label htmlFor="chemistry-version" className="block text-xs font-medium text-ink-subtle mb-1">Chemistry Version</label>
                     <input id="chemistry-version" value={editSampleForm.chemistry_version ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, chemistry_version: e.target.value })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="cell-count" className="block text-xs font-medium text-gray-500 mb-1">Cell Count</label>
+                    <label htmlFor="cell-count" className="block text-xs font-medium text-ink-subtle mb-1">Cell Count</label>
                     <input id="cell-count" type="number" min={0} value={editSampleForm.cell_count ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, cell_count: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="viability" className="block text-xs font-medium text-gray-500 mb-1">Viability %</label>
+                    <label htmlFor="viability" className="block text-xs font-medium text-ink-subtle mb-1">Viability %</label>
                     <input id="viability" type="number" min={0} max={100} step={0.1} value={editSampleForm.viability_pct ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, viability_pct: e.target.value ? Number(e.target.value) : null })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Molecule Type</label>
+                    <label className="block text-xs font-medium text-ink-subtle mb-1">Molecule Type</label>
                     <VocabularySelect fieldName="molecule_type" value={editSampleForm.molecule_type} onChange={(v) => setEditSampleForm({ ...editSampleForm, molecule_type: v })} placeholder="Molecule Type..." />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Library Prep Method</label>
+                    <label className="block text-xs font-medium text-ink-subtle mb-1">Library Prep Method</label>
                     <VocabularySelect fieldName="library_prep_method" value={editSampleForm.library_prep_method} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_prep_method: v })} placeholder="Library Prep Method..." />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Library Layout</label>
+                    <label className="block text-xs font-medium text-ink-subtle mb-1">Library Layout</label>
                     <VocabularySelect fieldName="library_layout" value={editSampleForm.library_layout} onChange={(v) => setEditSampleForm({ ...editSampleForm, library_layout: v })} placeholder="Library Layout..." />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">Assay</label>
+                    <label className="block text-xs font-medium text-ink-subtle mb-1">Assay</label>
                     <AssaySelect value={editSampleForm.assay} onChange={(v) => setEditSampleForm({ ...editSampleForm, assay: v })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="sample-batch" className="block text-xs font-medium text-gray-500 mb-1">Sample Batch</label>
+                    <label htmlFor="sample-batch" className="block text-xs font-medium text-ink-subtle mb-1">Sample Batch</label>
                     <input id="sample-batch" value={editSampleForm.sample_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sample_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   <div>
-                    <label htmlFor="sequencing-batch" className="block text-xs font-medium text-gray-500 mb-1">Sequencing Batch</label>
+                    <label htmlFor="sequencing-batch" className="block text-xs font-medium text-ink-subtle mb-1">Sequencing Batch</label>
                     <input id="sequencing-batch" value={editSampleForm.sequencing_batch_code ?? ""} onChange={(e) => setEditSampleForm({ ...editSampleForm, sequencing_batch_code: e.target.value || null })} className="border rounded px-3 py-2 text-sm w-full" />
                   </div>
                   {experiment?.custom_fields.map((cf) => (
                     <div key={cf.id}>
-                      <label id="lbl-page-1" className="block text-xs font-medium text-gray-500 mb-1">{cf.field_name}{cf.is_required ? " *" : ""}</label>
+                      <label id="lbl-page-1" className="block text-xs font-medium text-ink-subtle mb-1">{cf.field_name}{cf.is_required ? " *" : ""}</label>
                       <input aria-labelledby="lbl-page-1"
                         value={editSampleCustomFields[cf.field_name] ?? ""}
                         onChange={(e) => setEditSampleCustomFields((prev) => ({ ...prev, [cf.field_name]: e.target.value }))}
@@ -1109,7 +1109,7 @@ function ExperimentDetailPageInner() {
                 )}
                 <div className="flex justify-end gap-2 mt-4">
                   <button onClick={() => { setEditingSampleId(null); setEditSampleError(""); }} className="border px-4 py-2 rounded text-sm">Cancel</button>
-                  <button onClick={handleSaveSampleEdit} className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700">Save Changes</button>
+                  <Button onClick={handleSaveSampleEdit}>Save Changes</Button>
                 </div>
               </div>
             </div>
@@ -1123,23 +1123,22 @@ function ExperimentDetailPageInner() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Sample Batches</h3>
-              <button
+              <Button size="sm"
                 onClick={() => setShowBatchForm(!showBatchForm)}
-                className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700"
               >
                 Create Sample Batch
-              </button>
+              </Button>
             </div>
 
             {showBatchForm && (
-              <div className="bg-white rounded-lg shadow p-4 mb-4">
+              <div className="bg-surface rounded-lg shadow p-4 mb-4">
                 <div className="grid grid-cols-2 gap-3">
                   <input aria-label="Batch Name" placeholder="Batch Name *" value={batchForm.name} onChange={(e) => setBatchForm({ ...batchForm, name: e.target.value })} className="border rounded px-3 py-2 text-sm" />
                   <input aria-label="Prep Date" type="date" placeholder="Prep Date" value={batchForm.prep_date ?? ""} onChange={(e) => setBatchForm({ ...batchForm, prep_date: e.target.value || null })} className="border rounded px-3 py-2 text-sm" />
                   <input aria-label="Notes" placeholder="Notes" value={batchForm.notes ?? ""} onChange={(e) => setBatchForm({ ...batchForm, notes: e.target.value || null })} className="border rounded px-3 py-2 text-sm col-span-2" />
                 </div>
                 <div className="flex gap-2 mt-3">
-                  <button onClick={handleAddBatch} className="bg-bioaf-600 text-white px-4 py-1.5 rounded text-sm">Save</button>
+                  <Button size="sm" onClick={handleAddBatch}>Save</Button>
                   <button onClick={() => setShowBatchForm(false)} className="border px-4 py-1.5 rounded text-sm">Cancel</button>
                 </div>
               </div>
@@ -1147,21 +1146,21 @@ function ExperimentDetailPageInner() {
 
             <div className="grid gap-3">
               {batches.map((b) => (
-                <div key={b.id} className="bg-white rounded-lg shadow p-4">
+                <div key={b.id} className="bg-surface rounded-lg shadow p-4">
                   <div className="flex items-center justify-between">
                     <div>
                       <h4 className="font-semibold">{b.name}</h4>
-                      <p className="text-sm text-gray-500">{b.sample_count} samples</p>
+                      <p className="text-sm text-ink-subtle">{b.sample_count} samples</p>
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-ink-subtle">
                       {b.prep_date && <span>Prep: {b.prep_date}</span>}
                     </div>
                   </div>
-                  {b.notes && <p className="text-sm text-gray-500 mt-2">{b.notes}</p>}
+                  {b.notes && <p className="text-sm text-ink-subtle mt-2">{b.notes}</p>}
                 </div>
               ))}
               {batches.length === 0 && (
-                <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">No sample batches yet</div>
+                <div className="bg-surface rounded-lg shadow p-6 text-center text-ink-subtle text-sm">No sample batches yet</div>
               )}
             </div>
           </div>
@@ -1174,11 +1173,11 @@ function ExperimentDetailPageInner() {
                 const progress = sb.expected_file_count ? Math.round((sb.ingested_file_count / sb.expected_file_count) * 100) : 0;
 
                 return (
-                  <div key={sb.id} className="bg-white rounded-lg shadow p-4">
+                  <div key={sb.id} className="bg-surface rounded-lg shadow p-4">
                     <div className="flex items-center justify-between mb-2">
                       <div>
                         <h4 className="font-semibold">{sb.code}</h4>
-                        {sb.instrument_model && <p className="text-sm text-gray-500">{sb.instrument_model}</p>}
+                        {sb.instrument_model && <p className="text-sm text-ink-subtle">{sb.instrument_model}</p>}
                       </div>
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadgeClass("sampleBatch", sb.status)}`}>
                         {sb.status.replace("_", " ")}
@@ -1186,7 +1185,7 @@ function ExperimentDetailPageInner() {
                     </div>
                     {sb.expected_file_count && (
                       <div className="mt-2">
-                        <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <div className="flex justify-between text-xs text-ink-subtle mb-1">
                           <span>Files: {sb.ingested_file_count}/{sb.expected_file_count}</span>
                           <span>{progress}%</span>
                         </div>
@@ -1199,13 +1198,13 @@ function ExperimentDetailPageInner() {
                       </div>
                     )}
                     {sb.manifest_received_at && (
-                      <p className="text-xs text-gray-500 mt-2">Received: {new Date(sb.manifest_received_at).toLocaleString()}</p>
+                      <p className="text-xs text-ink-subtle mt-2">Received: {new Date(sb.manifest_received_at).toLocaleString()}</p>
                     )}
                   </div>
                 );
               })}
               {seqBatches.length === 0 && (
-                <div className="bg-white rounded-lg shadow p-6 text-center text-gray-500 text-sm">No sequencing batches linked to this experiment</div>
+                <div className="bg-surface rounded-lg shadow p-6 text-center text-ink-subtle text-sm">No sequencing batches linked to this experiment</div>
               )}
             </div>
           </div>
@@ -1228,48 +1227,46 @@ function ExperimentDetailPageInner() {
 
       {activeTab === "analysis" && (
         <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-surface rounded-lg shadow p-6">
             <h2 className="text-lg font-semibold mb-4">Launch Notebook</h2>
-            <p className="text-sm text-gray-500 mb-4">
+            <p className="text-sm text-ink-subtle mb-4">
               Start a Jupyter or RStudio session pre-linked to this experiment.
             </p>
             <div className="flex gap-3">
-              <button
+              <Button
                 onClick={() => handleLaunchNotebook("jupyter")}
-                className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700"
               >
                 Launch Jupyter
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => handleLaunchNotebook("rstudio")}
-                className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700"
               >
                 Launch RStudio
-              </button>
+              </Button>
             </div>
           </div>
 
           {notebookSessions.length > 0 && (
-            <div className="bg-white rounded-lg shadow">
+            <div className="bg-surface rounded-lg shadow">
               <div className="p-6 border-b">
                 <h2 className="text-lg font-semibold">Linked Sessions</h2>
               </div>
-              <table className="min-w-full divide-y divide-gray-200">
+              <table className="min-w-full divide-y divide-hairline">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Profile</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Type</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Profile</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Created</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-hairline">
                   {notebookSessions.map((s) => (
                     <tr key={s.id}>
                       <td className="px-4 py-3 text-sm capitalize">{s.session_type}</td>
                       <td className="px-4 py-3 text-sm">{s.status}</td>
                       <td className="px-4 py-3 text-sm capitalize">{s.resource_profile}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">{new Date(s.created_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-ink-subtle">{new Date(s.created_at).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1285,33 +1282,32 @@ function ExperimentDetailPageInner() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Pipeline Runs</h2>
-            <button
+            <Button
               onClick={() => router.push(`/pipelines?experiment=${id}`)}
-              className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
             >
               Launch Pipeline
-            </button>
+            </Button>
           </div>
           {pipelineRuns.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <p className="text-gray-500">No pipeline runs for this experiment yet.</p>
+            <div className="bg-surface rounded-lg shadow p-12 text-center">
+              <p className="text-ink-subtle">No pipeline runs for this experiment yet.</p>
             </div>
           ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <table className="min-w-full divide-y divide-gray-200">
+            <div className="bg-surface rounded-lg shadow overflow-hidden">
+              <table className="min-w-full divide-y divide-hairline">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Pipeline</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Status</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Progress</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Started</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
+                <tbody className="divide-y divide-hairline">
                   {pipelineRuns.map((r) => {
                     return (
-                      <tr key={r.id} className="hover:bg-gray-50">
+                      <tr key={r.id} className="hover:bg-surface-muted">
                         <td className="px-4 py-3 text-sm">{r.pipeline_name} {r.pipeline_version ? `v${r.pipeline_version}` : ""}</td>
                         <td className="px-4 py-3"><span className={`px-2 py-0.5 text-xs rounded-full ${statusBadgeClass("pipelineRun", r.status)}`}>{r.status}</span></td>
                         <td className="px-4 py-3">
@@ -1324,7 +1320,7 @@ function ExperimentDetailPageInner() {
                             </div>
                           ) : "—"}
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-500">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
+                        <td className="px-4 py-3 text-sm text-ink-subtle">{r.started_at ? new Date(r.started_at).toLocaleString() : "—"}</td>
                         <td className="px-4 py-3">
                           <button onClick={() => router.push(`/pipelines/runs/${r.id}`)} className="text-bioaf-600 text-sm hover:underline">View</button>
                         </td>
@@ -1357,23 +1353,23 @@ function ExperimentDetailPageInner() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Audit Trail ({auditTotal} entries)</h2>
           </div>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow overflow-hidden">
+            <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Entity</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Timestamp</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Entity</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Action</th>
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Details</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-hairline">
                 {auditEntries.map((e) => (
                   <tr key={e.id}>
-                    <td className="px-4 py-3 text-sm text-gray-500">{new Date(e.timestamp).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-ink-subtle">{new Date(e.timestamp).toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm">{e.entity_type} #{e.entity_id}</td>
                     <td className="px-4 py-3 text-sm">{e.action}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
+                    <td className="px-4 py-3 text-sm text-ink-subtle">
                       {e.details ? (
                         <details>
                           <summary className="cursor-pointer">View</summary>
@@ -1386,7 +1382,7 @@ function ExperimentDetailPageInner() {
                   </tr>
                 ))}
                 {auditEntries.length === 0 && (
-                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-500">No audit entries</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-ink-subtle">No audit entries</td></tr>
                 )}
               </tbody>
             </table>
@@ -1418,8 +1414,8 @@ function ExperimentDetailPageInner() {
       )}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Samples</h3>
+          <div className="bg-surface rounded-lg shadow-xl p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold text-ink mb-2">Delete Samples</h3>
             <p className="text-sm text-gray-600 mb-1">
               You are about to delete <span className="font-semibold">{selectedSampleIds.size}</span> sample{selectedSampleIds.size > 1 ? "s" : ""}.
             </p>
@@ -1434,13 +1430,14 @@ function ExperimentDetailPageInner() {
               >
                 Cancel
               </button>
-              <button
+              <Button
+                variant="danger"
                 onClick={handleBulkDelete}
-                disabled={deleting}
-                className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
+                busy={deleting}
+                busyLabel="Deleting..."
               >
-                {deleting ? "Deleting..." : "Delete"}
-              </button>
+                Delete
+              </Button>
             </div>
           </div>
         </div>
@@ -1508,7 +1505,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
     setExpandedPlot(plot);
   };
 
-  if (loading) return <p className="text-gray-500 text-sm">Loading results...</p>;
+  if (loading) return <p className="text-ink-subtle text-sm">Loading results...</p>;
 
   return (
     <div className="space-y-8">
@@ -1516,9 +1513,9 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       <section>
         <h2 className="text-lg font-semibold mb-3">QC Dashboards</h2>
         {qcDashboards.length === 0 ? (
-          <p className="text-gray-500 text-sm">No QC dashboards for this experiment.</p>
+          <p className="text-ink-subtle text-sm">No QC dashboards for this experiment.</p>
         ) : (
-          <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow divide-y divide-hairline">
             {qcDashboards.map((d) => (
               <QCDashboardListItem
                 key={d.id}
@@ -1534,14 +1531,14 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       <section>
         <h2 className="text-lg font-semibold mb-3">cellxgene Datasets</h2>
         {cellxgenePubs.length === 0 ? (
-          <p className="text-gray-500 text-sm">No published datasets for this experiment.</p>
+          <p className="text-ink-subtle text-sm">No published datasets for this experiment.</p>
         ) : (
-          <div className="bg-white rounded-lg shadow divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow divide-y divide-hairline">
             {cellxgenePubs.map((pub) => (
               <div key={pub.id} className="p-4 flex items-center justify-between">
                 <div>
                   <p className="font-medium text-sm">{pub.dataset_name}</p>
-                  <p className="text-xs text-gray-500">Status: {pub.status}</p>
+                  <p className="text-xs text-ink-subtle">Status: {pub.status}</p>
                 </div>
                 {pub.stable_url && pub.status === "running" && (
                   <a href={pub.stable_url} target="_blank" rel="noopener noreferrer" className="text-bioaf-600 text-sm hover:underline">Open</a>
@@ -1556,7 +1553,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       <section>
         <h2 className="text-lg font-semibold mb-3">Plots</h2>
         {plots.length === 0 ? (
-          <p className="text-gray-500 text-sm">No plots for this experiment.</p>
+          <p className="text-ink-subtle text-sm">No plots for this experiment.</p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {plots.map((plot) => {
@@ -1564,15 +1561,15 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
               return (
                 <div
                   key={plot.id}
-                  className={`bg-white rounded-lg shadow overflow-hidden transition-shadow ${deleted ? "opacity-60" : "hover:shadow-md"}`}
+                  className={`bg-surface rounded-lg shadow overflow-hidden transition-shadow ${deleted ? "opacity-60" : "hover:shadow-md"}`}
                 >
-                  <div className="aspect-square bg-gray-100 flex items-center justify-center relative">
+                  <div className="aspect-square bg-elevated flex items-center justify-center relative">
                     {deleted ? (
                       <StorageDeletedPlaceholder />
                     ) : plot.file ? (
                       <PlotThumbnail plot={plot} onClick={() => handleExpand(plot)} />
                     ) : (
-                      <span className="text-gray-500 text-xs">No preview</span>
+                      <span className="text-ink-subtle text-xs">No preview</span>
                     )}
                     {plot.file && (
                       <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-semibold uppercase rounded">
@@ -1582,7 +1579,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
                   </div>
                   <div className="p-2">
                     <p
-                      className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-gray-500" : ""}`}
+                      className={`text-[11px] leading-tight font-medium line-clamp-2 ${deleted ? "text-ink-subtle" : ""}`}
                       title={plot.title ?? undefined}
                     >
                       {plot.title}
@@ -1592,7 +1589,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
                         {plot.tags.slice(0, 3).map((tag) => (
                           <span
                             key={tag}
-                            className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]"
+                            className="px-1.5 py-0.5 bg-elevated text-gray-600 rounded text-[10px]"
                           >
                             {tag}
                           </span>

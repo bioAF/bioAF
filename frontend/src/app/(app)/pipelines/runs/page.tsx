@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/Button";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -110,25 +111,25 @@ export default function PipelineRunsPage() {
         </select>
       </div>
 
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
+      <div className="bg-surface rounded-lg shadow overflow-hidden">
+        <table className="min-w-full divide-y divide-hairline">
           <thead className="bg-gray-50">
             <tr>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("id")}>Run{sortIcon("id")}</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Experiment</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700" {...sortProps("status")}>Status{sortIcon("status")}</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Review</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitter</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Started</th>
-              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Duration</th>
-              {showCost && <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Est. $/hr</th>}
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase cursor-pointer select-none hover:text-ink-muted" {...sortProps("id")}>Run{sortIcon("id")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase cursor-pointer select-none hover:text-ink-muted" {...sortProps("pipeline_name")}>Pipeline{sortIcon("pipeline_name")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Experiment</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase cursor-pointer select-none hover:text-ink-muted" {...sortProps("status")}>Status{sortIcon("status")}</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Review</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Progress</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Submitter</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Started</th>
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Duration</th>
+              {showCost && <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">Est. $/hr</th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-hairline">
             {sortedRuns.map((r) => (
-              <tr key={r.id} className="hover:bg-gray-50 cursor-pointer" {...clickableRow(() => router.push(`/pipelines/runs/${r.id}`))}>
+              <tr key={r.id} className="hover:bg-surface-muted cursor-pointer" {...clickableRow(() => router.push(`/pipelines/runs/${r.id}`))}>
                 <td className="px-4 py-3 text-sm font-mono">#{r.id}</td>
                 <td className="px-4 py-3 text-sm">{r.pipeline_name}</td>
                 <td className="px-4 py-3 text-sm">{r.experiment?.name || "—"}</td>
@@ -142,7 +143,7 @@ export default function PipelineRunsPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-gray-500">—</span>}
+                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-ink-subtle">—</span>}
                 </td>
                 <td className="px-4 py-3">
                   {r.progress ? (
@@ -150,31 +151,27 @@ export default function PipelineRunsPage() {
                       <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
                         <div className="h-full bg-bioaf-500 rounded-full" style={{ width: `${r.progress.percent_complete}%` }} />
                       </div>
-                      <span className="text-xs text-gray-500">{Math.round(r.progress.percent_complete)}%</span>
+                      <span className="text-xs text-ink-subtle">{Math.round(r.progress.percent_complete)}%</span>
                     </div>
-                  ) : <span className="text-xs text-gray-500">—</span>}
+                  ) : <span className="text-xs text-ink-subtle">—</span>}
                 </td>
                 <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || "—"}</td>
-                <td className="px-4 py-3 text-sm text-gray-500">{formatDateTime(r.started_at)}</td>
-                <td className="px-4 py-3 text-sm text-gray-500">{formatDuration(r.started_at, r.completed_at)}</td>
-                {showCost && <td className="px-4 py-3 text-sm text-gray-500">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDateTime(r.started_at)}</td>
+                <td className="px-4 py-3 text-sm text-ink-subtle">{formatDuration(r.started_at, r.completed_at)}</td>
+                {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : "—"}</td>}
               </tr>
             ))}
             {loadError ? (
               <tr>
                 <td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center">
                   <p className="text-red-700 mb-3">Could not load pipeline runs. {loadError}</p>
-                  <button
-                    type="button"
-                    onClick={() => loadRuns()}
-                    className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
-                  >
+                  <Button variant="secondary" size="sm" onClick={() => loadRuns()}>
                     Retry
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ) : runs.length === 0 ? (
-              <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-gray-500">No pipeline runs</td></tr>
+              <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-ink-subtle">No pipeline runs</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -182,9 +179,9 @@ export default function PipelineRunsPage() {
 
       {total > 25 && (
         <div className="flex justify-center gap-2 mt-4">
-          <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Previous</button>
-          <span className="text-sm text-gray-500 py-1">Page {page} of {Math.ceil(total / 25)}</span>
-          <button onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)} className="border px-3 py-1 rounded text-sm disabled:opacity-50">Next</button>
+          <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Previous</Button>
+          <span className="text-sm text-ink-subtle py-1">Page {page} of {Math.ceil(total / 25)}</span>
+          <Button variant="secondary" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)}>Next</Button>
         </div>
       )}
       </>
