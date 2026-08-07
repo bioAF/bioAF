@@ -74,7 +74,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         failed={bootFailed}
         message={
           backendUnreachable
-            ? "bioAF cannot be reached right now. It keeps trying, and the technical detail is in the application logs."
+            ? // Not "bioAF cannot be reached": the wordmark sits directly above
+              // this line, so that spelling rendered as "bioAF / bioAF cannot be
+              // reached" on the deployed page.
+              "The server cannot be reached right now. This page keeps trying, and the technical detail is in the application logs."
             : permissionsFailed
               ? "Your permissions could not be loaded, so nothing is shown yet. The technical detail is in the application logs."
               : undefined
