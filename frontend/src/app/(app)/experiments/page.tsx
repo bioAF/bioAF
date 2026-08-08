@@ -74,7 +74,7 @@ export default function ExperimentsPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Experiments</h1>
+        <h1 className="text-2xl font-bold">Experiment List</h1>
         <Link
           href="/experiments/new"
           className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"

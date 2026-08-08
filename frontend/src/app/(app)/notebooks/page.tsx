@@ -196,7 +196,7 @@ export default function NotebooksPage() {
       }
     } catch (e) {
       logError("loading environments", e);
-      toast.error(loadFailureMessage("Environments"));
+      toast.error(loadFailureMessage("Workbench images"));
     }
   }
 
@@ -399,7 +399,7 @@ export default function NotebooksPage() {
               <ul className="space-y-1.5 text-blue-700">
                 <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>, organized by project, experiment, sample, and pipeline. Select files when launching a session.</li>
                 <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything in this directory is automatically synced to GCS and registered when you stop the session.</li>
-                <li><strong>Environments</strong> control the packages available in your session. Choose an environment and version when launching. Admins can create and build new environments from the <a href="/environments" className="underline font-medium">Environments</a> page.</li>
+                <li><strong>Workbench images</strong> control the packages available in your session. Choose an image and version when launching. Admins can create and build new ones from the <a href="/environments" className="underline font-medium">Workbench Images</a> page.</li>
                 <li><strong>Git integration</strong> can be configured per-session via SSH keys in your <a href="/profile" className="underline font-medium">Profile Settings</a>. Notebooks are auto-committed every 15 minutes when a git repo is configured.</li>
                 <li><strong>Session credentials</strong> (username and password for RStudio) are set in your <a href="/profile" className="underline font-medium">Profile Settings</a>.</li>
               </ul>

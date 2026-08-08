@@ -66,7 +66,7 @@ describe("Breadcrumb", () => {
     render(<Breadcrumb />);
     const breadcrumb = screen.getByTestId("breadcrumb");
     expect(breadcrumb).toHaveTextContent("Lab Knowledge");
-    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Literature");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Literature Library");
   });
 
   it("trails Lab Knowledge > Literature > paper title on a paper detail page", () => {
@@ -74,10 +74,10 @@ describe("Breadcrumb", () => {
     render(<Breadcrumb entityName="A CRISPR screen paper" />);
     const breadcrumb = screen.getByTestId("breadcrumb");
     expect(breadcrumb).toHaveTextContent("Lab Knowledge");
-    expect(breadcrumb).toHaveTextContent("Literature");
+    expect(breadcrumb).toHaveTextContent("Literature Library");
     expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("A CRISPR screen paper");
     // Literature is an intermediate crumb, so it links back to the library.
-    const litLink = screen.getByRole("link", { name: "Literature" });
+    const litLink = screen.getByRole("link", { name: "Literature Library" });
     expect(litLink).toHaveAttribute("href", "/lab-knowledge/literature");
   });
 

@@ -94,7 +94,7 @@ export default function EnvironmentsPage() {
       setEnvironments(envs);
       setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load environments");
+      setLoadError(err instanceof Error ? err.message : "Failed to load workbench images");
     } finally { setLoading(false); }
   }
 
@@ -109,8 +109,8 @@ export default function EnvironmentsPage() {
         setNewVersionFormat("conda");
       }
     } catch (e) {
-      logError("loading the environment detail", e);
-      toast.error(loadFailureMessage("The environment"));
+      logError("loading the workbench image detail", e);
+      toast.error(loadFailureMessage("The workbench image"));
     }
   }
 
@@ -126,13 +126,13 @@ export default function EnvironmentsPage() {
       setCreateForm({ name: "", description: "", environment_type: "notebook" });
       loadEnvironments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create environment");
+      toast.error(err instanceof Error ? err.message : "Failed to create workbench image");
     } finally { setCreating(false); }
   }
 
   async function handleDelete(id: number) {
     const ok = await confirm({
-      title: "Delete this environment and all its versions?",
+      title: "Delete this workbench image and all its versions?",
       message: "This cannot be undone.",
       confirmLabel: "Delete",
       variant: "danger",
@@ -294,7 +294,7 @@ export default function EnvironmentsPage() {
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Environments</h1>
+          <h1 className="text-2xl font-bold">Workbench Images</h1>
           {canCreate && (
             <button
               onClick={() => setShowCreateModal(true)}
@@ -351,7 +351,7 @@ export default function EnvironmentsPage() {
             ))}
             {environments.length === 0 && (
               <div className="col-span-full text-center py-12 text-gray-500">
-                No environments yet. Create one to get started.
+                No workbench images yet. Create one to get started.
               </div>
             )}
           </div>
@@ -426,7 +426,7 @@ export default function EnvironmentsPage() {
           /* Environment Detail */
           <div>
             <button onClick={() => setSelectedEnv(null)} className="text-sm text-bioaf-600 mb-4 hover:underline">
-              &larr; Back to environments
+              &larr; Back to workbench images
             </button>
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b">
@@ -571,7 +571,7 @@ export default function EnvironmentsPage() {
         {/* Create Environment Modal */}
         <Modal
           open={showCreateModal}
-          title="New Environment"
+          title="New Workbench Image"
           onClose={() => setShowCreateModal(false)}
           size="md"
           footer={

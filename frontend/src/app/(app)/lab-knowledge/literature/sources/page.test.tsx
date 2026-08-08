@@ -31,9 +31,9 @@ beforeEach(() => {
 test("renders a breadcrumb back to the Literature library", async () => {
   render(<LiteratureSourcesPage />);
   const breadcrumb = await screen.findByTestId("breadcrumb");
-  expect(breadcrumb).toHaveTextContent("Literature");
+  expect(breadcrumb).toHaveTextContent("Literature Library");
   expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Sources");
-  expect(screen.getByRole("link", { name: "Literature" })).toHaveAttribute(
+  expect(screen.getByRole("link", { name: "Literature Library" })).toHaveAttribute(
     "href",
     "/lab-knowledge/literature",
   );

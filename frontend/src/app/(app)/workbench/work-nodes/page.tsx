@@ -478,7 +478,7 @@ export default function WorkNodesPage() {
           <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
             <div className="text-sm text-blue-800 space-y-2">
               <ul className="space-y-1.5 text-blue-700">
-                <li><strong>Work nodes</strong> are full Linux VMs with SSH access. They run conda environments you configure on the <a href="/environments" className="underline font-medium">Environments</a> page.</li>
+                <li><strong>Work nodes</strong> are full Linux VMs with SSH access. They run conda environments you configure on the <a href="/environments" className="underline font-medium">Workbench Images</a> page.</li>
                 <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>. Select data mounts during launch to access pipeline outputs, uploads, and shared results.</li>
                 <li><strong>GitHub repos</strong> are cloned at boot into <code className="bg-blue-100 px-1 rounded">~/repos/</code>. Add repos in the section below, then select them when launching.</li>
                 <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything here is automatically synced to GCS when you stop the node.</li>

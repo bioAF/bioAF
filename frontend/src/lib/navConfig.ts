@@ -40,6 +40,9 @@ export interface NavSection {
   capability?: string;
 }
 
+// Every label here is also the page's own <h1>, and Breadcrumb.tsx builds its
+// trail from these strings, so a label that drifts from its page says the wrong
+// thing in three places at once. Held by src/__tests__/nav-label-agreement.test.ts.
 export const navConfig: NavSection[] = [
   { label: "Dashboard", path: "/dashboard", icon: "home" },
   // The assistant is now a global floating bubble (FloatingAssistant), not a nav destination, so it
@@ -48,7 +51,7 @@ export const navConfig: NavSection[] = [
     label: "Experiments",
     icon: "folder",
     children: [
-      { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
+      { label: "Projects", path: "/projects", permission: { resource: "projects", action: "view" } },
       { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
       { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
       { label: "Dataset Browser", path: "/data/browser", permission: { resource: "experiments", action: "view" } },
@@ -70,7 +73,7 @@ export const navConfig: NavSection[] = [
     icon: "chart",
     children: [
       { label: "QC Dashboards", path: "/results/qc-dashboards", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["qc_dashboard"] } },
-      { label: "Cellxgene", path: "/results/cellxgene", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["cellxgene"] }, capability: "cellxgene" },
+      { label: "cellxgene Explorer", path: "/results/cellxgene", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }], componentGate: { keys: ["cellxgene"] }, capability: "cellxgene" },
       { label: "Plot Archive", path: "/results/plot-archive", anyPermissions: [{ resource: "experiments", action: "view" }, { resource: "pipelines", action: "view" }] },
     ],
   },
@@ -78,16 +81,16 @@ export const navConfig: NavSection[] = [
     label: "Workbench",
     icon: "notebook",
     children: [
-      { label: "Notebooks", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
+      { label: "Notebook Sessions", path: "/notebooks", permission: { resource: "notebooks", action: "view" }, componentGate: { keys: ["jupyterhub", "rstudio"] } },
       { label: "Work Nodes", path: "/workbench/work-nodes", permission: { resource: "notebooks", action: "view" }, capability: "work_nodes" },
-      { label: "Compute Environments", path: "/environments", permission: { resource: "environments", action: "view" } },
+      { label: "Workbench Images", path: "/environments", permission: { resource: "environments", action: "view" } },
     ],
   },
   {
     label: "Data & Files",
     icon: "database",
     children: [
-      { label: "Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
+      { label: "Data Upload", path: "/data/upload", permission: { resource: "files", action: "upload" } },
       { label: "Files", path: "/data/files", permission: { resource: "files", action: "view" } },
       { label: "Reference Data", path: "/data/references", permission: { resource: "files", action: "view" } },
       { label: "Naming Profiles", path: "/settings/naming-profiles", permission: { resource: "infrastructure", action: "configure" } },
@@ -97,13 +100,13 @@ export const navConfig: NavSection[] = [
     label: "Lab Knowledge",
     icon: "book",
     children: [
-      { label: "Documents", path: "/lab-knowledge/documents", permission: { resource: "lab_documents", action: "view" } },
+      { label: "Lab Documents", path: "/lab-knowledge/documents", permission: { resource: "lab_documents", action: "view" } },
       // Papers-as-knowledge: Literature + its Validation Studies live alongside Documents/Glossary,
       // where scientists look for reference material (moved out of Data & Files).
-      { label: "Literature", path: "/lab-knowledge/literature", permission: { resource: "literature", action: "view" } },
+      { label: "Literature Library", path: "/lab-knowledge/literature", permission: { resource: "literature", action: "view" } },
       { label: "Validation Studies", path: "/lab-knowledge/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
-      { label: "Glossary", path: "/lab-knowledge/glossary", permission: { resource: "lab_glossary", action: "view" } },
-      { label: "Decision Records", path: "/lab-knowledge/decision-records", permission: { resource: "sdr", action: "view" } },
+      { label: "Lab Glossary", path: "/lab-knowledge/glossary", permission: { resource: "lab_glossary", action: "view" } },
+      { label: "Scientific Decision Records", path: "/lab-knowledge/decision-records", permission: { resource: "sdr", action: "view" } },
     ],
   },
   {
@@ -127,7 +130,7 @@ export const navConfig: NavSection[] = [
       { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" }, capability: "work_nodes" },
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
       { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" }, requiresBetaAvailability: true },
-      { label: "Information", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
+      { label: "Platform Info", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },
 ];

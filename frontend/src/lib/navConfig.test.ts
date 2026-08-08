@@ -37,13 +37,19 @@ const allChildren = (): NavChild[] => navConfig.flatMap((s) => s.children ?? [])
 
 describe("navConfig disambiguated labels", () => {
   it("renames the two 'Environments' entries so each says what it is", () => {
+    // Both used to be called "Environments". The first fix qualified them as
+    // "Pipeline Environments" and "Compute Environments"; the owner went further
+    // on 2026-08-08 ("the 'Environments' moniker has created a lot of
+    // confusion") and the workbench one is "Workbench Images" now, in the nav and
+    // in its own page heading. The property is unchanged and stronger: neither
+    // entry can be read as the other.
     const pipelines = navConfig.find((s) => s.label === "Pipelines");
     const workbench = navConfig.find((s) => s.label === "Workbench");
 
     expect(pipelines?.children?.find((c) => c.label === "Pipeline Environments")?.path).toBe(
       "/pipelines/environments",
     );
-    expect(workbench?.children?.find((c) => c.label === "Compute Environments")?.path).toBe(
+    expect(workbench?.children?.find((c) => c.label === "Workbench Images")?.path).toBe(
       "/environments",
     );
   });

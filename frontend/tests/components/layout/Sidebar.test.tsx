@@ -143,15 +143,15 @@ describe("Sidebar", () => {
   it("renders Experiments as an expandable section with its children", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Experiments"));
-    expect(screen.getByText("Project List")).toBeInTheDocument();
+    expect(screen.getByText("Projects")).toBeInTheDocument();
     expect(screen.getByText("Experiment Templates")).toBeInTheDocument();
     expect(screen.getByText("Experiment List")).toBeInTheDocument();
   });
 
-  it("Project List child navigates to /projects", () => {
+  it("Projects child navigates to /projects", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Experiments"));
-    const projectListLink = screen.getByText("Project List").closest("a");
+    const projectListLink = screen.getByText("Projects").closest("a");
     expect(projectListLink).toHaveAttribute("href", "/projects");
   });
 
@@ -191,7 +191,7 @@ describe("Sidebar", () => {
     // Click Results to expand
     fireEvent.click(screen.getByText("Results"));
     expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
-    expect(screen.getByText("Cellxgene")).toBeInTheDocument();
+    expect(screen.getByText("cellxgene Explorer")).toBeInTheDocument();
     expect(screen.getByText("Plot Archive")).toBeInTheDocument();
 
     // Click again to collapse
@@ -225,12 +225,12 @@ describe("Sidebar", () => {
     expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
   });
 
-  it("shows Workbench children: Notebooks, Work Nodes, Compute Environments", () => {
+  it("shows Workbench children: Notebook Sessions, Work Nodes, Workbench Images", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Workbench"));
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
     expect(screen.getByText("Work Nodes")).toBeInTheDocument();
-    expect(screen.getByText("Compute Environments")).toBeInTheDocument();
+    expect(screen.getByText("Workbench Images")).toBeInTheDocument();
   });
 
   it("shows Results to a role with only pipelines:view (View Results via OR)", () => {
@@ -250,14 +250,14 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Results"));
     expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
-    expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
+    expect(screen.queryByText("cellxgene Explorer")).not.toBeInTheDocument();
   });
 
   it("hides Work Nodes entries when the backend lacks the work_nodes capability", () => {
     mockHasCapability.mockImplementation((flag: string) => flag !== "work_nodes");
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Workbench"));
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
     expect(screen.queryByText("Work Nodes")).not.toBeInTheDocument();
   });
 

@@ -115,7 +115,7 @@ describe("Sidebar component gating", () => {
     // Expand Workbench to check children
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.queryByText("Notebooks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Notebook Sessions")).not.toBeInTheDocument();
   });
 
   test("shows Notebooks child when jupyterhub is enabled", () => {
@@ -132,7 +132,7 @@ describe("Sidebar component gating", () => {
 
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
   });
 
   test("shows Notebooks child when rstudio is enabled", () => {
@@ -149,7 +149,7 @@ describe("Sidebar component gating", () => {
 
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
   });
 
   test("hides QC Dashboards when qc_dashboard component is not enabled", () => {
@@ -167,7 +167,7 @@ describe("Sidebar component gating", () => {
     fireEvent.click(screen.getByText("Results"));
 
     expect(screen.queryByText("QC Dashboards")).not.toBeInTheDocument();
-    expect(screen.getByText("Cellxgene")).toBeInTheDocument();
+    expect(screen.getByText("cellxgene Explorer")).toBeInTheDocument();
   });
 
   test("hides Cellxgene when cellxgene component is not enabled", () => {
@@ -185,7 +185,7 @@ describe("Sidebar component gating", () => {
     fireEvent.click(screen.getByText("Results"));
 
     expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
-    expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
+    expect(screen.queryByText("cellxgene Explorer")).not.toBeInTheDocument();
   });
 
   test("renders its container but no nav items while permissions are still loading", () => {
