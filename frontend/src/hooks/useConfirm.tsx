@@ -34,6 +34,8 @@ export interface ConfirmOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: "danger" | "default";
+  /** Require the user to type this exact phrase before Confirm enables. */
+  requirePhrase?: string;
 }
 
 type ConfirmFn = (options: ConfirmOptions) => Promise<boolean>;
@@ -79,6 +81,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         confirmLabel={pending?.confirmLabel}
         cancelLabel={pending?.cancelLabel}
         variant={pending?.variant}
+        requirePhrase={pending?.requirePhrase}
         onConfirm={() => settle(true)}
         onCancel={() => settle(false)}
       />

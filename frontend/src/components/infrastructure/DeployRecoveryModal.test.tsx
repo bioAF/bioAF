@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
 import { DeployRecoveryModal } from "./DeployRecoveryModal";
 
 jest.mock("@/lib/api", () => ({
@@ -156,6 +156,16 @@ describe("DeployRecoveryModal", () => {
 
     fireEvent.click(screen.getByText(/Start Fresh/));
 
+    // Start Fresh deletes the previous deployment, and this modal's own copy says
+    // that deployment "finished successfully". It confirms now.
+    await screen.findByText(/Delete the previous deployment and start over\?/i);
+    expect(screen.getByText(/permanently deleted/i)).toBeInTheDocument();
+    expect(mockPost).not.toHaveBeenCalledWith(
+      "/api/v1/infrastructure/orphaned-resources/cleanup-all",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete and start over/i }));
+
     await waitFor(() => {
       expect(mockPost).toHaveBeenCalledWith(
         "/api/v1/infrastructure/orphaned-resources/cleanup-all",
@@ -164,7 +174,46 @@ describe("DeployRecoveryModal", () => {
     });
   });
 
-  test("auto-cleans dead orphans in background", async () => {
+  test("cancelling Start Fresh deletes nothing", async () => {
+    mockGet.mockResolvedValue({
+      recoverable: [
+        {
+          id: 1,
+          resource_name: "bioaf-demo-abc123",
+          gcp_project_id: "test-project",
+          gcp_zone: "us-central1",
+          stack_uid: "abc123",
+          gke_status: "RUNNING",
+          detected_at: "2026-04-01T00:00:00Z",
+        },
+      ],
+      provisioning: [],
+      dead: [],
+    });
+
+    render(<DeployRecoveryModal {...defaultProps} />);
+    await waitFor(() => expect(screen.getByText(/Start Fresh/)).toBeInTheDocument());
+    fireEvent.click(screen.getByText(/Start Fresh/));
+
+    await screen.findByText(/Delete the previous deployment and start over\?/i);
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+
+    await waitFor(() =>
+      expect(mockPost).not.toHaveBeenCalledWith(
+        "/api/v1/infrastructure/orphaned-resources/cleanup-all",
+      ),
+    );
+    expect(defaultProps.onStartFresh).not.toHaveBeenCalled();
+  });
+
+  /**
+   * This test used to assert the opposite: that opening the modal fired
+   * `cleanup-all` "in background". That was the defect, not the feature. A
+   * destructive cloud call with no user action, no disclosure and a swallowed
+   * failure is not something a render gets to do, however dead the resources
+   * look. Nothing is deleted until the user chooses Start Fresh.
+   */
+  test("deletes nothing merely by opening", async () => {
     mockGet.mockResolvedValue({
       recoverable: [],
       provisioning: [],
@@ -184,11 +233,11 @@ describe("DeployRecoveryModal", () => {
 
     render(<DeployRecoveryModal {...defaultProps} />);
 
-    await waitFor(() => {
-      expect(mockPost).toHaveBeenCalledWith(
-        "/api/v1/infrastructure/orphaned-resources/cleanup-all",
-      );
-    });
+    // Let the recovery check settle, then assert nothing was destroyed.
+    await waitFor(() => expect(mockGet).toHaveBeenCalled());
+    expect(mockPost).not.toHaveBeenCalledWith(
+      "/api/v1/infrastructure/orphaned-resources/cleanup-all",
+    );
   });
 
   test("does not render when open is false", () => {

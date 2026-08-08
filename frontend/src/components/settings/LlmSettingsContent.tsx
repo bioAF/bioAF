@@ -3,6 +3,7 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { literature } from "@/lib/literature";
 
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
@@ -129,12 +130,36 @@ export function LlmSettingsContent() {
   }
 
   async function handleDeactivateAll() {
+    // Styled as a plain link, and it switches off every AI feature in the
+    // product at once. `confirm` was already in this file for the far smaller
+    // "remove one provider's configuration"; this is the larger act and had no gate.
+    const ok = await confirm({
+      title: "Turn off all AI features?",
+      message: (
+        <>
+          <p>
+            Deactivating the active provider stops <span className="font-medium">Agent Review,
+            the AI Assistant, AI Literature Review and the AI glossary scan</span> for everyone
+            in the organisation.
+          </p>
+          <p>
+            Nothing is deleted: the provider configuration and its key are kept, so this can be
+            switched back on.
+          </p>
+        </>
+      ),
+      confirmLabel: "Turn off AI features",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     setError(null);
     try {
       await api.post("/api/integrations/llm/providers/deactivate");
       await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      logError("deactivating all LLM providers", e);
+      setError("AI features could not be turned off. The technical detail is in the application logs.");
     }
   }
 

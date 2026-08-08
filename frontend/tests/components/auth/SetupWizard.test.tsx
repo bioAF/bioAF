@@ -2,6 +2,17 @@ import { render, screen, waitFor } from "@/testing/renderWithProviders";
 import userEvent from "@testing-library/user-event";
 import { SetupWizard } from "@/components/auth/SetupWizard";
 
+/**
+ * Picking a stack provisions real cloud infrastructure and starts incurring
+ * charges, so it confirms before doing anything. Re-typing a six-character setup
+ * code got a dialog long before this did.
+ */
+async function acceptInfraConfirm(user: ReturnType<typeof userEvent.setup>) {
+  await screen.findByText(/Create cloud infrastructure now\?/i);
+  await user.click(screen.getByRole("button", { name: /Create infrastructure/i }));
+}
+
+
 // Mock fetch globally
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -270,6 +281,7 @@ describe("SetupWizard", () => {
       return Promise.resolve({});
     });
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await acceptInfraConfirm(user);
     await screen.findByRole("heading", { name: "Select Components" });
 
     // Once TF deploy has fired, no going back.
@@ -345,6 +357,7 @@ describe("SetupWizard", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await acceptInfraConfirm(user);
     await screen.findByRole("heading", { name: "Select Components" });
 
     expect(screen.getByRole("checkbox", { name: /Nextflow/ })).toBeChecked();
@@ -386,6 +399,7 @@ describe("SetupWizard", () => {
     });
 
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await acceptInfraConfirm(user);
     await screen.findByRole("heading", { name: "Select Components" });
 
     mockApiPost.mockResolvedValueOnce({ queued: ["nextflow"] });
@@ -439,6 +453,7 @@ describe("SetupWizard", () => {
       return Promise.resolve({});
     });
     await user.click(screen.getByRole("button", { name: /Continue with Kubernetes/i }));
+    await acceptInfraConfirm(user);
     await screen.findByRole("heading", { name: "Select Components" });
 
     // Submit the components

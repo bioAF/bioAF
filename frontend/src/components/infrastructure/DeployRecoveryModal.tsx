@@ -3,6 +3,8 @@
 import { Modal } from "@/components/shared/Modal";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
+import { useConfirm } from "@/hooks/useConfirm";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -47,9 +49,12 @@ export function DeployRecoveryModal({
   onRecovered,
   onStartFresh,
 }: Props) {
+  const confirm = useConfirm();
   const [state, setState] = useState<ModalState>("loading");
   const [recoverable, setRecoverable] = useState<RecoveryItem[]>([]);
   const [provisioning, setProvisioning] = useState<RecoveryItem[]>([]);
+  // Held so "Start Fresh" can say how many resources it is about to delete.
+  const [dead, setDead] = useState<RecoveryItem[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,12 +68,12 @@ export function DeployRecoveryModal({
       setRecoverable(data.recoverable);
       setProvisioning(data.provisioning);
 
-      // Auto-clean dead orphans in the background
-      if (data.dead.length > 0) {
-        api.post("/api/v1/infrastructure/orphaned-resources/cleanup-all").catch(() => {
-          // Best-effort cleanup
-        });
-      }
+      // This used to fire `cleanup-all` here, as a side effect of the modal
+      // rendering: no user action, no disclosure, and the failure swallowed. A
+      // destructive cloud call with no consent at all is not something a render
+      // gets to do, however dead the resources look. It is now surfaced as a
+      // count the user can act on, and nothing is deleted until they say so.
+      setDead(data.dead);
 
       if (data.recoverable.length > 0) {
         setState("recoverable");
@@ -109,13 +114,40 @@ export function DeployRecoveryModal({
   };
 
   const handleStartFresh = async () => {
+    // "Start Fresh" deletes every orphaned resource from the previous
+    // deployment, and the modal copy above says that deployment "finished
+    // successfully". Worse, this is the secondary, white, left-hand button --
+    // the position users scan as the cautious choice. Nothing said it deletes
+    // anything.
+    const count = dead.length + recoverable.length + provisioning.length;
+    const ok = await confirm({
+      title: "Delete the previous deployment and start over?",
+      message: (
+        <>
+          <p>
+            {count > 0
+              ? `${count} cloud ${count === 1 ? "resource" : "resources"} from the previous deployment will be permanently deleted,`
+              : "Any cloud resources from the previous deployment will be permanently deleted,"}{" "}
+            then a new deployment will begin.
+          </p>
+          <p>
+            If you would rather keep what is already there, cancel and choose
+            <span className="font-medium"> Resume Deployment</span> instead.
+          </p>
+        </>
+      ),
+      confirmLabel: "Delete and start over",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     setActionLoading(true);
     setError(null);
     try {
-      // Clean up all orphans before starting fresh
       await api.post("/api/v1/infrastructure/orphaned-resources/cleanup-all");
       onStartFresh();
-    } catch {
+    } catch (err) {
+      logError("cleaning up resources from the previous deployment", err);
       setError(
         "Could not clean up previous resources. Try again in a moment.",
       );

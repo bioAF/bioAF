@@ -5,6 +5,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
+import { useConfirm } from "@/hooks/useConfirm";
 import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal";
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -62,11 +63,15 @@ const COMPONENT_LABELS: Record<string, string> = {
 };
 
 export default function InfraCostCenterPage() {
+  const confirm = useConfirm();
   const toast = useToast();
   const router = useRouter();
   const { canAccess, loading: permLoading } = usePermissions();
   const [summary, setSummary] = useState<CostSummary | null>(null);
   const [budget, setBudget] = useState<BudgetConfig | null>(null);
+  // What the server currently has for the automatic-shutdown flag, so the
+  // confirmation fires on an off->on change rather than on every save while armed.
+  const [savedScaleToZero, setSavedScaleToZero] = useState(false);
   const [loading, setLoading] = useState(true);
   const [budgetInput, setBudgetInput] = useState("");
   const [currencyInput, setCurrencyInput] = useState("USD");
@@ -89,6 +94,7 @@ export default function InfraCostCenterPage() {
         ]);
         setSummary(s);
         setBudget(b);
+        setSavedScaleToZero(b.scale_to_zero_on_100);
         setBudgetInput(b.monthly_budget || "");
         setCurrencyInput(b.currency || "USD");
       } catch {
@@ -111,6 +117,33 @@ export default function InfraCostCenterPage() {
 
   const handleSaveBudget = async () => {
     if (!budget) return;
+
+    // "Scale to zero at 100%" is checkbox 4 of 4 in a list where the other three
+    // only send an alert. It arms an AUTOMATIC compute shutdown, and it shipped
+    // behind a plain "Save Budget Config". Only confirm when it is being turned
+    // ON, so routine budget edits are not nagged.
+    if (budget.scale_to_zero_on_100 && !savedScaleToZero) {
+      const ok = await confirm({
+        title: "Automatically stop all compute at 100% of budget?",
+        message: (
+          <>
+            <p>
+              When this month&apos;s spend reaches the budget,{" "}
+              <span className="font-medium">bioAF will scale compute to zero on its own</span>.
+              Running pipelines stop and notebook sessions end.
+            </p>
+            <p>
+              The other three thresholds only send an alert. This one acts. It can be switched
+              off again here at any time.
+            </p>
+          </>
+        ),
+        confirmLabel: "Arm automatic shutdown",
+        variant: "danger",
+      });
+      if (!ok) return;
+    }
+
     setSaving(true);
     setMessage("");
     try {
@@ -123,6 +156,7 @@ export default function InfraCostCenterPage() {
         currency: currencyInput,
       });
       setBudget(updated);
+      setSavedScaleToZero(updated.scale_to_zero_on_100);
       setMessage("Budget configuration saved");
     } catch {
       setMessage("Failed to save budget configuration");

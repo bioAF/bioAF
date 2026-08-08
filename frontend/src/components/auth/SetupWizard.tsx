@@ -3,6 +3,7 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
@@ -595,23 +596,49 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const handleSelectStack = async () => {
+    // The most expensive and least reversible action in the product, and it was
+    // an ordinary primary button. Re-typing a six-character setup code, two steps
+    // earlier, got a full confirmation dialog.
+    const ok = await confirm({
+      title: "Create cloud infrastructure now?",
+      message: (
+        <>
+          <p>
+            This provisions real infrastructure in your cloud account and
+            <span className="font-medium"> starts incurring charges</span>. It usually takes
+            10 to 15 minutes.
+          </p>
+          <p>
+            Undoing it means tearing the stack down again from the Infrastructure page, which
+            is not instant and not always clean.
+          </p>
+        </>
+      ),
+      confirmLabel: "Create infrastructure",
+    });
+    if (!ok) return;
+
     setError("");
     setStackDeploying(true);
     try {
       await api.post("/api/v1/infrastructure/terraform/init");
-      try {
-        await api.post("/api/v1/infrastructure/stack/deploy-background", {
-          stack_type: computeStack,
-        });
-      } catch {
-        // Deployment may fail; user can retry from Infrastructure page
-      }
+      // This POST used to be wrapped in a bare `catch {}` and the wizard advanced
+      // regardless, so step 8 asserted "Infrastructure deployment has started"
+      // whether or not it had. A user whose deploy never started would wait 15
+      // minutes and then go hunting in Infrastructure for something that was
+      // never queued. If it did not start, say so and stay put.
+      await api.post("/api/v1/infrastructure/stack/deploy-background", {
+        stack_type: computeStack,
+      });
       // Bootstrap completion is deferred until after the user has submitted
       // their component selections, so an interrupted wizard does not look
       // "complete" while still half-configured.
       setStep(7);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to initialize infrastructure");
+      logError("starting the cloud stack deployment", e);
+      setError(
+        "Infrastructure could not be started, so nothing has been created. The technical detail is in the application logs.",
+      );
     } finally {
       setStackDeploying(false);
     }

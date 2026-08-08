@@ -14,7 +14,7 @@
  * 34: Dependency enforcement shows message
  */
 
-import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, within } from "@/testing/renderWithProviders";
 import InfraComponentsPage from "@/app/(app)/infrastructure/components/page";
 
 // Mock API

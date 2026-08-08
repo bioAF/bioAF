@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
@@ -94,9 +94,13 @@ export default function InfraBackupPage() {
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
     title: string;
-    message: string;
+    // ReactNode, not string: the restore confirm has to name what it overwrites
+    // AND what it leaves alone, which is three paragraphs, not a sentence.
+    message: ReactNode;
     confirmLabel: string;
     variant: "danger" | "default";
+    /** Set for actions that overwrite configuration outright. */
+    requirePhrase?: string;
     onConfirm: () => void;
   }>({ open: false, title: "", message: "", confirmLabel: "Confirm", variant: "default", onConfirm: () => {} });
   const pollRef = useRef<NodeJS.Timeout | null>(null);
@@ -154,22 +158,52 @@ export default function InfraBackupPage() {
   }, [restoreStatus.active, loadData]);
 
   const handleConfigRestore = () => {
+    // The old dialog said only "Are you sure you want to initiate a config
+    // restore?" -- it named nothing it would overwrite, and named no snapshot.
+    // It could not name one: this call sends no `restore_point`, so the backend
+    // defaults to "latest". Saying so out loud is the honest fix; letting the
+    // user pick a snapshot is a separate feature (the table below lists them and
+    // offers no restore action).
+    const latest = snapshots[0];
     setConfirmDialog({
       open: true,
-      title: "Restore Configuration",
-      message: "Are you sure you want to initiate a config restore?",
-      confirmLabel: "Restore",
+      title: "Restore the latest configuration snapshot?",
+      message: (
+        <>
+          <p>
+            This replaces the instance&apos;s current configuration with the most recent
+            snapshot
+            {latest?.date
+              ? `, taken ${new Date(latest.date).toLocaleString()}`
+              : " available"}
+            .
+          </p>
+          <p>
+            Cloud credentials, LLM providers, integrations and networking settings are all
+            overwritten. Any configuration changed since that snapshot is lost, and this
+            cannot be undone.
+          </p>
+          <p>Experiments, samples, files and pipeline runs are not affected.</p>
+        </>
+      ),
+      confirmLabel: "Restore configuration",
       variant: "danger",
+      requirePhrase: "restore config",
       onConfirm: async () => {
         setConfirmDialog((prev) => ({ ...prev, open: false }));
         try {
           const data = await api.post<{ status: string; message: string }>(
             "/api/backups/restore/config",
+            // NOTE: the backend declares `confirmation_token` on RestoreRequest and
+            // never reads it (app/api/backups.py:70-80 uses only `restore_point`), so
+            // this value is not a guard on either side. The real gate is the typed
+            // phrase above. Raised separately; not changed here.
             { confirmation_token: "CONFIRM" }
           );
           setActionMessage(data.message);
         } catch (e) {
-          setActionMessage(e instanceof Error ? e.message : "Restore failed");
+          logError("restoring the configuration snapshot", e);
+          setActionMessage("The configuration could not be restored. The technical detail is in the application logs.");
         }
       },
     });
@@ -744,6 +778,7 @@ export default function InfraBackupPage() {
         message={confirmDialog.message}
         confirmLabel={confirmDialog.confirmLabel}
         variant={confirmDialog.variant}
+        requirePhrase={confirmDialog.requirePhrase}
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog((prev) => ({ ...prev, open: false }))}
       />

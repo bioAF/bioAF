@@ -855,6 +855,7 @@ function ReviewPanel({
   onReviewed: () => void;
 }) {
   useDismissOnEscape(true, () => onClose());
+  const confirm = useConfirm();
   const [data, setData] = useState<ProposalListResponse | null>(null);
   const [decisions, setDecisions] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -870,6 +871,51 @@ function ReviewPanel({
     setDecisions((prev) => ({ ...prev, [id]: decision }));
 
   const commit = async (bulk?: "accept" | "reject") => {
+    // The two bulk buttons had no gate. "Accept All Remaining" writes every
+    // AI-proposed term into the org glossary, including overwriting definitions
+    // that already exist, and "Reject All Remaining" is remembered (rejected
+    // proposals are suppressed from being proposed again), so neither is a
+    // browsing action. Per-decision "Apply Decisions" stays ungated: the user
+    // made each of those choices explicitly.
+    if (bulk) {
+      const remaining = (data?.new_terms?.length ?? 0) + (data?.changed_terms?.length ?? 0)
+        - Object.keys(decisions).length;
+      const count = Math.max(remaining, 0);
+      const ok = await confirm({
+        title:
+          bulk === "accept"
+            ? "Accept every remaining proposal?"
+            : "Reject every remaining proposal?",
+        message:
+          bulk === "accept" ? (
+            <>
+              <p>
+                {count > 0 ? `${count} proposals you have not decided on` : "Every proposal you have not decided on"}{" "}
+                will be written into the organisation glossary.
+              </p>
+              <p>
+                Where a proposal changes a term that already exists,{" "}
+                <span className="font-medium">the existing definition is replaced</span>.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                {count > 0 ? `${count} proposals you have not decided on` : "Every proposal you have not decided on"}{" "}
+                will be rejected.
+              </p>
+              <p>
+                Rejections are remembered, so these terms will not be proposed again by a future
+                scan.
+              </p>
+            </>
+          ),
+        confirmLabel: bulk === "accept" ? "Accept all" : "Reject all",
+        variant: bulk === "accept" ? "default" : "danger",
+      });
+      if (!ok) return;
+    }
+
     setBusy(true);
     try {
       await api.post(`${API_BASE}/glossary/scan/${jobId}/review`, {

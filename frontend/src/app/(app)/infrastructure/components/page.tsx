@@ -18,7 +18,9 @@ import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay } from "@/lib/storageDisplay";
 import { GCP_REGIONS, zonesForRegion } from "@/lib/gcp-regions";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { invalidateComponentCache } from "@/hooks/useComponents";
+import { useConfirm } from "@/hooks/useConfirm";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
 import {
   INTERACTIVE_MACHINE_OPTIONS,
@@ -117,6 +119,7 @@ const CATEGORY_ORDER = [
 ];
 
 export default function InfraComponentsPage() {
+  const confirm = useConfirm();
   const { has } = useCapabilities();
   // Provider-appropriate stack labels (GCP -> GKE+GCS, AWS -> EKS+S3); fails safe
   // to GCP defaults so a GCP install renders unchanged.
@@ -464,6 +467,31 @@ export default function InfraComponentsPage() {
       }
     }
 
+    // Disabling had no gate while ENABLING opens a three-way dialog above. The
+    // asymmetry ran the wrong way: re-enabling is recoverable, tearing down a
+    // deployed add-on takes any sessions running on it with it.
+    if (comp && comp.status === "enabled") {
+      const ok = await confirm({
+        title: `Disable ${comp.name}?`,
+        message: (
+          <>
+            <p>
+              This tears down the deployed {comp.name} component.{" "}
+              <span className="font-medium">Any sessions currently running on it stop</span>, and
+              unsaved work in them is lost.
+            </p>
+            <p>
+              Files in storage are not affected, and you can enable it again later, though that
+              means provisioning it from scratch.
+            </p>
+          </>
+        ),
+        confirmLabel: "Disable",
+        variant: "danger",
+      });
+      if (!ok) return;
+    }
+
     setTogglingComponent(componentKey);
     try {
       const url = forceRebuild
@@ -473,8 +501,20 @@ export default function InfraComponentsPage() {
       invalidateComponentCache();
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Toggle failed";
-      setComponentErrors((prev) => ({ ...prev, [componentKey]: message }));
+      logError(`toggling the ${componentKey} component`, e);
+      // A 4xx here is a validation message the backend wrote FOR the admin, e.g.
+      // "Dependency not met: kubernetes_cluster must be enabled first". That is
+      // already the plain sentence, and it names the fix. Replacing it with the
+      // generic house sentence threw away the only useful part, so the rule is
+      // scoped: show the server's reason when it gave one, otherwise say nothing
+      // technical.
+      const status = (e as { status?: number } | null)?.status;
+      const reason = status && status >= 400 && status < 500 && e instanceof Error ? e.message : null;
+      setComponentErrors((prev) => ({
+        ...prev,
+        [componentKey]:
+          reason ?? "That change could not be applied. The technical detail is in the application logs.",
+      }));
     } finally {
       setTogglingComponent(null);
     }

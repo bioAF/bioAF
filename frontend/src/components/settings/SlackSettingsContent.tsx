@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface SlackStatus {
   configured: boolean;
@@ -114,6 +115,7 @@ const EVENT_CATEGORIES: Record<string, { label: string; events: string[] }> = {
 };
 
 export function SlackSettingsContent() {
+  const confirm = useConfirm();
   const [status, setStatus] = useState<SlackStatus | null>(null);
   const [pendingDestructive, setPendingDestructive] = useState<"startOver" | "disconnect" | null>(null);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
@@ -316,6 +318,29 @@ export function SlackSettingsContent() {
   };
 
   const handleDeleteMapping = async (id: number) => {
+    // Org-wide effect with no gate, two hundred lines from an exemplary
+    // disconnect confirmation in the same file. The channel silently stops
+    // receiving notifications and the event selection is not recoverable.
+    const mapping = mappings.find((m) => m.id === id);
+    const ok = await confirm({
+      title: mapping ? `Stop sending notifications to ${mapping.channel_name}?` : "Remove this channel mapping?",
+      message: (
+        <>
+          <p>
+            Nobody in {mapping ? mapping.channel_name : "that channel"} will receive bioAF
+            notifications any more. This affects the whole organisation, not just you.
+          </p>
+          <p>
+            The list of event types chosen for this channel is not kept, so re-adding it means
+            picking them again.
+          </p>
+        </>
+      ),
+      confirmLabel: "Remove mapping",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     try {
       await api.delete(`/api/notifications/slack/channel-mappings/${id}`);
       setMappings(mappings.filter((m) => m.id !== id));
