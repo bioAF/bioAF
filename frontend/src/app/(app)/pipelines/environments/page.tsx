@@ -130,7 +130,7 @@ export default function PipelineEnvironmentsPage() {
       setLoadError(null);
     } catch (err) {
       if (!silent) {
-        setLoadError(err instanceof Error ? err.message : "Failed to load environments");
+        setLoadError(err instanceof Error ? err.message : "Failed to load pipeline templates");
       }
     } finally {
       if (!silent) setLoading(false);
@@ -143,7 +143,7 @@ export default function PipelineEnvironmentsPage() {
       setSelectedEnv((prev) => (prev && prev.id === id ? detail : prev));
     } catch (e) {
       logError("refreshing the environment", e);
-      toast.error(loadFailureMessage("The environment"));
+      toast.error(loadFailureMessage("The pipeline template"));
     }
   }
 
@@ -155,7 +155,7 @@ export default function PipelineEnvironmentsPage() {
       setSelectedVersion((prev) => (prev && prev.id === versionId ? version : prev));
     } catch (e) {
       logError("refreshing the environment version", e);
-      toast.error(loadFailureMessage("The environment version"));
+      toast.error(loadFailureMessage("The pipeline template version"));
     }
   }
 
@@ -168,7 +168,7 @@ export default function PipelineEnvironmentsPage() {
       setBuildLogs(null);
       setNewVersionContent(DEFAULT_PIPELINE_CONDA_YML);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load environment");
+      toast.error(err instanceof Error ? err.message : "Failed to load pipeline template");
     }
   }
 
@@ -196,7 +196,7 @@ export default function PipelineEnvironmentsPage() {
       });
       await loadEnvironments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create environment");
+      toast.error(err instanceof Error ? err.message : "Failed to create pipeline template");
     } finally {
       setCreating(false);
     }
@@ -204,7 +204,7 @@ export default function PipelineEnvironmentsPage() {
 
   async function handleDelete(id: number) {
     const ok = await confirm({
-      title: "Delete this environment and all its versions?",
+      title: "Delete this pipeline template and all its versions?",
       message: "This cannot be undone.",
       confirmLabel: "Delete",
       variant: "danger",
@@ -307,9 +307,13 @@ export default function PipelineEnvironmentsPage() {
 
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className="text-2xl font-bold">Pipeline Environments</h1>
-                <p className="text-sm text-gray-500 mt-1">
-                  Conda environments used by custom pipeline wrappers.
+                <h1 className="text-2xl font-bold">Pipeline Templates</h1>
+                {/* The old line named the technology and left the reader to infer
+                    the purpose. This one leads with what the template is FOR and
+                    mentions Conda as the mechanism, which is the same trade the
+                    Workbench Templates note makes. */}
+                <p className="text-sm text-gray-600 mt-1">
+                  Templates that define the runtime environment for custom pipelines, using Conda.
                 </p>
               </div>
               {!selectedEnv && canCreate && (
@@ -317,7 +321,7 @@ export default function PipelineEnvironmentsPage() {
                   onClick={() => setShowCreateModal(true)}
                   className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
                 >
-                  New Pipeline Environment
+                  New Pipeline Template
                 </button>
               )}
             </div>
@@ -631,7 +635,7 @@ export default function PipelineEnvironmentsPage() {
 
             <Modal
               open={showCreateModal}
-              title="New Pipeline Environment"
+              title="New Pipeline Template"
               onClose={() => setShowCreateModal(false)}
               size="md"
               footer={

@@ -313,7 +313,7 @@ export default function WorkNodesPage() {
       const readyVersion = detail.versions.find((v) => v.status === "ready" && v.image_uri);
       if (readyVersion) setSelectedVersionId(readyVersion.id);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not select that environment.");
+      toast.error(e instanceof Error ? e.message : "Could not select that template.");
     }
   }
 
@@ -478,7 +478,7 @@ export default function WorkNodesPage() {
           <div className="mt-2 rounded-lg border border-blue-200 bg-blue-50 p-4">
             <div className="text-sm text-blue-800 space-y-2">
               <ul className="space-y-1.5 text-blue-700">
-                <li><strong>Work nodes</strong> are full Linux VMs with SSH access. They run conda environments you configure on the <a href="/environments" className="underline font-medium">Workbench Images</a> page.</li>
+                <li><strong>Work nodes</strong> are full Linux VMs with SSH access. They run the conda software stack you configure on the <a href="/environments" className="underline font-medium">Workbench Templates</a> page.</li>
                 <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>. Select data mounts during launch to access pipeline outputs, uploads, and shared results.</li>
                 <li><strong>GitHub repos</strong> are cloned at boot into <code className="bg-blue-100 px-1 rounded">~/repos/</code>. Add repos in the section below, then select them when launching.</li>
                 <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything here is automatically synced to GCS when you stop the node.</li>
@@ -974,26 +974,26 @@ export default function WorkNodesPage() {
               </section>
 
               <section>
-                <h3 className="text-sm font-medium text-gray-700 mb-2">Select Environment</h3>
+                <h3 className="text-sm font-medium text-gray-700 mb-2">Select Workbench Template</h3>
                 {environments.length === 0 ? (
                   <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-700">
-                    No work node environments found. Create one from the{" "}
+                    No work node templates found. Create one from the{" "}
                     <a href="/environments" className="underline font-medium">
-                      Environments
+                      Workbench Templates
                     </a>{" "}
                     page with type &quot;Work Node&quot;.
                   </div>
                 ) : (
                   <div className="flex gap-3">
                     <select
-                      aria-label="Environment"
+                      aria-label="Workbench template"
                       value={selectedEnvId || ""}
                       onChange={(e) =>
                         e.target.value ? handleEnvSelect(Number(e.target.value)) : null
                       }
                       className="border rounded px-3 py-2 text-sm flex-1"
                     >
-                      <option value="">Select environment</option>
+                      <option value="">Select a template</option>
                       {environments.map((env) => (
                         <option key={env.id} value={env.id}>
                           {env.name}
@@ -1169,7 +1169,7 @@ export default function WorkNodesPage() {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Environment</span>
+                  <span className="text-gray-500">Template</span>
                   <span>{environments.find((e) => e.id === selectedEnvId)?.name}</span>
                 </div>
                 <div className="flex justify-between">

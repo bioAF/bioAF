@@ -128,3 +128,45 @@ describe("nav labels agree with the pages they open", () => {
     expect(unchecked.length).toBeLessThanOrEqual(2);
   });
 });
+
+// The owner standardised this vocabulary on 2026-08-08, in two steps. First the
+// two "Environments" destinations were disambiguated; then "Images" was rejected
+// too: "'Images' is a technical term." Both are "Templates" now, which is the
+// word a non-technical user can carry between them.
+//
+// A more universal word is also a vaguer one, so the trade is paid for at the
+// point of use: each page states, under its own heading, what its templates
+// actually are. Without that note "Workbench Templates" says less than
+// "Workbench Images" did, not more.
+describe("Templates, not Environments", () => {
+  const page = (rel: string) => readFileSync(join(SRC, rel), "utf8");
+  const WORKBENCH = "app/(app)/environments/page.tsx";
+  const PIPELINE = "app/(app)/pipelines/environments/page.tsx";
+
+  it("names both destinations 'Templates'", () => {
+    const labels = navConfig.flatMap((s) => s.children ?? []).map((c) => c.label);
+    expect(labels).toContain("Workbench Templates");
+    expect(labels).toContain("Pipeline Templates");
+  });
+
+  it("retires the words that came before", () => {
+    // "Environments" was ambiguous across two destinations; "Images" was
+    // technical. Neither should survive as a LABEL, in the nav or as a heading.
+    const all = [page(WORKBENCH), page(PIPELINE), page("lib/navConfig.ts")].join("\n");
+    for (const dead of ["Workbench Images", "Pipeline Environments", "New Workbench Image", "New Pipeline Environment"]) {
+      expect(all).not.toContain(dead);
+    }
+  });
+
+  it("explains what each kind of template is, under its own heading", () => {
+    // A note that exists but says nothing would pass a mere presence check, so
+    // each is required to name the concrete thing it configures.
+    const workbench = page(WORKBENCH);
+    expect(workbench).toMatch(/Notebook Sessions/);
+    expect(workbench).toMatch(/Work Nodes/);
+
+    const pipeline = page(PIPELINE);
+    expect(pipeline).toMatch(/custom pipelines?/i);
+    expect(pipeline).toMatch(/Conda/);
+  });
+});

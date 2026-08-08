@@ -329,7 +329,7 @@ export default function CustomPipelineDetailPage() {
       return;
     }
     if (versionForm.environment_version_id == null) {
-      setVersionError("Select an environment version.");
+      setVersionError("Select a template version.");
       return;
     }
     if (versionForm.code_source_type === "github_repo" && !versionForm.github_repo_id) {
@@ -661,7 +661,7 @@ export default function CustomPipelineDetailPage() {
                               </pre>
                             </div>
                           )}
-                        <DetailRow label="Environment">
+                        <DetailRow label="Pipeline Template">
                           {env ? (
                             <span>
                               {env.env_name} v{env.version_number}{" "}
@@ -939,7 +939,7 @@ function NewVersionForm({
       </div>
 
       <div>
-        <label htmlFor="environment" className="text-sm text-gray-500 block mb-1">Environment</label>
+        <label htmlFor="environment" className="text-sm text-gray-500 block mb-1">Pipeline Template</label>
         <select id="environment"
           value={versionForm.environment_version_id ?? ""}
           onChange={(e) =>
@@ -950,7 +950,7 @@ function NewVersionForm({
           }
           className="w-full border rounded px-3 py-2 text-sm bg-white"
         >
-          <option value="">Select an environment version...</option>
+          <option value="">Select a template version...</option>
           {readyEnvOptions.map((opt) => (
             <option key={opt.version_id} value={opt.version_id}>
               {opt.env_name} v{opt.version_number}

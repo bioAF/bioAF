@@ -589,7 +589,7 @@ export default function PipelineRunDetailPage() {
                 </code>
               </div>
               <div>
-                <span className="text-xs text-gray-500 block">Environment</span>
+                <span className="text-xs text-gray-500 block">Pipeline Template</span>
                 {customOverview.environment ? (
                   <span>
                     {customOverview.environment.environment_name} v

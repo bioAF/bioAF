@@ -165,7 +165,7 @@ async function openLaunchDialog(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("WorkNodesPage launch dialog: shape and ordering", () => {
-  it("step 1 sections appear in order: Machine Profile, Environment, Link to, GitHub Repos", async () => {
+  it("step 1 sections appear in order: Machine Profile, Workbench Template, Link to, GitHub Repos", async () => {
     const user = userEvent.setup();
     setupApiMocks();
     render(<WorkNodesPage />);
@@ -173,7 +173,7 @@ describe("WorkNodesPage launch dialog: shape and ordering", () => {
     const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
     expect(headings).toEqual([
       expect.stringMatching(/Machine Profile/i),
-      expect.stringMatching(/Select Environment/i),
+      expect.stringMatching(/Select Workbench Template/i),
       expect.stringMatching(/Link to/i),
       expect.stringMatching(/GitHub Repos/i),
     ]);
@@ -268,7 +268,7 @@ describe("WorkNodesPage launch button posts project_id correctly", () => {
     const profileGroup = screen.getByRole("group", { name: /machine profile/i });
     await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
 
-    const envSelect = screen.getByRole("combobox", { name: /^Environment$/i });
+    const envSelect = screen.getByRole("combobox", { name: /^Workbench template$/i });
     await user.selectOptions(envSelect, "1");
     await waitFor(() =>
       expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()
@@ -297,7 +297,7 @@ describe("WorkNodesPage launch button posts project_id correctly", () => {
     const profileGroup = screen.getByRole("group", { name: /machine profile/i });
     await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
 
-    const envSelect = screen.getByRole("combobox", { name: /^Environment$/i });
+    const envSelect = screen.getByRole("combobox", { name: /^Workbench template$/i });
     await user.selectOptions(envSelect, "1");
     await waitFor(() =>
       expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()
@@ -326,7 +326,7 @@ async function advanceToStep2(user: ReturnType<typeof userEvent.setup>) {
   await openLaunchDialog(user);
   const profileGroup = screen.getByRole("group", { name: /machine profile/i });
   await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
-  const envSelect = screen.getByRole("combobox", { name: /^Environment$/i });
+  const envSelect = screen.getByRole("combobox", { name: /^Workbench template$/i });
   await user.selectOptions(envSelect, "1");
   await waitFor(() =>
     expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()
@@ -365,7 +365,7 @@ describe("WorkNodesPage launch confirmation modal", () => {
     );
     const profileGroup = screen.getByRole("group", { name: /machine profile/i });
     await user.click(within(profileGroup).getByRole("button", { name: /^Medium\b/i }));
-    const envSelect = screen.getByRole("combobox", { name: /^Environment$/i });
+    const envSelect = screen.getByRole("combobox", { name: /^Workbench template$/i });
     await user.selectOptions(envSelect, "1");
     await waitFor(() =>
       expect(screen.getByRole("option", { name: /v1\.1 \(ready\)/i })).toBeInTheDocument()

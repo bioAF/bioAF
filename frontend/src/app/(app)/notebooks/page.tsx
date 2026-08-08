@@ -213,7 +213,7 @@ export default function NotebooksPage() {
         setSelectedVersionId(readyVersion.id);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not change the environment.");
+      toast.error(e instanceof Error ? e.message : "Could not change the template.");
     }
   }
 
@@ -399,7 +399,7 @@ export default function NotebooksPage() {
               <ul className="space-y-1.5 text-blue-700">
                 <li><strong>Input files</strong> are mounted at <code className="bg-blue-100 px-1 rounded">/data/</code>, organized by project, experiment, sample, and pipeline. Select files when launching a session.</li>
                 <li><strong>Output files</strong> should be saved to <code className="bg-blue-100 px-1 rounded">/outputs/</code>. Everything in this directory is automatically synced to GCS and registered when you stop the session.</li>
-                <li><strong>Workbench images</strong> control the packages available in your session. Choose an image and version when launching. Admins can create and build new ones from the <a href="/environments" className="underline font-medium">Workbench Images</a> page.</li>
+                <li><strong>Workbench templates</strong> control the packages available in your session. Choose a template and version when launching. Admins can create and build new ones from the <a href="/environments" className="underline font-medium">Workbench Templates</a> page.</li>
                 <li><strong>Git integration</strong> can be configured per-session via SSH keys in your <a href="/profile" className="underline font-medium">Profile Settings</a>. Notebooks are auto-committed every 15 minutes when a git repo is configured.</li>
                 <li><strong>Session credentials</strong> (username and password for RStudio) are set in your <a href="/profile" className="underline font-medium">Profile Settings</a>.</li>
               </ul>
@@ -651,7 +651,7 @@ export default function NotebooksPage() {
                     <h4 className="text-sm font-semibold text-gray-700">Provenance</h4>
                     {provenance.environment && (
                       <div>
-                        <p className="text-xs text-gray-500 mb-1">Environment</p>
+                        <p className="text-xs text-gray-500 mb-1">Workbench Template</p>
                         <p className="text-sm">
                           {provenance.environment.environment_name} v{provenance.environment.version_number}.{provenance.environment.build_number}
                           <span className="text-gray-500 ml-1">({provenance.environment.definition_format})</span>
@@ -787,16 +787,16 @@ export default function NotebooksPage() {
             )}
           </div>
 
-          {/* Environment */}
+          {/* Workbench template picker */}
           <div>
-            <label htmlFor="environment" className="text-sm text-gray-500 mb-2 block">Environment</label>
+            <label htmlFor="environment" className="text-sm text-gray-500 mb-2 block">Workbench Template</label>
             <div className="flex gap-3">
               <select id="environment"
                 value={selectedEnvId || ""}
                 onChange={(e) => e.target.value ? handleEnvChange(Number(e.target.value)) : null}
                 className="border rounded px-3 py-2 text-sm flex-1"
               >
-                <option value="">Select environment</option>
+                <option value="">Select a template</option>
                 {environments.map((env) => (
                   <option key={env.id} value={env.id}>
                     {env.name}
@@ -806,7 +806,7 @@ export default function NotebooksPage() {
               </select>
               {selectedEnvDetail && selectedEnvDetail.versions.filter((v) => v.status === "ready").length > 0 && (
                 <select
-                  aria-label="Environment version"
+                  aria-label="Template version"
                   value={selectedVersionId || ""}
                   onChange={(e) => {
                     const vid = e.target.value ? Number(e.target.value) : null;

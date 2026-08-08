@@ -652,7 +652,7 @@ function VersionPickerModal({
                   </code>
                 </div>
                 <div>
-                  <span className="text-xs text-gray-500 uppercase">Environment: </span>
+                  <span className="text-xs text-gray-500 uppercase">Template: </span>
                   {env
                     ? `${env.env_name} v${env.version_number}`
                     : `Environment version #${version.environment_version_id}`}

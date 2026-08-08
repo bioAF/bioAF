@@ -37,19 +37,21 @@ const allChildren = (): NavChild[] => navConfig.flatMap((s) => s.children ?? [])
 
 describe("navConfig disambiguated labels", () => {
   it("renames the two 'Environments' entries so each says what it is", () => {
-    // Both used to be called "Environments". The first fix qualified them as
-    // "Pipeline Environments" and "Compute Environments"; the owner went further
-    // on 2026-08-08 ("the 'Environments' moniker has created a lot of
-    // confusion") and the workbench one is "Workbench Images" now, in the nav and
-    // in its own page heading. The property is unchanged and stronger: neither
-    // entry can be read as the other.
+    // Both used to be called "Environments". Three passes got here, and the
+    // property under test never changed: neither entry can be read as the other.
+    //   1. qualified as "Pipeline Environments" / "Compute Environments"
+    //   2. owner, 2026-08-08: "the 'Environments' moniker has created a lot of
+    //      confusion" -> "Workbench Images"
+    //   3. owner, same day: "'Images' is a technical term" -> both are
+    //      "... Templates", one word a non-technical reader can carry between
+    //      them, with each page explaining what its templates configure.
     const pipelines = navConfig.find((s) => s.label === "Pipelines");
     const workbench = navConfig.find((s) => s.label === "Workbench");
 
-    expect(pipelines?.children?.find((c) => c.label === "Pipeline Environments")?.path).toBe(
+    expect(pipelines?.children?.find((c) => c.label === "Pipeline Templates")?.path).toBe(
       "/pipelines/environments",
     );
-    expect(workbench?.children?.find((c) => c.label === "Workbench Images")?.path).toBe(
+    expect(workbench?.children?.find((c) => c.label === "Workbench Templates")?.path).toBe(
       "/environments",
     );
   });

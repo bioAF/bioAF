@@ -225,12 +225,12 @@ describe("Sidebar", () => {
     expect(screen.getByText("Backup & Recovery")).toBeInTheDocument();
   });
 
-  it("shows Workbench children: Notebook Sessions, Work Nodes, Workbench Images", () => {
+  it("shows Workbench children: Notebook Sessions, Work Nodes, Workbench Templates", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Workbench"));
     expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
     expect(screen.getByText("Work Nodes")).toBeInTheDocument();
-    expect(screen.getByText("Workbench Images")).toBeInTheDocument();
+    expect(screen.getByText("Workbench Templates")).toBeInTheDocument();
   });
 
   it("shows Results to a role with only pipelines:view (View Results via OR)", () => {

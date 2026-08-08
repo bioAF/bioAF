@@ -75,7 +75,7 @@ export default function EnvironmentsPage() {
     try {
       const filterType = type ?? typeFilter;
       // The Workbench env page only manages notebook and work_node envs.
-      // Pipeline envs live under Pipelines > Environments and would be
+      // Pipeline templates live under Pipelines > Pipeline Templates and would be
       // unusable here, so "all" must fetch both notebook and work_node
       // explicitly rather than calling the unfiltered list endpoint.
       let envs: EnvironmentResponse[];
@@ -94,7 +94,7 @@ export default function EnvironmentsPage() {
       setEnvironments(envs);
       setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load workbench images");
+      setLoadError(err instanceof Error ? err.message : "Failed to load workbench templates");
     } finally { setLoading(false); }
   }
 
@@ -109,8 +109,8 @@ export default function EnvironmentsPage() {
         setNewVersionFormat("conda");
       }
     } catch (e) {
-      logError("loading the workbench image detail", e);
-      toast.error(loadFailureMessage("The workbench image"));
+      logError("loading the workbench template detail", e);
+      toast.error(loadFailureMessage("The workbench template"));
     }
   }
 
@@ -126,13 +126,13 @@ export default function EnvironmentsPage() {
       setCreateForm({ name: "", description: "", environment_type: "notebook" });
       loadEnvironments();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create workbench image");
+      toast.error(err instanceof Error ? err.message : "Failed to create workbench template");
     } finally { setCreating(false); }
   }
 
   async function handleDelete(id: number) {
     const ok = await confirm({
-      title: "Delete this workbench image and all its versions?",
+      title: "Delete this workbench template and all its versions?",
       message: "This cannot be undone.",
       confirmLabel: "Delete",
       variant: "danger",
@@ -294,19 +294,27 @@ export default function EnvironmentsPage() {
           </div>
         )}
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Workbench Images</h1>
+          <div>
+            <h1 className="text-2xl font-bold">Workbench Templates</h1>
+            {/* "Templates" is the word a non-technical user can carry between here
+                and Pipeline Templates, but it is vaguer than the "Images" it
+                replaced, so the page says what these ones actually configure. */}
+            <p className="text-sm text-gray-600 mt-1">
+              Template images that define the software available in Notebook Sessions and on Work Nodes.
+            </p>
+          </div>
           {canCreate && (
             <button
               onClick={() => setShowCreateModal(true)}
               className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
             >
-              New Environment
+              New Template
             </button>
           )}
         </div>
 
         {!selectedEnv ? (
-          /* Environment Cards */
+          /* Template cards */
           <>
           {/* Type filter tabs */}
           <div className="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-fit">
@@ -351,7 +359,7 @@ export default function EnvironmentsPage() {
             ))}
             {environments.length === 0 && (
               <div className="col-span-full text-center py-12 text-gray-500">
-                No workbench images yet. Create one to get started.
+                No workbench templates yet. Create one to get started.
               </div>
             )}
           </div>
@@ -423,10 +431,10 @@ export default function EnvironmentsPage() {
             </div>
           </div>
         ) : (
-          /* Environment Detail */
+          /* Template detail */
           <div>
             <button onClick={() => setSelectedEnv(null)} className="text-sm text-bioaf-600 mb-4 hover:underline">
-              &larr; Back to workbench images
+              &larr; Back to workbench templates
             </button>
             <div className="bg-white rounded-lg shadow">
               <div className="p-6 border-b">
@@ -568,10 +576,10 @@ export default function EnvironmentsPage() {
           </div>
         )}
 
-        {/* Create Environment Modal */}
+        {/* Create template modal */}
         <Modal
           open={showCreateModal}
-          title="New Workbench Image"
+          title="New Workbench Template"
           onClose={() => setShowCreateModal(false)}
           size="md"
           footer={
@@ -605,8 +613,8 @@ export default function EnvironmentsPage() {
               </select>
               <p className="text-xs text-gray-500 mt-1">
                 {createForm.environment_type === "work_node"
-                  ? "Work node environments use conda and build as GCE VM images."
-                  : "Notebook environments use Dockerfile or conda and build as container images."}
+                  ? "Work node templates use conda and build as GCE VM images."
+                  : "Notebook templates use Dockerfile or conda and build as container images."}
               </p>
             </div>
             <div>
