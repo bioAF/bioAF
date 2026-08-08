@@ -97,16 +97,16 @@ test("the measured failing pairings are gone", () => {
 // and `"\u2014"` evades both, which is how two of them survived on
 // /settings/users until the page was read in a browser.
 //
-// The remaining literal placeholders elsewhere are a separate, larger sweep that
-// has not been signed off, so this guard covers the files already cleaned.
-const EM_DASH_CLEANED = [
-  "app/(app)/settings/users/page.tsx",
-  "components/SnapshotComparison.tsx",
-];
+// The em-dash is banned project-wide, with exactly one exemption: the
+// missing-value placeholder, which the owner ruled on 2026-08-07 should be a
+// dash rather than the words "NOT SET". The exemption is a FILE, not a pattern,
+// so the ban does not weaken: lib/placeholders.ts declares the character once
+// and every one of the 22 call sites imports the constant.
+const EM_DASH_EXEMPT = "lib/placeholders.ts";
 
-test("no user-facing em-dash in any of its three spellings, in the cleaned files", () => {
+test("no user-facing em-dash outside the single placeholder constant", () => {
   const offenders: string[] = [];
-  for (const file of tsxFiles(SRC)) {
+  for (const file of [...tsxFiles(SRC), join(SRC, EM_DASH_EXEMPT)]) {
     const rel = file.replace(SRC + "/", "");
     readFileSync(file, "utf8")
       .split("\n")
@@ -114,12 +114,27 @@ test("no user-facing em-dash in any of its three spellings, in the cleaned files
         const entity = /&mdash;|&#8212;|&#x2014;/i.test(line);
         const escaped = /\\u2014/.test(line);
         const literal = line.includes("\u2014");
-        if (entity || (EM_DASH_CLEANED.includes(rel) && (escaped || literal))) {
+        if (rel === EM_DASH_EXEMPT) {
+          // Inside the exempt file, the dash is allowed only as the constant's
+          // own value. A dash in a sentence there is still a defect.
+          if ((entity || escaped || literal) && !/^export const NOT_SET = /.test(line)) {
+            offenders.push(`${rel}:${i + 1}`);
+          }
+        } else if (entity || escaped || literal) {
           offenders.push(`${rel}:${i + 1}`);
         }
       });
   }
   expect(offenders).toEqual([]);
+});
+
+test("the placeholder character lives in exactly one place", () => {
+  // The point of the ruling was a dash, not 69 scattered dashes: the reason the
+  // words replaced it in the first place was that ad-hoc dashes could not be
+  // told apart from a rendering bug or from a value that is itself a dash. One
+  // constant keeps that property while giving the owner the glyph they asked for.
+  const placeholders = readFileSync(join(SRC, EM_DASH_EXEMPT), "utf8");
+  expect(placeholders).toContain('export const NOT_SET = "\u2014"');
 });
 
 test("the paired state of a status cell is as readable as the cell it pairs with", () => {
@@ -151,12 +166,15 @@ test("no text uses a shade that fails AA on its own background", () => {
 });
 
 /**
- * A dash is not a word. 69 places rendered an em-dash where a value was
- * missing, which cannot be told apart from "failed to load", from a rendering
- * bug, or from a value that is itself a dash. The owner's ruling was a text
- * placeholder in caps; NOT_SET in src/lib/placeholders.ts is where it lives.
+ * 69 places once rendered a bare em-dash where a value was missing. That was
+ * replaced with the words "NOT SET", and on 2026-08-07 the owner reversed it:
+ * the placeholder is a dash again. What must NOT come back is the 69 of them.
+ *
+ * A missing value goes through NOT_SET in src/lib/placeholders.ts, so it can be
+ * changed again in one edit, and so the app never renders a dash that a reader
+ * has to guess the meaning of because some other file wrote its own.
  */
-test("nothing renders an em-dash as a missing-value placeholder", () => {
+test("every missing-value placeholder comes from the shared constant", () => {
   const walk = (dir: string): string[] =>
     readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
       const path = join(dir, entry.name);
@@ -166,11 +184,13 @@ test("nothing renders an em-dash as a missing-value placeholder", () => {
         : [];
     });
 
-  const offenders = walk(SRC).filter((file) => {
-    const src = readFileSync(file, "utf8");
-    // The literal, the HTML entities, and the escaped form that evaded both.
-    return /"\u2014"|&mdash;|&#8212;|&#x2014;|"\\u2014"/.test(src);
-  });
+  const offenders = walk(SRC)
+    .filter((file) => !file.endsWith(EM_DASH_EXEMPT))
+    .filter((file) => {
+      const src = readFileSync(file, "utf8");
+      // The literal, the HTML entities, and the escaped form that evaded both.
+      return /"\u2014"|&mdash;|&#8212;|&#x2014;|"\\u2014"/.test(src);
+    });
 
   expect(offenders.map((f) => f.replace(SRC, "src"))).toEqual([]);
 });

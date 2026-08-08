@@ -1,6 +1,7 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
+import { NotSet } from "@/components/shared/NotSet";
 import { useToast } from "@/components/shared/Toast";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState, useCallback } from "react";
@@ -596,7 +597,7 @@ export default function PipelineRunDetailPage() {
                     {customOverview.environment.build_number}
                   </span>
                 ) : (
-                  <span className="text-gray-500">—</span>
+                  <NotSet />
                 )}
               </div>
               <div>

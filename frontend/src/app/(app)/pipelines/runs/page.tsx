@@ -1,6 +1,7 @@
 "use client";
 
 import { NOT_SET } from "@/lib/placeholders";
+import { NotSet } from "@/components/shared/NotSet";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
@@ -144,7 +145,7 @@ export default function PipelineRunsPage() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <span className="text-xs text-ink-subtle">—</span>}
+                  {r.review_verdict ? <ReviewBadge verdict={r.review_verdict} /> : <NotSet />}
                 </td>
                 <td className="px-4 py-3">
                   {r.progress ? (
@@ -154,7 +155,7 @@ export default function PipelineRunsPage() {
                       </div>
                       <span className="text-xs text-ink-subtle">{Math.round(r.progress.percent_complete)}%</span>
                     </div>
-                  ) : <span className="text-xs text-ink-subtle">—</span>}
+                  ) : <NotSet />}
                 </td>
                 <td className="px-4 py-3 text-sm">{r.submitted_by?.name || r.submitted_by?.email || NOT_SET}</td>
                 <td className="px-4 py-3 text-sm text-ink-subtle">{formatDateTime(r.started_at)}</td>
