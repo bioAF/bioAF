@@ -1,29 +1,38 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 
 interface QueueData {
   queued: number;
   budget_queued: number;
 }
 
+/**
+ * How deep the pipeline queue is.
+ *
+ * This widget used to answer "we could not reach the backend" with the number 0.
+ * Measured on the deployed app under a total outage, it rendered "0 / pending
+ * jobs", byte-identical to a genuinely empty queue, because its catch did
+ * `setData({ queued: 0, budget_queued: 0 })`. It also declared `setError` and
+ * never called it, so its own error branch was unreachable dead code and there
+ * was no Retry.
+ *
+ * On a platform where the queue is how you know whether compute is backed up, a
+ * fabricated zero during an outage reads as a healthy idle cluster. It now shares
+ * `useWidgetData` with the rest of the dashboard, which logs the real error, shows
+ * the house sentence, and refetches this card alone.
+ */
 export function QueueDepthWidget() {
-  const [data, setData] = useState<QueueData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .get<{ runs: unknown[]; total: number }>("/api/pipeline-triggers/queue")
-      .then((resp) => {
-        setData({ queued: resp.total, budget_queued: resp.runs.length });
-      })
-      .catch(() => {
-        setData({ queued: 0, budget_queued: 0 });
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const { data, loading, error, retry } = useWidgetData<QueueData>(
+    async () => {
+      const resp = await api.get<{ runs: unknown[]; total: number }>(
+        "/api/pipeline-triggers/queue",
+      );
+      return { queued: resp.total, budget_queued: resp.runs.length };
+    },
+    "Queue depth",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-queue-depth">
@@ -35,8 +44,13 @@ export function QueueDepthWidget() {
           <div className="h-10 bg-gray-100 rounded" />
         </div>
       )}
-      {error && (
-        <div className="text-sm text-red-600" data-testid="widget-error">{error}</div>
+      {error && !loading && (
+        <div className="text-sm text-red-600" data-testid="widget-error">
+          {error}
+          <button onClick={retry} className="ml-2 text-bioaf-600 hover:underline">
+            Retry
+          </button>
+        </div>
       )}
       {!loading && !error && data && (
         <div>

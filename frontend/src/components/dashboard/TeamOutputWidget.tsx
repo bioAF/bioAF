@@ -26,13 +26,12 @@ const WEEK_HOURS = 24 * 7;
 export function TeamOutputWidget() {
   const { data: counts, loading, error, retry } = useWidgetData(
     async () => {
+      // Both halves or neither. Substituting an empty list for a failed half
+      // reported "0 runs completed" during a total outage, indistinguishable
+      // from a genuinely quiet week.
       const [runs, exps] = await Promise.all([
-        api
-          .getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=50")
-          .catch(() => ({ runs: [] }) as RunList),
-        api
-          .getWithRetry<ExperimentList>("/api/experiments?page_size=50")
-          .catch(() => ({ experiments: [] }) as ExperimentList),
+        api.getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=50"),
+        api.getWithRetry<ExperimentList>("/api/experiments?page_size=50"),
       ]);
       return {
         runs: (runs.runs || []).filter((r) => withinHours(r.completed_at, WEEK_HOURS)).length,

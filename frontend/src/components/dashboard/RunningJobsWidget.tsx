@@ -15,16 +15,17 @@ interface RunStats {
 export function RunningJobsWidget() {
   const { data: stats, loading, error, retry } = useWidgetData<RunStats>(
     async () => {
-      // Each count falls back to 0 on its own, which is what this widget did
-      // before the retry work. Whether a failed count should say so rather than
-      // read as "no running jobs" is a separate question, not this change.
+      // No per-count fallback. That question the old comment here left open --
+      // "whether a failed count should say so rather than read as no running
+      // jobs" -- was answered by measuring it: under a total outage this widget
+      // rendered "0 / 0 pending", byte-identical to a genuinely idle cluster.
+      //
+      // Letting either rejection through is deliberate. A partial total is a
+      // wrong total presented as a right one, and on a compute platform "0
+      // running" is the one number nobody double-checks.
       const [running, pending] = await Promise.all([
-        api
-          .getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1")
-          .catch(() => ({ total: 0 })),
-        api
-          .getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1")
-          .catch(() => ({ total: 0 })),
+        api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=running&page_size=1"),
+        api.getWithRetry<{ total: number }>("/api/pipeline-runs?status=pending&page_size=1"),
       ]);
       return {
         running: running.total,

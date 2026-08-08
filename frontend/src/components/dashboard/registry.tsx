@@ -17,6 +17,7 @@ import { TeamOutputWidget } from "@/components/dashboard/TeamOutputWidget";
 import { CostTrendWidget } from "@/components/dashboard/CostTrendWidget";
 import { BackupStatusWidget } from "@/components/dashboard/BackupStatusWidget";
 import { AutoIngestActivityWidget } from "@/components/dashboard/AutoIngestActivityWidget";
+import { IngestStatusWidget } from "@/components/dashboard/IngestStatusWidget";
 import { PendingInvitesWidget } from "@/components/dashboard/PendingInvitesWidget";
 
 export type PermissionPair = readonly [resource: string, action: string];
@@ -178,6 +179,17 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     description: "Files processed and failed by auto-ingest in the last 24h.",
     component: AutoIngestActivityWidget,
     permissions: [["settings", "view"]],
+    defaultForRoles: [],
+  },
+  {
+    // Built, tested and named in the Getting Started tour, but never registered,
+    // so no user could add it. Not a default for any role: it is opt-in like its
+    // neighbours here, but it is now reachable from the picker.
+    key: "file_inventory",
+    title: "File inventory",
+    description: "Artifact and uploaded file counts, broken down by type.",
+    component: IngestStatusWidget,
+    permissions: [["files", "view"]],
     defaultForRoles: [],
   },
   {

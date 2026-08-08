@@ -31,13 +31,13 @@ const ACTIVE_STATUSES = new Set(["running", "idle", "active", "starting", "ready
 export function MySessionsWidget() {
   const { data: items, loading, error, retry } = useWidgetData(
     async () => {
+      // No per-source fallback: an empty list stood in for a failed fetch, so a
+      // total outage rendered "No active sessions." -- and these sessions bill by
+      // the hour, which makes a false "you have none" the expensive direction to
+      // be wrong in.
       const [notebooks, workNodes] = await Promise.all([
-        api
-          .getWithRetry<SessionList>("/api/v1/notebooks/sessions")
-          .catch(() => ({ sessions: [] }) as SessionList),
-        api
-          .getWithRetry<SessionList>("/api/v1/work-nodes/sessions")
-          .catch(() => ({ sessions: [] }) as SessionList),
+        api.getWithRetry<SessionList>("/api/v1/notebooks/sessions"),
+        api.getWithRetry<SessionList>("/api/v1/work-nodes/sessions"),
       ]);
       const combined: CombinedSession[] = [
         ...(notebooks.sessions || []).map((s) => ({
