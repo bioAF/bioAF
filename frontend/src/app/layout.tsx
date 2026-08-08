@@ -22,7 +22,7 @@ export default function RootLayout({
             of the wrong theme. Kept in sync with src/lib/theme.ts. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="bg-gray-50 text-gray-900">
+      <body className="bg-canvas text-gray-900">
         <ThemeProvider>
           {/* ConfirmProvider sits in the ROOT layout, not the (app) shell, because
               the setup wizard at /setup is outside that group and guards the

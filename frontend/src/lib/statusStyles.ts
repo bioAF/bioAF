@@ -48,9 +48,10 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
   // failure and never appears in the lifecycle. The exact step is carried by the
   // label, which is always rendered with the badge.
   //
-  // Both brand steps stay within the set of utilities the dark-mode override layer
-  // in globals.css remaps (bg-bioaf-50/100, text-bioaf-600/700/800). Going deeper
-  // (bioaf-200, text-bioaf-900) would render untreated on the dark canvas.
+  // The brand steps used to be constrained by what the dark-mode override layer
+  // happened to list. They are not any more: every tint and text step of every
+  // ramp carries a dark token (tailwind.tokens.js), so a deeper step is a design
+  // choice here rather than a rendering hazard.
   experiment: {
     registered: { badge: "bg-gray-100 text-gray-800", label: "Registered" },
     library_prep: { badge: "bg-bioaf-50 text-bioaf-700", label: "Library Prep" },

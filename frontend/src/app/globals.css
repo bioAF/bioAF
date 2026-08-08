@@ -51,128 +51,26 @@
 }
 
 /* -------------------------------------------------------------------------- */
-/* Dark override layer                                                        */
+/* Dark mode                                                                  */
 /*                                                                            */
-/* Retrofits dark mode across the app without editing every component: it     */
-/* remaps the ubiquitous *light-neutral* Tailwind utilities to theme tokens   */
-/* under `.dark`. Every selector is `.dark .<util>` (or a variant), which is  */
-/* +1 class more specific than the utility itself, so it wins without         */
-/* !important. Intentional-dark classes (text-white, bg-gray-800/900,         */
-/* bg-black/*, colored solid buttons) are deliberately NOT listed, so the     */
-/* sidebar, terminal blocks and modal backdrops stay dark in both modes.      */
-/* These rules live outside @layer so Tailwind's purge never drops them.      */
+/* There is no override layer here any more, and that is the point. Dark mode */
+/* used to be a list of `.dark .bg-gray-50 {}` rules in this file, one per     */
+/* utility. An override matches the BARE class, so it needed a fresh rule for */
+/* every variant, every colour family and every gray step, forever, and it    */
+/* had already lost: 444 coloured tint sites went unremapped, `disabled:`     */
+/* appeared zero times against 27 sites, and `bg-blue-50/50` could not match  */
+/* `.dark .bg-blue-50` at all because that is a different class name.         */
+/*                                                                            */
+/* The flip now lives in each utility's own VALUE                             */
+/* (`rgb(var(--bg-red-50, 254 242 242) / <alpha-value>)`), so every variant   */
+/* reads the same variable and needs no rule. The variables and the single    */
+/* formula behind them are in ../../tailwind.tokens.js; the `.dark` block      */
+/* holding their values is emitted by the plugin in tailwind.config.js.       */
+/*                                                                            */
+/* Only two things still belong here: the semantic surfaces above, and the    */
+/* typography plugin's generated `.prose` styles below, which are not         */
+/* utilities and so cannot be tokenized the same way.                         */
 /* -------------------------------------------------------------------------- */
-
-/* Surfaces */
-.dark .bg-white {
-  background-color: rgb(var(--color-surface));
-}
-.dark .bg-gray-50 {
-  background-color: rgb(var(--color-canvas));
-}
-.dark .bg-gray-100 {
-  background-color: rgb(var(--color-elevated));
-}
-.dark .bg-gray-200 {
-  background-color: rgb(var(--color-elevated));
-}
-
-/* Surface variants: hover / odd / even / focus */
-.dark .hover\:bg-white:hover {
-  background-color: rgb(var(--color-surface));
-}
-.dark .hover\:bg-gray-50:hover {
-  background-color: rgb(var(--color-surface-muted));
-}
-.dark .hover\:bg-gray-100:hover {
-  background-color: rgb(var(--color-elevated));
-}
-.dark .hover\:bg-gray-200:hover {
-  background-color: rgb(var(--color-elevated));
-}
-.dark .odd\:bg-gray-50:nth-child(odd) {
-  background-color: rgb(var(--color-surface-muted));
-}
-.dark .even\:bg-gray-50:nth-child(even) {
-  background-color: rgb(var(--color-surface-muted));
-}
-.dark .focus\:bg-gray-50:focus {
-  background-color: rgb(var(--color-surface-muted));
-}
-
-/* Text */
-.dark .text-gray-900,
-.dark .text-gray-800 {
-  color: rgb(var(--color-ink));
-}
-.dark .text-gray-700,
-.dark .text-gray-600 {
-  color: rgb(var(--color-ink-muted));
-}
-.dark .text-gray-500,
-.dark .text-gray-400 {
-  color: rgb(var(--color-ink-subtle));
-}
-.dark .hover\:text-gray-900:hover,
-.dark .hover\:text-gray-800:hover,
-.dark .hover\:text-gray-700:hover {
-  color: rgb(var(--color-ink));
-}
-.dark .hover\:text-gray-600:hover,
-.dark .hover\:text-gray-500:hover {
-  color: rgb(var(--color-ink-muted));
-}
-
-/* Borders */
-.dark .border-gray-100,
-.dark .border-gray-200,
-.dark .border-gray-300 {
-  border-color: rgb(var(--color-hairline));
-}
-.dark .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
-.dark .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
-  border-color: rgb(var(--color-hairline));
-}
-.dark .ring-gray-200,
-.dark .ring-gray-300 {
-  --tw-ring-color: rgb(var(--color-hairline));
-}
-
-/* Placeholders */
-.dark .placeholder-gray-400::placeholder,
-.dark .placeholder-gray-500::placeholder,
-.dark .placeholder\:text-gray-400::placeholder,
-.dark .placeholder\:text-gray-500::placeholder {
-  color: rgb(var(--color-ink-subtle));
-}
-
-/* Brand links and tints: keep bioaf legible on a dark surface */
-.dark .text-bioaf-600,
-.dark .text-bioaf-700,
-.dark .text-bioaf-800 {
-  color: rgb(56 189 248); /* bioaf-400 */
-}
-.dark .hover\:text-bioaf-600:hover,
-.dark .hover\:text-bioaf-700:hover,
-.dark .hover\:text-bioaf-800:hover {
-  color: rgb(125 211 252); /* bioaf-300 */
-}
-.dark .bg-bioaf-50 {
-  background-color: rgb(56 189 248 / 0.12);
-}
-.dark .bg-bioaf-100 {
-  background-color: rgb(56 189 248 / 0.18);
-}
-.dark .hover\:bg-bioaf-50:hover {
-  background-color: rgb(56 189 248 / 0.16);
-}
-.dark .hover\:bg-bioaf-100:hover {
-  background-color: rgb(56 189 248 / 0.22);
-}
-.dark .border-bioaf-100,
-.dark .border-bioaf-200 {
-  border-color: rgb(56 189 248 / 0.35);
-}
 
 /* Long-form markdown rendered by the typography plugin */
 .dark .prose {

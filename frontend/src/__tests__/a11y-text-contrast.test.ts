@@ -10,8 +10,9 @@ import { join } from "path";
 // clears AA on the backgrounds this app actually uses while staying visibly
 // lighter than body text, which is what the shade was chosen for.
 //
-// Dark mode is unaffected: globals.css already maps `.dark .text-gray-500` and
-// `.dark .text-gray-400` to the same token.
+// Dark mode is unaffected: `text-gray-500` and `text-gray-400` resolve to the
+// same dark token (`--fg-gray-500` / `--fg-gray-400`, both --color-ink-subtle).
+// See tailwind.tokens.js and dark-theme-tokens.test.ts.
 //
 // THE SHADE DEPENDS ON THE BACKGROUND, and the first version of this sweep got
 // that wrong. The sidebar is permanently dark (`bg-gray-900`) regardless of
