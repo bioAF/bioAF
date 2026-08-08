@@ -18,6 +18,53 @@ logger = logging.getLogger("bioaf.plot_archive_service")
 # Track last scan timestamp per org
 _last_scan: dict[int, datetime] = {}
 
+# Directories that hold an HTML report's own furniture rather than its figures.
+#
+# Pipelines publish whole report trees, not just images, and the scanner used to
+# index every .png/.svg/.pdf under the results bucket. On the deployed instance
+# that meant 52 of 188 archive entries were Qualimap theme assets: up.png,
+# down.png, plus.png, bgtop.png, comment-bright.png and the rest, 13 filenames
+# across 4 samples, all under `<sample>/css/`.
+#
+# The discriminator is the DIRECTORY, not the filename. Qualimap writes its
+# chrome to `css/` and its real figures to the sibling `images_qualimapReport/`,
+# so a filename blocklist would never end and would still miss the next tool's
+# icons. These names are the conventional asset directories of the report
+# generators in this space (Sphinx for Qualimap, plus the usual web scaffolding);
+# none of them is a place a pipeline puts a figure it wants a scientist to see.
+REPORT_ASSET_DIRS = frozenset(
+    {
+        "css",
+        "js",
+        "font",
+        "fonts",
+        "_static",
+        "_sources",
+        "static",
+        "assets",
+        "scripts",
+        "style",
+        "styles",
+        "themes",
+        "theme",
+        "icons",
+        "vendor",
+    }
+)
+
+
+def is_report_asset(object_name: str) -> bool:
+    """True when this object lives inside an HTML report's asset directory.
+
+    Whole path SEGMENTS are compared, never substrings. `images_qualimapReport`
+    contains "images" and sits one directory away from the chrome this rejects;
+    a substring test would throw away 24 genuine Qualimap figures to remove 52
+    icons. The filename itself is excluded from the comparison for the same
+    reason: `plots/css.png` is a plot.
+    """
+    directories = object_name.split("/")[:-1]
+    return any(segment.lower() in REPORT_ASSET_DIRS for segment in directories)
+
 
 class PlotArchiveService:
     @staticmethod
@@ -176,6 +223,11 @@ class PlotArchiveService:
 
                         # Filter image files
                         if not name.lower().endswith((".png", ".svg", ".pdf")):
+                            continue
+
+                        # An image file is not automatically a plot. Skip the
+                        # furniture of any HTML report published alongside it.
+                        if is_report_asset(name):
                             continue
 
                         # Check not already in archive
