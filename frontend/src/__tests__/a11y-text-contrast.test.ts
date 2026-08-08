@@ -44,12 +44,15 @@ function tsxFiles(dir: string): string[] {
 // (`bg-black/40` sits behind a white panel, so text on it is unaffected) or as
 // a `hover:` state.
 const DARK_SURFACES = [
-  "components/layout/Sidebar.tsx",
-  "components/layout/NavItem.tsx",
   // The bg-gray-900 boot splash. It used to be inline in `app/(app)/layout.tsx`,
   // which is what this list named until the splash grew a failure state and moved
   // into its own component; the layout has no grey text left and no longer needs
   // an exemption.
+  //
+  // Sidebar.tsx and NavItem.tsx were here too, and are not any more: the nav moved
+  // onto `bg-surface` on 2026-08-08 so the shell is one plane in both themes.
+  // On a white panel the exemption would have permitted 2.54:1 text. Held by
+  // app-shell-surface.test.ts.
   "components/layout/BootSplash.tsx",
 ];
 

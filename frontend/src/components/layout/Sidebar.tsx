@@ -68,8 +68,8 @@ function SidebarChildItem({
       onClick={onNavigate}
       className={`block pl-10 pr-3 py-1.5 rounded-md text-sm transition-colors ${
         isActive
-          ? "bg-bioaf-700 text-white"
-          : "text-gray-400 hover:bg-gray-800 hover:text-white"
+          ? "bg-bioaf-50 text-bioaf-700"
+          : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
       }`}
     >
       {child.label}
@@ -100,8 +100,8 @@ function SidebarSection({
         onClick={onNavigate}
         className={`flex items-center gap-3 px-3 py-2 rounded-md transition-colors ${
           isSectionActive
-            ? "bg-bioaf-700 text-white"
-            : "text-gray-300 hover:bg-gray-800 hover:text-white"
+            ? "bg-bioaf-50 text-bioaf-700"
+            : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
         }`}
       >
         <NavIcon name={section.icon} testId={`nav-icon-${section.label}`} />
@@ -116,8 +116,8 @@ function SidebarSection({
         onClick={onToggle}
         className={`w-full flex items-center justify-between px-3 py-2 rounded-md transition-colors ${
           isSectionActive
-            ? "text-white bg-gray-800"
-            : "text-gray-300 hover:bg-gray-800 hover:text-white"
+            ? "text-gray-900 bg-gray-100"
+            : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
         }`}
       >
         <span className="flex items-center gap-3">
@@ -235,14 +235,14 @@ export function Sidebar({
       aria-label={mobileOpen ? "Main navigation" : undefined}
       className={`${collapsed ? "w-12" : "w-64"} ${
         mobileOpen ? "translate-x-0" : "-translate-x-full"
-      } fixed inset-y-0 left-0 z-40 md:static md:z-auto md:translate-x-0 bg-gray-900 text-white min-h-screen flex flex-col transition-transform md:transition-[width] duration-150 dark:border-r dark:border-gray-800`}
+      } fixed inset-y-0 left-0 z-40 md:static md:z-auto md:translate-x-0 bg-surface text-ink border-r border-hairline min-h-screen flex flex-col transition-transform md:transition-[width] duration-150`}
       id="app-sidebar"
       data-testid="sidebar"
       data-collapsed={collapsed ? "true" : "false"}
     >
       <div
         data-testid="sidebar-header"
-        className={`h-16 flex items-center border-b border-gray-700 ${collapsed ? "justify-center px-2" : "justify-between px-4"}`}
+        className={`h-16 flex items-center border-b border-hairline ${collapsed ? "justify-center px-2" : "justify-between px-4"}`}
       >
         {collapsed ? (
           <button
@@ -251,11 +251,11 @@ export function Sidebar({
             aria-label="Expand sidebar"
             aria-expanded={false}
             data-testid="sidebar-collapse-toggle"
-            className="rounded-md hover:bg-gray-800"
+            className="rounded-md hover:bg-gray-100"
           >
             <span
               data-testid="sidebar-logo-backdrop"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100"
             >
               <img
                 src="/bioAF-logo.svg"
@@ -270,7 +270,7 @@ export function Sidebar({
             <Link href="/dashboard" onClick={closeDrawer} className="flex items-center gap-2">
               <span
                 data-testid="sidebar-logo-backdrop"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-100"
               >
                 <img
                   src="/bioAF-logo.svg"
@@ -280,8 +280,8 @@ export function Sidebar({
                 />
               </span>
               <span className="flex flex-col leading-none">
-                <span className="text-base font-bold text-bioaf-400">bioAF</span>
-                <span className="mt-0.5 text-[10px] tracking-tight text-gray-400 whitespace-nowrap">
+                <span className="text-base font-bold text-bioaf-700">bioAF</span>
+                <span className="mt-0.5 text-[10px] tracking-tight text-gray-600 whitespace-nowrap">
                   Comp Bio Automation Framework
                 </span>
               </span>
@@ -292,7 +292,7 @@ export function Sidebar({
               aria-label="Collapse sidebar"
               aria-expanded={true}
               data-testid="sidebar-collapse-toggle"
-              className="p-1 rounded-md text-gray-400 hover:bg-gray-800 hover:text-white"
+              className="p-1 rounded-md text-gray-600 hover:bg-gray-100 hover:text-gray-900"
             >
               <CollapseToggleIcon collapsed={false} />
             </button>
@@ -324,8 +324,8 @@ export function Sidebar({
             const active = sectionIsActive(section, pathname);
             const cls = `flex h-10 w-10 items-center justify-center rounded-md transition-colors ${
               active
-                ? "bg-bioaf-700 text-white"
-                : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                ? "bg-bioaf-50 text-bioaf-700"
+                : "text-gray-700 hover:bg-gray-100 hover:text-gray-900"
             }`;
             return section.children ? (
               <button
@@ -357,8 +357,8 @@ export function Sidebar({
         </nav>
       )}
 
-      <div className={`border-t border-gray-700 ${collapsed ? "p-2 text-center" : "p-4"}`}>
-        <div className="text-xs text-gray-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
+      <div className={`border-t border-hairline ${collapsed ? "p-2 text-center" : "p-4"}`}>
+        <div className="text-xs text-gray-600">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
       </div>
     </aside>
     </>

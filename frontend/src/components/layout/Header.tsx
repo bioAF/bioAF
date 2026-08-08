@@ -47,10 +47,15 @@ export function Header({
     router.push("/login");
   };
 
+  // The header carries `bg-surface`/`border-hairline` rather than
+  // `bg-white`/`border-gray-200`, which paint identically in both themes. The
+  // header and the sidebar are one plane, and naming the same token in both is
+  // what keeps them that way when one of them is edited later. Held by
+  // app-shell-surface.test.ts.
   return (
     <>
     <DeploymentBanner />
-    <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between gap-4 px-6">
+    <header className="h-16 bg-surface border-b border-hairline flex items-center justify-between gap-4 px-6">
       <button
         type="button"
         onClick={onOpenNav}

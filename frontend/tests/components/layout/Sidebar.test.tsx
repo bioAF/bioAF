@@ -59,6 +59,15 @@ jest.mock("@/hooks/usePermissions", () => ({
   clearPermissionsCache: jest.fn(),
 }));
 
+// These tests are about WHICH item is marked active, not what the marker looks
+// like. They used to pin `bg-bioaf-700` and `bg-gray-800` inline, which made them
+// a second source of truth for the palette: the 2026-08-08 move of the sidebar
+// onto the shell surface broke three of them without any behaviour changing.
+// The colours themselves are owned by src/__tests__/app-shell-surface.test.ts,
+// which checks them for contrast in both themes.
+const ACTIVE_MARKER = "bg-bioaf-50";
+const EXPANDED_SECTION_MARKER = "bg-gray-100";
+
 describe("Sidebar", () => {
   beforeEach(() => {
     mockPathname.mockReturnValue("/dashboard");
@@ -164,7 +173,7 @@ describe("Sidebar", () => {
     mockPathname.mockReturnValue("/projects/experiments");
     render(<Sidebar />);
     const experimentsButton = screen.getByText("Experiments").closest("button");
-    expect(experimentsButton?.className).toContain("bg-gray-800");
+    expect(experimentsButton?.className).toContain(EXPANDED_SECTION_MARKER);
     expect(screen.getByText("Experiment List")).toBeInTheDocument();
   });
 
@@ -194,7 +203,7 @@ describe("Sidebar", () => {
     mockPathname.mockReturnValue("/dashboard");
     render(<Sidebar />);
     const dashboardLink = screen.getByText("Dashboard").closest("a");
-    expect(dashboardLink?.className).toContain("bg-bioaf-700");
+    expect(dashboardLink?.className).toContain(ACTIVE_MARKER);
   });
 
   it("highlights active path and auto-expands parent for child items", () => {
@@ -204,7 +213,7 @@ describe("Sidebar", () => {
     expect(screen.getByText("Pipeline Runs")).toBeInTheDocument();
     // Child item should be highlighted
     const runsLink = screen.getByText("Pipeline Runs").closest("a");
-    expect(runsLink?.className).toContain("bg-bioaf-700");
+    expect(runsLink?.className).toContain(ACTIVE_MARKER);
   });
 
   it("shows child items when parent section is expanded", () => {
