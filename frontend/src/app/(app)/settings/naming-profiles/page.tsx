@@ -18,6 +18,7 @@ export default function SettingsNamingProfilesPage() {
   const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showWizard, setShowWizard] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [editingProfile, setEditingProfile] = useState<NamingProfile | null>(null);
   const [detailProfile, setDetailProfile] = useState<NamingProfile | null>(null);
   const [error, setError] = useState("");
@@ -73,7 +74,12 @@ export default function SettingsNamingProfilesPage() {
     <main className="flex-1 overflow-y-auto p-6">
       <div className="max-w-6xl mx-auto">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Naming Profiles</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Naming Profiles</h1>
+            <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+              Rules that tell bioAF how your team encodes information in filenames, so it can read them without renaming anything.
+            </p>
+          </div>
           {!showWizard && (
             <button
               onClick={() => setShowWizard(true)}
@@ -91,11 +97,22 @@ export default function SettingsNamingProfilesPage() {
           <div className="mb-4 p-3 bg-green-50 text-green-700 rounded-lg">{message}</div>
         )}
 
-        {/* Feature breadcrumb */}
-        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-5">
-          <h2 className="text-base font-semibold text-blue-900 mb-1">
+        {/* Quick Start Guide. Same disclosure as Notebook Sessions and Work
+            Nodes: the explanation is long, and a new user needs it once. */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowGuide(!showGuide)}
+            aria-expanded={showGuide}
+            aria-controls="naming-profiles-guide"
+            className="inline-flex items-center gap-1.5 text-sm text-bioaf-600 hover:text-bioaf-700"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
             How naming profiles work
-          </h2>
+          </button>
+          {showGuide && (
+          <div id="naming-profiles-guide" className="mt-2 bg-blue-50 border border-blue-200 rounded-lg p-5">
           <p className="text-sm text-blue-700 mb-3">
             A naming profile tells bioAF how your team encodes
             information in filenames. bioAF <em>reads</em> filenames
@@ -130,6 +147,8 @@ export default function SettingsNamingProfilesPage() {
             There is no default profile shipped with bioAF. Create your
             team{"'"}s profile to start parsing filenames.
           </p>
+          </div>
+          )}
         </div>
 
         {showWizard && (

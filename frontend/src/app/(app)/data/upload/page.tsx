@@ -312,7 +312,10 @@ export default function DataUploadPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Data Upload</h1>
+      <h1 className="text-2xl font-bold mb-1">Data Upload</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        Upload sequencing data and other files, and attach them to a project, experiment or sample.
+      </p>
 
       <div className="space-y-6">
         {/* Drop zone. A <label> rather than a <div> so the whole area is still

@@ -173,7 +173,10 @@ export default function InfraCostCenterPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Cost Center</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-1">Cost Center</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        What this installation is spending, broken down by service and by project.
+      </p>
 
       {billingExport && !billingExport.configured && !billingExport.dataset_id && (
         <div className="mb-4 p-4 rounded-lg border border-amber-200 bg-amber-50 flex items-center justify-between">

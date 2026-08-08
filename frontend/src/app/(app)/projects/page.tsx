@@ -95,7 +95,12 @@ function ProjectsPageInner() {
     <>
       <main className="flex-1 overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Projects</h1>
+          <div>
+            <h1 className="text-2xl font-bold">Project List</h1>
+            <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+              Projects group related experiments, and the samples and files produced under them.
+            </p>
+          </div>
           {canCreate && (
             <button
               onClick={() => setShowCreateModal(true)}

@@ -102,7 +102,12 @@ export default function PipelineRunsPage() {
       ) : (
       <>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Pipeline Runs</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Pipeline Runs</h1>
+          <p data-testid="page-description" className="text-sm text-ink-subtle mt-1">
+            Every pipeline execution, with its status, progress and review verdict.
+          </p>
+        </div>
         <select aria-label="Filter by status" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-md px-3 py-1.5 text-sm">
           <option value="">All statuses</option>
           <option value="running">Running</option>

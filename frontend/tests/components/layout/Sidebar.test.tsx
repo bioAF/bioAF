@@ -143,15 +143,15 @@ describe("Sidebar", () => {
   it("renders Experiments as an expandable section with its children", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Experiments"));
-    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Project List")).toBeInTheDocument();
     expect(screen.getByText("Experiment Templates")).toBeInTheDocument();
     expect(screen.getByText("Experiment List")).toBeInTheDocument();
   });
 
-  it("Projects child navigates to /projects", () => {
+  it("Project List child navigates to /projects", () => {
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Experiments"));
-    const projectListLink = screen.getByText("Projects").closest("a");
+    const projectListLink = screen.getByText("Project List").closest("a");
     expect(projectListLink).toHaveAttribute("href", "/projects");
   });
 

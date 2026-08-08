@@ -587,7 +587,10 @@ export default function InfraComponentsPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-        <h1 className="text-2xl font-bold mb-6">Components</h1>
+        <h1 className="text-2xl font-bold mb-1">Components</h1>
+        <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+          The optional services that make up this installation, and whether each one is enabled and healthy.
+        </p>
 
         {loading ? (
           <div className="flex items-center justify-center py-20">

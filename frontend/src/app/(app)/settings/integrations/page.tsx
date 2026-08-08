@@ -49,7 +49,10 @@ export default function IntegrationsPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Integrations</h1>
+      <h1 className="text-2xl font-bold mb-1">Integrations</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        Connections to the outside services this instance uses: your cloud provider, SMTP, Slack, Seqera and LLM providers.
+      </p>
 
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex -mb-px space-x-8">

@@ -121,7 +121,10 @@ export default function WorkbenchSettingsPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Workbench Settings</h1>
+      <h1 className="text-2xl font-bold mb-1">Workbench Settings</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        Instance-wide limits and defaults for notebook sessions and work nodes.
+      </p>
 
       <div className="max-w-2xl space-y-8">
         {/* Work Nodes */}

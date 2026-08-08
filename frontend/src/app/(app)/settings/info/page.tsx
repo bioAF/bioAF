@@ -176,7 +176,10 @@ export default function SettingsInfoPage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Platform Info</h1>
+      <h1 className="text-2xl font-bold mb-1">Platform Info</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        The version this instance is running, its upgrade history, and the control to install an update.
+      </p>
 
       <div className="bg-white rounded-lg shadow p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">Platform Version</h2>

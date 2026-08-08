@@ -88,7 +88,12 @@ export default function DataReferencesPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Reference Data</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Reference Data</h1>
+          <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+            Genomes, annotations and index files that pipelines read at run time.
+          </p>
+        </div>
         {canAdd && (
           <button
             onClick={() => router.push("/data/references/add")}

@@ -137,7 +137,12 @@ export default function AuditLogPage() {
       <Breadcrumb />
       <main className="flex-1 overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Audit Log</h1>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Audit Log</h1>
+            <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+              A record of who did what in this instance, exportable for compliance review.
+            </p>
+          </div>
           <button
             onClick={handleExport}
             disabled={exporting}

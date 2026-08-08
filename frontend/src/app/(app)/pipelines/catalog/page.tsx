@@ -80,7 +80,7 @@ export default function PipelineCatalogPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold">Pipeline Catalog</h1>
-            <p className="text-sm text-ink-subtle mt-1">
+            <p data-testid="page-description" className="text-sm text-ink-subtle mt-1">
               Built-in NF-Core pipelines and your organization&apos;s custom pipelines.
             </p>
           </div>

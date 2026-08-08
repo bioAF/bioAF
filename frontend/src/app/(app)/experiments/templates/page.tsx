@@ -144,7 +144,12 @@ export default function ExperimentTemplatesPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Experiment Templates</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Experiment Templates</h1>
+          <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+            Reusable field definitions that pre-fill an experiment&apos;s metadata and sample structure when you register a new one.
+          </p>
+        </div>
         <button
           onClick={() => { setShowForm(!showForm); setEditingId(null); }}
           className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"

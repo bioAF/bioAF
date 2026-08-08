@@ -209,7 +209,10 @@ function QCDashboardsPageInner() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-        <h1 className="text-2xl font-bold mb-6">QC Dashboards</h1>
+        <h1 className="text-2xl font-bold mb-1">QC Dashboards</h1>
+        <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+          Quality-control summaries generated per pipeline run, with metrics, plots and an exportable report.
+        </p>
 
         {selected ? (
           <DashboardDetail

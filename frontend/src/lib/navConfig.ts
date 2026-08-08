@@ -51,7 +51,7 @@ export const navConfig: NavSection[] = [
     label: "Experiments",
     icon: "folder",
     children: [
-      { label: "Projects", path: "/projects", permission: { resource: "projects", action: "view" } },
+      { label: "Project List", path: "/projects", permission: { resource: "projects", action: "view" } },
       { label: "Experiment Templates", path: "/projects/experiment-templates", permission: { resource: "experiments", action: "view" } },
       { label: "Experiment List", path: "/projects/experiments", permission: { resource: "experiments", action: "view" } },
       { label: "Dataset Browser", path: "/data/browser", permission: { resource: "experiments", action: "view" } },

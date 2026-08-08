@@ -49,7 +49,7 @@ export default function BetaFeaturesPage() {
   return (
     <main className="flex-1 overflow-y-auto p-6">
       <h1 className="text-2xl font-bold mb-2">Beta Features</h1>
-      <p className="text-sm text-gray-500 mb-6">
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
         Preview features that are not yet enabled for everyone. Toggles here affect this entire
         instance.
       </p>

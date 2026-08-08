@@ -363,7 +363,7 @@ export default function CellxgenePage() {
         </button>
       </div>
 
-      <p className="text-sm text-gray-500 mb-6">
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
         Publish h5ad datasets for interactive single-cell exploration with cellxgene.
       </p>
 

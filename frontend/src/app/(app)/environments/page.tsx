@@ -299,7 +299,7 @@ export default function EnvironmentsPage() {
             {/* "Templates" is the word a non-technical user can carry between here
                 and Pipeline Templates, but it is vaguer than the "Images" it
                 replaced, so the page says what these ones actually configure. */}
-            <p className="text-sm text-gray-600 mt-1">
+            <p data-testid="page-description" className="text-sm text-gray-600 mt-1">
               Template images that define the software available in Notebook Sessions and on Work Nodes.
             </p>
           </div>

@@ -244,7 +244,12 @@ export default function LiteratureLibraryPage() {
       <Breadcrumb />
       <main className="flex-1 overflow-y-auto p-6">
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Literature Library</h1>
+          <div>
+            <h1 className="text-2xl font-bold">Literature Library</h1>
+            <p data-testid="page-description" className="text-sm text-gray-500 mt-1">
+              Papers your lab works from, with their metadata, full text and any validation studies run against them.
+            </p>
+          </div>
           <div className="flex gap-2">
             <button
               onClick={() => router.push("/lab-knowledge/literature/recommendations")}

@@ -115,7 +115,10 @@ export default function PlotArchivePage() {
 
   return (
     <main className="flex-1 overflow-y-auto p-6">
-      <h1 className="text-2xl font-bold mb-6">Plot Archive</h1>
+      <h1 className="text-2xl font-bold mb-1">Plot Archive</h1>
+      <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+        Figures saved from pipeline runs and notebook sessions, kept together and searchable across experiments.
+      </p>
 
       <div className="space-y-4">
         {/* Filters */}

@@ -340,7 +340,10 @@ export default function InfraBackupPage() {
   return (
     <>
       <main className="flex-1 overflow-y-auto p-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">Backup & Recovery</h1>
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Backup & Recovery</h1>
+        <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
+          Scheduled backups of the platform database, and the restore points you can recover to.
+        </p>
         {loadError && (
           <div className="mb-6">
             <ErrorState

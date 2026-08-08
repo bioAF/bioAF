@@ -312,7 +312,7 @@ export default function PipelineEnvironmentsPage() {
                     the purpose. This one leads with what the template is FOR and
                     mentions Conda as the mechanism, which is the same trade the
                     Workbench Templates note makes. */}
-                <p className="text-sm text-gray-600 mt-1">
+                <p data-testid="page-description" className="text-sm text-gray-600 mt-1">
                   Templates that define the runtime environment for custom pipelines, using Conda.
                 </p>
               </div>
