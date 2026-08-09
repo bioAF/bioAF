@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { NotificationItem } from "./NotificationItem";
 import { useToast } from "@/components/shared/Toast";
 
@@ -26,22 +27,29 @@ export function NotificationDropdown({ onClose, onCountChange }: Props) {
   const toast = useToast();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  // "No notifications" was reached from a rejection as readily as from an empty
+  // list, so an outage read as an inbox the user had already cleared.
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const load = async () => {
+      setLoading(true);
       try {
         const data = await api.get<{ notifications: Notification[] }>(
           "/api/notifications?page_size=10"
         );
         setNotifications(data.notifications);
-      } catch {
-        // ignore
+        setLoadFailed(false);
+      } catch (e) {
+        logError("loading notifications", e);
+        setLoadFailed(true);
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, []);
+  }, [reloadKey]);
 
   const handleMarkAllRead = async () => {
     try {
@@ -80,6 +88,19 @@ export function NotificationDropdown({ onClose, onCountChange }: Props) {
       <div className="max-h-96 overflow-y-auto">
         {loading ? (
           <div className="p-4 text-center text-gray-500 text-sm">Loading...</div>
+        ) : loadFailed ? (
+          <div
+            data-testid="notifications-load-failed"
+            className="p-4 text-center text-gray-500 text-sm"
+          >
+            <p>{loadFailureMessage("Your notifications")}</p>
+            <button
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="mt-2 text-xs text-bioaf-600 hover:text-bioaf-700 underline"
+            >
+              Retry
+            </button>
+          </div>
         ) : notifications.length === 0 ? (
           <div className="p-4 text-center text-gray-500 text-sm">No notifications</div>
         ) : (

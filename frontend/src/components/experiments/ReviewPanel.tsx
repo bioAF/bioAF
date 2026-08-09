@@ -3,6 +3,7 @@
 import { useToast } from "@/components/shared/Toast";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ReviewBadge } from "./ReviewBadge";
 import type {
   PipelineRunReview,
@@ -21,6 +22,11 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
   const [reviews, setReviews] = useState<PipelineRunReview[]>([]);
   const [activeReview, setActiveReview] = useState<PipelineRunReview | null>(null);
   const [loading, setLoading] = useState(true);
+  // A run whose review history could not be read is not a run that was never
+  // reviewed. Both states left `reviews` at [] and `activeReview` at null, so
+  // they rendered identically -- and the panel then invited a second review
+  // over a verdict the reviewer could not see.
+  const [reviewsFailed, setReviewsFailed] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [verdict, setVerdict] = useState<ReviewVerdict>("approved");
   const [notes, setNotes] = useState("");
@@ -41,8 +47,10 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
       ]);
       setReviews(reviewList.reviews);
       setActiveReview(active);
-    } catch {
-      // ignore
+      setReviewsFailed(false);
+    } catch (e) {
+      logError(`loading the reviews for pipeline run ${pipelineRunId}`, e);
+      setReviewsFailed(true);
     } finally {
       setLoading(false);
     }
@@ -72,6 +80,16 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
 
   return (
     <div className="space-y-4">
+      {reviewsFailed && (
+        <p
+          data-testid="reviews-load-failed"
+          className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3"
+        >
+          {loadFailureMessage("This run's reviews")} Until they load, a new
+          review cannot be filed, because there may already be one.
+        </p>
+      )}
+
       {activeReview && (
         <div className="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
           <div className="flex items-center justify-between mb-2">
@@ -97,7 +115,13 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
         <div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
+            disabled={reviewsFailed}
+            title={
+              reviewsFailed
+                ? "The existing reviews could not be loaded, so a new one cannot be filed yet."
+                : undefined
+            }
+            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {activeReview ? "Submit New Review" : "Submit Review"}
           </button>

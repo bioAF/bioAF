@@ -90,6 +90,7 @@ export default function NotebooksPage() {
   const [provenance, setProvenance] = useState<SessionProvenance | null>(null);
   const [showFileSelector, setShowFileSelector] = useState(false);
   const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
+  const [experimentFilesFailed, setExperimentFilesFailed] = useState(false);
   const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [activeBranchCount, setActiveBranchCount] = useState(0);
@@ -302,8 +303,13 @@ export default function NotebooksPage() {
           s.git_branch_name
       );
       setActiveBranchCount(active.length);
-    } catch {
+      setExperimentFilesFailed(false);
+    } catch (e) {
+      // "No files found for this experiment." is a claim about the experiment,
+      // read inside a launch picker. A failed request must not make it.
+      logError(`loading the files for experiment ${experimentId}`, e);
       setExperimentFiles([]);
+      setExperimentFilesFailed(true);
     }
   }
 
@@ -893,7 +899,14 @@ export default function NotebooksPage() {
           {scopeType === "experiment" && selectedExperiment && (
             <div>
               <label className="text-sm text-gray-500 mb-2 block">Input Files</label>
-              {experimentFiles.length === 0 ? (
+              {experimentFilesFailed ? (
+                <p
+                  data-testid="experiment-files-load-failed"
+                  className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2"
+                >
+                  {loadFailureMessage("This experiment's files")}
+                </p>
+              ) : experimentFiles.length === 0 ? (
                 <p className="text-xs text-gray-500">
                   No files found for this experiment.
                 </p>

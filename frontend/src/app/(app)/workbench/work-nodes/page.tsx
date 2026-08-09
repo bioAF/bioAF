@@ -85,6 +85,7 @@ export default function WorkNodesPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(null);
   const [experimentFiles, setExperimentFiles] = useState<FileResponse[]>([]);
+  const [experimentFilesFailed, setExperimentFilesFailed] = useState(false);
   const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
@@ -300,8 +301,12 @@ export default function WorkNodesPage() {
       } else {
         setSampleNames({});
       }
-    } catch {
+      setExperimentFilesFailed(false);
+    } catch (e) {
+      // Same claim, same launch picker, different page.
+      logError(`loading the files for experiment ${experimentId}`, e);
       setExperimentFiles([]);
+      setExperimentFilesFailed(true);
     }
   }
 
@@ -1104,7 +1109,14 @@ export default function WorkNodesPage() {
               {scopeType === "experiment" && selectedExperimentId && (
                 <section>
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Input Files</h3>
-                  {experimentFiles.length === 0 ? (
+                  {experimentFilesFailed ? (
+                    <p
+                      data-testid="experiment-files-load-failed"
+                      className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2"
+                    >
+                      {loadFailureMessage("This experiment's files")}
+                    </p>
+                  ) : experimentFiles.length === 0 ? (
                     <p className="text-xs text-gray-500">
                       No files found for this experiment.
                     </p>

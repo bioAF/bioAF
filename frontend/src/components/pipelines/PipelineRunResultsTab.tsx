@@ -6,7 +6,9 @@ import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
 import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
-import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { api, ApiError, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useFileContentUrl, usePlotThumbnailContentUrl } from "@/hooks/useContentUrl";
 import type {
   PlotArchiveListResponse,
@@ -134,10 +136,17 @@ function PlotThumbnail({
 export function PipelineRunResultsTab({ pipelineRunId }: Props) {
   const [dashboard, setDashboard] = useState<QCDashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  // "missing" and "could not be read" are different answers. Only a 404 means
+  // the run genuinely has no dashboard; anything else is an outage, and saying
+  // "no QC dashboard yet" for it is a claim about the run reached from a failed
+  // HTTP call.
   const [dashboardMissing, setDashboardMissing] = useState(false);
+  const [dashboardFailed, setDashboardFailed] = useState(false);
 
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [plotsLoading, setPlotsLoading] = useState(true);
+  const [plotsFailed, setPlotsFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
@@ -149,15 +158,20 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     (async () => {
       setDashboardLoading(true);
       setDashboardMissing(false);
+      setDashboardFailed(false);
       try {
         const data = await api.get<QCDashboardResponse>(
           `/api/qc-dashboards/by-run/${pipelineRunId}`,
         );
         if (!cancelled) setDashboard(data);
-      } catch {
+      } catch (e) {
         if (!cancelled) {
           setDashboard(null);
-          setDashboardMissing(true);
+          if (e instanceof ApiError && e.status === 404) setDashboardMissing(true);
+          else {
+            logError(`loading the QC dashboard for run ${pipelineRunId}`, e);
+            setDashboardFailed(true);
+          }
         }
       } finally {
         if (!cancelled) setDashboardLoading(false);
@@ -165,6 +179,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     })();
     (async () => {
       setPlotsLoading(true);
+      setPlotsFailed(false);
       try {
         const params = new URLSearchParams({
           pipeline_run_id: String(pipelineRunId),
@@ -173,8 +188,12 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
         });
         const data = await api.get<PlotArchiveListResponse>(`/api/plots?${params}`);
         if (!cancelled) setPlots(data.plots);
-      } catch {
-        if (!cancelled) setPlots([]);
+      } catch (e) {
+        if (!cancelled) {
+          logError(`loading the plot archive for run ${pipelineRunId}`, e);
+          setPlots([]);
+          setPlotsFailed(true);
+        }
       } finally {
         if (!cancelled) setPlotsLoading(false);
       }
@@ -182,7 +201,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [pipelineRunId]);
+  }, [pipelineRunId, reloadKey]);
 
   const handleExpand = useCallback(async (plot: PlotArchiveResponse) => {
     const isPdf = plot.file?.file_type?.toLowerCase() === "pdf";
@@ -239,6 +258,13 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
               </>
             )}
           </>
+        ) : dashboardFailed ? (
+          <div data-testid="qc-dashboard-load-failed">
+            <ErrorState
+              message={loadFailureMessage("The QC dashboard for this run")}
+              onRetry={() => setReloadKey((k) => k + 1)}
+            />
+          </div>
         ) : dashboardMissing ? (
           <p className="text-sm text-gray-500">
             No QC dashboard yet for this run. Dashboards are generated automatically when the run completes.
@@ -260,6 +286,13 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
           <div className="flex items-center gap-2 text-gray-500">
             <LoadingSpinner size="sm" />
             <span>Loading plots...</span>
+          </div>
+        ) : plotsFailed ? (
+          <div data-testid="run-plots-load-failed">
+            <ErrorState
+              message={loadFailureMessage("The plots for this run")}
+              onRetry={() => setReloadKey((k) => k + 1)}
+            />
           </div>
         ) : plots.length === 0 ? (
           <p className="text-sm text-gray-500">No plots indexed for this run yet.</p>

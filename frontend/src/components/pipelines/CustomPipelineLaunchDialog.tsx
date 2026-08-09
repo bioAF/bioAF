@@ -3,6 +3,7 @@
 import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { ReferencePicker } from "@/components/references/ReferencePicker";
 import { versionChangeKind } from "@/lib/customPipelineVersions";
@@ -95,6 +96,8 @@ export function CustomPipelineLaunchDialog({
   const [projects, setProjects] = useState<ProjectOption[]>([]);
   const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [files, setFiles] = useState<FileResponse[]>([]);
+  const [filesFailed, setFilesFailed] = useState(false);
+  const [filesReloadKey, setFilesReloadKey] = useState(0);
   const [sampleNames, setSampleNames] = useState<Record<number, string>>({});
   const [loadingFiles, setLoadingFiles] = useState(false);
 
@@ -223,13 +226,19 @@ export function CustomPipelineLaunchDialog({
             }
           }
         }
-      } catch {
+        setFilesFailed(false);
+      } catch (e) {
+        // "No files available for the selected target." is a statement about
+        // the user's data, made inside a launch dialog. Proven on the demo:
+        // with /api/files failing, that is exactly what the dialog said.
+        logError("loading the input files for a custom pipeline launch", e);
         setFiles([]);
+        setFilesFailed(true);
       } finally {
         setLoadingFiles(false);
       }
     })();
-  }, [projectId, experimentId]);
+  }, [projectId, experimentId, filesReloadKey]);
 
   function toggleVersionDetails(versionId: number) {
     setExpandedVersionIds((prev) => {
@@ -312,6 +321,9 @@ export function CustomPipelineLaunchDialog({
   const launchDisabled =
     launching ||
     selectedVersion == null ||
+    // Stated rather than implied. A failed file read already leaves nothing
+    // selectable, but a launch must not depend on that being true by accident.
+    filesFailed ||
     selectedFileIds.length === 0;
 
   return (
@@ -424,6 +436,19 @@ export function CustomPipelineLaunchDialog({
             </div>
             {loadingFiles ? (
               <p className="text-sm text-gray-500">Loading files...</p>
+            ) : filesFailed ? (
+              <div
+                data-testid="launch-files-load-failed"
+                className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
+              >
+                <p>{loadFailureMessage("The input files for this target")}</p>
+                <button
+                  onClick={() => setFilesReloadKey((k) => k + 1)}
+                  className="mt-2 text-xs underline hover:no-underline"
+                >
+                  Retry
+                </button>
+              </div>
             ) : files.length === 0 ? (
               <p className="text-sm text-gray-500">
                 No files available

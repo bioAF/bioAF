@@ -15,6 +15,7 @@ import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/shared/Modal";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -47,6 +48,7 @@ export default function ProjectDetailPage() {
   // Sample viewing/picker state
   const [viewingSample, setViewingSample] = useState<(ProjectSampleResponse & { experiment_name: string }) | null>(null);
   const [showSamplePicker, setShowSamplePicker] = useState(false);
+  const [availableSamplesFailed, setAvailableSamplesFailed] = useState(false);
   const [availableSamples, setAvailableSamples] = useState<Array<{
     id: number;
     external_id: string;
@@ -122,9 +124,14 @@ export default function ProjectDetailPage() {
         }))
       );
       setAvailableSamples(flat);
-    } catch {
-      // Fallback: just show the picker empty
+      setAvailableSamplesFailed(false);
+    } catch (e) {
+      // "Fallback: just show the picker empty" is the defect stated as the
+      // intent. An empty picker reads as "there are no samples left to add",
+      // which is a claim about the user's data made from a failed request.
+      logError("loading the samples that could be added to this project", e);
       setAvailableSamples([]);
+      setAvailableSamplesFailed(true);
     }
   };
 
@@ -542,7 +549,14 @@ export default function ProjectDetailPage() {
           onChange={(e) => setSampleSearch(e.target.value)}
           className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm mb-3"
         />
-          {filteredAvailable.length === 0 ? (
+          {availableSamplesFailed ? (
+            <p
+              data-testid="available-samples-load-failed"
+              className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
+            >
+              {loadFailureMessage("The samples you could add")}
+            </p>
+          ) : filteredAvailable.length === 0 ? (
             <p className="text-gray-500 text-center py-8">No matching samples available.</p>
           ) : (
             <table className="min-w-full divide-y divide-gray-200">

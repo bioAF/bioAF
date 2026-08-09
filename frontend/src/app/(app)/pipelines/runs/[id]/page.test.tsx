@@ -306,7 +306,9 @@ describe("PipelineRunDetailPage Results tab", () => {
       }
       if (url === "/api/pipeline-runs/1/references") return Promise.resolve([]);
       if (url === "/api/qc-dashboards/by-run/1") {
-        return Promise.reject(new Error("404"));
+        // A real 404. "This run has no dashboard" and "the dashboard could not
+        // be read" are now different answers, and only the first says so.
+        return Promise.reject(new ApiError(404, "Not found"));
       }
       if (url.startsWith("/api/plots")) {
         return Promise.resolve({ plots: [], total: 0, page: 1, page_size: 24 });

@@ -147,6 +147,11 @@ function QCDashboardsPageInner() {
   const [selected, setSelected] = useState<QCDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  // Three requests were swallowed whole here: opening a dashboard, the deep
+  // link the "results ready" notification lands on, and Regenerate (a POST).
+  // Proven on the demo: with the per-dashboard GET failing, clicking a row left
+  // the page text BYTE-IDENTICAL. A dead control is worse than an error.
+  const [actionError, setActionError] = useState<string | null>(null);
   const [expandedPlot, setExpandedPlot] = useState<{ url: string; title: string } | null>(null);
   const searchParams = useSearchParams();
 
@@ -177,8 +182,12 @@ function QCDashboardsPageInner() {
       try {
         const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/by-run/${run}`);
         setSelected(data);
-      } catch {
-        // ignore - the list remains visible
+        setActionError(null);
+      } catch (e) {
+        logError(`opening the QC dashboard for run ${run}`, e);
+        setActionError(
+          `The QC dashboard for run ${run} could not be opened, so the full list is shown instead. The technical detail is in the application logs.`,
+        );
       }
     })();
   }, [searchParams]);
@@ -187,20 +196,26 @@ function QCDashboardsPageInner() {
     try {
       const data = await api.get<QCDashboardResponse>(`/api/qc-dashboards/${id}`);
       setSelected(data);
-    } catch {
-      // ignore
+      setActionError(null);
+    } catch (e) {
+      logError(`opening QC dashboard ${id}`, e);
+      setActionError(loadFailureMessage("That QC dashboard"));
     }
   };
 
   const regenerateQc = async (runId: number) => {
     setRegenerating(true);
+    setActionError(null);
     try {
       const data = await api.post<QCDashboardResponse>(`/api/qc-dashboards/regenerate/${runId}`, {});
       setSelected(data);
       const updated = await api.get<QCDashboardSummary[]>("/api/qc-dashboards");
       setDashboards(updated);
-    } catch {
-      // ignore
+    } catch (e) {
+      logError(`regenerating the QC dashboard for run ${runId}`, e);
+      setActionError(
+        "The QC dashboard could not be regenerated, so it is unchanged. The technical detail is in the application logs.",
+      );
     } finally {
       setRegenerating(false);
     }
@@ -217,6 +232,16 @@ function QCDashboardsPageInner() {
         <p data-testid="page-description" className="text-sm text-gray-500 mb-6">
           Quality-control summaries generated per pipeline run, with metrics, plots and an exportable report.
         </p>
+
+        {actionError && (
+          <p
+            data-testid="qc-action-failed"
+            role="status"
+            className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
+          >
+            {actionError}
+          </p>
+        )}
 
         {selected ? (
           <DashboardDetail

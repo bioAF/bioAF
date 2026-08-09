@@ -3,6 +3,7 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
@@ -56,6 +57,9 @@ function PublishForm({
 }) {
   const [files, setFiles] = useState<CellxgenePublishableFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(true);
+  // "No publishable h5ad files available." is a claim about the user's data.
+  // It was reached from a rejected request as readily as from an empty list.
+  const [publishableFilesFailed, setPublishableFilesFailed] = useState(false);
   const [selectedFileId, setSelectedFileId] = useState<number | null>(null);
   const [datasetName, setDatasetName] = useState("");
   const [inspection, setInspection] = useState<CellxgeneFileInspection | null>(null);
@@ -67,8 +71,10 @@ function PublishForm({
       try {
         const data = await api.get<CellxgenePublishableFile[]>("/api/cellxgene/publishable-files");
         setFiles(data);
-      } catch {
-        // ignore
+        setPublishableFilesFailed(false);
+      } catch (e) {
+        logError("loading the h5ad files that can be published to cellxgene", e);
+        setPublishableFilesFailed(true);
       } finally {
         setLoadingFiles(false);
       }
@@ -119,6 +125,13 @@ function PublishForm({
         <label className="block text-sm font-medium text-gray-700 mb-2">Select h5ad file</label>
         {loadingFiles ? (
           <p className="text-sm text-gray-500">Loading available files...</p>
+        ) : publishableFilesFailed ? (
+          <p
+            data-testid="publishable-files-load-failed"
+            className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3"
+          >
+            {loadFailureMessage("The list of publishable h5ad files")}
+          </p>
         ) : files.length === 0 ? (
           <p className="text-sm text-gray-500">No publishable h5ad files available.</p>
         ) : (
@@ -303,6 +316,7 @@ export default function CellxgenePage() {
   const [publications, setPublications] = useState<CellxgenePublicationResponse[]>([]);
   const [experiments, setExperiments] = useState<Map<number, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [publicationsError, setPublicationsError] = useState<string | null>(null);
   const [showPublishForm, setShowPublishForm] = useState(false);
   const [filterExperimentId, setFilterExperimentId] = useState<number | null>(null);
 
@@ -314,8 +328,11 @@ export default function CellxgenePage() {
         : "/api/cellxgene";
       const data = await api.get<CellxgenePublicationResponse[]>(url);
       setPublications(data);
-    } catch {
-      // ignore
+      // A retry that succeeds must leave the failure state behind it.
+      setPublicationsError(null);
+    } catch (e) {
+      logError("loading the cellxgene publications", e);
+      setPublicationsError(loadFailureMessage("Published cellxgene datasets"));
     } finally {
       setLoading(false);
     }
@@ -426,6 +443,8 @@ export default function CellxgenePage() {
 
       {loading ? (
         <ContentLoading />
+      ) : publicationsError ? (
+        <ErrorState message={publicationsError} onRetry={fetchPublications} />
       ) : publications.length === 0 ? (
         <p className="text-gray-500 text-sm">
           {filterExperimentId

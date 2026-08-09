@@ -173,6 +173,7 @@ export default function PipelineRunDetailPage() {
   const [showSystemLogs, setShowSystemLogs] = useState(false);
   const [systemLogs, setSystemLogs] = useState<LogResponse | null>(null);
   const [systemLogsLoading, setSystemLogsLoading] = useState(false);
+  const [systemLogsFailed, setSystemLogsFailed] = useState(false);
   const [showRetriesModal, setShowRetriesModal] = useState(false);
   useDismissOnEscape(showRetriesModal, () => { setShowRetriesModal(false); });
 
@@ -326,8 +327,14 @@ export default function PipelineRunDetailPage() {
     try {
       const data = await api.get<LogResponse>(`/api/pipeline-runs/${runId}/logs?source=pod`);
       setSystemLogs(data);
-    } catch {
+      setSystemLogsFailed(false);
+    } catch (e) {
+      // These are read when a run has failed and the user is looking for why.
+      // "(empty)" says the pod printed nothing, which is the opposite of what a
+      // failed request means.
+      logError(`loading the pod system logs for run ${runId}`, e);
       setSystemLogs(null);
+      setSystemLogsFailed(true);
     } finally {
       setSystemLogsLoading(false);
     }
@@ -909,6 +916,13 @@ export default function PipelineRunDetailPage() {
                         <div className="flex items-center gap-2 text-gray-500">
                           <LoadingSpinner size="sm" /><span>Loading system logs...</span>
                         </div>
+                      ) : systemLogsFailed ? (
+                        <p
+                          data-testid="system-logs-load-failed"
+                          className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
+                        >
+                          {loadFailureMessage("This run's pod system logs")}
+                        </p>
                       ) : (
                         <pre className="text-xs bg-gray-900 text-green-400 p-4 rounded overflow-auto max-h-96 whitespace-pre-wrap">
                           {systemLogs?.stdout || "(empty)"}

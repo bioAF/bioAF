@@ -10,7 +10,8 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
-import { logError } from "@/lib/errorReporting";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { ErrorState } from "@/components/shared/ErrorState";
 
 import type {
   ReferenceDatasetDetail,
@@ -58,6 +59,7 @@ export default function DataReferenceDetailPage() {
 
   const [versions, setVersions] = useState<ReferenceDataset[] | null>(null);
   const [versionsLoading, setVersionsLoading] = useState(false);
+  const [versionsFailed, setVersionsFailed] = useState(false);
 
   const [importStatus, setImportStatus] = useState<ReferenceImportStatusResponse | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -153,8 +155,13 @@ export default function DataReferenceDetailPage() {
         `/api/references/by-name?${params}`,
       );
       setVersions(data.references);
-    } catch {
+      setVersionsFailed(false);
+    } catch (e) {
+      // "No other versions of this reference exist." is read on the page where
+      // a deprecation decision is made. A failed request must not answer it.
+      logError(`loading the other versions of reference ${id}`, e);
       setVersions([]);
+      setVersionsFailed(true);
     } finally {
       setVersionsLoading(false);
     }
@@ -173,11 +180,17 @@ export default function DataReferenceDetailPage() {
 
   async function loadImpact() {
     setImpactLoading(true);
+    setImpactFailed(false);
     try {
       const data = await api.get<ImpactSummary>(`/api/references/${id}/impact`);
       setImpact(data);
-    } catch {
-      // handled
+    } catch (e) {
+      // `// handled` was not true of the tab: `impact` stayed null and
+      // `impactLoading` went false, so the Impact tab rendered nothing at all
+      // -- a blank panel that reads as "this reference is used by nothing".
+      logError(`loading the deprecation impact for reference ${id}`, e);
+      setImpact(null);
+      setImpactFailed(true);
     } finally {
       setImpactLoading(false);
     }
@@ -523,7 +536,15 @@ export default function DataReferenceDetailPage() {
               </tbody>
             </table>
           )}
-          {!versionsLoading && versions && versions.length === 0 && (
+          {!versionsLoading && versionsFailed && (
+            <div className="px-6 py-12" data-testid="versions-load-failed">
+              <ErrorState
+                message={loadFailureMessage("This reference's other versions")}
+                onRetry={loadVersions}
+              />
+            </div>
+          )}
+          {!versionsLoading && !versionsFailed && versions && versions.length === 0 && (
             <div className="px-6 py-12 text-center text-gray-500">
               No other versions of this reference exist.
             </div>
@@ -536,6 +557,13 @@ export default function DataReferenceDetailPage() {
           {impactLoading ? (
             <div className="flex justify-center py-12">
               <LoadingSpinner size="lg" />
+            </div>
+          ) : impactFailed ? (
+            <div data-testid="impact-load-failed">
+              <ErrorState
+                message={loadFailureMessage("What uses this reference")}
+                onRetry={loadImpact}
+              />
             </div>
           ) : impact ? (
             <div className="space-y-6">

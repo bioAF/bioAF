@@ -39,6 +39,7 @@ export function DatasetBrowser() {
   const [selectedExperiments, setSelectedExperiments] = useState<Set<number>>(new Set());
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [newProjectName, setNewProjectName] = useState("");
   const [addingToProject, setAddingToProject] = useState(false);
@@ -99,8 +100,16 @@ export function DatasetBrowser() {
     try {
       const data = await api.get<ProjectListResponse>("/api/projects");
       setProjects(data.projects);
-    } catch {
-      // ignore
+      setProjectsFailed(false);
+    } catch (e) {
+      // Proven on the demo: with this read failing, the dialog opened offering
+      // only ["Choose a project...", "+ Create New Project"] while two real
+      // projects existed. The user cannot see whether the project they want is
+      // already there, so the only path forward creates a duplicate. A read
+      // that failed must not arm the write behind it.
+      logError("loading the projects to add the selected datasets to", e);
+      setProjects([]);
+      setProjectsFailed(true);
     }
     setShowProjectModal(true);
   };
@@ -359,20 +368,39 @@ export function DatasetBrowser() {
               Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
             </p>
             <div className="space-y-4">
-              <div>
-                <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
-                <select id="select-project"
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              {projectsFailed ? (
+                <div
+                  data-testid="projects-load-failed"
+                  className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
                 >
-                  <option value="">Choose a project...</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={String(p.id)}>{p.name}</option>
-                  ))}
-                  <option value="new">+ Create New Project</option>
-                </select>
-              </div>
+                  <p>{loadFailureMessage("Your projects")}</p>
+                  <p className="mt-2">
+                    Creating a new one from here would risk duplicating a project
+                    you already have, so nothing can be added until the list loads.
+                  </p>
+                  <button
+                    onClick={openProjectModal}
+                    className="mt-2 text-xs underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
+                  <select id="select-project"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="">Choose a project...</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={String(p.id)}>{p.name}</option>
+                    ))}
+                    <option value="new">+ Create New Project</option>
+                  </select>
+                </div>
+              )}
               {selectedProjectId === "new" && (
                 <div>
                   <label htmlFor="new-project-name" className="block text-sm font-medium text-ink-muted mb-1">New Project Name</label>
@@ -402,7 +430,9 @@ export function DatasetBrowser() {
                 busy={addingToProject}
                 busyLabel="Adding..."
                 disabled={
-                  !selectedProjectId || (selectedProjectId === "new" && !newProjectName.trim())
+                  projectsFailed ||
+                  !selectedProjectId ||
+                  (selectedProjectId === "new" && !newProjectName.trim())
                 }
               >
                 Add to Project
