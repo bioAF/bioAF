@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { FloatingAssistant } from "@/components/assistant/FloatingAssistant";
+import { DocumentTitle } from "@/components/layout/DocumentTitle";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { ConfirmProvider } from "@/hooks/useConfirm";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
@@ -24,6 +25,11 @@ export default function RootLayout({
       </head>
       <body className="bg-canvas text-gray-900">
         <ThemeProvider>
+          {/* Here rather than in the (app) shell for two reasons: it names the tab
+              on /login and /setup too, and the shell returns a boot splash before
+              it renders its children, which would leave the tab unnamed for
+              exactly as long as the app was still starting. */}
+          <DocumentTitle />
           {/* ConfirmProvider sits in the ROOT layout, not the (app) shell, because
               the setup wizard at /setup is outside that group and guards the
               bootstrap steps with confirmations too. */}
