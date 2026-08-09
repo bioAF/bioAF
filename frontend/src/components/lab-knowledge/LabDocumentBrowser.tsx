@@ -8,7 +8,8 @@ import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableRow } from "@/lib/a11y";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 
 interface Tag {
   id: number;
@@ -240,7 +241,6 @@ function UploadDocumentModal({
   onClose: () => void;
   onUploaded: () => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   const fileInput = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<"device" | "url">("device");
   const [sourceUrl, setSourceUrl] = useState("");
@@ -327,9 +327,26 @@ function UploadDocumentModal({
   );
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Upload Document</h2>
+    <Modal
+      open
+      title="Upload Document"
+      onClose={onClose}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            busy={busy}
+            busyLabel={mode === "url" ? "Importing..." : "Uploading..."}
+          >
+            {mode === "url" ? "Import" : "Upload"}
+          </Button>
+        </>
+      }
+    >
         <div className="space-y-3">
           <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
             {modeButton("device", "From device")}
@@ -383,26 +400,6 @@ function UploadDocumentModal({
           )}
           {err && <div className="text-red-600 text-sm">{err}</div>}
         </div>
-        <div className="flex justify-end gap-2 mt-5">
-          <button type="button" onClick={onClose} className="text-sm px-3 py-1.5">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
-          >
-            {busy
-              ? mode === "url"
-                ? "Importing..."
-                : "Uploading..."
-              : mode === "url"
-                ? "Import"
-                : "Upload"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

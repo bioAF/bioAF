@@ -7,7 +7,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableCard } from "@/lib/a11y";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface UserSummary {
@@ -360,7 +360,6 @@ function TermDetailPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState(term.definition);
@@ -395,20 +394,8 @@ function TermDetailPanel({
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg w-[32rem] max-h-[85vh] overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-xl font-bold">{term.term}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500">
-            x
-          </button>
-        </div>
+    <Modal open title={term.term} onClose={onClose} size="lg">
+      <div>
 
         {editing ? (
           <div className="space-y-3">
@@ -473,12 +460,11 @@ function TermDetailPanel({
           </>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
 function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
-  useDismissOnEscape(true, () => onClose());
   const [term, setTerm] = useState("");
   const [definition, setDefinition] = useState("");
   const [aliases, setAliases] = useState("");
@@ -511,9 +497,8 @@ function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Add Term</h2>
+    <Modal open title="Add Term" onClose={onClose} size="md">
+      <div>
         <div className="space-y-3">
           <input
             value={term}
@@ -566,7 +551,7 @@ function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -577,7 +562,6 @@ function ImportModal({
   onClose: () => void;
   onImported: (jobId: number) => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -599,9 +583,8 @@ function ImportModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-2">Import Glossary CSV</h2>
+    <Modal open title="Import Glossary CSV" onClose={onClose} size="md">
+      <div>
         <p className="text-sm text-gray-500 mb-4">
           Required columns: term, definition. Optional: aliases, category, context. Imported rows
           are reviewed before they are added.
@@ -628,7 +611,7 @@ function ImportModal({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -657,7 +640,6 @@ function ScanModal({
   onClose: () => void;
   onStarted: (job: ScanJob) => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   // "topic" was removed (LK-SPEC-D, D1); "experiment" reuses the Experiment
   // Review material, "document" picks a Lab Knowledge document OR a Data & Files
   // file via search.
@@ -736,9 +718,8 @@ function ScanModal({
   const labelFor = (e: ExperimentOption) => (e.project ? `${e.project.name} > ${e.name}` : e.name);
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-2">Run AI Glossary Scan</h2>
+    <Modal open title="Run AI Glossary Scan" onClose={onClose} size="md">
+      <div>
         <p className="text-sm text-gray-500 mb-4">
           This is an AI scan. It uses your organization&apos;s active LLM provider (the same
           connection as the AI Literature Review and AI pipeline review) to read the selected
@@ -842,7 +823,7 @@ function ScanModal({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -855,7 +836,6 @@ function ReviewPanel({
   onClose: () => void;
   onReviewed: () => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   const confirm = useConfirm();
   const [data, setData] = useState<ProposalListResponse | null>(null);
   const [decisions, setDecisions] = useState<Record<number, string>>({});
@@ -947,8 +927,8 @@ function ReviewPanel({
 
   if (!data) {
     return (
-      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-        <div className="bg-white rounded-lg p-6" onClick={(e) => e.stopPropagation()}>
+      <Modal open title="Review Proposed Terms" onClose={onClose} size="md">
+        <div>
           {proposalsFailed ? (
             <div data-testid="review-load-failed" role="status">
               <p className="text-gray-700">{loadFailureMessage("The scan proposals")}</p>
@@ -964,7 +944,7 @@ function ReviewPanel({
             <p data-testid="review-loading" className="text-gray-500">Loading proposals...</p>
           )}
         </div>
-      </div>
+      </Modal>
     );
   }
 
@@ -976,17 +956,8 @@ function ReviewPanel({
         : "";
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-white rounded-lg w-[44rem] max-h-[85vh] overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-bold">Review Proposed Terms</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-500">
-            x
-          </button>
-        </div>
+    <Modal open title="Review Proposed Terms" onClose={onClose} size="xl">
+      <div>
 
         <h3 className="font-semibold text-sm mb-2">New Terms ({data.new_terms.length})</h3>
         {data.new_terms.length === 0 ? (
@@ -1082,6 +1053,6 @@ function ReviewPanel({
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

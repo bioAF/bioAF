@@ -3,7 +3,8 @@
 import { useState } from "react";
 
 import type { WidgetDefinition } from "@/components/dashboard/registry";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 
 interface DashboardWidgetPickerProps {
   /** Widgets the user is permitted to use (already permission-filtered). */
@@ -20,7 +21,6 @@ export function DashboardWidgetPicker({
   onClose,
   onSave,
 }: DashboardWidgetPickerProps) {
-  useDismissOnEscape(true, () => onClose());
   const [selected, setSelected] = useState<Set<string>>(new Set(enabledKeys));
 
   const toggle = (key: string) => {
@@ -41,32 +41,28 @@ export function DashboardWidgetPicker({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={onClose}
-      data-testid="widget-picker"
+    <Modal
+      open
+      title="Customize dashboard"
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} data-testid="picker-save">
+            Save
+          </Button>
+        </>
+      }
     >
-      <div
-        className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="sticky top-0 bg-white border-b px-5 py-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold">Customize dashboard</h2>
-            <p className="text-xs text-gray-500">
-              Choose the widgets you want. You only see widgets you have access to.
-            </p>
-          </div>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="text-gray-500 hover:text-gray-600 text-2xl leading-none"
-          >
-            &times;
-          </button>
-        </div>
+      <div data-testid="widget-picker">
+        <p className="text-xs text-gray-500 mb-3">
+          Choose the widgets you want. You only see widgets you have access to.
+        </p>
 
-        <div className="p-5 space-y-1">
+        <div className="space-y-1">
           {available.length === 0 && (
             <p className="text-sm text-gray-500" data-testid="picker-empty">
               No widgets are available for your role.
@@ -92,23 +88,7 @@ export function DashboardWidgetPicker({
             </label>
           ))}
         </div>
-
-        <div className="sticky bottom-0 bg-white border-t px-5 py-3 flex justify-end gap-2">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            data-testid="picker-save"
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 text-sm font-medium"
-          >
-            Save
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }

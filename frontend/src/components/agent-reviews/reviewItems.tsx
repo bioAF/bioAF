@@ -7,7 +7,8 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 
 export type AgentReviewEntityType = "pipeline_run" | "experiment";
 
@@ -181,7 +182,6 @@ export function ReviewModal({
   onClose: () => void;
   onMutated: () => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
   const [review, setReview] = useState<AgentReviewDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalog, setCatalog] = useState<SectionCatalog | null>(null);
@@ -220,35 +220,34 @@ export function ReviewModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
-        {!review ? (
-          <div className="text-gray-500">Loading…</div>
-        ) : (
+    <Modal
+      open
+      title={review?.headline ?? "Agent review"}
+      onClose={onClose}
+      size="lg"
+      footer={
+        review ? (
           <>
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-xs text-gray-500">
-                  {new Date(review.created_at).toLocaleString()} ·{" "}
-                  {review.provider} · {review.model}
-                </div>
-                <h2 className="text-lg font-semibold mt-1">
-                  {review.headline ?? "(no headline)"}
-                </h2>
-              </div>
-              <button
-                onClick={onClose}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                ✕
-              </button>
-            </div>
+            {canDismiss && (
+              <Button variant="secondary" onClick={toggleDismiss} disabled={busy}>
+                {review.dismissed ? "Un-dismiss" : "Dismiss"}
+              </Button>
+            )}
+            <Button onClick={onClose}>Close</Button>
+          </>
+        ) : undefined
+      }
+    >
+      {!review ? (
+        <div className="text-gray-500">Loading…</div>
+      ) : (
+        <>
+          <div className="text-xs text-gray-500">
+            {new Date(review.created_at).toLocaleString()} · {review.provider} ·{" "}
+            {review.model}
+          </div>
 
+          <div>
             {review.status === "failed" ? (
               <div className="mt-4">
                 <h3 className="font-medium text-red-700">Error</h3>
@@ -305,28 +304,10 @@ export function ReviewModal({
                 <PromptDetails review={review} catalog={catalog} />
               </>
             )}
-
-            <div className="mt-6 flex justify-end gap-2">
-              {canDismiss && (
-                <button
-                  onClick={toggleDismiss}
-                  disabled={busy}
-                  className="px-3 py-1.5 text-sm border border-gray-300 rounded"
-                >
-                  {review.dismissed ? "Un-dismiss" : "Dismiss"}
-                </button>
-              )}
-              <button
-                onClick={onClose}
-                className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded"
-              >
-                Close
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

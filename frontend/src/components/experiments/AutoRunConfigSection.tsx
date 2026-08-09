@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
   AutoRunConfig,
@@ -258,16 +259,15 @@ function AutoRunConfigModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold">
-              {isEdit ? "Edit Auto-Run Configuration" : "Configure Auto-Run"}
-            </h2>
-            <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">&times;</button>
-          </div>
-
+    // Each step carries its own Back/Next, so the shell's footer stays empty
+    // rather than competing with them.
+    <Modal
+      open
+      title={isEdit ? "Edit Auto-Run Configuration" : "Configure Auto-Run"}
+      onClose={onClose}
+      size="lg"
+    >
+      <div>
           {/* Step indicator */}
           <div className="flex items-center gap-2 mb-6">
             {[1, 2, 3].map((s) => (
@@ -397,9 +397,8 @@ function AutoRunConfigModal({
               </div>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

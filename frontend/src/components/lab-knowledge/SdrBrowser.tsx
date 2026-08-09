@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 
 import { clickableRow } from "@/lib/a11y";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
 
 interface UserSummary {
   id: number;
@@ -632,17 +632,13 @@ function ModalShell({
   children: React.ReactNode;
   onClose: () => void;
 }) {
-  useDismissOnEscape(true, () => onClose());
+  // One shell for all five SDR dialogs, so putting it on the shared Modal
+  // converts them together. Each child brings its own action row, so the
+  // footer stays empty rather than competing with them.
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]"
-      onClick={onClose}
-    >
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">{title}</h2>
-        {children}
-      </div>
-    </div>
+    <Modal open title={title} onClose={onClose} size="md">
+      {children}
+    </Modal>
   );
 }
 

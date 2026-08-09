@@ -19,7 +19,8 @@ import type {
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
-import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import { useConfirm } from "@/hooks/useConfirm";
 
 function formatBytes(bytes: number | null): string {
@@ -88,10 +89,8 @@ export function FileBrowser({
   const [samples, setSamples] = useState<{ id: number; label: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [viewingFile, setViewingFile] = useState<FileResponse | null>(null);
-  useDismissOnEscape(viewingFile !== null, () => { setViewingFile(null); });
   const contentUrl = useFileContentUrl(viewingFile?.id ?? null);
   const [showProvenance, setShowProvenance] = useState(false);
-  useDismissOnEscape(showProvenance, () => { setShowProvenance(false); });
   const [page, setPage] = useState(1);
   const [totalFiles, setTotalFiles] = useState(0);
   const [downloading, setDownloading] = useState(false);
@@ -853,23 +852,13 @@ export function FileBrowser({
 
       {/* File detail modal */}
       {viewingFile && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setViewingFile(null)}
+        <Modal
+          open
+          title={viewingFile.filename}
+          onClose={() => setViewingFile(null)}
+          size="md"
         >
-          <div
-            className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
-              <h3 className="text-lg font-semibold truncate pr-4">{viewingFile.filename}</h3>
-              <button
-                onClick={() => setViewingFile(null)}
-                className="text-gray-500 hover:text-gray-600 text-xl leading-none px-2"
-              >
-                &times;
-              </button>
-            </div>
+          <div>
 
             {isImageFile(viewingFile.file_type) ? (
               <div className="p-4 flex justify-center bg-gray-50">
@@ -1022,48 +1011,48 @@ export function FileBrowser({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Provenance modal */}
       {showProvenance && viewingFile && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
-          onClick={() => setShowProvenance(false)}
+        <Modal
+          open
+          title={`Provenance: ${viewingFile.filename}`}
+          onClose={() => setShowProvenance(false)}
+          size="lg"
         >
-          <div
-            className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
-              <h3 className="text-lg font-semibold">Provenance: {viewingFile.filename}</h3>
-              <button
-                onClick={() => setShowProvenance(false)}
-                className="text-gray-500 hover:text-gray-600 text-xl leading-none px-2"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="p-4">
-              <ProvenanceReportPanel
-                entityType="artifact"
-                entityId={viewingFile.id}
-                entityName={viewingFile.filename}
-              />
-            </div>
-          </div>
-        </div>
+          <ProvenanceReportPanel
+            entityType="artifact"
+            entityId={viewingFile.id}
+            entityName={viewingFile.filename}
+          />
+        </Modal>
       )}
 
       {/* Associate modal */}
       {linkingFileIds.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-semibold mb-1">
-              {linkingFileIds.length === 1
-                ? "Associate File"
-                : `Associate ${linkingFileIds.length} Files`}
-            </h2>
+        <Modal
+          open
+          title={
+            linkingFileIds.length === 1
+              ? "Associate File"
+              : `Associate ${linkingFileIds.length} Files`
+          }
+          onClose={() => setLinkingFileIds([])}
+          size="sm"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setLinkingFileIds([])}>
+                Cancel
+              </Button>
+              <Button onClick={handleLink} disabled={!linkModalHasSelection}>
+                Save
+              </Button>
+            </>
+          }
+        >
+          <div>
             <p className="text-xs text-gray-500 mb-4">
               Link to a project, experiment, or specific sample. Select the most specific level that
               applies.
@@ -1153,23 +1142,8 @@ export function FileBrowser({
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-5">
-              <button
-                onClick={() => setLinkingFileIds([])}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleLink}
-                disabled={!linkModalHasSelection}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                Save
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

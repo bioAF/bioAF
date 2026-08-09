@@ -3,6 +3,8 @@
 import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import { logError } from "@/lib/errorReporting";
 import { literature } from "@/lib/literature";
 
@@ -462,32 +464,26 @@ function DataEgressWarningModal({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg">
-        <h3 className="text-lg font-semibold mb-2">
-          Enable {PROVIDER_LABEL[provider]}?
-        </h3>
-        <p className="text-sm text-gray-700">
-          Enabling this provider will send pipeline output data to a
-          third-party LLM over the public internet. Sample metadata, JSON
-          outputs, and QC reports may be transmitted. Continue?
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm border border-gray-300 rounded"
-          >
+    <Modal
+      open
+      title={`Enable ${PROVIDER_LABEL[provider]}?`}
+      onClose={onCancel}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded"
-          >
-            Confirm and enable
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button onClick={onConfirm}>Confirm and enable</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-gray-700">
+        Enabling this provider will send pipeline output data to a third-party
+        LLM over the public internet. Sample metadata, JSON outputs, and QC
+        reports may be transmitted. Continue?
+      </p>
+    </Modal>
   );
 }
 

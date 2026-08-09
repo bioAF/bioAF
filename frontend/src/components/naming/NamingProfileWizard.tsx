@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import type {
   NamingProfile,
   NamingProfileDelimiter,
@@ -703,17 +705,23 @@ function PromotionModal({
   saving,
 }: PromotionModalProps) {
   return (
-    <div
-      role="dialog"
-      aria-label={`Add new segments to template '${templateName}'?`}
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    <Modal
+      open
+      title={`Add new segments to template '${templateName}'?`}
+      onClose={onCancel}
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} busy={saving} busyLabel="Saving...">
+            Save profile
+          </Button>
+        </>
+      }
     >
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 space-y-4">
-        <h3 className="text-base font-semibold text-gray-900">
-          Add new segments to template{" "}
-          <span className="font-mono">&apos;{templateName}&apos;</span>?
-        </h3>
+      <div className="space-y-4">
         <p className="text-sm text-gray-600">
           These segments aren&apos;t in the template yet. Pick which to add
           and whether each is required. Unchecked rows stay on this profile
@@ -756,25 +764,8 @@ function PromotionModal({
             ))}
           </tbody>
         </table>
-        <div className="flex gap-2 pt-2 border-t">
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={saving}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50"
-          >
-            {saving ? "Saving..." : "Save profile"}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -87,10 +87,12 @@ test("the scan still finds dismiss overlays", () => {
   // Guard-the-guard: with a broken matcher every dialog looks compliant.
   //
   // The floor was 20 when the app had 38 hand-rolled overlays inside page
-  // files. Those are on the Modal shell now, so the true count is lower; the
-  // floor moved with it rather than the matcher being trusted blindly. The
-  // behavioural assertion below is unchanged.
-  expect(scan().overlays).toBeGreaterThanOrEqual(15);
+  // files, then 15 once those moved to the Modal shell. The 19 remaining
+  // component-level overlays have now moved too, so what is left is the shell
+  // itself and its sibling primitives. The floor tracks that rather than the
+  // matcher being trusted blindly; the behavioural assertion below is
+  // unchanged, and it is the one that matters.
+  expect(scan().overlays).toBeGreaterThanOrEqual(4);
 });
 
 test("every dialog that closes on backdrop click also closes on Escape", () => {

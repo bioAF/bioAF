@@ -3,6 +3,7 @@
 import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
 import type { AnalysisSnapshot } from "@/lib/types";
 
 interface SnapshotTimelineProps {
@@ -213,21 +214,14 @@ function ComparisonModal({ ids, snapshots, onClose }: ComparisonModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 flex items-start justify-center pt-8">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
-          <h2 className="text-lg font-semibold">
-            Comparing {snapshots.length} Snapshots
-          </h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-600 text-xl">
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <SnapshotComparisonContent url={comparisonUrl} snapshotLabels={snapshots} />
-        </div>
-      </div>
-    </div>
+    <Modal
+      open
+      title={`Comparing ${snapshots.length} Snapshots`}
+      onClose={onClose}
+      size="xl"
+    >
+      <SnapshotComparisonContent url={comparisonUrl} snapshotLabels={snapshots} />
+    </Modal>
   );
 }
 

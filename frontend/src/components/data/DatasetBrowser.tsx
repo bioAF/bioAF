@@ -7,6 +7,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { getCurrentUser } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { DetailModal } from "@/components/shared/DetailModal";
+import { Modal } from "@/components/shared/Modal";
 import type {
   DatasetExperimentSummary,
   DatasetSearchResult,
@@ -94,6 +95,12 @@ export function DatasetBrowser() {
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setSelectedExperiments(next);
+  };
+
+  const closeProjectModal = () => {
+    setShowProjectModal(false);
+    setSelectedProjectId("");
+    setNewProjectName("");
   };
 
   const openProjectModal = async () => {
@@ -359,15 +366,37 @@ export function DatasetBrowser() {
         />
       )}
 
-      {/* Add to Project Modal */}
-      {showProjectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-surface rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold mb-4">Add to Project</h2>
-            <p className="text-sm text-ink-subtle mb-4">
-              Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
-            </p>
-            <div className="space-y-4">
+      {/* Add to Project. On the shared shell: measured on the demo, the
+          hand-rolled version put 12 of 12 Tab stops outside the panel. */}
+      <Modal
+        open={showProjectModal}
+        title="Add to Project"
+        onClose={closeProjectModal}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeProjectModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddToProject}
+              busy={addingToProject}
+              busyLabel="Adding..."
+              disabled={
+                projectsFailed ||
+                !selectedProjectId ||
+                (selectedProjectId === "new" && !newProjectName.trim())
+              }
+            >
+              Add to Project
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-subtle mb-4">
+          Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
+        </p>
+        <div className="space-y-4">
               {projectsFailed ? (
                 <div
                   data-testid="projects-load-failed"
@@ -413,34 +442,8 @@ export function DatasetBrowser() {
                   />
                 </div>
               )}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowProjectModal(false);
-                  setSelectedProjectId("");
-                  setNewProjectName("");
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddToProject}
-                busy={addingToProject}
-                busyLabel="Adding..."
-                disabled={
-                  projectsFailed ||
-                  !selectedProjectId ||
-                  (selectedProjectId === "new" && !newProjectName.trim())
-                }
-              >
-                Add to Project
-              </Button>
-            </div>
-          </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }
