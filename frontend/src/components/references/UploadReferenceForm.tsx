@@ -9,6 +9,7 @@ import type {
   ReferenceUploadInitResponse,
 } from "@/lib/types";
 import { predictNextVersion } from "./referenceVersioning";
+import { Button } from "@/components/ui/Button";
 
 const CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"];
 const SCOPES = ["public", "internal"];
@@ -304,13 +305,10 @@ export function UploadReferenceForm({
         >
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+        <Button type="submit"
+          disabled={submitting}>
           {submitting ? "Uploading..." : "Start upload"}
-        </button>
+        </Button>
       </div>
     </form>
   );

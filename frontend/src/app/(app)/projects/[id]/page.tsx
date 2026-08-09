@@ -313,12 +313,10 @@ export default function ProjectDetailPage() {
           <div>
             {canModify && (
               <div className="mb-4">
-                <button
-                  onClick={openSamplePicker}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                >
+                <Button
+                  onClick={openSamplePicker}>
                   Add Samples
-                </button>
+                </Button>
               </div>
             )}
             {project.samples.length === 0 ? (

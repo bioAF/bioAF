@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
 import {
   infrastructure,
   type CheckUpdatesResult,
@@ -82,13 +83,11 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
             existing data are shown but never applied here.
           </p>
         </div>
-        <button
+        <Button size="sm" className="ml-4 shrink-0"
           onClick={check}
-          disabled={phase === "checking"}
-          className="ml-4 shrink-0 px-3 py-1.5 text-sm rounded bg-bioaf-600 text-white hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={phase === "checking"}>
           {phase === "checking" ? "Checking..." : "Check for Infrastructure Updates"}
-        </button>
+        </Button>
       </div>
 
       {result?.realigned && (
@@ -161,12 +160,10 @@ export function InfraUpdatesCard({ onApplyStarted }: Props) {
               Cancel
             </button>
             {result.has_additive && (
-              <button
-                onClick={applyAdditive}
-                className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-              >
+              <Button size="sm"
+                onClick={applyAdditive}>
                 Apply additive changes only
-              </button>
+              </Button>
             )}
           </div>
         </div>

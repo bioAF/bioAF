@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
 
 interface Preference {
   event_type: string;
@@ -274,13 +275,11 @@ export function NotificationsTab() {
             {isAdmin && " Slack posts to shared channels, and which events reach each channel is set in Settings, Slack."}
           </p>
         </div>
-        <button
+        <Button
           onClick={handleSave}
-          disabled={saving || loadFailed}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50 text-sm font-medium"
-        >
+          disabled={saving || loadFailed}>
           {saving ? "Saving..." : "Save Preferences"}
-        </button>
+        </Button>
       </div>
 
       {loadFailed && (

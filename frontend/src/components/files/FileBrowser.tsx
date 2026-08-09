@@ -600,12 +600,10 @@ export function FileBrowser({
               Associate
             </button>
             {isAdmin && (
-              <button
-                onClick={handleDeleteSelected}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-md text-sm hover:bg-red-700"
-              >
+              <Button variant="danger" size="sm"
+                onClick={handleDeleteSelected}>
                 Delete
-              </button>
+              </Button>
             )}
           </div>
         )}

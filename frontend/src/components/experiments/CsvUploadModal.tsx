@@ -3,6 +3,7 @@
 import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 
 interface RecognizedColumn {
   csv_header: string;
@@ -273,12 +274,10 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
             </>
           )}
           {step === "done" && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded-md hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={onClose}>
               Done
-            </button>
+            </Button>
           )}
           {step === "select" && (
             <button
@@ -429,13 +428,11 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                 Unrecognized columns will prompt you to map or skip them.
               </p>
 
-              <button
+              <Button
                 onClick={handleSheetPreview}
-                disabled={loading || !sheetUrl.trim()}
-                className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-              >
+                disabled={loading || !sheetUrl.trim()}>
                 {loading ? "Reading sheet..." : "Import from Sheet"}
-              </button>
+              </Button>
             </>
           )}
 

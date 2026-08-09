@@ -124,13 +124,10 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
               placeholder="Paste a real filename..."
               className="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
             />
-            <button
-              type="button"
-              onClick={handleTest}
-              className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleTest}>
               Parse
-            </button>
+            </Button>
           </div>
           {testResult && (
             <div

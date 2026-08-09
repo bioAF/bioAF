@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature, type LitReviewRun } from "@/lib/literature";
+import { Button } from "@/components/ui/Button";
 
 interface ProjectSummary {
   id: number;
@@ -186,13 +187,11 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
             ))}
           </select>
         </div>
-        <button
+        <Button
           onClick={submit}
-          disabled={running || !experimentId}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={running || !experimentId}>
           {running ? "Running..." : "Run AI Lit Review"}
-        </button>
+        </Button>
       </div>
       {running && (
         <div className="mt-3" data-testid="lit-review-progress">

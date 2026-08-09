@@ -22,6 +22,7 @@ import { logError } from "@/lib/errorReporting";
 import { invalidateComponentCache } from "@/hooks/useComponents";
 import { useConfirm } from "@/hooks/useConfirm";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
+import { Button } from "@/components/ui/Button";
 import {
   INTERACTIVE_MACHINE_OPTIONS,
   PIPELINE_MACHINE_OPTIONS,
@@ -717,13 +718,11 @@ export default function InfraComponentsPage() {
                         </div>
                       </div>
                     ) : (
-                      <button
+                      <Button
                         onClick={handleStartDeploy}
-                        disabled={deployLoading}
-                        className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
+                        disabled={deployLoading}>
                         {deployLoading ? "Starting..." : "Deploy"}
-                      </button>
+                      </Button>
                     )}
                   </div>
 
@@ -1229,13 +1228,11 @@ export default function InfraComponentsPage() {
           >
             Cancel
           </button>
-          <button
+          <Button
             onClick={handleConfirmDeploy}
-            disabled={deployLoading}
-            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={deployLoading}>
             {deployLoading ? "Starting..." : "Deploy"}
-          </button>
+          </Button>
           </>
         }
       >
@@ -1503,13 +1500,11 @@ export default function InfraComponentsPage() {
           >
             Continue Deploying
           </button>
-          <button
+          <Button variant="danger"
             onClick={handleAbortDeploy}
-            disabled={abortLoading}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-          >
+            disabled={abortLoading}>
             {abortLoading ? "Aborting..." : "Abort Deployment"}
-          </button>
+          </Button>
           </>
         }
       >

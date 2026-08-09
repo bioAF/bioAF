@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { ContentLoading } from "@/components/shared/ContentLoading";
+import { Button } from "@/components/ui/Button";
 
 interface SessionCredentialResponse {
   configured: boolean;
@@ -196,17 +197,15 @@ export function SessionCredentialsTab() {
                 />
               </div>
 
-              <button
+              <Button className="w-full"
                 onClick={handleSaveCredentials}
-                disabled={credSaving}
-                className="w-full bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 disabled:opacity-50 text-sm font-medium"
-              >
+                disabled={credSaving}>
                 {credSaving
                   ? "Saving..."
                   : cred?.configured
                     ? "Update Credentials"
                     : "Set Up Credentials"}
-              </button>
+              </Button>
             </div>
           )}
         </>

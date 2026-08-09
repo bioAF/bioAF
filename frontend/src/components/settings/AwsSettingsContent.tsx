@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
+import { Button } from "@/components/ui/Button";
 
 // AWS settings panel (stage 8d), the structural parallel of GcpSettingsContent.
 //
@@ -256,14 +257,12 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* Action buttons */}
         <div className="flex gap-3 pt-2">
-          <button
+          <Button
             data-testid="save-aws-config-btn"
             onClick={handleSave}
-            disabled={saving || validating}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={saving || validating}>
             {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
           <button
             data-testid="validate-aws-btn"
             onClick={handleValidate}

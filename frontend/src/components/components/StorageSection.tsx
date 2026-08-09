@@ -8,6 +8,7 @@ import { storageDisplay, type StorageDisplay } from "@/lib/storageDisplay";
 import { AutoIngestControls } from "./AutoIngestControls";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Button } from "@/components/ui/Button";
 
 interface BucketMetrics {
   bucket_name: string;
@@ -198,13 +199,11 @@ function DeployStorageCard({
           .
         </p>
       )}
-      <button
+      <Button
         onClick={onDeploy}
-        disabled={!terraformInitialized}
-        className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
+        disabled={!terraformInitialized}>
         Deploy Storage
-      </button>
+      </Button>
     </div>
   );
 }

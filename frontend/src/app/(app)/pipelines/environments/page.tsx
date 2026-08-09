@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { clickableCard, clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 import {
   statusBadgeClass as badgeClass,
@@ -641,15 +642,13 @@ export default function PipelineEnvironmentsPage() {
               size="md"
               footer={
                 <>
-                <button
+                <Button
                   onClick={handleCreate}
                   disabled={
                     creating || !createForm.name || !createForm.definition_content.trim()
-                  }
-                  className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
+                  }>
                   {creating ? "Creating..." : "Create"}
-                </button>
+                </Button>
                 <button
                   onClick={() => setShowCreateModal(false)}
                   className="border py-2 rounded text-sm"

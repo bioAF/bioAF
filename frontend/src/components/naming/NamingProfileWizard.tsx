@@ -601,13 +601,10 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
             placeholder="Paste a real filename..."
             className="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
           />
-          <button
-            type="button"
-            onClick={handleTest}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={handleTest}>
             Parse
-          </button>
+          </Button>
         </div>
         {testResult && (
           <div data-testid="parse-result" className="mt-3 border rounded-lg p-3 bg-gray-50 text-sm">
@@ -656,14 +653,11 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
       )}
 
       <div className="flex gap-2 pt-2 border-t">
-        <button
-          type="button"
+        <Button
           onClick={handleSave}
-          disabled={!canSave}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={!canSave}>
           {saving ? "Saving..." : "Save profile"}
-        </button>
+        </Button>
         <button
           type="button"
           onClick={onCancel}

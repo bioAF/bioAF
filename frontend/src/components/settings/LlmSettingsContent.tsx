@@ -556,13 +556,11 @@ function LitReviewThresholdSection() {
           onChange={(e) => setInput(e.target.value)}
           className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28"
         />
-        <button
+        <Button size="sm"
           onClick={save}
-          disabled={saving}
-          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={saving}>
           {saving ? "Saving..." : "Save"}
-        </button>
+        </Button>
         {saved && !error && (
           <span className="text-xs text-green-700">Saved.</span>
         )}
@@ -730,13 +728,11 @@ export function AutoLitReviewSection() {
             className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28 disabled:bg-gray-100"
           />
         </div>
-        <button
+        <Button size="sm"
           onClick={save}
-          disabled={saving}
-          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={saving}>
           {saving ? "Saving..." : "Save"}
-        </button>
+        </Button>
         {saved && !error && <span className="text-xs text-green-700">Saved.</span>}
       </div>
       {error && <div className="text-xs text-red-700">{error}</div>}

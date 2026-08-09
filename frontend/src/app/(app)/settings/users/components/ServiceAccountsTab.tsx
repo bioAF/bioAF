@@ -18,6 +18,7 @@ import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface Props {
   roles: Role[];
@@ -429,13 +430,11 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
             >
               Cancel
             </button>
-            <button
+            <Button
               onClick={handleEditSave}
-              disabled={!editName.trim() || !editRoleId}
-              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={!editName.trim() || !editRoleId}>
               Save Changes
-            </button>
+            </Button>
             </>
           }
         >

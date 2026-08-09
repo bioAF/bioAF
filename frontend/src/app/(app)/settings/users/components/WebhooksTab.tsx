@@ -14,6 +14,7 @@ import { RevealSecretModal } from "./RevealSecretModal";
 
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 const VALID_EVENTS = [
   "experiment.created",
@@ -405,13 +406,11 @@ export function WebhooksTab() {
             >
               Cancel
             </button>
-            <button
+            <Button
               onClick={handleEditSave}
-              disabled={!editName.trim() || !editUrl.trim() || editEvents.size === 0}
-              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={!editName.trim() || !editUrl.trim() || editEvents.size === 0}>
               Save Changes
-            </button>
+            </Button>
             </>
           }
         >

@@ -40,6 +40,7 @@ import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -389,12 +390,10 @@ export default function NotebooksPage() {
             Interactive Jupyter and RStudio sessions, running with your project data mounted.
           </p>
         </div>
-        <button
-          onClick={openLaunchModal}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={openLaunchModal}>
           Launch Session
-        </button>
+        </Button>
       </div>
 
       {/* Quick Start Guide */}

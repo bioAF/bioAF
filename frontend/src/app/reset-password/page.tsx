@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
+import { Button } from "@/components/ui/Button";
 
 function ResetPasswordInner() {
   const router = useRouter();
@@ -215,13 +216,10 @@ function ResetPasswordInner() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
+              <Button className="w-full" type="submit"
+                disabled={submitting}>
                 {submitting ? "Resetting..." : "Reset password"}
-              </button>
+              </Button>
             </form>
           )}
         </div>

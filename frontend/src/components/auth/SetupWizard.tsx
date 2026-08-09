@@ -7,6 +7,7 @@ import { logError } from "@/lib/errorReporting";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
+import { Button } from "@/components/ui/Button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -826,13 +827,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500 font-mono text-lg tracking-widest text-center"
             />
           </div>
-          <button
+          <Button className="w-full"
             onClick={handleVerifyCode}
-            disabled={setupCode.length !== 6}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={setupCode.length !== 6}>
             Verify
-          </button>
+          </Button>
         </div>
       )}
 
@@ -859,9 +858,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input id="setup-confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
           </div>
-          <button onClick={handleCreateAdmin} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleCreateAdmin}>
             Create Admin Account
-          </button>
+          </Button>
         </div>
       )}
 
@@ -874,9 +873,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               placeholder="e.g., Acme Biotech"
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
           </div>
-          <button onClick={handleConfigureOrg} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleConfigureOrg}>
             Save Organization Name
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1036,10 +1035,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             )}
           </div>
 
-          <button onClick={handleSaveGcp} disabled={gcpSaving}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSaveGcp} disabled={gcpSaving}>
             {gcpSaving ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
 
           {gcpValidation && !gcpValidation.passed && (
             <div className="border rounded divide-y text-sm">
@@ -1178,10 +1176,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             EC2 instance profile via IMDS; no access key is stored. install-aws.sh provisioned the role.
           </div>
 
-          <button onClick={handleSaveAws} disabled={awsSaving}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSaveAws} disabled={awsSaving}>
             {awsSaving ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
 
           {awsValidation && !awsValidation.passed && (
             <div className="border rounded divide-y text-sm">
@@ -1240,9 +1237,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input id="from-address" type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
-          <button onClick={handleConfigureSmtp} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleConfigureSmtp}>
             Save SMTP Configuration
-          </button>
+          </Button>
           <button onClick={() => setStep(5)} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Do this later
           </button>
@@ -1262,13 +1259,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               later in Settings.
             </p>
           )}
-          <button
+          <Button className="w-full"
             onClick={handleSetupInfrastructure}
-            disabled={!(isAws ? awsConfigured : gcpConfigured)}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={!(isAws ? awsConfigured : gcpConfigured)}>
             Set up infrastructure
-          </button>
+          </Button>
           <button onClick={handleDoInfraLater} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Do this later
           </button>
@@ -1341,11 +1336,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
           </div>
 
-          <button onClick={handleSelectStack}
-            disabled={stackDeploying}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSelectStack}
+            disabled={stackDeploying}>
             {stackDeploying ? "Initializing infrastructure..." : `Continue with ${computeStack === "kubernetes" ? k8sStackLabel : "SLURM + NFS"}`}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1366,13 +1360,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               onChange={handlePickerChange}
             />
           )}
-          <button
+          <Button className="w-full"
             onClick={handleSelectComponents}
-            disabled={componentsSubmitting || componentsLoading}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={componentsSubmitting || componentsLoading}>
             {componentsSubmitting ? "Queueing components..." : "Continue"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1436,9 +1428,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               anytime from your profile page.
             </p>
           </div>
-          <button onClick={onComplete} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={onComplete}>
             Go to Dashboard
-          </button>
+          </Button>
         </div>
       )}
     </div>

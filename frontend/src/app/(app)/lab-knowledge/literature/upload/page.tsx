@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { literature } from "@/lib/literature";
+import { Button } from "@/components/ui/Button";
 
 export default function LiteratureUploadPage() {
   const router = useRouter();
@@ -114,13 +115,10 @@ export default function LiteratureUploadPage() {
             >
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={uploading || !file}
-              className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-            >
+            <Button type="submit"
+              disabled={uploading || !file}>
               {uploading ? "Uploading..." : "Upload"}
-            </button>
+            </Button>
           </div>
         </form>
       </main>

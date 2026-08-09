@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 import type {
   CustomPipeline,
@@ -230,13 +231,11 @@ export default function CustomPipelineListPage() {
             size="md"
             footer={
               <>
-              <button
+              <Button
                 onClick={handleCreate}
-                disabled={creating || !createForm.name}
-                className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
+                disabled={creating || !createForm.name}>
                 {creating ? "Creating..." : "Create"}
-              </button>
+              </Button>
               <button
                 onClick={() => {
                   setShowCreateModal(false);

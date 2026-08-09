@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -71,13 +72,10 @@ export default function ForgotPasswordPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
+              <Button className="w-full" type="submit"
+                disabled={submitting}>
                 {submitting ? "Sending..." : "Send reset link"}
-              </button>
+              </Button>
 
               <div className="mt-4 text-center">
                 <Link href="/login" className="text-sm text-bioaf-600 hover:text-bioaf-700">

@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature } from "@/lib/literature";
 import type { ExperimentListResponse, ProjectListResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 interface NamedItem {
   id: number;
@@ -115,13 +116,11 @@ export function AssociatePaperModal({ paperIds, onClose, onAssociated }: Props) 
           >
             Cancel
           </button>
-          <button
+          <Button size="sm"
             onClick={performAssociate}
-            disabled={busy || (!projectId && !experimentId)}
-            className="px-3 py-1.5 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm disabled:opacity-50"
-          >
+            disabled={busy || (!projectId && !experimentId)}>
             {busy ? "Associating..." : "Associate"}
-          </button>
+          </Button>
         </>
       }
     >

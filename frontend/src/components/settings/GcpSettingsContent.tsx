@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { SheetsReaderSACard } from "@/components/settings/SheetsReaderSACard";
+import { Button } from "@/components/ui/Button";
 
 interface GCPConfig {
   gcp_project_id: string | null;
@@ -465,14 +466,12 @@ export function GcpSettingsContent() {
 
             {/* Action buttons */}
             <div className="flex gap-3 pt-2">
-              <button
+              <Button
                 data-testid="save-gcp-config-btn"
                 onClick={handleSave}
-                disabled={saving || validating || loadFailed}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
+                disabled={saving || validating || loadFailed}>
                 {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}
-              </button>
+              </Button>
               <button
                 data-testid="validate-gcp-btn"
                 onClick={handleValidate}

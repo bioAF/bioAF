@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { clickableCard } from "@/lib/a11y";
+import { Button } from "@/components/ui/Button";
 
 import {  cleanText,
   formatAuthors,
@@ -167,13 +168,11 @@ export default function LiteratureSearchesPage() {
               className="flex-1 border border-gray-300 rounded px-3 py-2"
               onKeyDown={(e) => e.key === "Enter" && submit()}
             />
-            <button
+            <Button
               onClick={submit}
-              disabled={submitting || !query.trim()}
-              className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={submitting || !query.trim()}>
               {submitting ? "Searching..." : "Search"}
-            </button>
+            </Button>
           </div>
           <p className="text-xs text-gray-500 mt-2">
             Runs across PubMed, bioRxiv, Europe PMC, and Semantic Scholar in
@@ -243,13 +242,11 @@ export default function LiteratureSearchesPage() {
                   />
                   <span>Select all not-in-library</span>
                 </label>
-                <button
+                <Button size="sm"
                   onClick={addSelected}
-                  disabled={selectedIds.size === 0 || adding}
-                  className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                >
+                  disabled={selectedIds.size === 0 || adding}>
                   {adding ? "Adding..." : `Add ${selectedIds.size || ""} to Library`}
-                </button>
+                </Button>
               </div>
             </div>
             <ul className="divide-y">

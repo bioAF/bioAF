@@ -8,6 +8,7 @@ import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { ReferencePicker } from "@/components/references/ReferencePicker";
 import { versionChangeKind } from "@/lib/customPipelineVersions";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
+import { Button } from "@/components/ui/Button";
 import type {
   CustomPipelineDetail,
   CustomPipelineVariable,
@@ -337,13 +338,11 @@ export function CustomPipelineLaunchDialog({
           <button onClick={onClose} className="border px-4 py-2 rounded text-sm">
             Cancel
           </button>
-          <button
+          <Button
             onClick={handleLaunch}
-            disabled={launchDisabled}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={launchDisabled}>
             {launching ? "Launching..." : "Launch"}
-          </button>
+          </Button>
         </>
       }
     >

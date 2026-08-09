@@ -4,6 +4,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReaderSAStatus, ReaderSACreateResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 export function SheetsReaderSACard() {
   const [status, setStatus] = useState<ReaderSAStatus | null>(null);
@@ -124,13 +125,11 @@ export function SheetsReaderSACard() {
 
       <div className="flex items-center gap-2">
         {!status.exists ? (
-          <button
+          <Button size="sm"
             onClick={handleCreate}
-            disabled={loading}
-            className="text-sm px-3 py-1.5 bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={loading}>
             {loading ? "Creating..." : "Create Reader Account"}
-          </button>
+          </Button>
         ) : (
           <button
             onClick={handleDelete}

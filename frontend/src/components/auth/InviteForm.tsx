@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import type { Role } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 interface InviteFormProps {
   roles?: Role[];
@@ -80,12 +81,10 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
             <option key={r.id} value={r.name}>{r.name}</option>
           ))}
         </select>
-        <button
-          onClick={handleInvite}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={handleInvite}>
           Invite
-        </button>
+        </Button>
       </div>
 
       <div>

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Button } from "@/components/ui/Button";
 
 export function SSHKeyTab() {
   const toast = useToast();
@@ -141,13 +142,11 @@ export function SSHKeyTab() {
           <p className="text-sm text-gray-600 mb-3">
             No SSH key configured. Generate one to use git inside notebook sessions.
           </p>
-          <button
+          <Button
             onClick={handleGenerate}
-            disabled={generating}
-            className="px-4 py-2 bg-bioaf-600 text-white text-sm rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={generating}>
             {generating ? "Generating..." : "Generate SSH Key"}
-          </button>
+          </Button>
         </div>
       )}
     </div>

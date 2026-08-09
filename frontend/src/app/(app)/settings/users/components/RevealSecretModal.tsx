@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 
 interface Props {
   title: string;
@@ -41,12 +42,10 @@ export function RevealSecretModal({ title, secret, description, onClose }: Props
         {secret}
       </div>
       <div className="flex items-center justify-between mb-4">
-        <button
-          onClick={copy}
-          className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button size="sm"
+          onClick={copy}>
           {copied ? "Copied" : "Copy"}
-        </button>
+        </Button>
       </div>
       <label className="flex items-start gap-2 text-sm text-gray-700">
         <input

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
+import { Button } from "@/components/ui/Button";
 
 /**
  * Error boundary for every authenticated page.
@@ -37,13 +38,10 @@ export default function AppError({
           changed by this error.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={reset}
-            className="rounded-md bg-bioaf-600 px-4 py-2 text-sm font-medium text-white hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={reset}>
             Try again
-          </button>
+          </Button>
           <Link
             href="/dashboard"
             className="rounded-md border border-hairline px-4 py-2 text-sm font-medium text-ink-muted hover:bg-surface-muted"

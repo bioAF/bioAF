@@ -5,6 +5,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/hooks/useConfirm";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface SlackStatus {
   configured: boolean;
@@ -481,12 +482,10 @@ export function SlackSettingsContent() {
                 </p>
 
                 {!manifest ? (
-                  <button
-                    onClick={handleGenerateManifest}
-                    className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm font-medium"
-                  >
+                  <Button
+                    onClick={handleGenerateManifest}>
                     Generate Slack App Manifest
-                  </button>
+                  </Button>
                 ) : (
                   <div className="space-y-6">
                     {/* Step 1: Manifest */}
@@ -572,13 +571,11 @@ export function SlackSettingsContent() {
                             className="w-full px-3 py-2 border rounded text-sm font-mono"
                           />
                         </div>
-                        <button
+                        <Button
                           onClick={handleSaveCredentials}
-                          disabled={savingCreds || !clientId || !clientSecret || !signingSecret}
-                          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm font-medium disabled:opacity-50"
-                        >
+                          disabled={savingCreds || !clientId || !clientSecret || !signingSecret}>
                           {savingCreds ? "Saving..." : "Save Credentials"}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -712,12 +709,10 @@ export function SlackSettingsContent() {
                             );
                           })}
                         </div>
-                        <button
-                          onClick={handleAddMapping}
-                          className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700"
-                        >
+                        <Button
+                          onClick={handleAddMapping}>
                           Save Channel Mapping
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
@@ -812,12 +807,10 @@ export function SlackSettingsContent() {
                                   );
                                 })}
                               </div>
-                              <button
-                                onClick={handleSaveEdit}
-                                className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700"
-                              >
+                              <Button
+                                onClick={handleSaveEdit}>
                                 Save Changes
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </div>
@@ -832,13 +825,11 @@ export function SlackSettingsContent() {
                   <p className="text-sm text-gray-500 mb-4">
                     Send a test message to all mapped channels to verify everything is working.
                   </p>
-                  <button
+                  <Button
                     onClick={handleTestSlack}
-                    disabled={testing}
-                    className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                  >
+                    disabled={testing}>
                     {testing ? "Sending..." : "Test Channel Mappings"}
-                  </button>
+                  </Button>
 
                   {testResults && (
                     <div className="mt-4 space-y-2">

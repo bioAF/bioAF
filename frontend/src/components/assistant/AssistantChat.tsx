@@ -6,6 +6,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlanConfirmCard } from "@/components/assistant/PlanConfirmCard";
 import { api, ApiError } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { Button } from "@/components/ui/Button";
 import type {
   AssistantAvailability,
   AssistantConfirmResponse,
@@ -397,13 +398,10 @@ export function AssistantChat() {
             aria-label="Message"
             className="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-bioaf-500 disabled:bg-gray-50 text-sm"
           />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50 text-sm"
-          >
+          <Button type="submit"
+            disabled={sending || !input.trim()}>
             Send
-          </button>
+          </Button>
         </form>
       </div>
     </div>

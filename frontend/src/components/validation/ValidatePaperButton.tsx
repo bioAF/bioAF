@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
+import { Button } from "@/components/ui/Button";
 
 /**
  * Entry point (F2) for the validation flow from a library paper: creates a ValidationStudy for the
@@ -41,14 +42,12 @@ export function ValidatePaperButton({ paperId, doi }: { paperId: number; doi?: s
 
   return (
     <span className="inline-flex items-center gap-2">
-      <button
+      <Button size="sm"
         onClick={start}
         disabled={busy}
-        className="rounded bg-bioaf-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-bioaf-700 disabled:opacity-50"
-        title="Reproduce this paper's analysis and compare the results"
-      >
+        title="Reproduce this paper's analysis and compare the results">
         {busy ? "Starting..." : "Validate reproduction"}
-      </button>
+      </Button>
       {error && <span className="text-sm text-red-700">{error}</span>}
     </span>
   );

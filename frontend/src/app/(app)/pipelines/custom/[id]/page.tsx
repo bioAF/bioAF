@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { versionChangeKind } from "@/lib/customPipelineVersions";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import type {
   CustomPipelineCodeSource,
   CustomPipelineDetail,
@@ -493,12 +494,10 @@ export default function CustomPipelineDetailPage() {
               {!editingMeta && (
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {canLaunch && (
-                    <button
-                      onClick={handleLaunch}
-                      className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                    >
+                    <Button
+                      onClick={handleLaunch}>
                       Launch
-                    </button>
+                    </Button>
                   )}
                   {canEdit && (
                     <button
@@ -555,13 +554,11 @@ export default function CustomPipelineDetailPage() {
                   <p className="text-sm text-red-600 mt-3">{versionError}</p>
                 )}
                 <div className="mt-4 flex gap-2">
-                  <button
+                  <Button
                     onClick={handleCreateVersion}
-                    disabled={creatingVersion}
-                    className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                  >
+                    disabled={creatingVersion}>
                     {creatingVersion ? "Creating..." : "Create Version"}
-                  </button>
+                  </Button>
                   <button
                     onClick={() => {
                       setShowNewVersionForm(false);
@@ -762,13 +759,11 @@ export default function CustomPipelineDetailPage() {
             size="sm"
             footer={
               <>
-              <button
+              <Button variant="danger"
                 onClick={handleDelete}
-                disabled={deleting}
-                className="bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-              >
+                disabled={deleting}>
                 {deleting ? "Deleting..." : "Delete"}
-              </button>
+              </Button>
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className="border py-2 rounded text-sm"

@@ -3,6 +3,7 @@
 import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 
 interface BillingSetupModalProps {
   onComplete: () => void;
@@ -103,12 +104,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Cancel
               </button>
-              <button
-                onClick={handleEnable}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleEnable}>
                 Get Started
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -155,12 +154,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 I&apos;ll do this later
               </button>
-              <button
-                onClick={handleVerify}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleVerify}>
                 Verify
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -222,12 +219,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Close
               </button>
-              <button
-                onClick={handleVerify}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleVerify}>
                 Check Again
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -243,12 +238,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Close
               </button>
-              <button
-                onClick={handleEnable}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleEnable}>
                 Retry
-              </button>
+              </Button>
             </div>
           </div>
         )}

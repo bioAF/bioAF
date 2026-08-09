@@ -13,6 +13,7 @@ import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 import type {
   ReferenceDatasetDetail,
@@ -706,13 +707,11 @@ export default function DataReferenceDetailPage() {
           >
             Cancel
           </button>
-          <button
+          <Button variant="danger"
             onClick={handleDeprecate}
-            disabled={submitting}
-            className="bg-red-600 text-white px-4 py-2 rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
-          >
+            disabled={submitting}>
             {submitting ? "Submitting..." : "Deprecate"}
-          </button>
+          </Button>
           </>
         }
       >

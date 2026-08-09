@@ -4,6 +4,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import type { PermissionEntry, Role } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 export type PermissionCatalog = Record<string, string[]>;
 
@@ -121,13 +122,11 @@ export function RoleEditorModal({ editingRole, catalog, onClose, onSaved }: Prop
           >
             Cancel
           </button>
-          <button
+          <Button
             onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={saving}>
             {saving ? "Saving..." : editingRole ? "Save Changes" : "Create Role"}
-          </button>
+          </Button>
         </>
       }
     >

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError } from "@/lib/errorReporting";
 import { useConfirm } from "@/hooks/useConfirm";
+import { Button } from "@/components/ui/Button";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -217,13 +218,11 @@ export function DeployRecoveryModal({
             >
               Start Fresh
             </button>
-            <button
+            <Button
               onClick={handleRecover}
-              disabled={actionLoading}
-              className="px-4 py-2 text-sm font-medium text-white bg-bioaf-600 rounded-lg hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+              disabled={actionLoading}>
               {actionLoading ? "Recovering..." : "Resume Deployment"}
-            </button>
+            </Button>
           </div>
         </>
       )}

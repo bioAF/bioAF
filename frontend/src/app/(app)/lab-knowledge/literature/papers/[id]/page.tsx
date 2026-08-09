@@ -13,6 +13,7 @@ import { statusLabel } from "@/lib/statusStyles";
 import dynamic from "next/dynamic";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
+import { Button } from "@/components/ui/Button";
 import {
   advanceReadingStatus,
   cleanText,
@@ -748,13 +749,11 @@ export default function PaperDetailPage() {
           >
             Cancel
           </button>
-          <button
+          <Button variant="danger" size="sm"
             onClick={deletePaper}
-            disabled={deleting}
-            className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
-          >
+            disabled={deleting}>
             {deleting ? "Deleting..." : "Delete paper"}
-          </button>
+          </Button>
           </>
         }
       >

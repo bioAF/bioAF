@@ -21,6 +21,7 @@ import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
@@ -579,13 +580,11 @@ function SettingsUsersPageInner() {
             >
               Cancel
             </button>
-            <button
+            <Button
               onClick={handleSetTempPassword}
-              disabled={!tempPassword}
-              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={!tempPassword}>
               Set Password
-            </button>
+            </Button>
             </>
           }
         >
@@ -618,12 +617,10 @@ function SettingsUsersPageInner() {
             >
               Cancel
             </button>
-            <button
-              onClick={handleEditSave}
-              className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleEditSave}>
               Save Changes
-            </button>
+            </Button>
             </>
           }
         >

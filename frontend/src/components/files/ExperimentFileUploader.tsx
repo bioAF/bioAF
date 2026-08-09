@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import type { ExperimentDetail, FileResponse, Project } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 type FileStatus = "queued" | "uploading" | "complete" | "error";
 
@@ -369,15 +370,13 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
           )}
 
           {pendingCount > 0 && (
-            <button
+            <Button
               onClick={uploadAll}
-              disabled={uploading}
-              className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={uploading}>
               {uploading
                 ? "Uploading..."
                 : `Upload ${pendingCount} file${pendingCount !== 1 ? "s" : ""}`}
-            </button>
+            </Button>
           )}
         </div>
       )}

@@ -4,6 +4,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import type { SheetPreviewResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 const ALL_SAMPLE_FIELDS = [
   { value: "external_id", label: "Sample ID" },
@@ -144,22 +145,18 @@ export function TemplateSheetImportModal({
           </button>
 
           {step === "url" && (
-            <button
+            <Button
               onClick={handlePreview}
-              disabled={loading || !sheetUrl.trim()}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={loading || !sheetUrl.trim()}>
               {loading ? "Reading sheet..." : "Import Columns"}
-            </button>
+            </Button>
           )}
 
           {step === "mapping" && (
-            <button
-              onClick={handleApply}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleApply}>
               Apply to Template
-            </button>
+            </Button>
           )}
         </>
       }

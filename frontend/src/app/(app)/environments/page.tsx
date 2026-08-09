@@ -12,6 +12,7 @@ import { statusBadgeClass, statusDotClass, statusLabel } from "@/lib/statusStyle
 import { clickableCard } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 import type {
   EnvironmentResponse,
@@ -461,12 +462,10 @@ export default function EnvironmentsPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     {canBuild && (
-                      <button
-                        onClick={openRebuildModal}
-                        className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                      >
+                      <Button
+                        onClick={openRebuildModal}>
                         Rebuild from Latest Template
-                      </button>
+                      </Button>
                     )}
                     {canDelete && (
                       <button
@@ -595,13 +594,11 @@ export default function EnvironmentsPage() {
           size="md"
           footer={
             <>
-            <button
+            <Button
               onClick={handleCreate}
-              disabled={creating || !createForm.name}
-              className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={creating || !createForm.name}>
               {creating ? "Creating..." : "Create"}
-            </button>
+            </Button>
             <button
               onClick={() => setShowCreateModal(false)}
               className="border py-2 rounded text-sm"
@@ -658,16 +655,14 @@ export default function EnvironmentsPage() {
             size="md"
             footer={
               <>
-              <button
+              <Button
                 onClick={handleRebuild}
                 // `!rebuildTemplateContent` is the belt to the failure flag's braces:
                 // whatever went wrong, a version cannot be created from an empty
                 // definition, which is what the old catch left in state.
-                disabled={rebuildLoading || rebuildTemplateFailed || !rebuildTemplateContent}
-                className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
+                disabled={rebuildLoading || rebuildTemplateFailed || !rebuildTemplateContent}>
                 {rebuildLoading ? "Working..." : rebuildAction === "replace" ? "Replace and Rebuild" : "Build New Version"}
-              </button>
+              </Button>
               <button
                 onClick={() => setShowRebuildModal(false)}
                 className="border py-2 rounded text-sm"

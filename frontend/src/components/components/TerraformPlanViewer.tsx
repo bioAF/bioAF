@@ -2,6 +2,7 @@
 
 import type { TerraformRun } from "@/lib/types";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface TerraformPlanViewerProps {
   planSummary: TerraformRun["plan_summary"];
@@ -77,12 +78,10 @@ export function TerraformPlanViewer({ planSummary, onApply, onCancel }: Terrafor
       )}
 
       <div className="flex gap-3 mt-6">
-        <button
-          onClick={onApply}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={onApply}>
           Apply Changes
-        </button>
+        </Button>
         <button
           onClick={onCancel}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"

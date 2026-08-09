@@ -4,6 +4,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import type { FieldDefaultValue, SheetPreviewResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 // All user-facing sample fields. Must match SAMPLE_FIELDS + DEFAULTABLE_SAMPLE_FIELDS
 // on the backend. Fields marked defaultable can have experiment-level defaults set.
@@ -184,22 +185,18 @@ export function SheetImportModal({
           </button>
 
           {step === "url" && (
-            <button
+            <Button
               onClick={handlePreview}
-              disabled={loading || !sheetUrl.trim()}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={loading || !sheetUrl.trim()}>
               {loading ? "Reading sheet..." : "Import Columns"}
-            </button>
+            </Button>
           )}
 
           {step === "mapping" && (
-            <button
-              onClick={handleApply}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleApply}>
               Apply to Form
-            </button>
+            </Button>
           )}
         </>
       }

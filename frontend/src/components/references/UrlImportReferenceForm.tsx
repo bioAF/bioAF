@@ -8,6 +8,7 @@ import type {
   ReferenceImportStartResponse,
 } from "@/lib/types";
 import { extractModeForUrl, predictNextVersion } from "./referenceVersioning";
+import { Button } from "@/components/ui/Button";
 
 const CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"];
 const SCOPES = ["public", "internal"];
@@ -242,13 +243,10 @@ export function UrlImportReferenceForm({
         >
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+        <Button type="submit"
+          disabled={submitting}>
           {submitting ? "Starting..." : "Start import"}
-        </button>
+        </Button>
       </div>
     </form>
   );

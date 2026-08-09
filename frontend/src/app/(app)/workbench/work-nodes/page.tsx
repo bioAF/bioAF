@@ -37,6 +37,7 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Button } from "@/components/ui/Button";
 
 function statusLabel(node: WorkNode): string {
   if (node.status === "stopping") return "Syncing outputs...";
@@ -441,12 +442,10 @@ export default function WorkNodesPage() {
           </p>
         </div>
         {canAccess("work_nodes", "launch") && (
-          <button
-            onClick={openLaunchDialog}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={openLaunchDialog}>
             New Work Node
-          </button>
+          </Button>
         )}
       </div>
 

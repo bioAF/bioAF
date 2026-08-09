@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentUser, setToken } from "@/lib/auth";
 import { api, ApiError } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 
 export function AccountTab() {
   const [email, setEmail] = useState("");
@@ -130,13 +131,11 @@ export function AccountTab() {
               className="w-full px-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-bioaf-500"
             />
           </div>
-          <button
+          <Button
             onClick={handleSaveName}
-            disabled={nameSaving}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 disabled:opacity-50 text-sm font-medium"
-          >
+            disabled={nameSaving}>
             {nameSaving ? "Saving..." : "Save Name"}
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -193,13 +192,11 @@ export function AccountTab() {
             />
           </div>
 
-          <button
+          <Button className="w-full"
             onClick={handleChangePassword}
-            disabled={pwSaving}
-            className="w-full bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 disabled:opacity-50 text-sm font-medium"
-          >
+            disabled={pwSaving}>
             {pwSaving ? "Changing..." : "Change Password"}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -10,6 +10,7 @@ import { BillingSetupModal } from "@/components/infrastructure/BillingSetupModal
 import { TerraformProgressModal } from "@/components/infrastructure/TerraformProgressModal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Button } from "@/components/ui/Button";
 
 interface BillingExportStatus {
   configured: boolean;
@@ -462,13 +463,11 @@ export default function InfraCostCenterPage() {
                     </label>
                   ))}
                 </div>
-                <button
+                <Button
                   onClick={handleSaveBudget}
-                  disabled={saving}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-                >
+                  disabled={saving}>
                   {saving ? "Saving..." : "Save Budget Config"}
-                </button>
+                </Button>
               </div>
             </div>
           )}

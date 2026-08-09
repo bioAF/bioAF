@@ -9,6 +9,7 @@ import type { Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 export default function SettingsRolesPage() {
   const router = useRouter();
@@ -101,12 +102,10 @@ export default function SettingsRolesPage() {
               Manage roles and their permission assignments
             </p>
           </div>
-          <button
-            onClick={openCreateForm}
-            className="px-4 py-2 bg-bioaf-600 text-white text-sm rounded hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={openCreateForm}>
             Create Role
-          </button>
+          </Button>
         </div>
 
         {error && (
