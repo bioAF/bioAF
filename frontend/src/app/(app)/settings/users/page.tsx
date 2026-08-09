@@ -20,6 +20,7 @@ import { PasswordResetActions } from "./components/PasswordResetActions";
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Card } from "@/components/ui/Card";
 
 type TabKey = "users" | "service-accounts" | "webhooks" | "api-activity";
 
@@ -466,16 +467,16 @@ function SettingsUsersPageInner() {
       )}
 
       {showInvite && (
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
+        <Card className="mb-6">
           <h2 className="text-lg font-semibold mb-4">Invite Users</h2>
           <InviteForm roles={roles} />
-        </div>
+        </Card>
       )}
 
       {loading ? (
         <LoadingSpinner size="lg" />
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -534,7 +535,7 @@ function SettingsUsersPageInner() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
       </>
       )}

@@ -13,6 +13,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { useToast } from "@/components/shared/Toast";
+import { Card } from "@/components/ui/Card";
 import {
   cleanText,
   formatAssociation,
@@ -437,7 +438,7 @@ export default function LiteratureLibraryPage() {
             Review for an experiment to populate the library.
           </div>
         ) : (
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -543,7 +544,7 @@ export default function LiteratureLibraryPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         )}
 
         <AssociatePaperModal

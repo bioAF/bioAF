@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import type { AnalysisSnapshot } from "@/lib/types";
+import { Card } from "@/components/ui/Card";
 
 interface SnapshotTimelineProps {
   experimentId?: number;
@@ -69,21 +70,21 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+      <Card padding="none" className="p-8 text-center text-gray-500">
         Loading snapshots...
-      </div>
+      </Card>
     );
   }
 
   if (snapshots.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+      <Card padding="none" className="p-8 text-center text-gray-500">
         <p className="text-lg font-medium mb-2">No Analysis Snapshots</p>
         <p>
           Use <code className="bg-gray-100 px-1 rounded">bioaf.snapshot(adata, label=&quot;...&quot;)</code>{" "}
           in a notebook to capture snapshots.
         </p>
-      </div>
+      </Card>
     );
   }
 

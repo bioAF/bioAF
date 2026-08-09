@@ -11,6 +11,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { versionChangeKind } from "@/lib/customPipelineVersions";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
+import { Card } from "@/components/ui/Card";
 import type {
   CustomPipelineCodeSource,
   CustomPipelineDetail,
@@ -520,7 +521,7 @@ export default function CustomPipelineDetailPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-lg shadow">
+          <Card padding="none">
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <h2 className="font-semibold text-lg">Versions</h2>
               {canEdit && (
@@ -738,7 +739,7 @@ export default function CustomPipelineDetailPage() {
                 </div>
               )}
             </div>
-          </div>
+          </Card>
 
           {showLaunchDialog && (
             <CustomPipelineLaunchDialog

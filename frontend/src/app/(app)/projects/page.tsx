@@ -15,6 +15,7 @@ import type { Project, ProjectListResponse } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 export default function ProjectsPage() {
   return (
@@ -146,7 +147,7 @@ function ProjectsPageInner() {
             }}
           />
         ) : projects.length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-12 text-center">
+          <Card padding="none" className="p-12 text-center">
             <h2 className="text-lg font-semibold text-gray-500 mb-2">No projects found</h2>
             <p className="text-gray-500 mb-4">Create a project to organize cross-experiment analysis.</p>
             {canCreate && (
@@ -157,9 +158,9 @@ function ProjectsPageInner() {
                 New Project
               </button>
             )}
-          </div>
+          </Card>
         ) : (
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -196,7 +197,7 @@ function ProjectsPageInner() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
         )}
       </main>
 

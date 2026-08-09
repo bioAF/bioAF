@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { RevealSecretModal } from "./RevealSecretModal";
 
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 const VALID_EVENTS = [
   "experiment.created",
@@ -197,7 +198,7 @@ export function WebhooksTab() {
           No webhooks yet. Create one to forward bioAF events to an external system.
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -222,7 +223,7 @@ export function WebhooksTab() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       {/* Create Webhook modal */}

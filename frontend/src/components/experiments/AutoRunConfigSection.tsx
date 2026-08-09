@@ -14,6 +14,7 @@ import type {
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { Card } from "@/components/ui/Card";
 
 export function AutoRunConfigSection({ experimentId }: { experimentId: number }) {
   const toast = useToast();
@@ -90,7 +91,7 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">Loading...</div>
+        <Card padding="none" className="p-8 text-center text-gray-500">Loading...</Card>
       ) : loadError ? (
         <ErrorState message={loadError} onRetry={() => loadConfigs()} />
       ) : configs.length === 0 ? (
@@ -101,7 +102,7 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -153,7 +154,7 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       {showModal && (

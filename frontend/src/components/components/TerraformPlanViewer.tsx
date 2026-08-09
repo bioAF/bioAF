@@ -1,6 +1,7 @@
 "use client";
 
 import type { TerraformRun } from "@/lib/types";
+import { Card } from "@/components/ui/Card";
 
 interface TerraformPlanViewerProps {
   planSummary: TerraformRun["plan_summary"];
@@ -11,14 +12,14 @@ interface TerraformPlanViewerProps {
 export function TerraformPlanViewer({ planSummary, onApply, onCancel }: TerraformPlanViewerProps) {
   if (!planSummary) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <p className="text-gray-500">No plan available</p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
+    <Card>
       <h2 className="text-lg font-semibold mb-4">Terraform Plan</h2>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -89,6 +90,6 @@ export function TerraformPlanViewer({ planSummary, onApply, onCancel }: Terrafor
           Cancel
         </button>
       </div>
-    </div>
+    </Card>
   );
 }

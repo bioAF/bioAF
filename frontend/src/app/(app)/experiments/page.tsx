@@ -15,6 +15,7 @@ import type { Experiment, ExperimentListResponse, ExperimentStatus, ProjectListR
 
 import { clickableRow } from "@/lib/a11y";
 import { useToast } from "@/components/shared/Toast";
+import { Card } from "@/components/ui/Card";
 
 export default function ExperimentsPage() {
   const toast = useToast();
@@ -125,12 +126,12 @@ export default function ExperimentsPage() {
           <LoadingSpinner size="lg" />
         </div>
       ) : loadError ? (
-        <div className="bg-surface rounded-lg shadow">
+        <Card padding="none">
           <ErrorState
             message={loadError}
             onRetry={() => setReloadKey((k) => k + 1)}
           />
-        </div>
+        </Card>
       ) : experiments.length === 0 ? (
         <div className="bg-surface rounded-lg shadow p-12 text-center">
           <h2 className="text-lg font-semibold text-ink-subtle mb-2">No experiments found</h2>

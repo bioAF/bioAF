@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 
 interface SmtpSettings {
   host: string;
@@ -133,7 +134,7 @@ export function SmtpSettingsContent() {
       {message && <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">{message}</div>}
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">{error}</div>}
 
-      <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+      <Card className="max-w-2xl">
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label htmlFor="host" className="block text-sm font-medium text-gray-700 mb-1">Host</label>
@@ -195,7 +196,7 @@ export function SmtpSettingsContent() {
             </button>
           </div>
         </div>
-      </div>
+      </Card>
     </>
   );
 }

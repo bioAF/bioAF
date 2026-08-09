@@ -10,6 +10,7 @@ import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { SheetImportModal } from "@/components/experiments/SheetImportModal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Card } from "@/components/ui/Card";
 import type {
   Experiment,
   ExperimentCreateRequest,
@@ -190,7 +191,7 @@ export default function NewExperimentPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow p-6 space-y-4">
+        <Card className="space-y-4">
           <h2 className="text-lg font-semibold">Basics</h2>
 
           <div>
@@ -294,9 +295,9 @@ export default function NewExperimentPage() {
               />
             </div>
           </div>
-        </div>
+        </Card>
 
-        <div className="bg-white rounded-lg shadow p-6 space-y-4">
+        <Card className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-lg font-semibold">Sample Field Defaults</h2>
@@ -434,9 +435,9 @@ export default function NewExperimentPage() {
               </button>
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="bg-white rounded-lg shadow p-6 space-y-4">
+        <Card className="space-y-4">
           <h2 className="text-lg font-semibold">Initial Samples (optional)</h2>
           <p className="text-sm text-gray-500">
             Upload a CSV/TSV file to add samples when the experiment is created.
@@ -453,7 +454,7 @@ export default function NewExperimentPage() {
               Selected: {csvFile.name} ({(csvFile.size / 1024).toFixed(1)} KB)
             </p>
           )}
-        </div>
+        </Card>
 
         <div className="flex gap-4">
           <button

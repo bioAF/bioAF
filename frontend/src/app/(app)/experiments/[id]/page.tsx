@@ -65,6 +65,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Card } from "@/components/ui/Card";
 
 type Tab = ExperimentTabKey;
 
@@ -573,7 +574,7 @@ function ExperimentDetailPageInner() {
 
       {activeTab === "overview" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-surface rounded-lg shadow p-6">
+          <Card>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Experiment Details</h2>
               {!editingOverview && (
@@ -763,9 +764,9 @@ function ExperimentDetailPageInner() {
                 <div><dt className="text-sm text-ink-subtle">Created</dt><dd className="text-sm">{new Date(experiment.created_at).toLocaleString()}</dd></div>
               </dl>
             )}
-          </div>
+          </Card>
 
-          <div className="bg-surface rounded-lg shadow p-6">
+          <Card>
             <h2 className="text-lg font-semibold mb-4">Status</h2>
             <div className="space-y-3">
               <div className="flex items-center gap-4">
@@ -820,7 +821,7 @@ function ExperimentDetailPageInner() {
                 </dl>
               </>
             )}
-          </div>
+          </Card>
         </div>
       )}
 
@@ -1253,7 +1254,7 @@ function ExperimentDetailPageInner() {
 
       {activeTab === "analysis" && (
         <div className="space-y-6">
-          <div className="bg-surface rounded-lg shadow p-6">
+          <Card>
             <h2 className="text-lg font-semibold mb-4">Launch Notebook</h2>
             <p className="text-sm text-ink-subtle mb-4">
               Start a Jupyter or RStudio session pre-linked to this experiment.
@@ -1270,10 +1271,10 @@ function ExperimentDetailPageInner() {
                 Launch RStudio
               </Button>
             </div>
-          </div>
+          </Card>
 
           {notebookSessions.length > 0 && (
-            <div className="bg-surface rounded-lg shadow">
+            <Card padding="none">
               <div className="p-6 border-b">
                 <h2 className="text-lg font-semibold">Linked Sessions</h2>
               </div>
@@ -1297,7 +1298,7 @@ function ExperimentDetailPageInner() {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </Card>
           )}
 
           <SnapshotTimeline experimentId={Number(id)} />

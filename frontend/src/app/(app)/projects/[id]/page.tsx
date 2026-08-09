@@ -23,6 +23,7 @@ import type { ProjectDetailResponse, ProjectSampleResponse, ProvenanceDAG, QCSta
 import { useToast } from "@/components/shared/Toast";
 
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 type Tab =
   | "experiments"
@@ -269,11 +270,11 @@ export default function ProjectDetailPage() {
         {activeTab === "experiments" && (
           <div>
             {project.experiments.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              <Card padding="none" className="p-8 text-center text-gray-500">
                 No experiments linked to this project.
-              </div>
+              </Card>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <Card padding="none" className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -302,7 +303,7 @@ export default function ProjectDetailPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </Card>
             )}
           </div>
         )}
@@ -321,16 +322,16 @@ export default function ProjectDetailPage() {
               </div>
             )}
             {project.samples.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              <Card padding="none" className="p-8 text-center text-gray-500">
                 No samples added yet. Click &quot;Add Samples&quot; to get started.
-              </div>
+              </Card>
             ) : (
               project.samples.map((group) => (
                 <div key={group.experiment_id} className="mb-6">
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
                     {group.experiment_name}
                   </h3>
-                  <div className="bg-white rounded-lg shadow overflow-x-auto">
+                  <Card padding="none" className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
@@ -374,7 +375,7 @@ export default function ProjectDetailPage() {
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                  </Card>
                 </div>
               ))
             )}
@@ -413,11 +414,11 @@ export default function ProjectDetailPage() {
         {activeTab === "runs" && (
           <div>
             {project.pipeline_runs.length === 0 ? (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              <Card padding="none" className="p-8 text-center text-gray-500">
                 No pipeline runs yet.
-              </div>
+              </Card>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <Card padding="none" className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -446,7 +447,7 @@ export default function ProjectDetailPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </Card>
             )}
           </div>
         )}
@@ -464,7 +465,7 @@ export default function ProjectDetailPage() {
                 <LoadingSpinner size="lg" />
               </div>
             ) : provenance ? (
-              <div className="bg-white rounded-lg shadow p-6">
+              <Card>
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-sm font-semibold text-gray-700">
                     Provenance DAG: {provenance.nodes.length} nodes, {provenance.edges.length} edges
@@ -474,11 +475,11 @@ export default function ProjectDetailPage() {
                 <div className="min-h-[400px]">
                   <ProvenanceDAGComponent data={provenance} />
                 </div>
-              </div>
+              </Card>
             ) : (
-              <div className="bg-white rounded-lg shadow p-8 text-center text-gray-500">
+              <Card padding="none" className="p-8 text-center text-gray-500">
                 No provenance data available.
-              </div>
+              </Card>
             )}
             <div className="mt-6">
               <ProvenanceReportPanel

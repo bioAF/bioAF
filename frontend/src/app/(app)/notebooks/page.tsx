@@ -39,6 +39,7 @@ import { useToast } from "@/components/shared/Toast";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 
 const PROFILE_ORDER: ResourceProfile[] = ["small", "medium", "large", "xlarge", "2xlarge"];
 
@@ -458,7 +459,7 @@ export default function NotebooksPage() {
       )}
 
       {/* Active Sessions */}
-      <div className="bg-white rounded-lg shadow">
+      <Card padding="none">
         <div className="p-6 border-b flex items-center justify-between gap-4">
           <h2 className="text-lg font-semibold">Sessions</h2>
           <SessionBucketFilter value={bucket} onChange={setBucket} />
@@ -571,7 +572,7 @@ export default function NotebooksPage() {
             </tbody>
           </table>
         )}
-      </div>
+      </Card>
 
       {/* Session Detail Modal */}
       {viewingSession && (

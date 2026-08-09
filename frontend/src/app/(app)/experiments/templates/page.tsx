@@ -10,6 +10,7 @@ import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { Card } from "@/components/ui/Card";
 
 const STANDARD_SAMPLE_FIELDS = [
   "organism",
@@ -264,9 +265,9 @@ export default function ExperimentTemplatesPage() {
       ) : loadError ? (
         <ErrorState message={loadError} onRetry={() => loadTemplates()} />
       ) : templates.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
+        <Card padding="none" className="p-12 text-center">
           <p className="text-gray-500">No templates yet. Create one to standardize experiment registration.</p>
-        </div>
+        </Card>
       ) : (
         <div className="grid gap-4">
           {templates.map((t) => (

@@ -22,6 +22,7 @@ import { clickableRow } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { useConfirm } from "@/hooks/useConfirm";
+import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
@@ -662,7 +663,7 @@ export function FileBrowser({
       ) : files.length === 0 && labDocHits.length === 0 ? (
         <p className="text-gray-500 text-sm py-8 text-center">No files found.</p>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -847,7 +848,7 @@ export function FileBrowser({
               </div>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* File detail modal */}

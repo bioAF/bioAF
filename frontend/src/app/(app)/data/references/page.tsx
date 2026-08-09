@@ -12,6 +12,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return NOT_SET;
@@ -157,14 +158,14 @@ export default function DataReferencesPage() {
           <LoadingSpinner size="lg" />
         </div>
       ) : loadError ? (
-        <div className="bg-white rounded-lg shadow">
+        <Card padding="none">
           <ErrorState
             message={loadError}
             onRetry={() => setReloadKey((k) => k + 1)}
           />
-        </div>
+        </Card>
       ) : references.length === 0 ? (
-        <div className="bg-white rounded-lg shadow p-12 text-center">
+        <Card padding="none" className="p-12 text-center">
           <h2 className="text-lg font-semibold text-gray-500 mb-2">No reference datasets found</h2>
           <p className="text-gray-500 mb-4">
             {canAdd
@@ -179,10 +180,10 @@ export default function DataReferencesPage() {
               Add Reference Data
             </button>
           )}
-        </div>
+        </Card>
       ) : (
         <>
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <Card padding="none" className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
@@ -219,7 +220,7 @@ export default function DataReferencesPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </Card>
 
           <div className="mt-4 text-sm text-gray-500">
             {total} reference dataset{total !== 1 ? "s" : ""}

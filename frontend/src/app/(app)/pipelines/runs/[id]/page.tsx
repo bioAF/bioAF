@@ -22,6 +22,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { Card } from "@/components/ui/Card";
 import type {
   CustomPipelineRunOverview,
   PipelineRunDetail,
@@ -702,18 +703,18 @@ export default function PipelineRunDetailPage() {
 
         {/* Parameters tab */}
         {activeTab === "parameters" && (
-          <div className="bg-white rounded-lg shadow p-6">
+          <Card>
             <h2 className="text-lg font-semibold mb-4">Parameters</h2>
             {run.parameters ? (
               <pre className="text-sm bg-gray-50 p-4 rounded overflow-auto max-h-96">{JSON.stringify(run.parameters, null, 2)}</pre>
             ) : <p className="text-gray-500">No parameters recorded</p>}
-          </div>
+          </Card>
         )}
 
         {/* Provenance tab */}
         {activeTab === "provenance" && (
           <div className="space-y-6">
-            <div className="bg-white rounded-lg shadow p-6">
+            <Card>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Provenance</h2>
                 <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
@@ -795,11 +796,11 @@ export default function PipelineRunDetailPage() {
                   )}
                 </pre>
               ) : <LoadingSpinner size="sm" />}
-            </div>
+            </Card>
 
             {/* Reference datasets in provenance view */}
             {references.length > 0 && (
-              <div className="bg-white rounded-lg shadow p-6">
+              <Card>
                 <h3 className="text-md font-semibold mb-3">Reference Datasets</h3>
                 <div className="space-y-2">
                   {references.map((ref) => (
@@ -817,14 +818,14 @@ export default function PipelineRunDetailPage() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             )}
           </div>
         )}
 
         {/* Report tab */}
         {activeTab === "report" && showReportTab && (
-          <div className="bg-white rounded-lg shadow p-6">
+          <Card>
             <h2 className="text-lg font-semibold mb-4">
               {isCustomRun ? "Pipeline Report" : "Nextflow Report"}
             </h2>
@@ -848,12 +849,12 @@ export default function PipelineRunDetailPage() {
             ) : (
               <p className="text-gray-500">No report available.</p>
             )}
-          </div>
+          </Card>
         )}
 
         {/* Logs tab */}
         {activeTab === "logs" && (
-          <div className="bg-white rounded-lg shadow p-6">
+          <Card>
             <div className="flex items-center gap-4 mb-4">
               <h2 className="text-lg font-semibold">Logs</h2>
               {!run.compute_job_ref && run.processes.length > 0 && (
@@ -933,7 +934,7 @@ export default function PipelineRunDetailPage() {
                 </div>
               )
             ) : <p className="text-gray-500">Select a process to view logs</p>}
-          </div>
+          </Card>
         )}
 
         {/* Results tab */}

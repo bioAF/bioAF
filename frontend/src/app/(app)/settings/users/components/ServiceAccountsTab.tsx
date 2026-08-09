@@ -17,6 +17,7 @@ import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/R
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useToast } from "@/components/shared/Toast";
+import { Card } from "@/components/ui/Card";
 
 interface Props {
   roles: Role[];
@@ -234,7 +235,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
           No service accounts yet. Click <strong>Create Service Account</strong> above to start.
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -261,7 +262,7 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       {/* Create Service Account modal */}

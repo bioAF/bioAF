@@ -8,6 +8,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { statusBadgeClass } from "@/lib/statusStyles";
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 import type {
   CustomPipeline,
@@ -157,7 +158,7 @@ export default function CustomPipelineListPage() {
             )}
           </div>
 
-          <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <Card padding="none" className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
                 <tr>
@@ -220,7 +221,7 @@ export default function CustomPipelineListPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </Card>
 
           <Modal
             open={showCreateModal}

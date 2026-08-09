@@ -9,6 +9,7 @@ import { ContentLoading } from "@/components/shared/ContentLoading";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 import type {
   PipelineCatalog,
   Experiment,
@@ -230,7 +231,7 @@ export default function PipelineLauncherPage() {
 
       {/* Step 1: Select Experiment */}
       {step === 1 && (
-        <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+        <Card className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
           <select
             aria-label="Select experiment"
@@ -250,12 +251,12 @@ export default function PipelineLauncherPage() {
               className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >Next</button>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Step 2: Select Samples */}
       {step === 2 && (
-        <div className="bg-white rounded-lg shadow p-6">
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Select Samples</h2>
           <div className="mb-3 flex items-center gap-4">
             <label className="text-sm">
@@ -302,12 +303,12 @@ export default function PipelineLauncherPage() {
             <button onClick={() => setStep(1)} className="border px-6 py-2 rounded-md text-sm">Back</button>
             <button onClick={() => setStep(3)} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Step 3: Configure Parameters */}
       {step === 3 && (
-        <div className="bg-white rounded-lg shadow p-6">
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Configure Parameters</h2>
           {detectedProtocol && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded text-sm">
@@ -325,12 +326,12 @@ export default function PipelineLauncherPage() {
             <button onClick={() => setStep(2)} className="border px-6 py-2 rounded-md text-sm">Back</button>
             <button onClick={() => setStep(4)} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Step 4: Review & Launch */}
       {step === 4 && (
-        <div className="bg-white rounded-lg shadow p-6 max-w-2xl">
+        <Card className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Review & Launch</h2>
           <dl className="space-y-3 mb-6">
             <div><dt className="text-sm text-gray-500">Pipeline</dt><dd className="text-sm font-medium">{pipeline.name} v{pipeline.version}</dd></div>
@@ -361,7 +362,7 @@ export default function PipelineLauncherPage() {
               {launching ? "Launching..." : "Launch Pipeline"}
             </button>
           </div>
-        </div>
+        </Card>
       )}
       </>
       )}

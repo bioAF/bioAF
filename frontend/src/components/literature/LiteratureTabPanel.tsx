@@ -10,6 +10,7 @@ import {
   type Paper,
 } from "@/lib/literature";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { Card } from "@/components/ui/Card";
 
 interface Props {
   experimentId?: number;
@@ -79,7 +80,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
   return (
     <div className="space-y-3">
       <div className="text-xs text-gray-500">{total} papers</div>
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <Card padding="none" className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
@@ -147,7 +148,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
             ))}
           </tbody>
         </table>
-      </div>
+      </Card>
     </div>
   );
 }

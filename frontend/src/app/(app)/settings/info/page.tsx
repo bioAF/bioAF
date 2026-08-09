@@ -7,6 +7,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/shared/Toast";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 
 interface UpdateCheck {
   current_version: string;
@@ -188,7 +189,7 @@ export default function SettingsInfoPage() {
         The version this instance is running, its upgrade history, and the control to install an update.
       </p>
 
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
+      <Card className="mb-6">
         <h2 className="text-lg font-semibold mb-4">Platform Version</h2>
 
         {updateCheck && (
@@ -290,10 +291,10 @@ export default function SettingsInfoPage() {
           ) : (
             <p className="text-gray-500 text-sm">Loading version information...</p>
           ))}
-      </div>
+      </Card>
 
       {upgradeHistory.length > 0 && (
-        <div className="bg-white rounded-lg shadow p-6">
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Upgrade History</h2>
           <table className="w-full text-sm">
             <thead>
@@ -324,7 +325,7 @@ export default function SettingsInfoPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
     </main>
   );

@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
+import { Card } from "@/components/ui/Card";
 import type {
   ExperimentListResponse,
   FileResponse,
@@ -451,7 +452,7 @@ export default function DataUploadPage() {
 
         {/* File list */}
         {items.length > 0 && (
-          <div className="bg-white rounded-lg shadow p-4">
+          <Card padding="sm">
             <div className="flex items-center justify-between mb-3 gap-3">
               <h3 className="font-medium">Files ({items.length})</h3>
               {suggestionCount > 0 && (
@@ -557,7 +558,7 @@ export default function DataUploadPage() {
                 {uploading ? "Uploading..." : `Upload ${pendingCount} file${pendingCount !== 1 ? "s" : ""}`}
               </button>
             )}
-          </div>
+          </Card>
         )}
       </div>
     </main>

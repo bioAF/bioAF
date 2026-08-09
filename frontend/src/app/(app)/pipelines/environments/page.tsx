@@ -10,6 +10,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { clickableCard, clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 
 import {
   statusBadgeClass as badgeClass,
@@ -327,7 +328,7 @@ export default function PipelineEnvironmentsPage() {
             </div>
 
             {!selectedEnv ? (
-              <div className="bg-white rounded-lg shadow overflow-x-auto">
+              <Card padding="none" className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500 uppercase text-xs tracking-wide">
                     <tr>
@@ -395,7 +396,7 @@ export default function PipelineEnvironmentsPage() {
                     )}
                   </tbody>
                 </table>
-              </div>
+              </Card>
             ) : selectedVersion ? (
               <div>
                 <button
@@ -407,7 +408,7 @@ export default function PipelineEnvironmentsPage() {
                 >
                   &larr; Back to {selectedEnv.name}
                 </button>
-                <div className="bg-white rounded-lg shadow">
+                <Card padding="none">
                   <div className="p-6 border-b">
                     <div className="flex items-center justify-between">
                       <div>
@@ -482,7 +483,7 @@ export default function PipelineEnvironmentsPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </Card>
               </div>
             ) : (
               <div>
@@ -492,7 +493,7 @@ export default function PipelineEnvironmentsPage() {
                 >
                   &larr; Back to pipeline environments
                 </button>
-                <div className="bg-white rounded-lg shadow">
+                <Card padding="none">
                   <div className="p-6 border-b">
                     <div className="flex items-center justify-between">
                       <div>
@@ -629,7 +630,7 @@ export default function PipelineEnvironmentsPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                </Card>
               </div>
             )}
 

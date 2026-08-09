@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/hooks/useConfirm";
+import { Card } from "@/components/ui/Card";
 
 interface SlackStatus {
   configured: boolean;
@@ -472,7 +473,7 @@ export function SlackSettingsContent() {
 
             {/* Phase 1: Setup wizard (no Slack App configured yet) */}
             {!status?.configured && !status?.connected && (
-              <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <Card className="mb-6">
                 <h2 className="font-semibold mb-2">Set Up Slack App</h2>
                 <p className="text-sm text-gray-600 mb-4">
                   Before connecting, you need to create a Slack App in your workspace.
@@ -582,12 +583,12 @@ export function SlackSettingsContent() {
                     </div>
                   </div>
                 )}
-              </div>
+              </Card>
             )}
 
             {/* Phase 2: Configured but not connected */}
             {status?.configured && !status?.connected && (
-              <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <Card className="mb-6">
                 <h2 className="font-semibold mb-4">Connection</h2>
                 <div className="text-center py-8">
                   <p className="text-gray-500 mb-4">
@@ -615,14 +616,14 @@ export function SlackSettingsContent() {
                     </button>
                   </div>
                 </div>
-              </div>
+              </Card>
             )}
 
             {/* Phase 3: Connected */}
             {status?.connected && (
               <>
                 {/* Connection status */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-4">Connection</h2>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -642,10 +643,10 @@ export function SlackSettingsContent() {
                       Disconnect
                     </button>
                   </div>
-                </div>
+                </Card>
 
                 {/* Channel mappings */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-2">Channel Mappings</h2>
                   <p className="text-sm text-gray-500 mb-4">
                     Choose which Slack channels receive bioAF notifications and what types of events each channel gets.
@@ -823,10 +824,10 @@ export function SlackSettingsContent() {
                       ))}
                     </div>
                   )}
-                </div>
+                </Card>
 
                 {/* Test channel mappings */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-2">Test Channel Mappings</h2>
                   <p className="text-sm text-gray-500 mb-4">
                     Send a test message to all mapped channels to verify everything is working.
@@ -865,7 +866,7 @@ export function SlackSettingsContent() {
                       ))}
                     </div>
                   )}
-                </div>
+                </Card>
               </>
             )}
           </div>

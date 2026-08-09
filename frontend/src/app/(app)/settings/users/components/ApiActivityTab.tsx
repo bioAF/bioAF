@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 import { clickableRow } from "@/lib/a11y";
+import { Card } from "@/components/ui/Card";
 
 export function ApiActivityTab() {
   const [rows, setRows] = useState<ApiActivityRow[]>([]);
@@ -55,7 +56,7 @@ export function ApiActivityTab() {
           No API activity yet.
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
@@ -84,7 +85,7 @@ export function ApiActivityTab() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       <Modal

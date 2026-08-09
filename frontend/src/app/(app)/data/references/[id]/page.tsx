@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ErrorState } from "@/components/shared/ErrorState";
+import { Card } from "@/components/ui/Card";
 
 import type {
   ReferenceDatasetDetail,
@@ -437,7 +438,7 @@ export default function DataReferenceDetailPage() {
       </div>
 
       {activeTab === "files" && (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -467,11 +468,11 @@ export default function DataReferenceDetailPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       {activeTab === "versions" && (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           {versionsLoading && (
             <div className="flex justify-center py-12">
               <LoadingSpinner size="lg" />
@@ -549,7 +550,7 @@ export default function DataReferenceDetailPage() {
               No other versions of this reference exist.
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {activeTab === "impact" && (
@@ -568,18 +569,18 @@ export default function DataReferenceDetailPage() {
           ) : impact ? (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white rounded-lg shadow p-6">
+                <Card>
                   <p className="text-sm text-gray-500">Total Pipeline Runs</p>
                   <p className="text-3xl font-bold mt-1">{impact.total_pipeline_runs}</p>
-                </div>
-                <div className="bg-white rounded-lg shadow p-6">
+                </Card>
+                <Card>
                   <p className="text-sm text-gray-500">Total Experiments</p>
                   <p className="text-3xl font-bold mt-1">{impact.total_experiments}</p>
-                </div>
+                </Card>
               </div>
 
               {impact.pipeline_runs.length > 0 && (
-                <div className="bg-white rounded-lg shadow overflow-x-auto">
+                <Card padding="none" className="overflow-x-auto">
                   <div className="px-6 py-4 border-b">
                     <h3 className="font-semibold">Pipeline Runs Using This Reference</h3>
                   </div>
@@ -613,25 +614,25 @@ export default function DataReferenceDetailPage() {
                       ))}
                     </tbody>
                   </table>
-                </div>
+                </Card>
               )}
 
               {impact.pipeline_runs.length === 0 && (
-                <div className="bg-white rounded-lg shadow p-12 text-center">
+                <Card padding="none" className="p-12 text-center">
                   <p className="text-gray-500">No pipeline runs are using this reference dataset.</p>
-                </div>
+                </Card>
               )}
             </div>
           ) : (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
+            <Card padding="none" className="p-12 text-center">
               <p className="text-gray-500">Unable to load impact data.</p>
-            </div>
+            </Card>
           )}
         </div>
       )}
 
       {activeTab === "details" && (
-        <div className="bg-white rounded-lg shadow p-6">
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Reference Details</h2>
           <dl className="space-y-3">
             <div>
@@ -684,7 +685,7 @@ export default function DataReferenceDetailPage() {
               <dd className="text-sm">{new Date(reference.created_at).toLocaleString()}</dd>
             </div>
           </dl>
-        </div>
+        </Card>
       )}
 
       {/* Deprecation Modal */}

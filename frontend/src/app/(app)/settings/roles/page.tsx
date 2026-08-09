@@ -8,6 +8,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Role, RoleListResponse } from "@/lib/types";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { RoleEditorModal, type PermissionCatalog } from "@/components/settings/RoleEditorModal";
+import { Card } from "@/components/ui/Card";
 
 export default function SettingsRolesPage() {
   const router = useRouter();
@@ -120,7 +121,7 @@ export default function SettingsRolesPage() {
         )}
 
         {/* Role list */}
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
@@ -178,7 +179,7 @@ export default function SettingsRolesPage() {
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
 
         {/* Expanded role permissions */}
         {expandedRoleId && (() => {

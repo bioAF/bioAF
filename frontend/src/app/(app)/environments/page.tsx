@@ -11,6 +11,7 @@ import { api } from "@/lib/api";
 import { statusBadgeClass, statusDotClass, statusLabel } from "@/lib/statusStyles";
 import { clickableCard } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { Card } from "@/components/ui/Card";
 
 import type {
   EnvironmentResponse,
@@ -383,7 +384,7 @@ export default function EnvironmentsPage() {
             >
               &larr; Back to {selectedEnv.name}
             </button>
-            <div className="bg-white rounded-lg shadow">
+            <Card padding="none">
               <div className="p-6 border-b">
                 <div className="flex items-center justify-between">
                   <div>
@@ -438,7 +439,7 @@ export default function EnvironmentsPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           </div>
         ) : (
           /* Template detail */
@@ -446,7 +447,7 @@ export default function EnvironmentsPage() {
             <button onClick={() => setSelectedEnv(null)} className="text-sm text-bioaf-600 mb-4 hover:underline">
               &larr; Back to workbench templates
             </button>
-            <div className="bg-white rounded-lg shadow">
+            <Card padding="none">
               <div className="p-6 border-b">
                 <div className="flex items-center justify-between">
                   <div>
@@ -582,7 +583,7 @@ export default function EnvironmentsPage() {
                   </div>
                 )}
               </div>
-            </div>
+            </Card>
           </div>
         )}
 

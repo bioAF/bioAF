@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ReviewBadge } from "./ReviewBadge";
+import { Card } from "@/components/ui/Card";
 import type {
   PipelineRunReview,
   PipelineRunReviewListResponse,
@@ -129,7 +130,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
       )}
 
       {showForm && (
-        <div className="bg-white rounded-lg shadow p-4">
+        <Card padding="sm">
           <h3 className="font-semibold text-sm mb-3">Pipeline Run Review</h3>
           <div className="space-y-3">
             <div>
@@ -169,7 +170,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
               </button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {reviews.length > 1 && (

@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useFileContentUrl, usePlotThumbnailContentUrl } from "@/hooks/useContentUrl";
+import { Card } from "@/components/ui/Card";
 import type {
   PlotArchiveListResponse,
   PlotArchiveResponse,
@@ -217,7 +218,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">QC Dashboard</h2>
           <Link
@@ -270,9 +271,9 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             No QC dashboard yet for this run. Dashboards are generated automatically when the run completes.
           </p>
         ) : null}
-      </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Plot Archive</h2>
           <Link
@@ -327,7 +328,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       {expandedUrl && expandedPlot && (
         <PlotModal
