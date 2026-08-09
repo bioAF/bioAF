@@ -13,6 +13,12 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 import type { PipelineRun, PipelineRunListResponse } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+
+/** Matches the run detail page, which is the surface a user flips to from here. */
+const REFRESH_INTERVAL_MS = 10_000;
+/** The duration column shows seconds under a minute, so it needs a per-second clock. */
+const CLOCK_TICK_MS = 1_000;
 
 export default function PipelineRunsPage() {
   const router = useRouter();
@@ -26,14 +32,37 @@ export default function PipelineRunsPage() {
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState<"id" | "status" | "pipeline_name">("id");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     loadRuns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router, page, statusFilter]);
 
-  async function loadRuns() {
-    setLoading(true);
+  // This is the fleet view, and it was the only live surface in the app that never
+  // refreshed itself: the run detail polls every 10s, logs every 5s, pipeline
+  // templates every 5s, cellxgene every 5s. A run that finished, failed, or was
+  // launched from anywhere else did not appear here until the user reloaded.
+  useEffect(() => {
+    const interval = setInterval(() => loadRuns({ silent: true }), REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, statusFilter]);
+
+  // `formatDuration` read Date.now() once, at render, so an in-flight 8-hour run read
+  // "3m" until the page was reloaded. It is the only elapsed-time signal on this
+  // screen, so it has to be driven by a clock rather than by whenever React last
+  // happened to re-render. Only ticks while something is actually in flight.
+  const hasInFlight = runs.some((r) => !r.completed_at && r.started_at);
+  useEffect(() => {
+    if (!hasInFlight) return;
+    const tick = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(tick);
+  }, [hasInFlight]);
+
+  async function loadRuns(opts: { silent?: boolean } = {}) {
+    // A background refresh must not replace the table with a skeleton every 10s.
+    if (!opts.silent) setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), page_size: "25" });
       if (statusFilter) params.set("status", statusFilter);
@@ -42,14 +71,23 @@ export default function PipelineRunsPage() {
       setTotal(data.total);
       setLoadError(null);
     } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Could not load pipeline runs.");
-    } finally { setLoading(false); }
+      // Two things were wrong here. The raw server string went onto the screen
+      // ("Could not load pipeline runs. {loadError}"), against the house rule. And
+      // `runs` was never touched, so the red error row rendered UNDERNEATH a full table
+      // of stale rows that still read as current.
+      //
+      // The rows are not discarded, because a transient blip during a 10s poll should
+      // not blank a table the user is reading. They are labelled instead: the banner
+      // sits above the table and says what is shown may be out of date.
+      logError("loading the pipeline runs list", e);
+      setLoadError(loadFailureMessage("The pipeline runs list"));
+    } finally { if (!opts.silent) setLoading(false); }
   }
 
   function formatDuration(startedAt: string | null, completedAt: string | null): string {
     if (!startedAt) return NOT_SET;
     const start = new Date(startedAt).getTime();
-    const end = completedAt ? new Date(completedAt).getTime() : Date.now();
+    const end = completedAt ? new Date(completedAt).getTime() : nowMs;
     const seconds = Math.floor((end - start) / 1000);
     if (seconds < 60) return `${seconds}s`;
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -118,6 +156,22 @@ export default function PipelineRunsPage() {
         </select>
       </div>
 
+      {loadError && (
+        <div
+          data-testid="runs-load-error"
+          role="status"
+          className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-center justify-between gap-3"
+        >
+          <span>
+            {loadError}
+            {runs.length > 0 && " The runs below are from the last successful refresh and may be out of date."}
+          </span>
+          <Button variant="secondary" size="sm" onClick={() => loadRuns()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       <div className="bg-surface rounded-lg shadow overflow-x-auto">
         <table className="min-w-full divide-y divide-hairline">
           <thead className="bg-gray-50">
@@ -168,16 +222,12 @@ export default function PipelineRunsPage() {
                 {showCost && <td className="px-4 py-3 text-sm text-ink-subtle">{r.cost_estimate ? `$${r.cost_estimate.toFixed(2)}/hr` : NOT_SET}</td>}
               </tr>
             ))}
-            {loadError ? (
-              <tr>
-                <td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center">
-                  <p className="text-red-700 mb-3">Could not load pipeline runs. {loadError}</p>
-                  <Button variant="secondary" size="sm" onClick={() => loadRuns()}>
-                    Retry
-                  </Button>
-                </td>
-              </tr>
-            ) : runs.length === 0 ? (
+            {/*
+              "No pipeline runs" is only said when the last load SUCCEEDED and returned
+              nothing. With an error outstanding, the emptiness is unexplained rather
+              than a fact, and the banner above the table is what says so.
+            */}
+            {!loadError && runs.length === 0 ? (
               <tr><td colSpan={showCost ? 10 : 9} className="px-4 py-12 text-center text-ink-subtle">No pipeline runs</td></tr>
             ) : null}
           </tbody>

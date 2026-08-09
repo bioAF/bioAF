@@ -507,8 +507,36 @@ export default function PipelineRunDetailPage() {
                 </span>
               )}
             </div>
+          </div>
+        )}
+
+        {/*
+          Why the failure explanation is NOT inside the progress card above.
+
+          It used to be. The OOM banner, the preemption banner and the plain
+          `error_message` were all nested inside `{run.progress && (...)}`, and
+          `run.progress_json` is precisely what is null for a run that dies BEFORE
+          Nextflow writes a trace: `_populate_progress` in pipeline_monitor_service.py
+          returns early on an adapter exception or an empty process list, and unlike the
+          `completed` branch, the `failed` branch has no fallback payload. Image pull
+          failure, scheduling failure, node provisioning failure and a bad Nextflow
+          config all land there.
+
+          The backend writes a full explanatory paragraph into `error_message` for
+          exactly those cases, and the UI discarded it: a red `failed` pill, a duration,
+          seven tabs, and no reason. The recovery panels were unreachable in the one
+          case that most needs them, and the Logs tab is empty too when there is no
+          compute_job_ref and no processes.
+
+          A run's reason for failing has nothing to do with whether a progress payload
+          arrived, so it is no longer conditioned on one.
+        */}
+        {(run.failure_reason === "oom" ||
+          run.failure_reason === "preemption_exhausted" ||
+          run.error_message) && (
+          <div data-testid="run-failure-reason" className="mb-6">
             {run.failure_reason === "oom" && (
-              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
                 <span className="text-amber-700 text-lg" title="Memory">&#x1F4BE;</span>
                 <div className="flex-1">
                   <p className="text-sm text-amber-800 font-medium">This pipeline ran out of memory.</p>
@@ -523,7 +551,7 @@ export default function PipelineRunDetailPage() {
               </div>
             )}
             {run.failure_reason === "preemption_exhausted" && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-sm text-blue-800 font-medium">This pipeline was interrupted multiple times by Spot instance reclamation.</p>
                 <p className="text-sm text-blue-700 mt-1">This is unusual and typically resolves on its own.</p>
                 <div className="flex gap-2 mt-2">
@@ -543,7 +571,7 @@ export default function PipelineRunDetailPage() {
               </div>
             )}
             {run.error_message && run.failure_reason !== "oom" && run.failure_reason !== "preemption_exhausted" && (
-              <p className="text-sm text-red-600 mt-2">{run.error_message}</p>
+              <p className="text-sm text-red-600">{run.error_message}</p>
             )}
           </div>
         )}

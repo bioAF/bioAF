@@ -138,3 +138,111 @@ describe("the Report tab", () => {
     expect(document.querySelector("iframe")?.getAttribute("srcdoc")).toContain("report");
   });
 });
+
+/**
+ * Item 7. A run that dies BEFORE Nextflow writes a trace showed no reason at all.
+ *
+ * The OOM banner, the preemption banner and the plain `run.error_message` were all
+ * nested inside `{run.progress && (...)}`, so they render only when there is a progress
+ * payload. `progress_json` is exactly what is missing in this failure class:
+ * `_populate_progress` in pipeline_monitor_service.py returns early on an adapter
+ * exception or an empty process list, and unlike the `completed` branch, the `failed`
+ * branch has no fallback payload. Image pull failure, scheduling failure, node
+ * provisioning failure and a bad Nextflow config all land there.
+ *
+ * The backend writes a full explanatory paragraph into `error_message` for exactly
+ * these cases. The UI threw it away and rendered a red `failed` pill, a duration, seven
+ * tabs and nothing else. The recovery panels were unreachable in the one case that
+ * needs them most.
+ */
+describe("a run that failed before any progress was recorded", () => {
+  const FAILED_NO_PROGRESS = {
+    id: 42,
+    status: "failed",
+    pipeline_name: "rnaseq",
+    pipeline_key: "rnaseq",
+    experiment: null,
+    submitted_by: null,
+    created_at: "2026-06-01T00:00:00Z",
+    started_at: "2026-06-01T00:00:00Z",
+    completed_at: "2026-06-01T00:04:00Z",
+    error_message: "Pipeline failed: the container image could not be pulled.",
+    failure_reason: "task_error",
+    progress: null, // <- the whole point
+    parameters: {},
+    compute_job_ref: null,
+    processes: [],
+  };
+
+  function mountRun(run: Record<string, unknown>) {
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/api/pipeline-runs/42")) return Promise.resolve(run);
+      return Promise.resolve({});
+    });
+  }
+
+  test("still shows the reason the backend recorded", async () => {
+    mountRun(FAILED_NO_PROGRESS);
+
+    render(<PipelineRunDetailPage />);
+
+    expect(await screen.findByTestId("run-failure-reason")).toHaveTextContent(
+      /container image could not be pulled/i
+    );
+  });
+
+  test("still offers the OOM recovery panel", async () => {
+    mountRun({
+      ...FAILED_NO_PROGRESS,
+      failure_reason: "oom",
+      error_message: "Pipeline failed: out of memory.",
+    });
+
+    render(<PipelineRunDetailPage />);
+
+    expect(await screen.findByText(/ran out of memory/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /update node size/i })).toBeInTheDocument();
+  });
+
+  test("still offers the preemption recovery panel", async () => {
+    mountRun({ ...FAILED_NO_PROGRESS, failure_reason: "preemption_exhausted" });
+
+    render(<PipelineRunDetailPage />);
+
+    expect(await screen.findByText(/spot instance reclamation/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /re-run pipeline/i })).toBeInTheDocument();
+  });
+
+  test("a run with progress still shows its reason exactly once", async () => {
+    // The banners must not be rendered twice once they are lifted out of the progress
+    // card: the progress card is still there for runs that have a payload.
+    mountRun({
+      ...FAILED_NO_PROGRESS,
+      progress: {
+        total_processes: 4,
+        completed: 2,
+        running: 0,
+        failed: 1,
+        cached: 1,
+        percent_complete: 50,
+        retries: [],
+      },
+    });
+
+    render(<PipelineRunDetailPage />);
+
+    await waitFor(() => expect(screen.getByTestId("run-failure-reason")).toBeInTheDocument());
+    expect(screen.getAllByTestId("run-failure-reason")).toHaveLength(1);
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  test("a healthy completed run shows no failure block", async () => {
+    mountRun({ ...FAILED_NO_PROGRESS, status: "completed", error_message: null, failure_reason: null });
+
+    render(<PipelineRunDetailPage />);
+
+    await waitFor(() => expect(screen.queryByTestId("error-message")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("run-failure-reason")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ran out of memory/i)).not.toBeInTheDocument();
+  });
+});
