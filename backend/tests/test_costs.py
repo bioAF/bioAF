@@ -343,3 +343,112 @@ async def test_local_cost_rates_from_settings(admin_user, session):
     node = result.scalar_one()
     # Default setting is 0.01/hr * 24 = 0.24/day
     assert float(node.cost_amount) == pytest.approx(0.24, abs=0.01)
+
+
+@pytest.mark.asyncio
+async def test_summary_lazy_sync_survives_the_request(
+    client: AsyncClient, admin_token: str, admin_user, session
+):
+    """The lazy sync inside /summary must commit, not just flush.
+
+    Proven on the demo 2026-08-09: /summary reported $76.90 of month-to-date spend
+    while /history returned {"records": [], "total_amount": "0"} for ALL time and
+    cost_records held 0 rows. The sync ran on every /summary request and every row
+    it wrote was rolled back when the request's session closed.
+    """
+    from sqlalchemy import select
+    from app.models.cost_record import CostRecord
+
+    org_id = admin_user.organization_id
+    today = date.today()
+
+    response = await client.get(
+        "/api/costs/summary",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 200
+
+    # A session that is not the request's must see the rows the sync wrote.
+    await session.rollback()
+    result = await session.execute(
+        select(CostRecord).where(
+            CostRecord.organization_id == org_id,
+            CostRecord.record_date == today,
+        )
+    )
+    assert list(result.scalars().all()), "the lazy sync's rows did not survive the request"
+
+
+@pytest.mark.asyncio
+async def test_history_reports_what_summary_reported(
+    client: AsyncClient, admin_token: str, admin_user, session
+):
+    """The two cost endpoints must not disagree about whether spend exists.
+
+    This is the user-visible defect: the Cost Center page (/summary) shows spend
+    while the dashboard's "Cost / spend trend" widget (/history) says there is none.
+    """
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    today = date.today()
+
+    summary = await client.get("/api/costs/summary", headers=headers)
+    assert summary.status_code == 200
+    assert float(summary.json()["current_month_spend"]) > 0
+
+    history = await client.get(
+        f"/api/costs/history?start_date={today.replace(day=1)}&end_date={today}",
+        headers=headers,
+    )
+    assert history.status_code == 200
+    assert history.json()["records"], "summary reported spend that history cannot see"
+
+
+@pytest.mark.asyncio
+async def test_daily_billing_sync_commits(admin_user, session):
+    """The daily sync loop's one pass must persist what it syncs."""
+    from sqlalchemy import select
+    from app.models.cost_record import CostRecord
+    from app.main import _cost_billing_sync_once
+
+    org_id = admin_user.organization_id
+    today = date.today()
+
+    await _cost_billing_sync_once()
+
+    await session.rollback()
+    result = await session.execute(
+        select(CostRecord).where(
+            CostRecord.organization_id == org_id,
+            CostRecord.record_date == today,
+        )
+    )
+    assert list(result.scalars().all()), "the daily sync wrote nothing that survived"
+
+
+@pytest.mark.asyncio
+async def test_sync_serialises_per_org(admin_user, db_engine):
+    """A second sync for the same org must wait for the first to finish.
+
+    Every writer in the sync is a select-then-insert and cost_records has no
+    unique constraint, so two syncs overlapping on a day with no rows yet can
+    both insert and double that day's spend. That could not happen while every
+    sync was rolled back; it can now that the rows are durable.
+    """
+    import asyncio as _asyncio
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+    from app.services.cost_service import CostService
+
+    org_id = admin_user.organization_id
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with factory() as first, factory() as second:
+        # First sync runs but does not commit, so it still holds its lock.
+        await CostService.sync_billing_data(first, org_id)
+
+        task = _asyncio.create_task(CostService.sync_billing_data(second, org_id))
+        await _asyncio.sleep(0.5)
+        assert not task.done(), "a second sync ran while the first was still open"
+
+        await first.commit()
+        await _asyncio.wait_for(task, timeout=10)
+        await second.commit()

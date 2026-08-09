@@ -16,6 +16,9 @@ from app.services.event_types import BUDGET_THRESHOLD_50, BUDGET_THRESHOLD_80, B
 
 logger = logging.getLogger("bioaf.cost_service")
 
+# Arbitrary but stable namespace for the per-org billing-sync advisory lock.
+_COST_SYNC_LOCK_NAMESPACE = 4242
+
 
 class CostService:
     @staticmethod
@@ -32,8 +35,18 @@ class CostService:
             )
         )
         if (today_check.scalar() or 0) == 0:
-            await CostService.sync_billing_data(session, org_id)
-            await session.flush()
+            # In its own session, and committed. A flush on the caller's session is
+            # discarded when that session closes, so every other reader of
+            # cost_records -- /history, and the dashboard's spend trend widget behind
+            # it -- saw an empty table forever while this method re-synced and
+            # re-discarded the same rows on every single call. It cannot commit on the
+            # caller's session either: auto_run_service calls this mid-transaction and
+            # that would commit its pending cancellations early.
+            from app.database import async_session_factory
+
+            async with async_session_factory() as sync_session:
+                await CostService.sync_billing_data(sync_session, org_id)
+                await sync_session.commit()
 
         now = datetime.now(timezone.utc)
         month_start = date(now.year, now.month, 1)
@@ -144,7 +157,15 @@ class CostService:
         MTD data (excluding today, which lags up to 24h) and uses adapter
         estimates for today only. When not configured, uses the adapter path
         for all data.
+
+        Serialised per org by a transaction-scoped advisory lock. Every writer
+        here is a select-then-insert and cost_records has no unique constraint,
+        so two syncs racing on a day with no rows yet would both insert and
+        double that day's spend. The lock releases when the caller commits.
         """
+        await session.execute(
+            select(func.pg_advisory_xact_lock(_COST_SYNC_LOCK_NAMESPACE, org_id))
+        )
         logger.info("Syncing billing data for org %d", org_id)
         today = date.today()
         month_start = date(today.year, today.month, 1)

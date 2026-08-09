@@ -59,9 +59,16 @@ export function CostTrendWidget() {
         </div>
       )}
       {!loading && !error && records.length === 0 && (
-        <p className="text-sm text-gray-500" data-testid="widget-empty">
-          No cost history yet.
-        </p>
+        <div data-testid="widget-empty">
+          {/* This asked about 30 days, so it cannot say none has ever been recorded. */}
+          <p className="text-sm text-gray-500">No cost recorded in the last 30 days.</p>
+          <Link
+            href="/infrastructure/cost-center"
+            className="text-xs text-bioaf-600 hover:underline mt-2 inline-block"
+          >
+            View cost center
+          </Link>
+        </div>
       )}
       {!loading && !error && records.length > 0 && data && (
         <div>

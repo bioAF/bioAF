@@ -43,6 +43,26 @@ test("empty state with no history", async () => {
   await waitFor(() => expect(screen.getByTestId("widget-empty")).toBeInTheDocument());
 });
 
+test("the empty state claims nothing beyond the window it asked about", async () => {
+  // The widget asks for 30 days, so it cannot know whether cost has ever been
+  // recorded. "No cost history yet" asserts none ever existed.
+  mockGet.mockResolvedValueOnce({ records: [], total_amount: 0 });
+  render(<CostTrendWidget />);
+  await waitFor(() => expect(screen.getByTestId("widget-empty")).toBeInTheDocument());
+  expect(screen.getByTestId("widget-empty")).toHaveTextContent(/last 30 days/i);
+  expect(screen.getByTestId("widget-empty")).not.toHaveTextContent(/yet/i);
+});
+
+test("the empty state still offers the way to the full record", async () => {
+  mockGet.mockResolvedValueOnce({ records: [], total_amount: 0 });
+  render(<CostTrendWidget />);
+  await waitFor(() => expect(screen.getByTestId("widget-empty")).toBeInTheDocument());
+  expect(screen.getByText("View cost center")).toHaveAttribute(
+    "href",
+    "/infrastructure/cost-center",
+  );
+});
+
 test("error state", async () => {
   mockGet.mockRejectedValueOnce(new Error("x"));
   render(<CostTrendWidget />);
