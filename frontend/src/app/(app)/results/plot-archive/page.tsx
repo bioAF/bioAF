@@ -87,6 +87,10 @@ export default function PlotArchivePage() {
       );
       setPlots(data.plots);
       setTotal(data.total);
+      // Without this, a Retry that SUCCEEDS still leaves the failure sentence on
+      // screen: the error was set on the way down and never cleared on the way back
+      // up, so the only way to lose it was a full page reload.
+      setLoadError(null);
     } catch (e) {
       logError("loading the plot archive", e);
       setLoadError(loadFailureMessage("Plots"));

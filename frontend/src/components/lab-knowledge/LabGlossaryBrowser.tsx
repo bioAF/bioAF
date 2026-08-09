@@ -8,6 +8,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 
 import { clickableCard } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface UserSummary {
   id: number;
@@ -860,11 +861,23 @@ function ReviewPanel({
   const [decisions, setDecisions] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
 
+  const [proposalsFailed, setProposalsFailed] = useState(false);
+
   useEffect(() => {
     api
       .get<ProposalListResponse>(`${API_BASE}/glossary/scan/${jobId}/proposals`)
-      .then(setData)
-      .catch(() => setData(null));
+      .then((d) => {
+        setData(d);
+        setProposalsFailed(false);
+      })
+      .catch((e) => {
+        // `setData(null)` is the same state the component starts in, and the render
+        // below turns a null `data` into "Loading proposals...". So a failed fetch
+        // spun forever: the dialog never resolved, and there was nothing to retry.
+        logError(`loading glossary scan proposals for job ${jobId}`, e);
+        setData(null);
+        setProposalsFailed(true);
+      });
   }, [jobId]);
 
   const decide = (id: number, decision: string) =>
@@ -936,7 +949,20 @@ function ReviewPanel({
     return (
       <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
         <div className="bg-white rounded-lg p-6" onClick={(e) => e.stopPropagation()}>
-          <p data-testid="review-loading" className="text-gray-500">Loading proposals...</p>
+          {proposalsFailed ? (
+            <div data-testid="review-load-failed" role="status">
+              <p className="text-gray-700">{loadFailureMessage("The scan proposals")}</p>
+              <button
+                type="button"
+                onClick={onClose}
+                className="mt-3 px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <p data-testid="review-loading" className="text-gray-500">Loading proposals...</p>
+          )}
         </div>
       </div>
     );

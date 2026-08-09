@@ -197,9 +197,17 @@ export default function AuditLogPage() {
           )}
         </div>
 
-        <div className="text-xs text-gray-500 mb-2">
-          {total} {total === 1 ? "entry" : "entries"} total
-        </div>
+        {/*
+          `total` is whatever the last SUCCESSFUL load returned, so with an error
+          occupying the table below it read as a live count of the current filter:
+          "1,284 entries total" over an empty, failed table. A count nobody could
+          verify against anything on screen is worse than no count.
+        */}
+        {!loadError && (
+          <div className="text-xs text-gray-500 mb-2">
+            {total} {total === 1 ? "entry" : "entries"} total
+          </div>
+        )}
 
         <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
           <table className="w-full text-sm">

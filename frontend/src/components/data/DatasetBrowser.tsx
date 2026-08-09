@@ -64,6 +64,9 @@ export function DatasetBrowser() {
       );
       setDatasets(data.experiments);
       setTotal(data.total);
+      // A Retry that succeeds must clear the failure it retried. Set on the way down,
+      // never cleared on the way back up, means only a page reload lost the message.
+      setLoadError(null);
     } catch (e) {
       logError("loading datasets", e);
       setLoadError(loadFailureMessage("Datasets"));
@@ -117,18 +120,22 @@ export function DatasetBrowser() {
       }
 
       const selectedDs = datasets.filter((ds) => selectedExperiments.has(ds.experiment_id));
+
+      // Every selected experiment's samples must be read BEFORE anything is written.
+      //
+      // This loop used to toast "Could not add the datasets to the project" on a failed
+      // read and then carry on, posting the sample IDs it had managed to collect. So
+      // the user was told the operation had failed while a partial subset of their
+      // selection was silently added: the message and the outcome disagreed, and the
+      // half that landed was invisible. Now a failed read aborts before the write.
       const sampleIds: number[] = [];
       for (const ds of selectedDs) {
-        try {
-          const expData = await api.get<{ samples: Array<{ id: number }> }>(
-            `/api/experiments/${ds.experiment_id}`
-          );
-          if (expData.samples) {
-            sampleIds.push(...expData.samples.map((s) => s.id));
-          }
-        } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not add the datasets to the project.");
-    }
+        const expData = await api.get<{ samples: Array<{ id: number }> }>(
+          `/api/experiments/${ds.experiment_id}`
+        );
+        if (expData.samples) {
+          sampleIds.push(...expData.samples.map((s) => s.id));
+        }
       }
 
       if (sampleIds.length > 0) {
@@ -141,8 +148,12 @@ export function DatasetBrowser() {
       setSelectedExperiments(new Set());
       setSelectedProjectId("");
       setNewProjectName("");
-    } catch {
-      // handled by api client
+    } catch (e) {
+      // `catch { // handled by api client }` was a false comment: lib/api.ts only
+      // throws, it reports nothing. A failed POST /api/projects/{id}/samples was
+      // therefore completely silent, and the modal closed as though it had worked.
+      logError("adding the selected datasets to a project", e);
+      toast.error("The datasets could not be added to the project, so none were added.");
     } finally {
       setAddingToProject(false);
     }

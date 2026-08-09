@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { useToast } from "@/components/shared/Toast";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface UpdateCheck {
   current_version: string;
@@ -48,6 +49,7 @@ export default function SettingsInfoPage() {
   const toast = useToast();
   const { canAccess } = usePermissions();
   const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null);
+  const [versionLoadFailed, setVersionLoadFailed] = useState(false);
   const [upgradeHistory, setUpgradeHistory] = useState<UpgradeHistoryItem[]>([]);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updating, setUpdating] = useState(false);
@@ -110,8 +112,13 @@ export default function SettingsInfoPage() {
             pollRef.current = setInterval(pollUpdateStatus, 3000);
           }
         }
-      } catch {
-        // ignore
+      } catch (e) {
+        // `updateCheck` stays null on any failure, and the render turns a null
+        // `updateCheck` into "Loading version information..." with no end condition. So
+        // a failed call left an admin watching a permanent loading line on the page
+        // that tells them which version they are running.
+        logError("loading the platform version information", e);
+        setVersionLoadFailed(true);
       }
     };
     load();
@@ -271,9 +278,18 @@ export default function SettingsInfoPage() {
           </div>
         )}
 
-        {!updateCheck && (
-          <p className="text-gray-500 text-sm">Loading version information...</p>
-        )}
+        {!updateCheck &&
+          (versionLoadFailed ? (
+            <p
+              data-testid="version-load-failed"
+              role="status"
+              className="text-gray-500 text-sm"
+            >
+              {loadFailureMessage("Version information")}
+            </p>
+          ) : (
+            <p className="text-gray-500 text-sm">Loading version information...</p>
+          ))}
       </div>
 
       {upgradeHistory.length > 0 && (

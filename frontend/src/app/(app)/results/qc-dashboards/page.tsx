@@ -155,6 +155,10 @@ function QCDashboardsPageInner() {
       try {
         const data = await api.get<QCDashboardSummary[]>("/api/qc-dashboards");
         setDashboards(data);
+        // A Retry bumps `reloadKey` and re-runs this effect. Without clearing here, a
+        // successful retry still showed the failure sentence, so the only recovery was
+        // a full page reload.
+        setLoadError(null);
       } catch (e) {
         logError("loading QC dashboards", e);
         setLoadError(loadFailureMessage("QC dashboards"));

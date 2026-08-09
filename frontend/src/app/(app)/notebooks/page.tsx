@@ -156,8 +156,11 @@ export default function NotebooksPage() {
       setLoadError(null);
     } catch (e) {
       // These sessions bill while they run, so "you have none" must never stand
-      // in for "we could not ask".
-      setLoadError(e instanceof Error ? e.message : "Could not load notebook sessions.");
+      // in for "we could not ask". The comment was right and the render was not: the
+      // error row and the "No active sessions" row were separate conditions, so both
+      // rendered at once and the page said both things simultaneously. See below.
+      logError("loading the notebook sessions", e);
+      setLoadError(loadFailureMessage("Notebook sessions"));
     } finally {
       setLoading(false);
     }
@@ -533,10 +536,20 @@ export default function NotebooksPage() {
                   </td>
                 </tr>
               ))}
+              {/*
+                These were two independent conditions, so on a failed load the table
+                said "Could not load notebook sessions" AND "No active sessions" at the
+                same time, one directly under the other. They are mutually exclusive
+                claims, and these sessions bill by the hour: a user reading the second
+                one concludes nothing is running up a cost.
+
+                The colSpan was also 7 against an 8-column header, so both rows stopped
+                a column short of the table.
+              */}
               {loadError ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center">
-                    <p className="text-red-700 mb-3">Could not load notebook sessions. {loadError}</p>
+                <tr data-testid="notebooks-load-error">
+                  <td colSpan={8} className="px-4 py-12 text-center">
+                    <p className="text-red-700 mb-3">{loadError}</p>
                     <button
                       type="button"
                       onClick={() => loadSessions()}
@@ -546,10 +559,9 @@ export default function NotebooksPage() {
                     </button>
                   </td>
                 </tr>
+              ) : sessions.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No active sessions</td></tr>
               ) : null}
-              {sessions.length === 0 && (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No active sessions</td></tr>
-              )}
             </tbody>
           </table>
         )}
