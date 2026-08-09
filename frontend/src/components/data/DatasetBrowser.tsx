@@ -232,7 +232,7 @@ export function DatasetBrowser() {
         <p className="text-ink-subtle text-sm">No datasets found.</p>
       ) : (
         <>
-          <div className="bg-surface rounded-lg shadow overflow-hidden">
+          <div className="bg-surface rounded-lg shadow overflow-x-auto">
             <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>

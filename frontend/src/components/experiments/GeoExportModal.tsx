@@ -254,7 +254,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
             {validationReport.series_fields.length > 0 && (
               <div>
                 <h3 className="text-md font-semibold mb-2">Series Fields</h3>
-                <div className="bg-gray-50 rounded-md overflow-hidden">
+                <div className="bg-gray-50 rounded-md overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b">
@@ -283,7 +283,7 @@ export function GeoExportModal({ experimentId, isOpen, onClose, userRole }: GeoE
             {validationReport.protocol_fields.length > 0 && (
               <div>
                 <h3 className="text-md font-semibold mb-2">Protocol Fields</h3>
-                <div className="bg-gray-50 rounded-md overflow-hidden">
+                <div className="bg-gray-50 rounded-md overflow-x-auto">
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="border-b">

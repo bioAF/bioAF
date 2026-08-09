@@ -227,6 +227,20 @@ export function Sidebar({
         className="fixed inset-0 z-30 bg-black/50 md:hidden"
       />
     )}
+    {/*
+      `invisible` below md is doing accessibility work, not visual work. The closed
+      drawer is only moved off-canvas by a transform, and a transformed element is still
+      in the tab order: measured at 375px on the deployed app, the CLOSED sidebar was the
+      first 11 tab stops, so a keyboard user pressed Tab eleven times through controls
+      they could not see before reaching the hamburger. `visibility: hidden` is what
+      takes a subtree out of the tab order; `opacity` and `translate` do not.
+
+      It is transitioned rather than toggled because visibility interpolates as a
+      discrete step in which every value between 0 and 1 maps to `visible`. The drawer
+      therefore stays on screen for the whole 150ms slide in BOTH directions and only
+      flips to hidden once the slide-out has finished, where toggling it outright would
+      make the drawer vanish instead of sliding away.
+    */}
     <aside
       ref={drawerRef}
       tabIndex={mobileOpen ? -1 : undefined}
@@ -234,8 +248,8 @@ export function Sidebar({
       aria-modal={mobileOpen ? true : undefined}
       aria-label={mobileOpen ? "Main navigation" : undefined}
       className={`${collapsed ? "w-12" : "w-64"} ${
-        mobileOpen ? "translate-x-0" : "-translate-x-full"
-      } fixed inset-y-0 left-0 z-40 md:static md:z-auto md:translate-x-0 bg-surface text-ink border-r border-hairline min-h-screen flex flex-col transition-transform md:transition-[width] duration-150`}
+        mobileOpen ? "translate-x-0" : "-translate-x-full invisible md:visible"
+      } fixed inset-y-0 left-0 z-40 md:static md:z-auto md:translate-x-0 bg-surface text-ink border-r border-hairline min-h-screen flex flex-col transition-[transform,visibility] md:transition-[width] duration-150`}
       id="app-sidebar"
       data-testid="sidebar"
       data-collapsed={collapsed ? "true" : "false"}

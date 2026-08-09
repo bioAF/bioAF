@@ -179,7 +179,7 @@ export default function SettingsNamingProfilesPage() {
             your team{"'"}s convention.
           </div>
         ) : (
-          <div className="bg-white border rounded-lg overflow-hidden">
+          <div className="bg-white border rounded-lg overflow-x-auto">
             <table className="min-w-full">
               <thead className="bg-gray-50">
                 <tr>

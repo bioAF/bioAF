@@ -909,7 +909,7 @@ function ExperimentDetailPageInner() {
             </div>
           )}
 
-          <div className="bg-surface rounded-lg shadow overflow-hidden">
+          <div className="bg-surface rounded-lg shadow overflow-x-auto">
             <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
@@ -1295,7 +1295,7 @@ function ExperimentDetailPageInner() {
               <p className="text-ink-subtle">No pipeline runs for this experiment yet.</p>
             </div>
           ) : (
-            <div className="bg-surface rounded-lg shadow overflow-hidden">
+            <div className="bg-surface rounded-lg shadow overflow-x-auto">
               <table className="min-w-full divide-y divide-hairline">
                 <thead className="bg-gray-50">
                   <tr>
@@ -1355,7 +1355,7 @@ function ExperimentDetailPageInner() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Audit Trail ({auditTotal} entries)</h2>
           </div>
-          <div className="bg-surface rounded-lg shadow overflow-hidden">
+          <div className="bg-surface rounded-lg shadow overflow-x-auto">
             <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>

@@ -591,6 +591,25 @@ describe("Sidebar as a drawer on a narrow screen", () => {
     expect(sidebar.className).not.toContain("-translate-x-full");
   });
 
+  // A transform moves the drawer off screen but leaves it in the tab order. Measured
+  // at 375px on the deployed app, the closed drawer was the first 11 tab stops, so a
+  // keyboard user tabbed through 11 controls they could not see before reaching the
+  // hamburger. `visibility: hidden` is the only one of translate/opacity/visibility
+  // that removes a subtree from the tab order.
+  test("is out of the tab order while closed below md, and back in it above md", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("invisible");
+    expect(sidebar.className).toContain("md:visible");
+  });
+
+  test("is in the tab order once opened", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    expect(screen.getByTestId("sidebar").className).not.toContain("invisible");
+  });
+
   test("covers the page with a scrim only while it is open", () => {
     const { rerender } = render(<Sidebar />);
     expect(screen.queryByTestId("sidebar-scrim")).not.toBeInTheDocument();

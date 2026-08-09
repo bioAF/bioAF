@@ -266,7 +266,7 @@ export default function ProjectDetailPage() {
                 No experiments linked to this project.
               </div>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="bg-white rounded-lg shadow overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
@@ -323,7 +323,7 @@ export default function ProjectDetailPage() {
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">
                     {group.experiment_name}
                   </h3>
-                  <div className="bg-white rounded-lg shadow overflow-hidden">
+                  <div className="bg-white rounded-lg shadow overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
@@ -410,7 +410,7 @@ export default function ProjectDetailPage() {
                 No pipeline runs yet.
               </div>
             ) : (
-              <div className="bg-white rounded-lg shadow overflow-hidden">
+              <div className="bg-white rounded-lg shadow overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
                     <tr>
