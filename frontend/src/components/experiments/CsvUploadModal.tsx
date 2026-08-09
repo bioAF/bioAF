@@ -258,7 +258,7 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
               >
                 Back
               </button>
-              <button
+              <Button
                 onClick={() => {
                   if (source === "gsheet") {
                     submitSheetConfirm(columnMappings);
@@ -266,11 +266,9 @@ export function CsvUploadModal({ experimentId, existingCustomFields = [], onClos
                     submitConfirm(file, columnMappings);
                   }
                 }}
-                className="px-4 py-2 text-sm text-white bg-bioaf-600 rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-                disabled={loading}
-              >
+                disabled={loading}>
                 {loading ? "Creating samples..." : `Create ${preview?.total_rows ?? 0} Samples`}
-              </button>
+              </Button>
             </>
           )}
           {step === "done" && (

@@ -13,6 +13,7 @@ import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types
 
 import { clickableRow } from "@/lib/a11y";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return NOT_SET;
@@ -96,12 +97,10 @@ export default function DataReferencesPage() {
           </p>
         </div>
         {canAdd && (
-          <button
-            onClick={() => router.push("/data/references/add")}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700 transition-colors"
-          >
+          <Button
+            onClick={() => router.push("/data/references/add")}>
             Add Reference Data
-          </button>
+          </Button>
         )}
       </div>
 
@@ -173,12 +172,10 @@ export default function DataReferencesPage() {
               : "No reference datasets are available yet."}
           </p>
           {canAdd && (
-            <button
-              onClick={() => router.push("/data/references/add")}
-              className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={() => router.push("/data/references/add")}>
               Add Reference Data
-            </button>
+            </Button>
           )}
         </Card>
       ) : (

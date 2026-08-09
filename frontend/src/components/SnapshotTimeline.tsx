@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import type { AnalysisSnapshot } from "@/lib/types";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface SnapshotTimelineProps {
   experimentId?: number;
@@ -103,12 +104,10 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
       {/* Compare button */}
       {selected.size >= 2 && (
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowComparison(true)}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={() => setShowComparison(true)}>
             Compare Selected ({selected.size})
-          </button>
+          </Button>
           <button
             onClick={() => setSelected(new Set())}
             className="text-gray-500 text-sm hover:text-gray-700"

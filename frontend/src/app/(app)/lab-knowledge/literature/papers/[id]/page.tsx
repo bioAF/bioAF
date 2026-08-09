@@ -787,13 +787,11 @@ export default function PaperDetailPage() {
             >
               Cancel
             </button>
-            <button
+            <Button variant="danger" size="sm"
               onClick={() => doUpload(pendingPdf, true)}
-              disabled={uploadingPdf}
-              className="px-3 py-1.5 bg-red-600 text-white rounded text-sm hover:bg-red-700 disabled:opacity-50"
-            >
+              disabled={uploadingPdf}>
               {uploadingPdf ? "Merging..." : "Replace and merge"}
-            </button>
+            </Button>
             </>
           }
         >

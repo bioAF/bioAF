@@ -524,17 +524,15 @@ export default function CustomPipelineDetailPage() {
             <div className="px-6 py-4 border-b flex items-center justify-between">
               <h2 className="font-semibold text-lg">Versions</h2>
               {canEdit && (
-                <button
+                <Button size="sm"
                   onClick={() => {
                     setShowNewVersionForm((s) => !s);
                     if (!showNewVersionForm) {
                       seedVersionFormFromLatest(pipeline, envOptions);
                     }
-                  }}
-                  className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700"
-                >
+                  }}>
                   {showNewVersionForm ? "Cancel" : "New Version"}
-                </button>
+                </Button>
               )}
             </div>
 

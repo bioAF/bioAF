@@ -11,6 +11,7 @@ import { NamingProfileWizard } from "@/components/naming/NamingProfileWizard";
 import type { NamingProfile } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
+import { Button } from "@/components/ui/Button";
 
 export default function SettingsNamingProfilesPage() {
   const router = useRouter();
@@ -81,12 +82,10 @@ export default function SettingsNamingProfilesPage() {
             </p>
           </div>
           {!showWizard && (
-            <button
-              onClick={() => setShowWizard(true)}
-              className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={() => setShowWizard(true)}>
               New Profile
-            </button>
+            </Button>
           )}
         </div>
 

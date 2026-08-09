@@ -12,7 +12,7 @@
  * 22 dialog dismissals the Modal primitive already owns -- so the honest target
  * was 409, not 731.
  *
- * Inside that, ONE control was spelled 70 different ways across 126 instances:
+ * Inside that, ONE control was spelled dozens of ways across 215 instances:
  * the primary action. `px-4` and `px-6`; `py-2` and `py-1.5`; `rounded`,
  * `rounded-md` and `rounded-lg`; with and without `disabled:opacity-50`. That
  * is the split this guard exists to stop reopening, and it is the same finding
@@ -50,15 +50,47 @@ function stripComments(src: string): string {
     .replace(/^\s*\/\/.*$/gm, "");
 }
 
+/**
+ * End index of the `>` that closes the opening tag starting at `start`.
+ *
+ * Not a regex, and this matters. `<button\b[^>]*?>` stops at the first `>`,
+ * which for `onClick={() => save()}` is the one inside the arrow function. The
+ * first version of this guard used that pattern and could therefore not see a
+ * hand-rolled button with an inline handler, which is most of them: it reported
+ * 43 where the real number was 85.
+ */
+function endOfOpenTag(src: string, start: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = start + "<button".length; i < src.length; i++) {
+    const c = src[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "{") depth++;
+    else if (c === "}") depth--;
+    else if (c === ">" && depth === 0) return i;
+  }
+  return -1;
+}
+
 /** A raw <button> painted as the primary or the danger action. */
 function handRolledActions(): string[] {
   const found: string[] = [];
   for (const file of FILES) {
     if (file.endsWith(join("components", "ui", "Button.tsx"))) continue;
     const src = stripComments(readFileSync(file, "utf8"));
-    for (const m of src.matchAll(/<button\b[^>]*?>/g)) {
-      if (!/\b(bg-bioaf-(600|700)|bg-red-600)\b/.test(m[0])) continue;
-      if (!/\btext-white\b/.test(m[0])) continue;
+    const re = /<button(\s|>)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      const gt = endOfOpenTag(src, m.index);
+      if (gt === -1) break;
+      const tag = src.slice(m.index, gt + 1);
+      re.lastIndex = gt + 1;
+      if (!/\b(bg-bioaf-(600|700)|bg-red-600)\b/.test(tag)) continue;
+      if (!/\btext-white\b/.test(tag)) continue;
       found.push(`${relative(SRC, file)}:${src.slice(0, m.index).split("\n").length}`);
     }
   }
@@ -70,10 +102,12 @@ test("the sweep is looking at the whole tree", () => {
 });
 
 /**
- * 131 before the sweep, 43 after 88 were converted. Lower this number when more
- * are converted; never raise it. A new primary or danger action uses `Button`.
+ * 215 before the sweep, 85 after 130 were converted in two passes. Lower this
+ * number when more are converted; never raise it. A new primary or danger
+ * action uses `Button`.
  *
- * The 43 left are there on purpose. Each one either sets a padding that is not
+ * The 85 left are there on purpose, in 38 spellings, 20 of them building their
+ * class list in a template literal. Each one either sets a padding that is not
  * one of Button's two sizes (converting would silently resize the hit target),
  * a font size Button does not set, a disabled treatment of its own, or spells
  * its class list as a template literal with a condition inside it. Passing any
@@ -82,7 +116,7 @@ test("the sweep is looking at the whole tree", () => {
  * order -- so the call site would not control which one won. That trap cost the
  * Card sweep its first run. They need reading, not sweeping.
  */
-const ACTION_CEILING = 43;
+const ACTION_CEILING = 85;
 
 test("the hand-rolled primary/danger button count does not grow", () => {
   expect(handRolledActions().length).toBeLessThanOrEqual(ACTION_CEILING);
@@ -91,7 +125,7 @@ test("the hand-rolled primary/danger button count does not grow", () => {
 test("the ceiling tracks reality rather than drifting above it", () => {
   // Guard-the-guard. A ceiling far above the real count silently permits the
   // one-offs this exists to stop.
-  expect(handRolledActions().length).toBeGreaterThan(ACTION_CEILING - 14);
+  expect(handRolledActions().length).toBeGreaterThan(ACTION_CEILING - 20);
 });
 
 test("Button is actually called, across the tree and not just one corner", () => {

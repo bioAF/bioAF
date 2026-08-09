@@ -202,13 +202,10 @@ export function ExperimentFileUploader({ experimentId, samples, onUploaded }: Pr
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-      >
+      <Button size="sm"
+        onClick={() => setExpanded((v) => !v)}>
         {expanded ? "Cancel upload" : "Upload"}
-      </button>
+      </Button>
 
       {expanded && (
         <div className="basis-full w-full bg-white rounded-lg shadow p-4 space-y-4">

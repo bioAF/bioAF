@@ -319,12 +319,10 @@ export default function PipelineEnvironmentsPage() {
                 </p>
               </div>
               {!selectedEnv && canCreate && (
-                <button
-                  onClick={() => setShowCreateModal(true)}
-                  className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                >
+                <Button
+                  onClick={() => setShowCreateModal(true)}>
                   New Pipeline Template
-                </button>
+                </Button>
               )}
             </div>
 
@@ -438,12 +436,10 @@ export default function PipelineEnvironmentsPage() {
                         {canBuild &&
                           (selectedVersion.status === "draft" ||
                             selectedVersion.status === "failed") && (
-                            <button
-                              onClick={() => handleBuild(selectedEnv.id, selectedVersion.id)}
-                              className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-                            >
+                            <Button
+                              onClick={() => handleBuild(selectedEnv.id, selectedVersion.id)}>
                               Build Image
-                            </button>
+                            </Button>
                           )}
                         {canBuild && selectedVersion.status === "ready" && (
                           <button
@@ -710,13 +706,11 @@ export default function PipelineEnvironmentsPage() {
                 size="md"
                 footer={
                   <>
-                  <button
+                  <Button variant="danger"
                     onClick={() => handleDeleteVersion(selectedEnv.id, showDeleteVersionModal)}
-                    disabled={deletingVersion}
-                    className="bg-red-600 text-white py-2 rounded text-sm hover:bg-red-700 disabled:opacity-50"
-                  >
+                    disabled={deletingVersion}>
                     {deletingVersion ? "Deleting..." : "Delete Version"}
-                  </button>
+                  </Button>
                   <button
                     onClick={() => setShowDeleteVersionModal(null)}
                     className="border py-2 rounded text-sm"

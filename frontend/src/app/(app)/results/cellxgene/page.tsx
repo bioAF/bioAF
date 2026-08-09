@@ -13,6 +13,7 @@ import type {
   ExperimentListResponse,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { Button } from "@/components/ui/Button";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "Unknown size";
@@ -229,17 +230,15 @@ function PublishForm({
 
       {/* Actions */}
       <div className="flex gap-3">
-        <button
+        <Button
           onClick={() => {
             if (selectedFileId && canPublish) {
               onPublish(selectedFileId, datasetName.trim(), null);
             }
           }}
-          disabled={!canPublish}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={!canPublish}>
           Publish
-        </button>
+        </Button>
         <button
           onClick={onCancel}
           className="px-4 py-2 text-gray-600 bg-gray-100 rounded-md text-sm hover:bg-gray-200"
@@ -403,12 +402,10 @@ export default function CellxgenePage() {
     <main className="flex-1 overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-2">
         <h1 className="text-2xl font-bold">cellxgene Explorer</h1>
-        <button
-          onClick={() => setShowPublishForm(!showPublishForm)}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={() => setShowPublishForm(!showPublishForm)}>
           Publish Dataset
-        </button>
+        </Button>
       </div>
 
       <p data-testid="page-description" className="text-sm text-gray-500 mb-6">

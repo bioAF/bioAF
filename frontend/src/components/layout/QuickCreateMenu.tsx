@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 
 // The top creating jobs, startable from anywhere. New Sample points at the
 // experiment registration flow, which is where samples are first added (a sample
@@ -28,12 +29,10 @@ export function QuickCreateMenu() {
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="text-sm font-medium bg-bioaf-600 text-white px-3 py-1.5 rounded-md hover:bg-bioaf-700"
-      >
+      <Button size="sm"
+        onClick={() => setOpen((o) => !o)}>
         + New
-      </button>
+      </Button>
       {open && (
         <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-50 py-1">
           {ITEMS.map((item) => (

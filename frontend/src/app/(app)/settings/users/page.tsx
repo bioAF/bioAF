@@ -290,17 +290,15 @@ function SettingsUsersPageInner() {
 
     return (
       <div className="flex flex-wrap gap-2">
-        <button
+        <Button size="sm"
           onClick={() => {
             setEditingUser(user);
             setEditName(user.name || "");
             setEditRole(user.role_name);
             setViewingUser(null);
-          }}
-          className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+          }}>
           Edit
-        </button>
+        </Button>
         {user.status === "invited" && (
           <button
             onClick={() => {
@@ -359,15 +357,13 @@ function SettingsUsersPageInner() {
           </button>
         )}
         {isDeactivated && !user.last_login && (
-          <button
+          <Button variant="danger" size="sm"
             onClick={() => {
               setPendingAction({ type: "delete", user });
               setViewingUser(null);
-            }}
-            className="px-3 py-1.5 text-sm bg-red-600 text-white rounded hover:bg-red-700"
-          >
+            }}>
             Delete
-          </button>
+          </Button>
         )}
       </div>
     );
@@ -385,12 +381,10 @@ function SettingsUsersPageInner() {
           </p>
         </div>
         {activeTab === "users" && (
-          <button
-            onClick={() => setShowInvite(!showInvite)}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={() => setShowInvite(!showInvite)}>
             {showInvite ? "Close" : "Invite Users"}
-          </button>
+          </Button>
         )}
       </div>
 

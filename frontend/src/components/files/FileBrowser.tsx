@@ -593,12 +593,10 @@ export function FileBrowser({
                 {downloading ? downloadProgress || "Downloading..." : "Download Selected"}
               </button>
             )}
-            <button
-              onClick={() => openLinkModal(Array.from(selectedIds))}
-              className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-            >
+            <Button size="sm"
+              onClick={() => openLinkModal(Array.from(selectedIds))}>
               Associate
-            </button>
+            </Button>
             {isAdmin && (
               <Button variant="danger" size="sm"
                 onClick={handleDeleteSelected}>

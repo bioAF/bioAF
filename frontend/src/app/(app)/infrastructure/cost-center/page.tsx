@@ -204,12 +204,10 @@ export default function InfraCostCenterPage() {
               Dataset created. Data typically appears within 24 hours after enabling export in the Google Cloud Console.
             </p>
           </div>
-          <button
-            onClick={() => setShowBillingSetupModal(true)}
-            className="px-3 py-1.5 bg-bioaf-600 text-white rounded text-sm font-medium hover:bg-bioaf-700 whitespace-nowrap"
-          >
+          <Button size="sm" className="whitespace-nowrap"
+            onClick={() => setShowBillingSetupModal(true)}>
             Check Status
-          </button>
+          </Button>
         </div>
       )}
 
@@ -276,15 +274,13 @@ export default function InfraCostCenterPage() {
           >
             Cancel
           </button>
-          <button
+          <Button variant="danger"
             onClick={() => {
               setShowTeardownConfirm(false);
               setShowTeardownModal(true);
-            }}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700"
-          >
+            }}>
             Confirm Teardown
-          </button>
+          </Button>
           </>
         }
       >

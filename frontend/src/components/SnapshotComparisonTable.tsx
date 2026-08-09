@@ -4,6 +4,7 @@ import { NOT_SET } from "@/lib/placeholders";
 import { useState, useMemo } from "react";
 import type { AnalysisSnapshot } from "@/lib/types";
 import { clickableRow } from "@/lib/a11y";
+import { Button } from "@/components/ui/Button";
 
 interface SnapshotComparisonTableProps {
   snapshots: AnalysisSnapshot[];
@@ -68,12 +69,10 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
     <div>
       {selected.size >= 2 && (
         <div className="mb-3 flex items-center gap-3">
-          <button
-            onClick={() => onCompare(Array.from(selected))}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={() => onCompare(Array.from(selected))}>
             Compare Selected ({selected.size})
-          </button>
+          </Button>
           <button
             onClick={() => setSelected(new Set())}
             className="text-gray-500 text-sm hover:text-gray-700"

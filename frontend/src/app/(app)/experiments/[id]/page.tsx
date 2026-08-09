@@ -828,7 +828,7 @@ function ExperimentDetailPageInner() {
       {activeTab === "samples" && (
         <div>
           <div className="flex items-center gap-4 mb-4">
-            <button
+            <Button
               onClick={() => {
                 if (!showSampleForm && experiment) {
                   const prefill: Record<string, string> = {};
@@ -844,11 +844,9 @@ function ExperimentDetailPageInner() {
                   setSampleCustomFieldValues(cfDefaults);
                 }
                 setShowSampleForm(!showSampleForm);
-              }}
-              className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-            >
+              }}>
               Add Sample
-            </button>
+            </Button>
             <button
               onClick={() => setShowCsvUpload(true)}
               className="bg-surface border border-gray-300 px-4 py-2 rounded-md text-sm hover:bg-surface-muted"

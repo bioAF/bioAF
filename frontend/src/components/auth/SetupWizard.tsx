@@ -1412,9 +1412,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               ))}
             </div>
           )}
-          <button onClick={() => setStep(9)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={() => setStep(9)}>
             Continue to Getting Started
-          </button>
+          </Button>
         </div>
       )}
 

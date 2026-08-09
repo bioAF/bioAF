@@ -178,12 +178,10 @@ export function WebhooksTab() {
         <p className="text-sm text-gray-600">
           Webhook subscriptions notify external systems when bioAF entities change.
         </p>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button size="sm"
+          onClick={() => setShowCreate(true)}>
           Create Webhook
-        </button>
+        </Button>
       </div>
 
       {error && (

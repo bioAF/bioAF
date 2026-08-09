@@ -703,12 +703,10 @@ export default function InfraComponentsPage() {
                           </p>
                         )}
                         <div className="flex gap-2">
-                          <button
-                            onClick={() => setShowDeployModal(true)}
-                            className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 font-medium"
-                          >
+                          <Button size="sm"
+                            onClick={() => setShowDeployModal(true)}>
                             View Progress
-                          </button>
+                          </Button>
                           <button
                             onClick={() => setShowAbortConfirm(true)}
                             className="px-3 py-1.5 text-sm bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium"
@@ -1335,7 +1333,7 @@ export default function InfraComponentsPage() {
           >
             Cancel
           </button>
-          <button
+          <Button variant="danger"
             disabled={!teardownChecked}
             onClick={async () => {
               setShowTeardownModal(false);
@@ -1347,11 +1345,9 @@ export default function InfraComponentsPage() {
                 const msg = e instanceof Error ? e.message : "Teardown failed to start";
                 toast.error(msg);
               }
-            }}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+            }}>
             Teardown
-          </button>
+          </Button>
           </>
         }
       >
@@ -1407,7 +1403,7 @@ export default function InfraComponentsPage() {
           >
             Cancel
           </button>
-          <button
+          <Button variant="danger"
             disabled={!destroyStorageChecked || destroyStoragePhrase !== DESTROY_STORAGE_PHRASE}
             onClick={async () => {
               setShowDestroyStorageModal(false);
@@ -1419,11 +1415,9 @@ export default function InfraComponentsPage() {
                 const msg = e instanceof Error ? e.message : "Storage destroy failed to start";
                 toast.error(msg);
               }
-            }}
-            className="px-4 py-2 text-sm bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+            }}>
             Destroy Storage
-          </button>
+          </Button>
           </>
         }
       >

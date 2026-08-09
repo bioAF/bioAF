@@ -798,12 +798,10 @@ export default function WorkNodesPage() {
           </div>
           {canAccess("work_nodes", "stop") && viewingNode.status === "running" && (
             <div className="mt-4 pt-4 border-t">
-              <button
-                onClick={() => handleStop(viewingNode.id)}
-                className="w-full px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-              >
+              <Button variant="danger" className="w-full"
+                onClick={() => handleStop(viewingNode.id)}>
                 Stop Work Node
-              </button>
+              </Button>
               <p className="text-xs text-gray-500 mt-1 text-center">Files in /outputs/ will be synced. Data in /scratch will be lost.</p>
             </div>
           )}

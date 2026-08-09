@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ReviewBadge } from "./ReviewBadge";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import type {
   PipelineRunReview,
   PipelineRunReviewListResponse,
@@ -114,18 +115,16 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
 
       {canReview && (
         <div>
-          <button
+          <Button
             onClick={() => setShowForm(!showForm)}
             disabled={reviewsFailed}
             title={
               reviewsFailed
                 ? "The existing reviews could not be loaded, so a new one cannot be filed yet."
                 : undefined
-            }
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
+            }>
             {activeReview ? "Submit New Review" : "Submit Review"}
-          </button>
+          </Button>
         </div>
       )}
 

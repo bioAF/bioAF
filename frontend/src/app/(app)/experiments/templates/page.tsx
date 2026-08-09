@@ -11,6 +11,7 @@ import type { ExperimentTemplate, TemplateCreateRequest } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 const STANDARD_SAMPLE_FIELDS = [
   "organism",
@@ -151,12 +152,10 @@ export default function ExperimentTemplatesPage() {
             Reusable field definitions that pre-fill an experiment&apos;s metadata and sample structure when you register a new one.
           </p>
         </div>
-        <button
-          onClick={() => { setShowForm(!showForm); setEditingId(null); }}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={() => { setShowForm(!showForm); setEditingId(null); }}>
           {showForm ? "Cancel" : "Create Template"}
-        </button>
+        </Button>
       </div>
 
       {showForm && (

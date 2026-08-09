@@ -965,13 +965,10 @@ export default function NotebooksPage() {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={() => performLaunch(pendingLaunch)}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={() => performLaunch(pendingLaunch)}>
                 Launch anyway
-              </button>
+              </Button>
             </>
           }
         >

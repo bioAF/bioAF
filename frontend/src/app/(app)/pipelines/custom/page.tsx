@@ -150,12 +150,10 @@ export default function CustomPipelineListPage() {
               </p>
             </div>
             {canCreate && (
-              <button
-                onClick={() => setShowCreateModal(true)}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={() => setShowCreateModal(true)}>
                 Create Pipeline
-              </button>
+              </Button>
             )}
           </div>
 

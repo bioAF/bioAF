@@ -211,12 +211,10 @@ export function ServiceAccountsTab({ roles: rolesProp, onRolesChanged }: Props) 
         <p className="text-sm text-gray-600">
           Service accounts authenticate external LIMS systems against the integration API.
         </p>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="px-3 py-1.5 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button size="sm"
+          onClick={() => setShowCreate(true)}>
           Create Service Account
-        </button>
+        </Button>
       </div>
       <p className="text-xs text-gray-500 mb-4">
         Each service account holds a role that defines what its keys can do. Click a row to open

@@ -14,6 +14,7 @@ import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { useToast } from "@/components/shared/Toast";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import {
   cleanText,
   formatAssociation,
@@ -271,12 +272,10 @@ export default function LiteratureLibraryPage() {
               Sources
             </button>
             {canUpload && (
-              <button
-                onClick={() => router.push("/lab-knowledge/literature/upload")}
-                className="bg-bioaf-600 text-white px-4 py-2 rounded-md hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={() => router.push("/lab-knowledge/literature/upload")}>
                 Upload paper
-              </button>
+              </Button>
             )}
           </div>
         </div>
@@ -403,12 +402,10 @@ export default function LiteratureLibraryPage() {
             <span className="text-sm text-gray-700">
               {selectedIds.size} selected
             </span>
-            <button
-              onClick={() => openAssociate(Array.from(selectedIds))}
-              className="px-3 py-1.5 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-            >
+            <Button size="sm"
+              onClick={() => openAssociate(Array.from(selectedIds))}>
               Associate
-            </button>
+            </Button>
             <button
               onClick={() => setConfirmingBulkDismiss(true)}
               disabled={dismissBusy}
