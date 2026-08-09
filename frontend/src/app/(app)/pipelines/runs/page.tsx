@@ -5,6 +5,7 @@ import { NotSet } from "@/components/shared/NotSet";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/Button";
+import { PageSizeSelect, DEFAULT_PAGE_SIZE } from "@/components/shared/PageSizeSelect";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
@@ -30,14 +31,17 @@ export default function PipelineRunsPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
-  const [sortField, setSortField] = useState<"id" | "status" | "pipeline_name">("id");
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  // Unset until the user asks, so an untouched list keeps the server's own
+  // ordering (created_at DESC) rather than being silently re-sorted by id.
+  const [sortField, setSortField] = useState<"id" | "status" | "pipeline_name" | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     loadRuns();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, page, statusFilter]);
+  }, [router, page, pageSize, statusFilter, sortField, sortDir]);
 
   // This is the fleet view, and it was the only live surface in the app that never
   // refreshed itself: the run detail polls every 10s, logs every 5s, pipeline
@@ -47,7 +51,7 @@ export default function PipelineRunsPage() {
     const interval = setInterval(() => loadRuns({ silent: true }), REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, statusFilter]);
+  }, [page, pageSize, statusFilter, sortField, sortDir]);
 
   // `formatDuration` read Date.now() once, at render, so an in-flight 8-hour run read
   // "3m" until the page was reloaded. It is the only elapsed-time signal on this
@@ -64,8 +68,16 @@ export default function PipelineRunsPage() {
     // A background refresh must not replace the table with a skeleton every 10s.
     if (!opts.silent) setLoading(true);
     try {
-      const params = new URLSearchParams({ page: String(page), page_size: "25" });
+      const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
       if (statusFilter) params.set("status", statusFilter);
+      // Sorting happens in the query, before the LIMIT. Sorting the rows this
+      // page already holds answers a different question: on the demo, "sort by
+      // ID ascending" over page 1 of 29 runs put #5 at the top when the real
+      // answer was #1, on page 2.
+      if (sortField) {
+        params.set("sort_by", sortField);
+        params.set("sort_dir", sortDir);
+      }
       const data = await api.get<PipelineRunListResponse>(`/api/pipeline-runs?${params}`);
       setRuns(data.runs);
       setTotal(data.total);
@@ -108,15 +120,14 @@ export default function PipelineRunsPage() {
       setSortField(field);
       setSortDir("desc");
     }
+    // Re-sorting the whole list means page 4 of the old order is meaningless.
+    setPage(1);
   }
 
-  const sortedRuns = [...runs].sort((a, b) => {
-    let cmp = 0;
-    if (sortField === "id") cmp = a.id - b.id;
-    else if (sortField === "status") cmp = a.status.localeCompare(b.status);
-    else if (sortField === "pipeline_name") cmp = a.pipeline_name.localeCompare(b.pipeline_name);
-    return sortDir === "desc" ? -cmp : cmp;
-  });
+  // Deliberately NOT re-sorted here. The rows arrive in the order the server
+  // was asked for, and reordering them again would reinstate the defect: a
+  // client can only ever sort what it already has.
+  const sortedRuns = runs;
 
   const sortIcon = (field: string) => sortField === field ? (sortDir === "desc" ? " ↓" : " ↑") : "";
 
@@ -234,13 +245,27 @@ export default function PipelineRunsPage() {
         </table>
       </div>
 
-      {total > 25 && (
-        <div className="flex justify-center gap-2 mt-4">
-          <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Previous</Button>
-          <span className="text-sm text-ink-subtle py-1">Page {page} of {Math.ceil(total / 25)}</span>
-          <Button variant="secondary" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / 25)}>Next</Button>
-        </div>
-      )}
+      {/* The size control renders whether or not there is a second page, so it
+          is the same control in the same place regardless of how much data the
+          list happens to hold. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+        <PageSizeSelect
+          value={pageSize}
+          onChange={(size) => {
+            setPageSize(size);
+            // Page 12 of 25-row pages does not exist at 100 a page, so keeping
+            // the number would show an empty table for a list that is not empty.
+            setPage(1);
+          }}
+        />
+        {total > pageSize && (
+          <div className="flex gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>Previous</Button>
+            <span className="text-sm text-ink-subtle py-1">Page {page} of {Math.ceil(total / pageSize)}</span>
+            <Button variant="secondary" size="sm" onClick={() => setPage(page + 1)} disabled={page >= Math.ceil(total / pageSize)}>Next</Button>
+          </div>
+        )}
+      </div>
       </>
       )}
     </main>

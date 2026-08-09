@@ -1,5 +1,7 @@
+from typing import Literal
+
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +27,15 @@ from app.services.pipeline_monitor_service import PipelineMonitorService
 from app.services.pipeline_run_service import PipelineRunService
 
 router = APIRouter(prefix="/api/pipeline-runs", tags=["pipeline-runs"])
+
+# Declared as a Literal so FastAPI refuses an unknown field with a 422 before it
+# reaches the service. A sort field ends up as a column name in ORDER BY; it is
+# never taken from input unchecked. Kept in step with
+# PipelineRunService.SORTABLE, which holds the same names.
+SortableRunField = Literal[
+    "id", "status", "pipeline_name", "created_at", "started_at", "completed_at"
+]
+SortDirection = Literal["asc", "desc"]
 
 
 def _run_response(run) -> PipelineRunResponse:
@@ -91,12 +102,20 @@ def _detail_response(run) -> PipelineRunDetailResponse:
 
 @router.get("", response_model=PipelineRunListResponse)
 async def list_runs(
-    page: int = 1,
-    page_size: int = 25,
+    page: int = Query(1, ge=1),
+    # The UI offers 25/50/100. The bound is here rather than in the control,
+    # because page_size is user input that becomes a LIMIT and the control is
+    # not the only caller.
+    page_size: int = Query(25, ge=1, le=200),
     experiment_id: int | None = None,
     pipeline_key: str | None = None,
     status: str | None = None,
     submitted_by_user_id: int | None = None,
+    # Sorting happens in the query, before the LIMIT. Sorting the rows a page
+    # already holds answers a different question: on the demo, "sort by ID
+    # ascending" over page 1 of 29 runs returned #5 when the real answer was #1.
+    sort_by: SortableRunField | None = None,
+    sort_dir: SortDirection = "desc",
     current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -110,6 +129,8 @@ async def list_runs(
         pipeline_key=pipeline_key,
         status=status,
         submitted_by_user_id=submitted_by_user_id,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
     # Batch-fetch active review verdicts for listed runs
     run_ids = [r.id for r in runs]

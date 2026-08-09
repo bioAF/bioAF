@@ -541,6 +541,21 @@ class PipelineRunService:
         )
         return result.scalar_one_or_none()
 
+    # Sortable columns, by the name the API exposes.
+    #
+    # An allowlist rather than a getattr: a sort field arrives as user input and
+    # ends up as a column in ORDER BY, so anything not named here must not be
+    # reachable. Restricted to what a user can already see in the list, which is
+    # also exactly what the table offers as a sortable header.
+    SORTABLE = {
+        "id": PipelineRun.id,
+        "status": PipelineRun.status,
+        "pipeline_name": PipelineRun.pipeline_name,
+        "created_at": PipelineRun.created_at,
+        "started_at": PipelineRun.started_at,
+        "completed_at": PipelineRun.completed_at,
+    }
+
     @staticmethod
     async def list_runs(
         session: AsyncSession,
@@ -551,6 +566,8 @@ class PipelineRunService:
         pipeline_key: str | None = None,
         status: str | None = None,
         submitted_by_user_id: int | None = None,
+        sort_by: str | None = None,
+        sort_dir: str = "desc",
     ) -> tuple[list[PipelineRun], int]:
         query = (
             select(PipelineRun)
@@ -572,7 +589,15 @@ class PipelineRunService:
             query = query.where(PipelineRun.submitted_by_user_id == submitted_by_user_id)
             count_query = count_query.where(PipelineRun.submitted_by_user_id == submitted_by_user_id)
 
-        query = query.order_by(PipelineRun.created_at.desc())
+        # The ORDER BY goes before the LIMIT, which is the whole point: sorting
+        # the rows a page already holds answers a different question from the
+        # one the user asked. `id` is the tiebreaker so paging is stable across
+        # requests when the sort column has duplicates (status, especially).
+        column = PipelineRunService.SORTABLE.get(sort_by) if sort_by else None
+        if column is None:
+            column = PipelineRun.created_at
+        direction = (column.asc() if sort_dir == "asc" else column.desc())
+        query = query.order_by(direction, PipelineRun.id.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
 
         result = await session.execute(query)
