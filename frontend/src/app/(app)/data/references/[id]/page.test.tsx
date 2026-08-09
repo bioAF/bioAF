@@ -281,3 +281,49 @@ describe("Reference Detail - in-flight URL import", () => {
     });
   });
 });
+
+// The deprecate dialog's amber warning ("N pipeline runs across M experiments use this
+// reference and will be impacted") only renders when `impact` is present and non-zero.
+// The fetch that fills it was wrapped in `catch { // ignore }`, so a failed impact call
+// silently removed the blast radius from the screen at the exact moment the user was
+// deciding, and looked identical to "nothing uses this reference".
+describe("Reference Detail: deprecation blast radius", () => {
+  beforeEach(() => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    (console.error as jest.Mock).mockRestore?.();
+  });
+
+  function mount(impact: () => Promise<unknown>) {
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/references/1") return Promise.resolve(REF_DETAIL);
+      if (url.includes("/impact")) return impact();
+      return Promise.resolve({ references: [], total: 0 });
+    });
+    render(<DataReferenceDetailPage />);
+  }
+
+  it("says the impact is unknown rather than showing nothing", async () => {
+    mount(() => Promise.reject(new Error("500")));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^deprecate$/i }));
+
+    expect(await screen.findByTestId("deprecate-impact-unknown")).toHaveTextContent(
+      /could not be loaded/i
+    );
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("deprecation impact"),
+      expect.any(Error)
+    );
+  });
+
+  it("still shows a real blast radius when the fetch succeeds", async () => {
+    mount(() => Promise.resolve({ total_pipeline_runs: 12, total_experiments: 3 }));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^deprecate$/i }));
+
+    expect(await screen.findByText(/12 pipeline runs across 3 experiments/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("deprecate-impact-unknown")).not.toBeInTheDocument();
+  });
+});

@@ -17,11 +17,14 @@ jest.mock("@/lib/auth", () => ({
 }));
 
 const routerMock = { push: jest.fn(), back: jest.fn() };
+// Mutable so a single suite can land on different tabs. Read at call time, not at
+// mock-definition time.
+let mockTabParam = "tab=samples";
 jest.mock("next/navigation", () => ({
   useRouter: () => routerMock,
   useParams: () => ({ id: "7" }),
-  // The tab loads are what this is about, so land on the samples tab.
-  useSearchParams: () => new URLSearchParams("tab=samples"),
+  // The tab loads are what this is about, so land on the samples tab by default.
+  useSearchParams: () => new URLSearchParams(mockTabParam),
 }));
 jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true, loading: false }),
@@ -89,4 +92,83 @@ test("a working page raises no error toast", async () => {
   render(<ExperimentDetailPage />);
   await waitFor(() => expect(screen.getByText(/GSE129538 reproduction/)).toBeInTheDocument());
   expect(toastMock.error).not.toHaveBeenCalled();
+});
+
+/**
+ * The page's OWN load, as distinct from the tab loads above. `loadExperiment` ended in
+ * `catch { // handled }`, which left `experiment` null, and a null experiment renders
+ * "Experiment not found". A 500 or a dropped connection was therefore reported to the
+ * scientist as a deleted record: the same screen they would see for an experiment
+ * somebody had genuinely removed.
+ */
+describe("the page's own load", () => {
+  test("a 500 does not claim the experiment was deleted", async () => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/experiments/7")
+        return Promise.reject(Object.assign(new Error("Server Error"), { status: 500 }));
+      return Promise.resolve({});
+    });
+
+    render(<ExperimentDetailPage />);
+
+    expect(await screen.findByTestId("experiment-load-failed")).toHaveTextContent(
+      /could not be loaded/i
+    );
+    expect(screen.queryByText(/experiment not found/i)).not.toBeInTheDocument();
+  });
+
+  test("a 404 still says not found, because there the record really is gone", async () => {
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/experiments/7")
+        return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+      return Promise.resolve({});
+    });
+
+    render(<ExperimentDetailPage />);
+
+    expect(await screen.findByText(/experiment not found/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("experiment-load-failed")).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The Results tab fetched QC dashboards, cellxgene publications and plots in one
+ * `Promise.all` with `catch { // ignore }`. A single rejection left all three arrays
+ * empty, so ONE failure produced THREE false claims at once: "No QC dashboards for this
+ * experiment", "No published datasets for this experiment", "No plots for this
+ * experiment". allSettled keeps the sections independent.
+ */
+describe("the Results tab", () => {
+  beforeEach(() => {
+    mockTabParam = "tab=results";
+  });
+  afterEach(() => {
+    mockTabParam = "tab=samples";
+  });
+
+  function mountResults(failing: string) {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/experiments/7") return Promise.resolve(experiment);
+      if (url.includes(failing)) return Promise.reject(new Error("Backend unavailable"));
+      if (url.includes("/api/qc-dashboards")) return Promise.resolve([]);
+      if (url.includes("/api/cellxgene")) return Promise.resolve([]);
+      if (url.includes("/api/plots")) return Promise.resolve({ plots: [], total: 0 });
+      return Promise.resolve({});
+    });
+  }
+
+  test("one failed call does not empty the other two sections", async () => {
+    mountResults("/api/plots");
+
+    render(<ExperimentDetailPage />);
+
+    // The plots section reports its own failure...
+    expect(await screen.findByTestId("plots-section-failed")).toBeInTheDocument();
+    // ...and the two that succeeded still say what they actually found.
+    expect(screen.getByText(/no qc dashboards for this experiment/i)).toBeInTheDocument();
+    expect(screen.getByText(/no published datasets for this experiment/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no plots for this experiment/i)).not.toBeInTheDocument();
+  });
 });

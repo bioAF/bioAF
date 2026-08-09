@@ -87,6 +87,7 @@ function ExperimentDetailPageInner() {
     canAccess("experiments", "view") || canAccess("pipelines", "view");
 
   const [experiment, setExperiment] = useState<ExperimentDetail | null>(null);
+  const [experimentLoadFailed, setExperimentLoadFailed] = useState(false);
   const [samples, setSamples] = useState<Sample[]>([]);
   const [batches, setBatches] = useState<SampleBatch[]>([]);
   const [seqBatches, setSeqBatches] = useState<SequencingBatch[]>([]);
@@ -164,8 +165,16 @@ function ExperimentDetailPageInner() {
     try {
       const data = await api.get<ExperimentDetail>(`/api/experiments/${id}`);
       setExperiment(data);
-    } catch {
-      // handled
+      setExperimentLoadFailed(false);
+    } catch (e) {
+      // "handled" meant nothing was handled: `experiment` stayed null, and the render
+      // below turns a null experiment into "Experiment not found". A 500, an expired
+      // gateway or a dropped connection was therefore reported to the scientist as a
+      // deleted record. Only a 404 is a missing record.
+      if ((e as { status?: number } | null)?.status !== 404) {
+        logError(`loading experiment ${id}`, e);
+        setExperimentLoadFailed(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -471,7 +480,22 @@ function ExperimentDetailPageInner() {
   if (!experiment) {
     return (
       <main className="flex-1 flex items-center justify-center">
-        <p className="text-ink-subtle">Experiment not found</p>
+        {experimentLoadFailed ? (
+          <div data-testid="experiment-load-failed" role="status" className="text-center">
+            <p className="text-ink-subtle">{loadFailureMessage("This experiment")}</p>
+            <button
+              onClick={() => {
+                setLoading(true);
+                loadExperiment();
+              }}
+              className="mt-3 underline text-sm hover:no-underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p className="text-ink-subtle">Experiment not found</p>
+        )}
       </main>
     );
   }
@@ -1472,6 +1496,7 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
   const [modalDashboardId, setModalDashboardId] = useState<number | null>(null);
   const [cellxgenePubs, setCellxgenePubs] = useState<CellxgenePublicationResponse[]>([]);
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
+  const [failedSections, setFailedSections] = useState({ qc: false, pubs: false, plots: false });
   const [loading, setLoading] = useState(true);
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
@@ -1479,20 +1504,35 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
 
   useEffect(() => {
     (async () => {
-      try {
-        const [qc, pubs, plotData] = await Promise.all([
-          api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`),
-          api.get<CellxgenePublicationResponse[]>(`/api/cellxgene?experiment_id=${experimentId}`),
-          api.get<PlotArchiveListResponse>(`/api/plots?experiment_id=${experimentId}&page_size=12`),
-        ]);
-        setQcDashboards(qc);
-        setCellxgenePubs(pubs);
-        setPlots(plotData.plots);
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false);
-      }
+      // These were one `Promise.all` with `catch { // ignore }`, so a single rejection
+      // left all three arrays empty and the sections below then made three false
+      // claims at once: "No QC dashboards for this experiment", "No published datasets
+      // for this experiment", "No plots for this experiment". One timeout on the plots
+      // call told the scientist their experiment had no QC and no datasets either.
+      //
+      // allSettled keeps them independent: each section reports only its own outcome,
+      // and a section that loaded is still shown.
+      const [qc, pubs, plotData] = await Promise.allSettled([
+        api.get<QCDashboardSummary[]>(`/api/qc-dashboards?experiment_id=${experimentId}`),
+        api.get<CellxgenePublicationResponse[]>(`/api/cellxgene?experiment_id=${experimentId}`),
+        api.get<PlotArchiveListResponse>(`/api/plots?experiment_id=${experimentId}&page_size=12`),
+      ]);
+
+      if (qc.status === "fulfilled") setQcDashboards(qc.value);
+      else logError(`loading QC dashboards for experiment ${experimentId}`, qc.reason);
+
+      if (pubs.status === "fulfilled") setCellxgenePubs(pubs.value);
+      else logError(`loading cellxgene datasets for experiment ${experimentId}`, pubs.reason);
+
+      if (plotData.status === "fulfilled") setPlots(plotData.value.plots);
+      else logError(`loading plots for experiment ${experimentId}`, plotData.reason);
+
+      setFailedSections({
+        qc: qc.status === "rejected",
+        pubs: pubs.status === "rejected",
+        plots: plotData.status === "rejected",
+      });
+      setLoading(false);
     })();
   }, [experimentId]);
 
@@ -1516,7 +1556,11 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       {/* QC Dashboards */}
       <section>
         <h2 className="text-lg font-semibold mb-3">QC Dashboards</h2>
-        {qcDashboards.length === 0 ? (
+        {failedSections.qc ? (
+          <p data-testid="qc-section-failed" role="status" className="text-ink-subtle text-sm">
+            {loadFailureMessage("QC dashboards")}
+          </p>
+        ) : qcDashboards.length === 0 ? (
           <p className="text-ink-subtle text-sm">No QC dashboards for this experiment.</p>
         ) : (
           <div className="bg-surface rounded-lg shadow divide-y divide-hairline">
@@ -1534,7 +1578,11 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       {/* cellxgene Publications */}
       <section>
         <h2 className="text-lg font-semibold mb-3">cellxgene Datasets</h2>
-        {cellxgenePubs.length === 0 ? (
+        {failedSections.pubs ? (
+          <p data-testid="pubs-section-failed" role="status" className="text-ink-subtle text-sm">
+            {loadFailureMessage("Published datasets")}
+          </p>
+        ) : cellxgenePubs.length === 0 ? (
           <p className="text-ink-subtle text-sm">No published datasets for this experiment.</p>
         ) : (
           <div className="bg-surface rounded-lg shadow divide-y divide-hairline">
@@ -1556,7 +1604,11 @@ function ExperimentResultsTab({ experimentId }: { experimentId: number }) {
       {/* Plot Archive */}
       <section>
         <h2 className="text-lg font-semibold mb-3">Plots</h2>
-        {plots.length === 0 ? (
+        {failedSections.plots ? (
+          <p data-testid="plots-section-failed" role="status" className="text-ink-subtle text-sm">
+            {loadFailureMessage("Plots")}
+          </p>
+        ) : plots.length === 0 ? (
           <p className="text-ink-subtle text-sm">No plots for this experiment.</p>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

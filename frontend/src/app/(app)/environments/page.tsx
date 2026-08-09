@@ -58,6 +58,7 @@ export default function EnvironmentsPage() {
   const [rebuildTemplateContent, setRebuildTemplateContent] = useState("");
   const [rebuildTemplateMatch, setRebuildTemplateMatch] = useState(false);
   const [rebuildLoading, setRebuildLoading] = useState(false);
+  const [rebuildTemplateFailed, setRebuildTemplateFailed] = useState(false);
   const [rebuildAction, setRebuildAction] = useState<"new" | "replace">("new");
 
   // Delete version modal state
@@ -203,6 +204,7 @@ export default function EnvironmentsPage() {
     setRebuildLoading(true);
     setShowRebuildModal(true);
     setRebuildAction("new");
+    setRebuildTemplateFailed(false);
     try {
       // Work-node environments are conda-only; serve the conda env.yml template,
       // not the Dockerfile template (handleRebuild submits it as definition_format
@@ -226,9 +228,17 @@ export default function EnvironmentsPage() {
       } else {
         setRebuildTemplateMatch(false);
       }
-    } catch {
+    } catch (e) {
+      // `setRebuildTemplateMatch(false)` is the value that selects the GREEN branch of
+      // the modal below: "The template has been updated since your last build. The new
+      // version will include the latest changes." A failed fetch therefore reassured
+      // the user that there was something to pick up, left the build button live, and
+      // POSTed `definition_content: ""` -- an empty environment version, built.
+      // "Could not read it" and "it differs" are not the same answer.
+      logError("loading the latest environment template", e);
       setRebuildTemplateContent("");
       setRebuildTemplateMatch(false);
+      setRebuildTemplateFailed(true);
     } finally {
       setRebuildLoading(false);
     }
@@ -649,7 +659,10 @@ export default function EnvironmentsPage() {
               <>
               <button
                 onClick={handleRebuild}
-                disabled={rebuildLoading}
+                // `!rebuildTemplateContent` is the belt to the failure flag's braces:
+                // whatever went wrong, a version cannot be created from an empty
+                // definition, which is what the old catch left in state.
+                disabled={rebuildLoading || rebuildTemplateFailed || !rebuildTemplateContent}
                 className="bg-bioaf-600 text-white py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
               >
                 {rebuildLoading ? "Working..." : rebuildAction === "replace" ? "Replace and Rebuild" : "Build New Version"}
@@ -666,6 +679,18 @@ export default function EnvironmentsPage() {
   
             {rebuildLoading && !rebuildTemplateContent ? (
               <p className="text-sm text-gray-500">Loading template...</p>
+            ) : rebuildTemplateFailed ? (
+              <div
+                data-testid="rebuild-template-load-failed"
+                role="status"
+                className="bg-red-50 border border-red-200 rounded p-3 mb-4"
+              >
+                <p className="text-sm text-red-800">
+                  {loadFailureMessage("The latest bioAF template")} Whether it differs from
+                  v{selectedEnv.versions[0]?.version_number} is unknown, so there is nothing to
+                  build from yet.
+                </p>
+              </div>
             ) : rebuildTemplateMatch ? (
               <>
                 <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-4">

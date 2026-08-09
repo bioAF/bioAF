@@ -10,6 +10,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { getCurrentUser } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
+import { logError } from "@/lib/errorReporting";
 
 import type {
   ReferenceDatasetDetail,
@@ -45,6 +46,7 @@ export default function DataReferenceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>("files");
 
+  const [impactFailed, setImpactFailed] = useState(false);
   const [impact, setImpact] = useState<ImpactSummary | null>(null);
   const [impactLoading, setImpactLoading] = useState(false);
 
@@ -210,6 +212,7 @@ export default function DataReferenceDetailPage() {
 
   async function openDeprecateModal() {
     setShowDeprecateModal(true);
+    setImpactFailed(false);
     try {
       const [refsData, impactData] = await Promise.all([
         api.get<ReferenceDatasetListResponse>("/api/references?status=active"),
@@ -217,8 +220,16 @@ export default function DataReferenceDetailPage() {
       ]);
       setActiveRefs(refsData.references.filter((r) => r.id !== Number(id)));
       setImpact(impactData);
-    } catch {
-      // ignore
+    } catch (e) {
+      // `// ignore` left `impact` null, and the dialog only renders the amber warning
+      // ("N pipeline runs across M experiments use this reference and will be
+      // impacted") when impact is present and non-zero. A failed fetch therefore
+      // removed the blast radius from the screen at the exact moment the user was
+      // deciding, and looked identical to "nothing uses this reference". Absent and
+      // unknown must not render the same.
+      logError(`loading the deprecation impact for reference ${id}`, e);
+      setImpact(null);
+      setImpactFailed(true);
     }
   }
 
@@ -679,6 +690,19 @@ export default function DataReferenceDetailPage() {
         <p className="text-sm text-gray-500 mb-4">
           This will mark &quot;{reference.name}&quot; as pending deprecation approval.
         </p>
+        {impactFailed && (
+          <div
+            data-testid="deprecate-impact-unknown"
+            role="status"
+            className="bg-amber-50 border border-amber-200 rounded-md p-3 mb-4"
+          >
+            <p className="text-sm text-amber-800 font-medium">
+              How many pipeline runs and experiments use this reference could not be loaded, so
+              the impact of deprecating it is unknown. The technical detail is in the application
+              logs.
+            </p>
+          </div>
+        )}
         {impact && impact.total_pipeline_runs > 0 && (
           <div className="bg-amber-50 border border-amber-200 rounded-md p-3 mb-4">
             <p className="text-sm text-amber-800 font-medium">

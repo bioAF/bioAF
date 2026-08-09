@@ -8,6 +8,7 @@ import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { InputDialog } from "@/components/shared/InputDialog";
 import { getCurrentUser } from "@/lib/auth";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { statusLabel } from "@/lib/statusStyles";
 import dynamic from "next/dynamic";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
@@ -59,6 +60,7 @@ export default function PaperDetailPage() {
     user?.role_name === "admin" || user?.role_name === "comp_bio";
 
   const [paper, setPaper] = useState<Paper | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [notes, setNotes] = useState<RecommendationNote[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,7 +103,16 @@ export default function PaperDetailPage() {
         setComments(c.items);
         setNotes(n);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => {
+        // `paper` stays null on any rejection, and the render below turns that into
+        // "Paper not found." A 500 or a dropped connection was reported as a deleted
+        // record. Only a 404 means the paper is gone. The raw `e.message` also went
+        // straight to the screen, against the house rule; the detail belongs in the
+        // logs.
+        logError(`loading paper ${paperId}`, e);
+        if ((e as { status?: number } | null)?.status === 404) setNotFound(true);
+        else setError(loadFailureMessage("This paper"));
+      })
       .finally(() => setLoading(false));
   }
 
@@ -269,8 +280,13 @@ export default function PaperDetailPage() {
   if (!paper) {
     return (
       <main className="p-6">
-        <div className="text-gray-600">Paper not found.</div>
-        {error && <div className="text-red-700">{error}</div>}
+        {notFound ? (
+          <div className="text-gray-600">Paper not found.</div>
+        ) : (
+          <div data-testid="paper-load-failed" role="status" className="text-gray-600">
+            {error || loadFailureMessage("This paper")}
+          </div>
+        )}
       </main>
     );
   }

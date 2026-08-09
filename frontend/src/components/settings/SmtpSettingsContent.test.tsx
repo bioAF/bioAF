@@ -62,3 +62,59 @@ test("tells the admin that leaving the password blank keeps the stored one", asy
   await waitFor(() => expect(screen.getByDisplayValue("smtp.example.com")).toBeInTheDocument());
   expect(screen.getByText(/leave blank to keep/i)).toBeInTheDocument();
 });
+
+// `catch { // Settings not configured yet }` assumed every failure meant "nothing
+// stored yet". It also caught 500s and dropped connections, and the form then rendered
+// blank with port 587 and starttls, which are component defaults, not the org's
+// settings. Save posts host/username/from_address unconditionally, so one click wrote
+// empty strings over a working mail configuration. The password was already protected
+// by the omit-unless-typed rule above; the other four fields were not.
+describe("when the stored settings cannot be read", () => {
+  beforeEach(() => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    (console.error as jest.Mock).mockRestore?.();
+  });
+
+  test("says so, instead of showing a blank form that looks unconfigured", async () => {
+    mockGet.mockRejectedValue(new Error("HTTP 500"));
+    render(<SmtpSettingsContent />);
+
+    expect(await screen.findByTestId("smtp-load-failed")).toHaveTextContent(/could not be loaded/i);
+  });
+
+  test("cannot be saved, because saving would blank what was not read", async () => {
+    mockGet.mockRejectedValue(new Error("HTTP 500"));
+    render(<SmtpSettingsContent />);
+    await screen.findByTestId("smtp-load-failed");
+
+    const save = screen.getByRole("button", { name: /save smtp/i });
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  test("puts the real error in the logs", async () => {
+    mockGet.mockRejectedValue(new Error("HTTP 500"));
+    render(<SmtpSettingsContent />);
+    await screen.findByTestId("smtp-load-failed");
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("SMTP settings"),
+      expect.any(Error)
+    );
+  });
+
+  test("a 404 still means 'nothing configured yet', and stays saveable", async () => {
+    // The original comment was right about ONE case. A first-run instance has no
+    // settings row, and that must remain an editable empty form rather than an error.
+    mockGet.mockRejectedValue(Object.assign(new Error("Not Found"), { status: 404 }));
+    render(<SmtpSettingsContent />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /save smtp/i })).not.toBeDisabled()
+    );
+    expect(screen.queryByTestId("smtp-load-failed")).not.toBeInTheDocument();
+  });
+});

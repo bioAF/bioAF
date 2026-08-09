@@ -65,3 +65,76 @@ test("a run that really is missing still says so", async () => {
   await waitFor(() => expect(screen.getByText(/run not found/i)).toBeInTheDocument());
   expect(screen.queryByTestId("error-message")).not.toBeInTheDocument();
 });
+
+/**
+ * `loadReport` used `fetch` with no `res.ok` check and piped `res.text()` straight into
+ * `<iframe srcDoc>` under the heading "Nextflow Report". `fetch` does not reject on
+ * 4xx/5xx, so a 404 body, a 500 stack trace or an nginx error page was displayed to the
+ * user as the pipeline's own report.
+ */
+describe("the Report tab", () => {
+  const COMPLETED_RUN = {
+    id: 42,
+    status: "completed",
+    pipeline_name: "rnaseq",
+    pipeline_key: "rnaseq",
+    experiment: null,
+    submitted_by: null,
+    created_at: "2026-06-01T00:00:00Z",
+    started_at: "2026-06-01T00:00:00Z",
+    completed_at: "2026-06-01T01:00:00Z",
+    error_message: null,
+    progress: null,
+    parameters: {},
+    compute_job_ref: null,
+    processes: [],
+  };
+
+  afterEach(() => {
+    (global.fetch as jest.Mock | undefined)?.mockRestore?.();
+  });
+
+  function mountReport(response: Partial<Response>) {
+    mockGet.mockImplementation((url: string) => {
+      if (url.includes("/api/pipeline-runs/42")) return Promise.resolve(COMPLETED_RUN);
+      return Promise.resolve({});
+    });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "<html>report</html>",
+      ...response,
+    }) as unknown as typeof fetch;
+  }
+
+  test("a 500 body is not rendered as the run's report", async () => {
+    const { toastMock } = jest.requireMock("@/components/shared/Toast");
+    mountReport({
+      ok: false,
+      status: 500,
+      text: async () => "<html><body>Internal Server Error</body></html>",
+    });
+
+    render(<PipelineRunDetailPage />);
+    const reportTab = await screen.findByRole("button", { name: /^report$/i });
+    reportTab.click();
+
+    await waitFor(() =>
+      expect(toastMock.error).toHaveBeenCalledWith(
+        expect.stringMatching(/run report could not be loaded/i)
+      )
+    );
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  test("a real report still renders", async () => {
+    mountReport({});
+
+    render(<PipelineRunDetailPage />);
+    const reportTab = await screen.findByRole("button", { name: /^report$/i });
+    reportTab.click();
+
+    await waitFor(() => expect(document.querySelector("iframe")).not.toBeNull());
+    expect(document.querySelector("iframe")?.getAttribute("srcdoc")).toContain("report");
+  });
+});

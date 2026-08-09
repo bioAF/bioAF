@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { SheetsReaderSACard } from "@/components/settings/SheetsReaderSACard";
 
 interface GCPConfig {
@@ -176,16 +177,31 @@ export function GcpSettingsContent() {
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showApis, setShowApis] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
+  // A read that failed must not arm a write.
+  //
+  // This had no .catch() at all. `region` and `zone` start on the component's own
+  // hardcoded defaults ("us-central1" / "us-central1-a"), so a failed GET left those
+  // sitting in the form looking exactly like stored configuration, and `handleSave`
+  // PUTs both unconditionally. One click on Save & Validate wrote us-central1 over a
+  // real europe-west4 deployment, and nothing on screen had suggested the form was
+  // showing anything other than what the org had configured.
   useEffect(() => {
-    api.get<GCPConfig>("/api/v1/settings/gcp").then((cfg) => {
-      setProjectId(cfg.gcp_project_id ?? "");
-      setRegion(cfg.gcp_region ?? "us-central1");
-      setZone(cfg.gcp_zone ?? "us-central1-a");
-      setOrgSlug(cfg.org_slug ?? "");
-      setCredentialSource((cfg.gcp_credential_source as "vm_default" | "service_account_key") ?? "vm_default");
-      setServiceAccountEmail(cfg.gcp_service_account_email ?? "");
-    });
+    api
+      .get<GCPConfig>("/api/v1/settings/gcp")
+      .then((cfg) => {
+        setProjectId(cfg.gcp_project_id ?? "");
+        setRegion(cfg.gcp_region ?? "us-central1");
+        setZone(cfg.gcp_zone ?? "us-central1-a");
+        setOrgSlug(cfg.org_slug ?? "");
+        setCredentialSource((cfg.gcp_credential_source as "vm_default" | "service_account_key") ?? "vm_default");
+        setServiceAccountEmail(cfg.gcp_service_account_email ?? "");
+      })
+      .catch((e) => {
+        logError("loading the GCP configuration", e);
+        setLoadFailed(true);
+      });
   }, []);
 
   const runValidation = async () => {
@@ -201,6 +217,7 @@ export function GcpSettingsContent() {
   };
 
   const handleSave = async () => {
+    if (loadFailed) return;
     setError("");
     setMessage("");
 
@@ -247,6 +264,16 @@ export function GcpSettingsContent() {
     <>
       <h1 className="text-2xl font-bold mb-6">GCP Configuration</h1>
 
+          {loadFailed && (
+            <div
+              data-testid="gcp-config-load-failed"
+              role="status"
+              className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm"
+            >
+              {loadFailureMessage("The stored GCP configuration")} Saving is disabled until it
+              loads, because saving would write these fields over settings that were never read.
+            </div>
+          )}
           {message && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">
               {message}
@@ -441,7 +468,7 @@ export function GcpSettingsContent() {
               <button
                 data-testid="save-gcp-config-btn"
                 onClick={handleSave}
-                disabled={saving || validating}
+                disabled={saving || validating || loadFailed}
                 className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
               >
                 {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}

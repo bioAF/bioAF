@@ -124,3 +124,101 @@ describe("Workbench EnvironmentsPage build confirmation", () => {
     confirmSpy.mockRestore();
   });
 });
+
+// The catch used to be `setRebuildTemplateContent(""); setRebuildTemplateMatch(false);`.
+// `rebuildTemplateMatch === false` is the value that selects the GREEN branch of the
+// modal: "The template has been updated since your last build. The new version will
+// include the latest changes." So a failed template fetch reassured the user there was
+// something to pick up, left the build button live, and POSTed definition_content: "".
+// "Could not read it" and "it differs" are not the same answer.
+describe("Workbench EnvironmentsPage rebuild when the template cannot be read", () => {
+  const envSummary = {
+    id: 1,
+    name: "Default Notebook",
+    description: null,
+    visibility: "organization",
+    environment_type: "notebook",
+    version_count: 1,
+    latest_version: null,
+    created_by: null,
+    created_at: "2026-05-07T10:00:00Z",
+    updated_at: "2026-05-07T10:00:00Z",
+  };
+  const envDetail = {
+    ...envSummary,
+    versions: [
+      {
+        id: 10,
+        version_number: 3,
+        build_number: 1,
+        status: "built",
+        definition_format: "conda",
+        image_uri: "img",
+        created_at: "2026-05-07T10:00:00Z",
+      },
+    ],
+  };
+
+  function mountWith(templateResult: () => Promise<unknown>) {
+    mockGet.mockImplementation((url: string) => {
+      if (url === "/api/v1/environments?type=notebook")
+        return Promise.resolve({ environments: [envSummary], total: 1 });
+      if (url === "/api/v1/environments?type=work_node")
+        return Promise.resolve({ environments: [], total: 0 });
+      if (url === "/api/v1/environments/1") return Promise.resolve(envDetail);
+      if (url.includes("/template/")) return templateResult();
+      if (url.includes("/versions/10")) return Promise.resolve({ definition_content: "FROM x" });
+      return Promise.resolve({});
+    });
+  }
+
+  async function openRebuild() {
+    render(<EnvironmentsPage />);
+    await waitFor(() => expect(screen.getByText("Default Notebook")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Default Notebook"));
+    fireEvent.click(await screen.findByText("Rebuild from Latest Template"));
+  }
+
+  beforeEach(() => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    (console.error as jest.Mock).mockRestore?.();
+  });
+
+  test("does not claim the template has been updated", async () => {
+    mountWith(() => Promise.reject(new Error("500")));
+    await openRebuild();
+
+    expect(await screen.findByTestId("rebuild-template-load-failed")).toBeInTheDocument();
+    expect(screen.queryByText(/has been updated since your last build/i)).not.toBeInTheDocument();
+  });
+
+  test("cannot build an empty definition from a failed read", async () => {
+    mountWith(() => Promise.reject(new Error("500")));
+    await openRebuild();
+    await screen.findByTestId("rebuild-template-load-failed");
+
+    expect(screen.getByRole("button", { name: /build new version/i })).toBeDisabled();
+  });
+
+  test("puts the real error in the logs", async () => {
+    mountWith(() => Promise.reject(new Error("500")));
+    await openRebuild();
+    await screen.findByTestId("rebuild-template-load-failed");
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining("environment template"),
+      expect.any(Error)
+    );
+  });
+
+  test("a template that really did change still reads as changed, and builds", async () => {
+    mountWith(() => Promise.resolve({ definition_content: "FROM y" }));
+    await openRebuild();
+
+    expect(await screen.findByText(/has been updated since your last build/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("rebuild-template-load-failed")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /build new version/i })).not.toBeDisabled();
+  });
+});

@@ -292,6 +292,11 @@ export default function PipelineRunDetailPage() {
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/pipeline-runs/${runId}/report`, {
         headers: { Authorization: `Bearer ${localStorage.getItem("bioaf_token")}` },
       });
+      // `fetch` does not reject on 4xx/5xx, and this used to pipe `res.text()`
+      // straight into `<iframe srcDoc>` under the heading "Nextflow Report". A 404
+      // body, a 500 stack trace or an nginx error page was therefore rendered as the
+      // pipeline's own report. Only a 2xx body is a report.
+      if (!res.ok) throw new Error(`HTTP ${res.status} from the report endpoint`);
       setReport(await res.text());
     } catch (e) {
       logError("loading the run report", e);

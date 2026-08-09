@@ -4,6 +4,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import { useState, useEffect, useCallback } from "react";
 import { ContentLoading } from "@/components/shared/ContentLoading";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
   CellxgenePublicationResponse,
   CellxgenePublishableFile,
@@ -59,6 +60,7 @@ function PublishForm({
   const [datasetName, setDatasetName] = useState("");
   const [inspection, setInspection] = useState<CellxgeneFileInspection | null>(null);
   const [inspecting, setInspecting] = useState(false);
+  const [inspectFailed, setInspectFailed] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -84,11 +86,22 @@ function PublishForm({
 
     // Inspect the file for cellxgene compatibility
     setInspecting(true);
+    setInspectFailed(false);
     try {
       const info = await api.get<CellxgeneFileInspection>(`/api/cellxgene/inspect/${fileId}`);
       setInspection(info);
-    } catch {
-      setInspection({ embeddings: [], cell_count: 0, gene_count: 0, cellxgene_ready: false, missing: "unable to inspect file" });
+    } catch (e) {
+      // This used to fabricate an inspection result:
+      //   { embeddings: [], cell_count: 0, cellxgene_ready: false,
+      //     missing: "unable to inspect file" }
+      // which the panel below renders as "Not ready for cellxgene. Missing: unable to
+      // inspect file. This file needs secondary analysis (normalization, PCA, UMAP)
+      // before it can be viewed in cellxgene." That is a claim about the user's data,
+      // reached from a failed HTTP call, and Publish was then disabled on the strength
+      // of it. A network error is not a finding about an h5ad file.
+      logError(`inspecting file ${fileId} for cellxgene compatibility`, e);
+      setInspection(null);
+      setInspectFailed(true);
     } finally {
       setInspecting(false);
     }
@@ -143,6 +156,24 @@ function PublishForm({
       {selectedFile && inspecting && (
         <div className="bg-gray-50 rounded p-3 text-sm text-gray-500">
           Inspecting file for cellxgene compatibility...
+        </div>
+      )}
+      {selectedFile && inspectFailed && !inspecting && (
+        <div
+          data-testid="cellxgene-inspect-failed"
+          role="status"
+          className="bg-red-50 rounded p-3 text-sm text-red-800 flex items-start justify-between gap-3"
+        >
+          <span>
+            {loadFailureMessage("This file's cellxgene compatibility")} Nothing is known about the
+            file either way.
+          </span>
+          <button
+            onClick={() => handleFileSelect(selectedFile.id)}
+            className="shrink-0 underline hover:no-underline"
+          >
+            Retry
+          </button>
         </div>
       )}
       {selectedFile && inspection && !inspecting && (

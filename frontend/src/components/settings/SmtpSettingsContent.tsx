@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface SmtpSettings {
   host: string;
@@ -25,6 +26,7 @@ export function SmtpSettingsContent() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -38,8 +40,25 @@ export function SmtpSettingsContent() {
         setHasExistingPassword(!!data.password);
         setSmtpFrom(data.from_address);
         setSmtpEncryption(data.encryption);
-      } catch {
-        // Settings not configured yet
+      } catch (e) {
+        // The old body here was `// Settings not configured yet`, which is true of a
+        // 404 and of nothing else. Every other failure -- a 500, a dropped connection
+        // -- also landed here, and the form then rendered blank with port 587 and
+        // starttls, which are this component's defaults rather than the org's. Save
+        // posts host, username and from_address unconditionally, so one click wrote
+        // empty strings over a working mail configuration and silently broke invites,
+        // password resets and notification email. That is the same defect the password
+        // field above already carries a fix for; the other four fields did not have one.
+        //
+        // The status is read off the error rather than through `instanceof ApiError`,
+        // because the class identity does not survive a jest module mock and the status
+        // is the only part of it this decision needs.
+        if ((e as { status?: number } | null)?.status === 404) {
+          // Genuinely nothing stored yet: a first-run instance keeps an editable form.
+        } else {
+          logError("loading the SMTP settings", e);
+          setLoadFailed(true);
+        }
       } finally {
         setLoading(false);
       }
@@ -48,6 +67,7 @@ export function SmtpSettingsContent() {
   }, []);
 
   const handleSaveSmtp = async () => {
+    if (loadFailed) return;
     setError("");
     setMessage("");
     try {
@@ -100,6 +120,16 @@ export function SmtpSettingsContent() {
     <>
       <h1 className="text-2xl font-bold mb-6">SMTP Configuration</h1>
 
+      {loadFailed && (
+        <div
+          data-testid="smtp-load-failed"
+          role="status"
+          className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm"
+        >
+          {loadFailureMessage("The stored SMTP settings")} Saving is disabled until they load,
+          because saving would write these fields over settings that were never read.
+        </div>
+      )}
       {message && <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">{message}</div>}
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm">{error}</div>}
 
@@ -140,7 +170,11 @@ export function SmtpSettingsContent() {
           </div>
         </div>
         <div className="mt-6">
-          <button onClick={handleSaveSmtp} className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700">
+          <button
+            onClick={handleSaveSmtp}
+            disabled={loadFailed}
+            className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
+          >
             Save SMTP Settings
           </button>
         </div>
