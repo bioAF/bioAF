@@ -1,4 +1,4 @@
-"""GEO checksum manifest generator — MD5 manifest in GEO format."""
+"""GEO checksum manifest generator: MD5 manifest in GEO format."""
 
 import logging
 

@@ -129,7 +129,7 @@ async def test_full_search_hit_urls_per_type(session, admin_user):
     assert single["pipeline_run"] == f"/pipelines/runs/{run.id}"
     assert single["file"] == f"/data/files?file={f.id}"
     assert single["project"] == f"/projects/{proj.id}"
-    assert single["literature_paper"] == f"/data/literature/papers/{paper.id}"
+    assert single["literature_paper"] == f"/lab-knowledge/literature/papers/{paper.id}"
 
     defs = {h["title"]: h["url"] for h in hits if h["entity_type"] == "pipeline_definition"}
     # The pipeline_key slash must be URL-encoded so it stays one route segment.

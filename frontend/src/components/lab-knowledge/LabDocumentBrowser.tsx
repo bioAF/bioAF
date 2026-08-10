@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { uploadDocumentFile } from "@/lib/labDocuments";
 import { usePermissions } from "@/hooks/usePermissions";
+
+import { clickableRow } from "@/lib/a11y";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 
 interface Tag {
   id: number;
@@ -68,6 +73,10 @@ export function LabDocumentBrowser() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [includeArchived, setIncludeArchived] = useState(false);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
 
   const [showUpload, setShowUpload] = useState(false);
 
@@ -86,7 +95,7 @@ export function LabDocumentBrowser() {
     const params = new URLSearchParams();
     for (const id of selectedTagIds) params.append("tag_ids", String(id));
     if (includeArchived) params.set("include_archived", "true");
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     try {
       const data = await api.get<ListResponse>(`${API_BASE}/documents?${params.toString()}`);
       setDocuments(data.documents);
@@ -95,7 +104,7 @@ export function LabDocumentBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [selectedTagIds, includeArchived, query]);
+  }, [selectedTagIds, includeArchived, settledQuery]);
 
   useEffect(() => {
     fetchTags();
@@ -109,10 +118,11 @@ export function LabDocumentBrowser() {
     setSelectedTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
   };
 
-  if (loading) {
-    return <div data-testid="lab-docs-loading" className="p-8 text-gray-500">Loading documents...</div>;
-  }
-
+  // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
+  // dependency of fetchDocuments, so every keystroke sets loading=true; returning
+  // early unmounted the whole toolbar, taking the search input (and the caret) with
+  // it, so only the first character of a search ever landed. The loading state is
+  // rendered in the results region instead, below, and the toolbar stays mounted.
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -138,7 +148,7 @@ export function LabDocumentBrowser() {
           <button
             type="button"
             onClick={() => setShowUpload(true)}
-            className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+            className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
           >
             Upload Document
           </button>
@@ -154,7 +164,7 @@ export function LabDocumentBrowser() {
               onClick={() => toggleTag(t.id)}
               className={`text-xs rounded-full px-3 py-1 border ${
                 selectedTagIds.includes(t.id)
-                  ? "bg-blue-600 text-white border-blue-600"
+                  ? "bg-bioaf-600 text-white border-bioaf-600"
                   : "bg-white text-gray-700 border-gray-300"
               }`}
             >
@@ -166,29 +176,33 @@ export function LabDocumentBrowser() {
 
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
-      {documents.length === 0 ? (
+      {loading ? (
+        <div data-testid="lab-docs-loading" className="text-gray-500 py-12 text-center">
+          Loading documents...
+        </div>
+      ) : documents.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">No documents found.</div>
       ) : (
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-gray-500 border-b">
-              <th className="py-2">Title</th>
-              <th>Tags</th>
-              <th>Version</th>
-              <th>Uploaded by</th>
-              <th>Last updated</th>
+              <th scope="col" className="py-2">Title</th>
+              <th scope="col">Tags</th>
+              <th scope="col">Version</th>
+              <th scope="col">Uploaded by</th>
+              <th scope="col">Last updated</th>
             </tr>
           </thead>
           <tbody>
             {documents.map((d) => (
               <tr
                 key={d.id}
-                onClick={() => router.push(`/lab-knowledge/documents/${d.id}`)}
+                {...clickableRow(() => router.push(`/lab-knowledge/documents/${d.id}`))}
                 className="border-b hover:bg-gray-50 cursor-pointer"
               >
                 <td className="py-2 font-medium">
                   {d.title}
-                  {d.is_archived && <span className="ml-2 text-xs text-gray-400">(archived)</span>}
+                  {d.is_archived && <span className="ml-2 text-xs text-gray-500">(archived)</span>}
                 </td>
                 <td className="text-gray-600">{d.tags.map((t) => t.name).join(", ")}</td>
                 <td>v{d.current_version}</td>
@@ -305,7 +319,7 @@ function UploadDocumentModal({
       }}
       aria-pressed={mode === value}
       className={`px-3 py-1.5 text-sm ${extra} ${
-        mode === value ? "bg-blue-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
+        mode === value ? "bg-bioaf-600 text-white" : "bg-white text-gray-700 hover:bg-gray-50"
       }`}
     >
       {label}
@@ -313,9 +327,26 @@ function UploadDocumentModal({
   );
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Upload Document</h2>
+    <Modal
+      open
+      title="Upload Document"
+      onClose={onClose}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={submit}
+            busy={busy}
+            busyLabel={mode === "url" ? "Importing..." : "Uploading..."}
+          >
+            {mode === "url" ? "Import" : "Upload"}
+          </Button>
+        </>
+      }
+    >
         <div className="space-y-3">
           <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
             {modeButton("device", "From device")}
@@ -356,7 +387,7 @@ function UploadDocumentModal({
                 onClick={() => toggle(t.id)}
                 className={`text-xs rounded-full px-3 py-1 border ${
                   tagIds.includes(t.id)
-                    ? "bg-blue-600 text-white border-blue-600"
+                    ? "bg-bioaf-600 text-white border-bioaf-600"
                     : "bg-white text-gray-700 border-gray-300"
                 }`}
               >
@@ -365,30 +396,10 @@ function UploadDocumentModal({
             ))}
           </div>
           {!canManageTags && tags.length === 0 && (
-            <p className="text-xs text-gray-400">No tags available.</p>
+            <p className="text-xs text-gray-500">No tags available.</p>
           )}
           {err && <div className="text-red-600 text-sm">{err}</div>}
         </div>
-        <div className="flex justify-end gap-2 mt-5">
-          <button type="button" onClick={onClose} className="text-sm px-3 py-1.5">
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
-          >
-            {busy
-              ? mode === "url"
-                ? "Importing..."
-                : "Uploading..."
-              : mode === "url"
-                ? "Import"
-                : "Upload"}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

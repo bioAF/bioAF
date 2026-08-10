@@ -1,4 +1,4 @@
-"""GEO Excel workbook generator — creates pre-filled GEO submission template."""
+"""GEO Excel workbook generator: creates pre-filled GEO submission template."""
 
 import json
 import logging

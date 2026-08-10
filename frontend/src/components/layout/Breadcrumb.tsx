@@ -61,7 +61,7 @@ export function Breadcrumb({ entityName }: BreadcrumbProps) {
         {segments.map((segment, index) => (
           <li key={index} className="flex items-center">
             {index > 0 && (
-              <span className="mx-2 text-gray-400">/</span>
+              <span className="mx-2 text-gray-500">/</span>
             )}
             {segment.href ? (
               <Link

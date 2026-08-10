@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { SheetsReaderSACard } from "@/components/settings/SheetsReaderSACard";
+import { Button } from "@/components/ui/Button";
 
 interface GCPConfig {
   gcp_project_id: string | null;
@@ -151,7 +153,7 @@ function ProbePanel({ title, subtitle, probe }: { title: string; subtitle: strin
               {detail.permission}
             </code>
             {!detail.granted && (
-              <span className="text-gray-400">(needs {detail.recommended_role})</span>
+              <span className="text-gray-500">(needs {detail.recommended_role})</span>
             )}
           </li>
         ))}
@@ -176,16 +178,31 @@ export function GcpSettingsContent() {
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showApis, setShowApis] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
+  // A read that failed must not arm a write.
+  //
+  // This had no .catch() at all. `region` and `zone` start on the component's own
+  // hardcoded defaults ("us-central1" / "us-central1-a"), so a failed GET left those
+  // sitting in the form looking exactly like stored configuration, and `handleSave`
+  // PUTs both unconditionally. One click on Save & Validate wrote us-central1 over a
+  // real europe-west4 deployment, and nothing on screen had suggested the form was
+  // showing anything other than what the org had configured.
   useEffect(() => {
-    api.get<GCPConfig>("/api/v1/settings/gcp").then((cfg) => {
-      setProjectId(cfg.gcp_project_id ?? "");
-      setRegion(cfg.gcp_region ?? "us-central1");
-      setZone(cfg.gcp_zone ?? "us-central1-a");
-      setOrgSlug(cfg.org_slug ?? "");
-      setCredentialSource((cfg.gcp_credential_source as "vm_default" | "service_account_key") ?? "vm_default");
-      setServiceAccountEmail(cfg.gcp_service_account_email ?? "");
-    });
+    api
+      .get<GCPConfig>("/api/v1/settings/gcp")
+      .then((cfg) => {
+        setProjectId(cfg.gcp_project_id ?? "");
+        setRegion(cfg.gcp_region ?? "us-central1");
+        setZone(cfg.gcp_zone ?? "us-central1-a");
+        setOrgSlug(cfg.org_slug ?? "");
+        setCredentialSource((cfg.gcp_credential_source as "vm_default" | "service_account_key") ?? "vm_default");
+        setServiceAccountEmail(cfg.gcp_service_account_email ?? "");
+      })
+      .catch((e) => {
+        logError("loading the GCP configuration", e);
+        setLoadFailed(true);
+      });
   }, []);
 
   const runValidation = async () => {
@@ -201,6 +218,7 @@ export function GcpSettingsContent() {
   };
 
   const handleSave = async () => {
+    if (loadFailed) return;
     setError("");
     setMessage("");
 
@@ -247,6 +265,16 @@ export function GcpSettingsContent() {
     <>
       <h1 className="text-2xl font-bold mb-6">GCP Configuration</h1>
 
+          {loadFailed && (
+            <div
+              data-testid="gcp-config-load-failed"
+              role="status"
+              className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded text-sm"
+            >
+              {loadFailureMessage("The stored GCP configuration")} Saving is disabled until it
+              loads, because saving would write these fields over settings that were never read.
+            </div>
+          )}
           {message && (
             <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-700 rounded text-sm">
               {message}
@@ -262,7 +290,7 @@ export function GcpSettingsContent() {
           <details data-testid="recommended-roles" className="bg-white rounded-lg shadow max-w-2xl mb-6">
             <summary className="px-6 py-4 cursor-pointer text-lg font-semibold select-none">
               Recommended IAM Roles
-              <span className="ml-2 text-sm font-normal text-gray-400">
+              <span className="ml-2 text-sm font-normal text-gray-500">
                 (bioaf-bootstrap: {BOOTSTRAP_ROLES.length}, bioaf-app: {APP_ROLES.length})
               </span>
             </summary>
@@ -280,7 +308,7 @@ export function GcpSettingsContent() {
                   {BOOTSTRAP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-2 text-xs">
                       <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -294,7 +322,7 @@ export function GcpSettingsContent() {
                   {APP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-2 text-xs">
                       <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-800">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -306,8 +334,8 @@ export function GcpSettingsContent() {
           <div className="bg-white rounded-lg shadow p-6 max-w-2xl space-y-5">
             {/* GCP Project ID */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
-              <input
+              <label htmlFor="gcp-project-id" className="block text-sm font-medium text-gray-700 mb-1">GCP Project ID</label>
+              <input id="gcp-project-id"
                 data-testid="gcp-project-id-input"
                 type="text"
                 value={projectId}
@@ -319,8 +347,8 @@ export function GcpSettingsContent() {
 
             {/* Region */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
-              <select
+              <label htmlFor="default-region" className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
+              <select id="default-region"
                 data-testid="gcp-region-select"
                 value={region}
                 onChange={(e) => {
@@ -337,8 +365,8 @@ export function GcpSettingsContent() {
 
             {/* Zone */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Default Zone</label>
-              <select
+              <label htmlFor="default-zone" className="block text-sm font-medium text-gray-700 mb-1">Default Zone</label>
+              <select id="default-zone"
                 data-testid="gcp-zone-select"
                 value={zone}
                 onChange={(e) => setZone(e.target.value)}
@@ -352,11 +380,11 @@ export function GcpSettingsContent() {
 
             {/* Org Slug */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="organization-slug-3-30-chars-lowercase-h" className="block text-sm font-medium text-gray-700 mb-1">
                 Organization Slug
-                <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+                <span className="ml-1 text-gray-500 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
               </label>
-              <input
+              <input id="organization-slug-3-30-chars-lowercase-h"
                 data-testid="org-slug-input"
                 type="text"
                 value={orgSlug}
@@ -400,8 +428,8 @@ export function GcpSettingsContent() {
 
               {credentialSource === "service_account_key" && (
                 <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
-                  <textarea
+                  <label htmlFor="service-account-key-json" className="block text-sm font-medium text-gray-700 mb-1">Service Account Key (JSON)</label>
+                  <textarea id="service-account-key-json"
                     data-testid="service-account-key-input"
                     value={serviceAccountKey}
                     onChange={(e) => setServiceAccountKey(e.target.value)}
@@ -414,11 +442,11 @@ export function GcpSettingsContent() {
 
               {credentialSource === "vm_default" && (
                 <div className="mt-3">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="service-account-email-optional-for-imper" className="block text-sm font-medium text-gray-700 mb-1">
                     Service Account Email
-                    <span className="ml-1 text-gray-400 font-normal text-xs">(optional -- for impersonation)</span>
+                    <span className="ml-1 text-gray-500 font-normal text-xs">(optional -- for impersonation)</span>
                   </label>
-                  <input
+                  <input id="service-account-email-optional-for-imper"
                     data-testid="service-account-email-input"
                     type="email"
                     value={serviceAccountEmail}
@@ -438,14 +466,12 @@ export function GcpSettingsContent() {
 
             {/* Action buttons */}
             <div className="flex gap-3 pt-2">
-              <button
+              <Button
                 data-testid="save-gcp-config-btn"
                 onClick={handleSave}
-                disabled={saving || validating}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
+                disabled={saving || validating || loadFailed}>
                 {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}
-              </button>
+              </Button>
               <button
                 data-testid="validate-gcp-btn"
                 onClick={handleValidate}
@@ -473,7 +499,7 @@ export function GcpSettingsContent() {
               <ul className="space-y-2 mb-5">
                 {validationResult.checks.map((check) => (
                   <li key={check.name} className="flex items-start gap-2 text-sm">
-                    <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-400" : "text-red-600"}`}>
+                    <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-500" : "text-red-600"}`}>
                       {check.passed ? "\u2713" : check.status === "skipped" ? "\u2013" : "\u2717"}
                     </span>
                     <div>
@@ -509,7 +535,7 @@ export function GcpSettingsContent() {
                           {detail.permission}
                         </code>
                         {!detail.granted && (
-                          <span className="text-gray-400">
+                          <span className="text-gray-500">
                             (needs {detail.recommended_role})
                           </span>
                         )}
@@ -546,7 +572,7 @@ export function GcpSettingsContent() {
                   {REQUIRED_APIS.map((a) => (
                     <li key={a.name}>
                       <code className="bg-gray-100 px-1 rounded">{a.name}</code>
-                      <span className="ml-1 text-gray-400">-- {a.description}</span>
+                      <span className="ml-1 text-gray-500">-- {a.description}</span>
                     </li>
                   ))}
                 </ul>

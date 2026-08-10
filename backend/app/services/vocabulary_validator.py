@@ -67,7 +67,7 @@ class VocabularyValidator:
 
         allowed = await VocabularyValidator._get_allowed_values(session, field_name)
         if not allowed:
-            # No vocabulary defined for this field — accept any value
+            # No vocabulary defined for this field: accept any value
             return
 
         if value not in allowed:

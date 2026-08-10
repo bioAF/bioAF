@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 type EntityType = "experiments" | "projects" | "samples" | "pipeline-runs" | "files" | "validation-studies";
 type ExportFormat = "json" | "csv" | "pdf";
@@ -21,6 +22,7 @@ const FORMAT_LABELS: Record<ExportFormat, string> = {
 
 export function ProvenanceExportMenu({ entityType, entityId, label = "Export Provenance" }: ProvenanceExportMenuProps) {
   const [open, setOpen] = useState(false);
+  useDismissOnEscape(open, () => { setOpen(false); });
   const [exporting, setExporting] = useState<ExportFormat | null>(null);
 
   async function handleExport(format: ExportFormat) {

@@ -1,8 +1,10 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
 import type { SheetPreviewResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 const ALL_SAMPLE_FIELDS = [
   { value: "external_id", label: "Sample ID" },
@@ -124,148 +126,17 @@ export function TemplateSheetImportModal({
     onClose();
   }
 
+  const title =
+    step === "url" ? "Import Template from Google Sheet" : "Map Columns to Template";
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
-        <div className="px-6 py-4 border-b flex justify-between items-center">
-          <h2 className="text-lg font-semibold">
-            {step === "url" && "Import Template from Google Sheet"}
-            {step === "mapping" && "Map Columns to Template"}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
-            &times;
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {step === "url" && (
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">
-                Paste a Google Sheets URL to seed required sample fields and custom fields
-                from its column headers. Share the sheet with the bioAF reader service account.
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Google Sheets URL</label>
-                <input
-                  type="url"
-                  value={sheetUrl}
-                  onChange={(e) => setSheetUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handlePreview();
-                    }
-                  }}
-                  placeholder="https://docs.google.com/spreadsheets/d/..."
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-bioaf-500 focus:border-bioaf-500"
-                  autoFocus
-                />
-              </div>
-            </div>
-          )}
-
-          {step === "mapping" && preview && (
-            <div className="space-y-6">
-              <p className="text-sm text-gray-600">
-                Found {preview.columns.length} column{preview.columns.length !== 1 ? "s" : ""} in
-                sheet &quot;{preview.sheet_name}&quot;. Tick &quot;Required&quot; on any column that
-                samples must populate.
-              </p>
-
-              {preview.recognized_columns.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-2">Recognized Sample Fields</h3>
-                  <div className="space-y-2">
-                    {preview.recognized_columns.map((col) => (
-                      <div key={col.header} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
-                        <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
-                          {col.header}
-                        </span>
-                        <span className="text-gray-400">&rarr;</span>
-                        <span className="text-sm flex-1">
-                          {ALL_SAMPLE_FIELDS.find((f) => f.value === col.mapped_to)?.label ?? col.mapped_to}
-                        </span>
-                        <label className="flex items-center gap-1 text-sm text-gray-600">
-                          <input
-                            type="checkbox"
-                            checked={!!requiredFlags[col.header]}
-                            onChange={(e) =>
-                              setRequiredFlags((prev) => ({ ...prev, [col.header]: e.target.checked }))
-                            }
-                          />
-                          Required
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {preview.unknown_columns.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-medium text-gray-700 mb-3">Unmapped Columns</h3>
-                  <div className="space-y-3">
-                    {preview.unknown_columns.map((col) => (
-                      <div key={col} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
-                        <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
-                          {col}
-                        </span>
-                        <select
-                          value={columnMappings[col] ?? "custom"}
-                          onChange={(e) =>
-                            setColumnMappings((prev) => ({ ...prev, [col]: e.target.value }))
-                          }
-                          className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5"
-                        >
-                          <option value="custom">Add as custom field &quot;{col}&quot;</option>
-                          <option value="skip">Skip</option>
-                          {ALL_SAMPLE_FIELDS.map((f) => (
-                            <option key={f.value} value={f.value}>
-                              Map to {f.label}
-                            </option>
-                          ))}
-                        </select>
-                        {(columnMappings[col] ?? "custom") === "custom" && (
-                          <select
-                            value={customTypes[col] ?? "string"}
-                            onChange={(e) =>
-                              setCustomTypes((prev) => ({ ...prev, [col]: e.target.value }))
-                            }
-                            className="text-sm border border-gray-300 rounded-md px-2 py-1.5"
-                          >
-                            <option value="string">Text</option>
-                            <option value="number">Number</option>
-                            <option value="date">Date</option>
-                          </select>
-                        )}
-                        {(columnMappings[col] ?? "custom") !== "skip" && (
-                          <label className="flex items-center gap-1 text-sm text-gray-600">
-                            <input
-                              type="checkbox"
-                              checked={!!requiredFlags[col]}
-                              onChange={(e) =>
-                                setRequiredFlags((prev) => ({ ...prev, [col]: e.target.checked }))
-                              }
-                            />
-                            Required
-                          </label>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-4">
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t flex justify-end gap-3">
+    <Modal
+      open
+      title={title}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
@@ -274,25 +145,149 @@ export function TemplateSheetImportModal({
           </button>
 
           {step === "url" && (
-            <button
+            <Button
               onClick={handlePreview}
-              disabled={loading || !sheetUrl.trim()}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-            >
+              disabled={loading || !sheetUrl.trim()}>
               {loading ? "Reading sheet..." : "Import Columns"}
-            </button>
+            </Button>
           )}
 
           {step === "mapping" && (
-            <button
-              onClick={handleApply}
-              className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleApply}>
               Apply to Template
-            </button>
+            </Button>
+          )}
+        </>
+      }
+    >
+      {step === "url" && (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Paste a Google Sheets URL to seed required sample fields and custom fields
+            from its column headers. Share the sheet with the bioAF reader service account.
+          </p>
+          <div>
+            <label htmlFor="google-sheets-url" className="block text-sm font-medium text-gray-700 mb-1">Google Sheets URL</label>
+            <input id="google-sheets-url"
+              type="url"
+              value={sheetUrl}
+              onChange={(e) => setSheetUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handlePreview();
+                }
+              }}
+              placeholder="https://docs.google.com/spreadsheets/d/..."
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-bioaf-500 focus:border-bioaf-500"
+              autoFocus
+            />
+          </div>
+        </div>
+      )}
+
+      {step === "mapping" && preview && (
+        <div className="space-y-6">
+          <p className="text-sm text-gray-600">
+            Found {preview.columns.length} column{preview.columns.length !== 1 ? "s" : ""} in
+            sheet &quot;{preview.sheet_name}&quot;. Tick &quot;Required&quot; on any column that
+            samples must populate.
+          </p>
+
+          {preview.recognized_columns.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Recognized Sample Fields</h3>
+              <div className="space-y-2">
+                {preview.recognized_columns.map((col) => (
+                  <div key={col.header} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
+                    <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
+                      {col.header}
+                    </span>
+                    <span className="text-gray-500">&rarr;</span>
+                    <span className="text-sm flex-1">
+                      {ALL_SAMPLE_FIELDS.find((f) => f.value === col.mapped_to)?.label ?? col.mapped_to}
+                    </span>
+                    <label className="flex items-center gap-1 text-sm text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={!!requiredFlags[col.header]}
+                        onChange={(e) =>
+                          setRequiredFlags((prev) => ({ ...prev, [col.header]: e.target.checked }))
+                        }
+                      />
+                      Required
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {preview.unknown_columns.length > 0 && (
+            <div>
+              <h3 className="text-sm font-medium text-gray-700 mb-3">Unmapped Columns</h3>
+              <div className="space-y-3">
+                {preview.unknown_columns.map((col) => (
+                  <div key={col} className="flex items-center gap-3 bg-gray-50 rounded-md p-3">
+                    <span className="text-sm font-mono font-medium text-gray-800 min-w-[140px]">
+                      {col}
+                    </span>
+                    <select
+                      aria-label={`Map column ${col} to`}
+                      value={columnMappings[col] ?? "custom"}
+                      onChange={(e) =>
+                        setColumnMappings((prev) => ({ ...prev, [col]: e.target.value }))
+                      }
+                      className="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                    >
+                      <option value="custom">Add as custom field &quot;{col}&quot;</option>
+                      <option value="skip">Skip</option>
+                      {ALL_SAMPLE_FIELDS.map((f) => (
+                        <option key={f.value} value={f.value}>
+                          Map to {f.label}
+                        </option>
+                      ))}
+                    </select>
+                    {(columnMappings[col] ?? "custom") === "custom" && (
+                      <select
+                        aria-label={`Type for custom field ${col}`}
+                        value={customTypes[col] ?? "string"}
+                        onChange={(e) =>
+                          setCustomTypes((prev) => ({ ...prev, [col]: e.target.value }))
+                        }
+                        className="text-sm border border-gray-300 rounded-md px-2 py-1.5"
+                      >
+                        <option value="string">Text</option>
+                        <option value="number">Number</option>
+                        <option value="date">Date</option>
+                      </select>
+                    )}
+                    {(columnMappings[col] ?? "custom") !== "skip" && (
+                      <label className="flex items-center gap-1 text-sm text-gray-600">
+                        <input
+                          type="checkbox"
+                          checked={!!requiredFlags[col]}
+                          onChange={(e) =>
+                            setRequiredFlags((prev) => ({ ...prev, [col]: e.target.checked }))
+                          }
+                        />
+                        Required
+                      </label>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
-      </div>
-    </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-3 mt-4">
+          <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+    </Modal>
   );
 }

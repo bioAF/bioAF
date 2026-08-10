@@ -8,7 +8,7 @@
 
 ## Context
 
-In production biotech workflows, data files arrive continuously from Contract Research Organizations (CROs), sequencing core facilities, and internal instruments. These files are delivered directly to cloud storage buckets — often automatically via SFTP-to-GCS bridges or direct GCS uploads by the CRO.
+In production biotech workflows, data files arrive continuously from Contract Research Organizations (CROs), sequencing core facilities, and internal instruments. These files are delivered directly to cloud storage buckets: often automatically via SFTP-to-GCS bridges or direct GCS uploads by the CRO.
 
 bioAF's original architecture required manual upload through the UI (drag-and-drop with experiment linking). This works for small-scale operations but breaks down when:
 
@@ -78,7 +78,7 @@ When the ingest service parses a filename and resolves entity codes:
 - Unclaimed entities display a prominent visual badge throughout the platform (experiment list, project list, dataset browser, dashboard)
 - Unclaimed entities have no pipeline settings, no metadata beyond what the filename provided, and no assigned owner
 - Any user with appropriate permissions (comp_bio or admin) can "claim" an unclaimed entity, which opens a form to complete the metadata and assign ownership
-- Unclaimed entities can receive additional files — the auto-ingest system continues linking new files to them as they arrive
+- Unclaimed entities can receive additional files: the auto-ingest system continues linking new files to them as they arrive
 
 ### Bulk Reassignment
 
@@ -182,7 +182,7 @@ The ingest system emits notifications for:
 
 ### Manual Upload Preserved
 
-The existing drag-and-drop upload UI (F-010) remains fully functional. Manual uploads bypass the naming profile parser — users explicitly select the experiment and sample during upload. Both paths (auto-ingest and manual upload) produce identical file records in the metadata database.
+The existing drag-and-drop upload UI (F-010) remains fully functional. Manual uploads bypass the naming profile parser: users explicitly select the experiment and sample during upload. Both paths (auto-ingest and manual upload) produce identical file records in the metadata database.
 
 ---
 
@@ -201,18 +201,18 @@ The existing drag-and-drop upload UI (F-010) remains fully functional. Manual up
 - Auto-created entities with incomplete metadata may accumulate if not regularly claimed
 - Pub/Sub adds a GCP service dependency and small cost (~$0.40 per million messages)
 - Large file processing (multi-GB FASTQs) may hit the Pub/Sub ack deadline; requires careful timeout management
-- The system trusts filename parsing for entity linkage — errors in CRO naming propagate automatically
+- The system trusts filename parsing for entity linkage: errors in CRO naming propagate automatically
 
 **Neutral:**
 
-- Manual upload is unaffected — this is additive functionality
+- Manual upload is unaffected: this is additive functionality
 - The ingest service runs as a deployment on GKE, scaling with the existing cluster
 
 ---
 
 ## References
 
-- ADR-023 (configurable CRO naming profiles — provides the parser)
-- ADR-022 (GCS storage backend — defines bucket structure including ingest bucket)
-- ADR-025 (automated pipeline triggering — subscribes to ingest events)
-- ADR-009 (immutable audit log — all ingest actions logged)
+- ADR-023 (configurable CRO naming profiles: provides the parser)
+- ADR-022 (GCS storage backend: defines bucket structure including ingest bucket)
+- ADR-025 (automated pipeline triggering: subscribes to ingest events)
+- ADR-009 (immutable audit log: all ingest actions logged)

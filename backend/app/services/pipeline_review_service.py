@@ -1,4 +1,4 @@
-"""Pipeline review service — handles review creation with all transactional side effects."""
+"""Pipeline review service: handles review creation with all transactional side effects."""
 
 import asyncio
 import logging

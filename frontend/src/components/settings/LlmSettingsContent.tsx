@@ -1,7 +1,11 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
+import { logError } from "@/lib/errorReporting";
 import { literature } from "@/lib/literature";
 
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
@@ -50,6 +54,7 @@ interface ProvidersResponse {
 
 export function LlmSettingsContent() {
   const [data, setData] = useState<ProvidersResponse | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingProvider, setSavingProvider] = useState<ProviderId | null>(null);
@@ -127,17 +132,47 @@ export function LlmSettingsContent() {
   }
 
   async function handleDeactivateAll() {
+    // Styled as a plain link, and it switches off every AI feature in the
+    // product at once. `confirm` was already in this file for the far smaller
+    // "remove one provider's configuration"; this is the larger act and had no gate.
+    const ok = await confirm({
+      title: "Turn off all AI features?",
+      message: (
+        <>
+          <p>
+            Deactivating the active provider stops <span className="font-medium">Agent Review,
+            the AI Assistant, AI Literature Review and the AI glossary scan</span> for everyone
+            in the organisation.
+          </p>
+          <p>
+            Nothing is deleted: the provider configuration and its key are kept, so this can be
+            switched back on.
+          </p>
+        </>
+      ),
+      confirmLabel: "Turn off AI features",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     setError(null);
     try {
       await api.post("/api/integrations/llm/providers/deactivate");
       await refresh();
     } catch (e) {
-      setError((e as Error).message);
+      logError("deactivating all LLM providers", e);
+      setError("AI features could not be turned off. The technical detail is in the application logs.");
     }
   }
 
   async function handleDelete(provider: ProviderId) {
-    if (!confirm(`Remove the ${PROVIDER_LABEL[provider]} configuration?`)) return;
+    const ok = await confirm({
+      title: `Remove the ${PROVIDER_LABEL[provider]} configuration?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Remove",
+      variant: "danger",
+    });
+    if (!ok) return;
     setError(null);
     try {
       await api.delete(`/api/integrations/llm/providers/${provider}`);
@@ -329,10 +364,10 @@ function ProviderCard({
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         {hosted && (
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="api-key" className="block text-sm font-medium text-gray-700 mb-1">
               API key
             </label>
-            <input
+            <input id="api-key"
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
@@ -352,10 +387,10 @@ function ProviderCard({
         )}
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="model" className="block text-sm font-medium text-gray-700 mb-1">
             Model
           </label>
-          <select
+          <select id="model"
             value={model}
             onChange={(e) => setModel(e.target.value)}
             className="w-full border border-gray-300 rounded px-3 py-2 text-sm"
@@ -368,7 +403,7 @@ function ProviderCard({
             ))}
           </select>
           {models?.used_fallback && (
-            <div className="text-xs text-amber-600 mt-1">
+            <div className="text-xs text-amber-700 mt-1">
               Model list shown from local fallback; live fetch failed.
             </div>
           )}
@@ -429,32 +464,26 @@ function DataEgressWarningModal({
   onCancel: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl p-6 max-w-lg">
-        <h3 className="text-lg font-semibold mb-2">
-          Enable {PROVIDER_LABEL[provider]}?
-        </h3>
-        <p className="text-sm text-gray-700">
-          Enabling this provider will send pipeline output data to a
-          third-party LLM over the public internet. Sample metadata, JSON
-          outputs, and QC reports may be transmitted. Continue?
-        </p>
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm border border-gray-300 rounded"
-          >
+    <Modal
+      open
+      title={`Enable ${PROVIDER_LABEL[provider]}?`}
+      onClose={onCancel}
+      size="md"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            className="px-4 py-2 text-sm bg-bioaf-600 text-white rounded"
-          >
-            Confirm and enable
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button onClick={onConfirm}>Confirm and enable</Button>
+        </>
+      }
+    >
+      <p className="text-sm text-gray-700">
+        Enabling this provider will send pipeline output data to a third-party
+        LLM over the public internet. Sample metadata, JSON outputs, and QC
+        reports may be transmitted. Continue?
+      </p>
+    </Modal>
   );
 }
 
@@ -518,7 +547,7 @@ function LitReviewThresholdSection() {
         more candidates.
       </p>
       <div className="flex items-center gap-2">
-        <input
+        <input aria-label="Relevance lower bound"
           type="number"
           min={0}
           max={1}
@@ -527,13 +556,11 @@ function LitReviewThresholdSection() {
           onChange={(e) => setInput(e.target.value)}
           className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28"
         />
-        <button
+        <Button size="sm"
           onClick={save}
-          disabled={saving}
-          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={saving}>
           {saving ? "Saving..." : "Save"}
-        </button>
+        </Button>
         {saved && !error && (
           <span className="text-xs text-green-700">Saved.</span>
         )}
@@ -659,10 +686,10 @@ export function AutoLitReviewSection() {
 
       <div className="flex flex-wrap items-end gap-4">
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="cadence" className="block text-xs font-medium text-gray-700 mb-1">
             Cadence
           </label>
-          <select
+          <select id="cadence"
             value={cadence}
             onChange={(e) => setCadence(e.target.value)}
             disabled={!enabled}
@@ -676,10 +703,10 @@ export function AutoLitReviewSection() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="first-run" className="block text-xs font-medium text-gray-700 mb-1">
             First run
           </label>
-          <input
+          <input id="first-run"
             type="datetime-local"
             value={firstRun}
             onChange={(e) => setFirstRun(e.target.value)}
@@ -688,10 +715,10 @@ export function AutoLitReviewSection() {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
+          <label htmlFor="max-experiments-per-run" className="block text-xs font-medium text-gray-700 mb-1">
             Max experiments per run
           </label>
-          <input
+          <input id="max-experiments-per-run"
             type="number"
             min={1}
             step={1}
@@ -701,13 +728,11 @@ export function AutoLitReviewSection() {
             className="border border-gray-300 rounded px-3 py-1.5 text-sm w-28 disabled:bg-gray-100"
           />
         </div>
-        <button
+        <Button size="sm"
           onClick={save}
-          disabled={saving}
-          className="bg-bioaf-600 text-white px-3 py-1.5 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={saving}>
           {saving ? "Saving..." : "Save"}
-        </button>
+        </Button>
         {saved && !error && <span className="text-xs text-green-700">Saved.</span>}
       </div>
       {error && <div className="text-xs text-red-700">{error}</div>}

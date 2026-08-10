@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo } from "@/components/dashboard/time";
 
@@ -14,22 +14,14 @@ interface CustomPipeline {
 }
 
 export function MyCustomPipelinesWidget() {
-  const [items, setItems] = useState<CustomPipeline[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<CustomPipeline[]>("/api/v1/custom-pipelines")
-      .then((res) => setItems(res || []))
-      .catch(() => setError("Failed to load pipelines"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<CustomPipeline[]>("/api/v1/custom-pipelines");
+      return res || [];
+    },
+    "Pipelines",
+  );
+  const items = data;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-custom-pipelines">
@@ -37,7 +29,7 @@ export function MyCustomPipelinesWidget() {
         My custom pipelines
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading pipelines...</span>
         </div>
@@ -46,7 +38,7 @@ export function MyCustomPipelinesWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry
@@ -54,7 +46,7 @@ export function MyCustomPipelinesWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No custom pipelines yet.
         </p>
       )}
@@ -68,7 +60,7 @@ export function MyCustomPipelinesWidget() {
                   className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="truncate text-sm text-gray-800">{p.name}</span>
-                  <span className="shrink-0 text-xs text-gray-400">{timeAgo(p.updated_at)}</span>
+                  <span className="shrink-0 text-xs text-gray-500">{timeAgo(p.updated_at)}</span>
                 </Link>
               </li>
             ))}

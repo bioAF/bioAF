@@ -1,4 +1,4 @@
-"""GEO Export Service — orchestrates validation, Excel generation, and ZIP packaging."""
+"""GEO Export Service: orchestrates validation, Excel generation, and ZIP packaging."""
 
 import logging
 import zipfile
@@ -334,13 +334,19 @@ def _format_validation_report(report: ValidationReport) -> str:
     if report.summary.populated_unvalidated > 0:
         lines.append("UNVALIDATED VALUES")
         lines.append("-" * 30)
+        # GEO expresses metadata as colon-separated `tag: value` pairs (SOFT format
+        # and the sample characteristics field, e.g. `tissue: liver`), which is also
+        # what the MISSING REQUIRED lines above already use. The advisory message is
+        # an annotation ABOUT the value, not part of it, so it is parenthesised: GEO
+        # values routinely contain commas ("liver, frozen"), and a comma separator
+        # would make the line impossible to read back unambiguously.
         for f in report.series_fields + report.protocol_fields:
             if f.status == "populated_unvalidated":
-                lines.append(f"  [SERIES/PROTOCOL] {f.geo_column}: {f.value} — {f.message}")
+                lines.append(f"  [SERIES/PROTOCOL] {f.geo_column}: {f.value} ({f.message})")
         for sv in report.sample_validations:
             for f in sv.fields:
                 if f.status == "populated_unvalidated":
-                    lines.append(f"  [SAMPLE {sv.sample_name}] {f.geo_column}: {f.value} — {f.message}")
+                    lines.append(f"  [SAMPLE {sv.sample_name}] {f.geo_column}: {f.value} ({f.message})")
         lines.append("")
 
     if report.file_manifest.files_missing_checksums > 0:

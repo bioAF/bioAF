@@ -54,7 +54,7 @@ function FloatingAssistantInner() {
           type="button"
           onClick={() => assistantUiStore.close()}
           aria-label="Minimize assistant"
-          className="text-gray-400 hover:text-gray-600 rounded p-1"
+          className="text-gray-500 hover:text-gray-600 rounded p-1"
         >
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />

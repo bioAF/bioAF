@@ -16,7 +16,7 @@ Rather than replacing one hardcoded choice with another, bioAF needs an abstract
 
 ## Decision
 
-Introduce the **BioAF Adapter Layer (BAL)** — a set of interface contracts that decouple bioAF's application logic and UI from specific infrastructure providers. The BAL defines normalized data models and operations for three provider categories: compute, storage, and interactive analysis (notebooks). Each category has one or more adapter implementations that translate between the provider's native concepts and bioAF's normalized model.
+Introduce the **BioAF Adapter Layer (BAL)**: a set of interface contracts that decouple bioAF's application logic and UI from specific infrastructure providers. The BAL defines normalized data models and operations for three provider categories: compute, storage, and interactive analysis (notebooks). Each category has one or more adapter implementations that translate between the provider's native concepts and bioAF's normalized model.
 
 ### Provider Categories and Interface Contracts
 
@@ -125,7 +125,7 @@ The existing pattern of separate `.tf` files per optional component (ADR-007) ex
 - Teams can choose the infrastructure stack that fits their experience and budget
 - The recommended path (K8s + GCS) is significantly cheaper to operate
 - Future adapters (AWS EKS, Azure AKS, alternative storage backends) plug into the same interface without changing application logic or UI
-- UI components are simpler — they render normalized data without provider-specific conditionals scattered throughout
+- UI components are simpler: they render normalized data without provider-specific conditionals scattered throughout
 
 **Negative:**
 
@@ -136,7 +136,7 @@ The existing pattern of separate `.tf` files per optional component (ADR-007) ex
 
 **Neutral:**
 
-- No changes to the data model — the BAL sits between the service layer and infrastructure, not between the service layer and the database
+- No changes to the data model: the BAL sits between the service layer and infrastructure, not between the service layer and the database
 - Pipeline definitions (Nextflow, Snakemake) already support both K8s and SLURM executors, so pipeline authors are unaffected
 
 ---

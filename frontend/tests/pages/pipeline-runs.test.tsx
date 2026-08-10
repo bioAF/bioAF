@@ -6,7 +6,7 @@
  * 29: Log viewer displays real content
  * 30: Cancel button calls cancel endpoint
  */
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@/testing/renderWithProviders";
 
 // Mock next/navigation
 const mockPush = jest.fn();
@@ -130,7 +130,7 @@ describe("Pipeline Run Detail - References Used", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
@@ -159,7 +159,7 @@ describe("Pipeline Run Detail - Provider details (Test 28)", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
@@ -207,7 +207,7 @@ describe("Pipeline Logs Display (Test 29)", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     // Wait for page to load (pipeline name is embedded in heading)
@@ -247,18 +247,19 @@ describe("Cancel Button (Test 30)", () => {
     });
     mockApiPost.mockResolvedValue({ ...mockRunWithK8s, status: "cancelled" });
 
-    // Mock confirm dialog
-    jest.spyOn(window, "confirm").mockReturnValue(true);
-
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     render(<PipelineRunDetailPage />);
 
     await waitFor(() => {
       expect(screen.getByText("Cancel")).toBeInTheDocument();
     });
 
+    // The page's own "Cancel" button opens the gate; inside the dialog the
+    // accept button is "Cancel run", because "Cancel" there means dismiss.
     fireEvent.click(screen.getByText("Cancel"));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel run" }));
 
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(
@@ -292,7 +293,7 @@ describe("Nextflow Report iframe", () => {
     });
 
     const PipelineRunDetailPage =
-      require("@/app/pipelines/runs/[id]/page").default;
+      require("@/app/(app)/pipelines/runs/[id]/page").default;
     const { container } = render(<PipelineRunDetailPage />);
 
     await waitFor(() => {

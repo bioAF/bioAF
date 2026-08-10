@@ -1,6 +1,8 @@
 "use client";
 
 import type { TerraformRun } from "@/lib/types";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface TerraformPlanViewerProps {
   planSummary: TerraformRun["plan_summary"];
@@ -11,14 +13,14 @@ interface TerraformPlanViewerProps {
 export function TerraformPlanViewer({ planSummary, onApply, onCancel }: TerraformPlanViewerProps) {
   if (!planSummary) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <p className="text-gray-500">No plan available</p>
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
+    <Card>
       <h2 className="text-lg font-semibold mb-4">Terraform Plan</h2>
 
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -76,12 +78,10 @@ export function TerraformPlanViewer({ planSummary, onApply, onCancel }: Terrafor
       )}
 
       <div className="flex gap-3 mt-6">
-        <button
-          onClick={onApply}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={onApply}>
           Apply Changes
-        </button>
+        </Button>
         <button
           onClick={onCancel}
           className="px-4 py-2 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
@@ -89,6 +89,6 @@ export function TerraformPlanViewer({ planSummary, onApply, onCancel }: Terrafor
           Cancel
         </button>
       </div>
-    </div>
+    </Card>
   );
 }

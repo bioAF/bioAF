@@ -154,7 +154,10 @@ test("Edit button calls onEdit", async () => {
   expect(onEdit).toHaveBeenCalled();
 });
 
-test("Close button calls onClose", async () => {
+test("every Close affordance calls onClose", async () => {
+  // On the shared Modal shell there are two: the footer button this dialog
+  // always had, and the shell's own named header close. The hand-rolled
+  // header close was labelled "close detail"; neither was removed.
   const user = userEvent.setup();
   const onClose = jest.fn();
   render(
@@ -164,6 +167,10 @@ test("Close button calls onClose", async () => {
       onEdit={jest.fn()}
     />,
   );
-  await user.click(screen.getByRole("button", { name: /^close$/i }));
-  expect(onClose).toHaveBeenCalled();
+  const closers = screen.getAllByRole("button", { name: /^close$/i });
+  expect(closers).toHaveLength(2);
+  for (const [i, button] of closers.entries()) {
+    await user.click(button);
+    expect(onClose).toHaveBeenCalledTimes(i + 1);
+  }
 });

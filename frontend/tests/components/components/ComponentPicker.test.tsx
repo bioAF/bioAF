@@ -43,7 +43,7 @@ const SAMPLE_COMPONENTS = [
     cost_estimate: "$20-$50/month",
     status: "available" as const,
   },
-  // Always-on plumbing — should still render but the picker may render them
+  // Always-on plumbing: should still render but the picker may render them
   // as auto-checked dependencies in a less prominent style.
   {
     key: "k8s_pipeline_pool",

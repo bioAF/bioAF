@@ -6,13 +6,13 @@
 
 ## Context
 
-Computational biology platforms typically treat infrastructure (compute, pipelines, notebooks) as the primary concern and experiment metadata as an afterthought — something users track in spreadsheets, ELNs, or not at all. This creates a disconnect between the bench scientists who generate samples and the computational biologists who analyze them, and makes it difficult to trace a result back to its source for publication or regulatory purposes.
+Computational biology platforms typically treat infrastructure (compute, pipelines, notebooks) as the primary concern and experiment metadata as an afterthought: something users track in spreadsheets, ELNs, or not at all. This creates a disconnect between the bench scientists who generate samples and the computational biologists who analyze them, and makes it difficult to trace a result back to its source for publication or regulatory purposes.
 
 bioAF's target users include bench scientists (who own sample metadata), bioinformaticians (who process data), computational biologists (who analyze data), and leadership (who need audit trails). A platform that only serves the computational team misses half the user base and the auditability requirement.
 
 ## Decision
 
-Experiment tracking is a mandatory, first-class layer in the bioAF architecture — not an optional add-on. Experiments and samples are the primary entities that all other layers reference. Every FASTQ upload, pipeline run, notebook session, and visualization links back to an experiment and its samples.
+Experiment tracking is a mandatory, first-class layer in the bioAF architecture: not an optional add-on. Experiments and samples are the primary entities that all other layers reference. Every FASTQ upload, pipeline run, notebook session, and visualization links back to an experiment and its samples.
 
 The experiment tracker is part of the mandatory foundation (deployed with `bioaf deploy`) and is built in Phase 2 (weeks 4–6), immediately after the infrastructure skeleton, so that every subsequent layer can reference it from day one.
 

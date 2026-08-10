@@ -58,7 +58,7 @@ export function DashboardContent() {
           data-testid="dashboard-gear"
           onClick={() => setPickerOpen(true)}
           aria-label="Customize dashboard"
-          className="p-2 rounded-lg text-gray-500 hover:text-gray-800 hover:bg-gray-100"
+          className="p-2 rounded-lg text-gray-600 hover:text-gray-800 hover:bg-gray-100"
         >
           <GearIcon />
         </button>

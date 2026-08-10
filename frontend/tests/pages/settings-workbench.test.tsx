@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import WorkbenchSettingsPage from "@/app/settings/work-nodes/page";
+import WorkbenchSettingsPage from "@/app/(app)/settings/work-nodes/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

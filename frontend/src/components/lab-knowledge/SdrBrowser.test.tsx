@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@/testing/renderWithProviders";
 import { SdrBrowser, SdrDetailView, sdrCode } from "./SdrBrowser";
 
 let canAccessImpl = (_resource: string, _action: string) => true;
@@ -158,4 +158,18 @@ test("SdrDetailView renders decision, justification, and status history", async 
   );
   expect(screen.getByText("Better doublet handling and speed.")).toBeInTheDocument();
   expect(screen.getByText(/Status History/i)).toBeInTheDocument();
+});
+
+test("search box survives typing: the input stays mounted and keeps focus between keystrokes", async () => {
+  render(<SdrBrowser />);
+  await waitFor(() =>
+    expect(screen.getByPlaceholderText("Search decision records...")).toBeInTheDocument(),
+  );
+
+  const input = screen.getByPlaceholderText("Search decision records...") as HTMLInputElement;
+  input.focus();
+  fireEvent.change(input, { target: { value: "c" } });
+
+  expect(screen.queryByPlaceholderText("Search decision records...")).toBeInTheDocument();
+  expect(document.activeElement).toBe(screen.getByPlaceholderText("Search decision records..."));
 });

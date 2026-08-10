@@ -97,10 +97,13 @@ describe("GeoExportModal", () => {
     });
   });
 
-  it("calls onClose when × button is clicked", () => {
+  it("calls onClose when the close button is clicked", () => {
+    // Was a bare "×" with no accessible name. The shared Modal shell now supplies
+    // the control and labels it, so the assertion is unchanged but the button is
+    // findable by a screen reader as well as by this test.
     const onClose = jest.fn();
     render(<GeoExportModal experimentId={1} isOpen onClose={onClose} userRole="admin" />);
-    fireEvent.click(screen.getByRole("button", { name: "×" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     expect(onClose).toHaveBeenCalled();
   });
 

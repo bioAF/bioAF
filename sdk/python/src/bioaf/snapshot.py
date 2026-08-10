@@ -22,7 +22,7 @@ def snapshot(
     """Capture an analysis snapshot and send to bioAF.
 
     Args:
-        adata: AnnData object (or any object — metadata extraction is best-effort)
+        adata: AnnData object (or any object, metadata extraction is best-effort)
         label: Human-readable label for this snapshot
         notes: Optional free-text notes
         figure: Optional figure to attach (matplotlib Figure, file path str/Path, or bytes)

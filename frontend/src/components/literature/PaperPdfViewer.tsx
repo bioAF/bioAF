@@ -104,7 +104,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
   }, [page, numPages]);
 
   if (loading) {
-    return <div className="text-sm text-gray-400 p-4">Loading PDF...</div>;
+    return <div className="text-sm text-gray-500 p-4">Loading PDF...</div>;
   }
   if (error) {
     return <div className="text-sm text-red-700 p-4">{error}</div>;

@@ -6,7 +6,7 @@
 
 ## Context
 
-Publishing results from sequencing experiments requires submitting raw and processed data to public repositories. For the vast majority of bioAF's target users — small biotech teams doing single-cell and bulk RNA-seq — the relevant repository is NCBI's Gene Expression Omnibus (GEO). GEO enforces MIAME and MINSEQE compliance through a structured Excel submission template with specific required fields, controlled drop-down values, and a defined file upload process.
+Publishing results from sequencing experiments requires submitting raw and processed data to public repositories. For the vast majority of bioAF's target users: small biotech teams doing single-cell and bulk RNA-seq, the relevant repository is NCBI's Gene Expression Omnibus (GEO). GEO enforces MIAME and MINSEQE compliance through a structured Excel submission template with specific required fields, controlled drop-down values, and a defined file upload process.
 
 Today, preparing a GEO submission is a manual, error-prone process:
 
@@ -91,10 +91,10 @@ The service maps bioAF's internal schema to GEO's template columns:
 
 Before generating the export, the service runs a validation pass and categorizes each field as:
 
-- **Complete** — field is populated and matches GEO's controlled vocabulary where applicable.
-- **Populated but unvalidated** — field has a value but it's not in GEO's known vocabulary (e.g., a novel instrument model). GEO may accept it, but the user should verify.
-- **Missing (required)** — GEO requires this field and it's empty in bioAF. The export will include a placeholder value (e.g., `[REQUIRED - please fill in]`) and the validation report will flag it.
-- **Missing (recommended)** — GEO doesn't strictly require this but submissions are often rejected without it. Flagged as a warning.
+- **Complete**: field is populated and matches GEO's controlled vocabulary where applicable.
+- **Populated but unvalidated**: field has a value but it's not in GEO's known vocabulary (e.g., a novel instrument model). GEO may accept it, but the user should verify.
+- **Missing (required)**: GEO requires this field and it's empty in bioAF. The export will include a placeholder value (e.g., `[REQUIRED - please fill in]`) and the validation report will flag it.
+- **Missing (recommended)**: GEO doesn't strictly require this but submissions are often rejected without it. Flagged as a warning.
 
 ### API and UI
 
@@ -124,7 +124,7 @@ GEO occasionally updates their Excel template (new fields, changed column names,
 ## Rationale
 
 - **GEO is the universal target.** While other repositories exist (ArrayExpress, SRA, DDBJ), GEO is the most widely used for gene expression studies and its submission format is the de facto standard. GEO brokers raw data to SRA automatically, so a GEO submission satisfies both repositories.
-- **Export, not direct submission.** bioAF generates the submission package but does not submit directly to GEO's API (GEO doesn't have a robust programmatic submission API — it's FTP + web form). This keeps the feature simple and avoids brittleness from depending on GEO's infrastructure.
+- **Export, not direct submission.** bioAF generates the submission package but does not submit directly to GEO's API (GEO doesn't have a robust programmatic submission API: it's FTP + web form). This keeps the feature simple and avoids brittleness from depending on GEO's infrastructure.
 - **Validation before export reduces rejection cycles.** GEO curators manually review submissions and reject those with missing or incorrect fields. Pre-export validation catches most issues before the user uploads to GEO, reducing round-trips that can add weeks to the publication timeline.
 - **Covering GEO covers all three standards.** GEO's submission template is designed to satisfy both MIAME and MINSEQE. If a bioAF export produces a valid GEO submission, the underlying data is MIAME/MINSEQE compliant by construction. This means bioAF doesn't need separate MIAME or MINSEQE export features.
 - **The template definition approach handles GEO's evolution.** GEO has changed their template multiple times over the years. A data-driven mapping (JSON definition file) is more maintainable than hard-coded Excel generation logic.
@@ -134,6 +134,6 @@ GEO occasionally updates their Excel template (new fields, changed column names,
 - ADR-013 (MINSEQE-compliant metadata schema) is a hard prerequisite. The GEO export cannot produce a valid submission without the structured fields it introduces.
 - The `openpyxl` Python library (or equivalent) is added as a backend dependency for Excel generation.
 - The GEO template definition file must be maintained as GEO updates their requirements. This is a low-frequency maintenance task (GEO changes their template roughly once per year).
-- The export feature becomes a strong incentive for bench scientists to fill in metadata completely at experiment registration time — they'll see the validation warnings at export time if they didn't.
+- The export feature becomes a strong incentive for bench scientists to fill in metadata completely at experiment registration time: they'll see the validation warnings at export time if they didn't.
 - Future extensions could include export to other repositories (ArrayExpress, SRA direct, CellxGene Census) using the same architecture: a repository-specific template definition file + a mapping from bioAF's schema.
 - The MD5 checksum generation for large FASTQ files may be slow if checksums weren't computed at upload time. The upload service (Phase 5) already computes MD5s, so this should be a lookup, not a computation. If historical files are missing checksums, the export service flags them in the validation report rather than computing them on the fly.

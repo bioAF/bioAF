@@ -572,25 +572,37 @@ async def _lit_review_auto_loop():
             logger.error("Lit review auto loop error: %s", e)
 
 
-async def _cost_billing_sync_loop():
-    """Sync billing data daily and check budget thresholds."""
+async def _cost_billing_sync_once():
+    """One pass of the billing sync: every org, committed per org."""
     from app.database import async_session_factory
     from app.services.cost_service import CostService
     from app.models.organization import Organization
     from sqlalchemy import select
 
+    async with async_session_factory() as session:
+        result = await session.execute(select(Organization))
+        orgs = list(result.scalars().all())
+        for org in orgs:
+            try:
+                await CostService.sync_billing_data(session, org.id)
+                await CostService.check_budget_thresholds(session, org.id)
+                # Per org, so one org's failure cannot discard another's sync.
+                await session.commit()
+            except Exception as e:
+                await session.rollback()
+                logger.warning("Billing sync failed for org %d: %s", org.id, e)
+
+
+async def _cost_billing_sync_loop():
+    """Sync billing data daily and check budget thresholds."""
+    # Sync shortly after boot, then daily. Sleeping the full day first meant an
+    # installation restarted more often than once a day never synced at all.
+    delay = 60
     while True:
         try:
-            await asyncio.sleep(86400)  # 24 hours
-            async with async_session_factory() as session:
-                result = await session.execute(select(Organization))
-                orgs = list(result.scalars().all())
-                for org in orgs:
-                    try:
-                        await CostService.sync_billing_data(session, org.id)
-                        await CostService.check_budget_thresholds(session, org.id)
-                    except Exception as e:
-                        logger.warning("Billing sync failed for org %d: %s", org.id, e)
+            await asyncio.sleep(delay)
+            delay = 86400  # 24 hours
+            await _cost_billing_sync_once()
         except asyncio.CancelledError:
             break
         except Exception as e:

@@ -8,7 +8,7 @@
 
 ## Context
 
-bioAF's original architecture specified SLURM as the compute orchestrator, reflecting its status as the de facto standard in bioinformatics HPC. However, feedback from practicing computational biologists — all of whom had used SLURM — was unanimous: starting fresh, they would choose Kubernetes. Their reasoning:
+bioAF's original architecture specified SLURM as the compute orchestrator, reflecting its status as the de facto standard in bioinformatics HPC. However, feedback from practicing computational biologists: all of whom had used SLURM, was unanimous: starting fresh, they would choose Kubernetes. Their reasoning:
 
 1. **Cost:** SLURM requires a dedicated controller node and login node that run continuously (~$50-80/month idle). Kubernetes on GKE Autopilot only charges for resources when pods are running.
 2. **Cloud-native:** GKE is a managed service with native autoscaling, self-healing, and integrated monitoring. SLURM on GCP requires managing VMs manually.
@@ -56,7 +56,7 @@ profiles {
 
 ### Node Pool Configuration
 
-For GKE Autopilot, node provisioning is fully managed — bioAF simply specifies resource requests on pods and Autopilot handles node selection. For GKE Standard (if users need more control), bioAF configures:
+For GKE Autopilot, node provisioning is fully managed: bioAF simply specifies resource requests on pods and Autopilot handles node selection. For GKE Standard (if users need more control), bioAF configures:
 
 | Node Pool | Purpose | Machine Type | Autoscaling | Spot/On-Demand |
 |---|---|---|---|---|
@@ -128,7 +128,7 @@ For teams that initially chose SLURM and later want to migrate to Kubernetes:
 
 - Eliminates SLURM controller and login node costs (~$50-80/month)
 - Single orchestrator (GKE) for both platform services and workloads
-- Native autoscaling to zero — no idle compute charges
+- Native autoscaling to zero: no idle compute charges
 - Docker containers are the standard; no Singularity conversion needed
 - Pipeline monitoring integrates with standard K8s tooling (kubectl, Prometheus, Grafana)
 - Path to multi-cloud: K8s runs on AWS (EKS) and Azure (AKS) with minimal adapter changes

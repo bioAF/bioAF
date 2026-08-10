@@ -138,23 +138,39 @@ class NotificationService:
         user_id: int,
         preferences: list[dict],
     ) -> list[NotificationPreference]:
-        # Delete existing preferences for this user
-        await session.execute(delete(NotificationPreference).where(NotificationPreference.user_id == user_id))
+        """Upsert the supplied preferences, keyed by (event_type, channel).
 
-        # Insert new preferences
-        new_prefs = []
+        This merges rather than replacing. It used to DELETE every row for the user and re-insert
+        the payload, which meant any save from a partial view of the user's preferences silently
+        wiped the rest: the profile page swallows a failed load and renders channel defaults, so one
+        Save from that state could erase every setting the user had. A save only ever changes the
+        toggles it carries.
+        """
+        existing_result = await session.execute(
+            select(NotificationPreference).where(NotificationPreference.user_id == user_id)
+        )
+        existing = {(p.event_type, p.channel): p for p in existing_result.scalars().all()}
+
+        touched = []
         for pref in preferences:
-            p = NotificationPreference(
-                user_id=user_id,
-                event_type=pref["event_type"],
-                channel=pref["channel"],
-                enabled=pref.get("enabled", True),
-            )
-            session.add(p)
-            new_prefs.append(p)
+            key = (pref["event_type"], pref["channel"])
+            enabled = pref.get("enabled", True)
+            p = existing.get(key)
+            if p is None:
+                p = NotificationPreference(
+                    user_id=user_id,
+                    event_type=key[0],
+                    channel=key[1],
+                    enabled=enabled,
+                )
+                session.add(p)
+                existing[key] = p
+            else:
+                p.enabled = enabled
+            touched.append(p)
 
         await session.flush()
-        return new_prefs
+        return touched
 
     # ---- Rules (admin only) ----
 

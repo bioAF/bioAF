@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import GcpSettingsPage from "@/app/settings/gcp/page";
+import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";
+import GcpSettingsPage from "@/app/(app)/settings/gcp/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo, withinHours } from "@/components/dashboard/time";
 
@@ -26,23 +27,12 @@ const WINDOWS = [
 ];
 
 export function FailedRunsWidget() {
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [hours, setHours] = useState(24);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<RunList>("/api/pipeline-runs?status=failed&page_size=20")
-      .then((res) => setRuns(res.runs || []))
-      .catch(() => setError("Failed to load runs"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data: runs, loading, error, retry } = useWidgetData(
+    async () =>
+      (await api.getWithRetry<RunList>("/api/pipeline-runs?status=failed&page_size=20")).runs || [],
+    "Failed runs",
+  );
 
   const windowLabel = WINDOWS.find((w) => w.hours === hours)?.label;
   const visible = (runs || []).filter((r) => withinHours(r.completed_at || r.created_at, hours));
@@ -62,7 +52,7 @@ export function FailedRunsWidget() {
               className={`text-xs px-1.5 py-0.5 rounded ${
                 hours === w.hours
                   ? "bg-bioaf-600 text-white"
-                  : "text-gray-500 hover:bg-gray-100"
+                  : "text-gray-600 hover:bg-gray-100"
               }`}
             >
               {w.label}
@@ -71,7 +61,7 @@ export function FailedRunsWidget() {
         </div>
       </div>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading runs...</span>
         </div>
@@ -80,7 +70,7 @@ export function FailedRunsWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry
@@ -88,7 +78,7 @@ export function FailedRunsWidget() {
         </div>
       )}
       {!loading && !error && visible.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No failed runs in the last {windowLabel}.
         </p>
       )}
@@ -103,7 +93,7 @@ export function FailedRunsWidget() {
                   className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="truncate text-sm text-gray-800">{r.pipeline_name}</span>
-                  <span className="shrink-0 text-xs text-gray-400">
+                  <span className="shrink-0 text-xs text-gray-500">
                     {timeAgo(r.completed_at || r.created_at)}
                   </span>
                 </Link>

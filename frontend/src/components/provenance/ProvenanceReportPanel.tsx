@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 type EntityType = "project" | "experiment" | "sample" | "pipeline_run" | "artifact";
 type DownloadFormat = "json" | "md" | "pdf" | "csv" | "all";
@@ -48,6 +49,7 @@ export function ProvenanceReportPanel({ entityType, entityId, entityName }: Prov
   const [preview, setPreview] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  useDismissOnEscape(dropdownOpen, () => { setDropdownOpen(false); });
   const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
 
   const basePath = `/api/${ENTITY_PATH_MAP[entityType]}/${entityId}/provenance/report`;

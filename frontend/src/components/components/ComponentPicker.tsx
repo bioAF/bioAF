@@ -137,14 +137,14 @@ export function ComponentPicker({
                     className="bg-white rounded-lg shadow p-4 border border-gray-200 opacity-60"
                   >
                     <div className="flex items-start justify-between mb-2">
-                      <span className="font-medium text-sm text-gray-400">
+                      <span className="font-medium text-sm text-gray-500">
                         {c.name}
                       </span>
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                         Coming Soon
                       </span>
                     </div>
-                    <p className="text-xs text-gray-400">{c.description}</p>
+                    <p className="text-xs text-gray-500">{c.description}</p>
                   </div>
                 ) : (
                   <label
@@ -165,7 +165,7 @@ export function ComponentPicker({
                       </div>
                       <p className="text-xs text-gray-600">{c.description}</p>
                       {c.dependencies.length > 0 && (
-                        <p className="text-xs text-gray-400 mt-1">
+                        <p className="text-xs text-gray-500 mt-1">
                           Requires: {c.dependencies.join(", ")}
                         </p>
                       )}

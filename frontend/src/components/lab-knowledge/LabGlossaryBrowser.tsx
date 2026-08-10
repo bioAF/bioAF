@@ -1,8 +1,14 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
+
+import { clickableCard } from "@/lib/a11y";
+import { Modal } from "@/components/shared/Modal";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 
 interface UserSummary {
   id: number;
@@ -75,6 +81,10 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
   const [sourceFilter, setSourceFilter] = useState("");
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingJobIds, setPendingJobIds] = useState<number[]>([]);
@@ -91,7 +101,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     if (sourceFilter) params.set("source", sourceFilter);
     try {
       const data = await api.get<TermListResponse>(`${API_BASE}/glossary?${params.toString()}`);
@@ -101,7 +111,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     } finally {
       setLoading(false);
     }
-  }, [query, sourceFilter]);
+  }, [settledQuery, sourceFilter]);
 
   const fetchPending = useCallback(async () => {
     try {
@@ -159,10 +169,11 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
     };
   }, [activeScanJobId, fetchPending]);
 
-  if (loading) {
-    return <div data-testid="glossary-loading" className="p-8 text-gray-500">Loading glossary...</div>;
-  }
-
+  // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
+  // dependency of the fetch, so every keystroke sets loading=true; returning early
+  // unmounted the whole toolbar, taking the search input (and the caret) with it, so
+  // only the first character of a search ever landed. The loading state is rendered
+  // in the results region instead, below, and the toolbar stays mounted.
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -192,7 +203,7 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
             <button
               type="button"
               onClick={() => setShowAdd(true)}
-              className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+              className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
             >
               Add Term
             </button>
@@ -246,7 +257,11 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
       {scanError && <div className="text-red-600 text-sm mb-3">{scanError}</div>}
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
-      {terms.length === 0 ? (
+      {loading ? (
+        <div data-testid="glossary-loading" className="text-gray-500 py-12 text-center">
+          Loading glossary...
+        </div>
+      ) : terms.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
           No terms yet. {canManage ? "Add one manually, import a CSV, or run an AI scan." : ""}
         </div>
@@ -255,12 +270,12 @@ export function LabGlossaryBrowser({ focusTermId }: { focusTermId?: number }) {
           {terms.map((t) => (
             <li
               key={t.id}
-              onClick={() => setSelected(t)}
+              {...clickableCard(() => setSelected(t))}
               className="p-3 hover:bg-gray-50 cursor-pointer"
             >
               <div className="flex items-baseline justify-between">
                 <span className="font-semibold">{t.term}</span>
-                <span className="text-xs text-gray-400">{SOURCE_LABELS[t.source] ?? t.source}</span>
+                <span className="text-xs text-gray-500">{SOURCE_LABELS[t.source] ?? t.source}</span>
               </div>
               <p className="text-sm text-gray-700 mt-0.5">{t.definition}</p>
               <div className="text-xs text-gray-500 mt-1">
@@ -345,6 +360,7 @@ function TermDetailPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [definition, setDefinition] = useState(term.definition);
   const [category, setCategory] = useState(term.category ?? "");
@@ -366,26 +382,20 @@ function TermDetailPanel({
   };
 
   const remove = async () => {
-    if (!window.confirm("This will permanently remove this term. Are you sure?")) return;
+    const ok = await confirm({
+      title: "Permanently remove this term?",
+      message: "This cannot be undone.",
+      confirmLabel: "Remove",
+      variant: "danger",
+    });
+    if (!ok) return;
     await api.delete(`${API_BASE}/glossary/${term.id}`);
     onChanged();
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg w-[32rem] max-h-[85vh] overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-xl font-bold">{term.term}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
-            x
-          </button>
-        </div>
+    <Modal open title={term.term} onClose={onClose} size="lg">
+      <div>
 
         {editing ? (
           <div className="space-y-3">
@@ -414,7 +424,7 @@ function TermDetailPanel({
                 type="button"
                 onClick={save}
                 disabled={busy}
-                className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+                className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
               >
                 Save
               </button>
@@ -431,12 +441,12 @@ function TermDetailPanel({
             ) : null}
             {term.category ? <p className="text-xs text-gray-500 mb-1">Category: {term.category}</p> : null}
             {term.context ? <p className="text-xs text-gray-500 mb-1">Context: {term.context}</p> : null}
-            <p className="text-xs text-gray-400 mt-2">Source: {SOURCE_LABELS[term.source] ?? term.source}</p>
+            <p className="text-xs text-gray-500 mt-2">Source: {SOURCE_LABELS[term.source] ?? term.source}</p>
 
             {(canManage || canDelete) && (
               <div className="border-t pt-4 mt-4 flex items-center gap-4">
                 {canManage && (
-                  <button type="button" onClick={() => setEditing(true)} className="text-sm text-blue-600">
+                  <button type="button" onClick={() => setEditing(true)} className="text-sm text-bioaf-600">
                     Edit
                   </button>
                 )}
@@ -450,7 +460,7 @@ function TermDetailPanel({
           </>
         )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -487,9 +497,8 @@ function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">Add Term</h2>
+    <Modal open title="Add Term" onClose={onClose} size="md">
+      <div>
         <div className="space-y-3">
           <input
             value={term}
@@ -536,13 +545,13 @@ function AddTermModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =
             type="button"
             onClick={submit}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Saving..." : "Save"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -574,9 +583,8 @@ function ImportModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-2">Import Glossary CSV</h2>
+    <Modal open title="Import Glossary CSV" onClose={onClose} size="md">
+      <div>
         <p className="text-sm text-gray-500 mb-4">
           Required columns: term, definition. Optional: aliases, category, context. Imported rows
           are reviewed before they are added.
@@ -597,13 +605,13 @@ function ImportModal({
             type="button"
             onClick={submit}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Importing..." : "Import"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -710,9 +718,8 @@ function ScanModal({
   const labelFor = (e: ExperimentOption) => (e.project ? `${e.project.name} > ${e.name}` : e.name);
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-2">Run AI Glossary Scan</h2>
+    <Modal open title="Run AI Glossary Scan" onClose={onClose} size="md">
+      <div>
         <p className="text-sm text-gray-500 mb-4">
           This is an AI scan. It uses your organization&apos;s active LLM provider (the same
           connection as the AI Literature Review and AI pipeline review) to read the selected
@@ -779,7 +786,7 @@ function ScanModal({
                           </span>
                         </div>
                         {(r.file_type || r.experiment_id != null) && (
-                          <div className="text-xs text-gray-400 mt-0.5">
+                          <div className="text-xs text-gray-500 mt-0.5">
                             {[r.file_type, r.experiment_id != null ? `Experiment ${r.experiment_id}` : null]
                               .filter(Boolean)
                               .join(" · ")}
@@ -791,7 +798,7 @@ function ScanModal({
                 </ul>
               )}
               {docQuery.trim() && docResults.length === 0 && (
-                <p className="text-xs text-gray-400 mt-2">No matching documents or files.</p>
+                <p className="text-xs text-gray-500 mt-2">No matching documents or files.</p>
               )}
             </div>
           )}
@@ -810,13 +817,13 @@ function ScanModal({
             type="button"
             onClick={submit}
             disabled={!canSubmit}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             {busy ? "Starting..." : "Start AI Scan"}
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -829,21 +836,79 @@ function ReviewPanel({
   onClose: () => void;
   onReviewed: () => void;
 }) {
+  const confirm = useConfirm();
   const [data, setData] = useState<ProposalListResponse | null>(null);
   const [decisions, setDecisions] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
 
+  const [proposalsFailed, setProposalsFailed] = useState(false);
+
   useEffect(() => {
     api
       .get<ProposalListResponse>(`${API_BASE}/glossary/scan/${jobId}/proposals`)
-      .then(setData)
-      .catch(() => setData(null));
+      .then((d) => {
+        setData(d);
+        setProposalsFailed(false);
+      })
+      .catch((e) => {
+        // `setData(null)` is the same state the component starts in, and the render
+        // below turns a null `data` into "Loading proposals...". So a failed fetch
+        // spun forever: the dialog never resolved, and there was nothing to retry.
+        logError(`loading glossary scan proposals for job ${jobId}`, e);
+        setData(null);
+        setProposalsFailed(true);
+      });
   }, [jobId]);
 
   const decide = (id: number, decision: string) =>
     setDecisions((prev) => ({ ...prev, [id]: decision }));
 
   const commit = async (bulk?: "accept" | "reject") => {
+    // The two bulk buttons had no gate. "Accept All Remaining" writes every
+    // AI-proposed term into the org glossary, including overwriting definitions
+    // that already exist, and "Reject All Remaining" is remembered (rejected
+    // proposals are suppressed from being proposed again), so neither is a
+    // browsing action. Per-decision "Apply Decisions" stays ungated: the user
+    // made each of those choices explicitly.
+    if (bulk) {
+      const remaining = (data?.new_terms?.length ?? 0) + (data?.changed_terms?.length ?? 0)
+        - Object.keys(decisions).length;
+      const count = Math.max(remaining, 0);
+      const ok = await confirm({
+        title:
+          bulk === "accept"
+            ? "Accept every remaining proposal?"
+            : "Reject every remaining proposal?",
+        message:
+          bulk === "accept" ? (
+            <>
+              <p>
+                {count > 0 ? `${count} proposals you have not decided on` : "Every proposal you have not decided on"}{" "}
+                will be written into the organisation glossary.
+              </p>
+              <p>
+                Where a proposal changes a term that already exists,{" "}
+                <span className="font-medium">the existing definition is replaced</span>.
+              </p>
+            </>
+          ) : (
+            <>
+              <p>
+                {count > 0 ? `${count} proposals you have not decided on` : "Every proposal you have not decided on"}{" "}
+                will be rejected.
+              </p>
+              <p>
+                Rejections are remembered, so these terms will not be proposed again by a future
+                scan.
+              </p>
+            </>
+          ),
+        confirmLabel: bulk === "accept" ? "Accept all" : "Reject all",
+        variant: bulk === "accept" ? "default" : "danger",
+      });
+      if (!ok) return;
+    }
+
     setBusy(true);
     try {
       await api.post(`${API_BASE}/glossary/scan/${jobId}/review`, {
@@ -862,11 +927,24 @@ function ReviewPanel({
 
   if (!data) {
     return (
-      <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-        <div className="bg-white rounded-lg p-6" onClick={(e) => e.stopPropagation()}>
-          <p data-testid="review-loading" className="text-gray-500">Loading proposals...</p>
+      <Modal open title="Review Proposed Terms" onClose={onClose} size="md">
+        <div>
+          {proposalsFailed ? (
+            <div data-testid="review-load-failed" role="status">
+              <p className="text-gray-700">{loadFailureMessage("The scan proposals")}</p>
+              <button
+                type="button"
+                onClick={onClose}
+                className="mt-3 px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+          ) : (
+            <p data-testid="review-loading" className="text-gray-500">Loading proposals...</p>
+          )}
         </div>
-      </div>
+      </Modal>
     );
   }
 
@@ -878,21 +956,12 @@ function ReviewPanel({
         : "";
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
-      <div
-        className="bg-white rounded-lg w-[44rem] max-h-[85vh] overflow-y-auto p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between mb-4">
-          <h2 className="text-lg font-bold">Review Proposed Terms</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400">
-            x
-          </button>
-        </div>
+    <Modal open title="Review Proposed Terms" onClose={onClose} size="xl">
+      <div>
 
         <h3 className="font-semibold text-sm mb-2">New Terms ({data.new_terms.length})</h3>
         {data.new_terms.length === 0 ? (
-          <p className="text-sm text-gray-400 mb-4">None.</p>
+          <p className="text-sm text-gray-500 mb-4">None.</p>
         ) : (
           <ul className="divide-y border rounded mb-5">
             {data.new_terms.map((p) => (
@@ -901,7 +970,7 @@ function ReviewPanel({
                   <span className="font-medium">
                     {p.term}
                     {p.previously_rejected && (
-                      <span className="ml-2 text-xs text-amber-600">previously rejected</span>
+                      <span className="ml-2 text-xs text-amber-700">previously rejected</span>
                     )}
                   </span>
                   <span className="flex gap-2">
@@ -915,7 +984,7 @@ function ReviewPanel({
                 </div>
                 <p className="text-sm text-gray-700 mt-0.5">{p.proposed_definition}</p>
                 {p.source_description && (
-                  <p className="text-xs text-gray-400 mt-1">{p.source_description}</p>
+                  <p className="text-xs text-gray-500 mt-1">{p.source_description}</p>
                 )}
               </li>
             ))}
@@ -924,7 +993,7 @@ function ReviewPanel({
 
         <h3 className="font-semibold text-sm mb-2">Changed Terms ({data.changed_terms.length})</h3>
         {data.changed_terms.length === 0 ? (
-          <p className="text-sm text-gray-400 mb-4">None.</p>
+          <p className="text-sm text-gray-500 mb-4">None.</p>
         ) : (
           <ul className="divide-y border rounded mb-5">
             {data.changed_terms.map((p) => (
@@ -949,11 +1018,11 @@ function ReviewPanel({
                 </div>
                 <div className="grid grid-cols-2 gap-3 mt-1">
                   <div className="text-xs">
-                    <span className="text-gray-400">Current</span>
+                    <span className="text-gray-500">Current</span>
                     <p className="text-gray-600">{p.existing_definition}</p>
                   </div>
                   <div className="text-xs">
-                    <span className="text-gray-400">Proposed</span>
+                    <span className="text-gray-500">Proposed</span>
                     <p className="text-gray-700">{p.proposed_definition}</p>
                   </div>
                 </div>
@@ -978,12 +1047,12 @@ function ReviewPanel({
             type="button"
             onClick={() => commit("accept")}
             disabled={busy}
-            className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+            className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
           >
             Accept All Remaining
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

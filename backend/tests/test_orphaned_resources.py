@@ -34,7 +34,7 @@ async def _seed_platform_config(session, overrides: dict | None = None):
 
 
 # ---------------------------------------------------------------------------
-# OrphanedResourceService — log, list, has_orphaned_for_uid
+# OrphanedResourceService: log, list, has_orphaned_for_uid
 # ---------------------------------------------------------------------------
 
 
@@ -149,7 +149,7 @@ async def test_has_orphaned_for_uid_ignores_resolved(session):
 
 
 # ---------------------------------------------------------------------------
-# OrphanedResourceService — cleanup and dismiss
+# OrphanedResourceService: cleanup and dismiss
 # ---------------------------------------------------------------------------
 
 

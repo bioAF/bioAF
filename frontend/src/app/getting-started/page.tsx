@@ -27,7 +27,7 @@ export default function GettingStartedPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-12 px-4">
+    <div className="min-h-screen bg-canvas py-12 px-4">
       <div className="max-w-3xl mx-auto">
         <h1 className="text-2xl font-bold text-gray-900 mb-8 text-center">Getting Started</h1>
         <GettingStarted standalone onComplete={() => router.push("/")} />

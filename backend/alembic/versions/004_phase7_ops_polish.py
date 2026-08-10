@@ -210,7 +210,7 @@ def upgrade() -> None:
     )
     op.create_index("idx_cost_records_org_date", "cost_records", ["organization_id", "record_date"])
 
-    # Grant permissions (conditionally — bioaf_app role may not exist in dev/POC)
+    # Grant permissions (conditionally: bioaf_app role may not exist in dev/POC)
     op.execute("""
         DO $$
         BEGIN

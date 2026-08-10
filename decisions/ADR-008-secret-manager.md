@@ -44,7 +44,7 @@ All secrets are stored in Google Secret Manager. The bioAF control plane accesse
 - **IAM integration is native.** Workload Identity on GKE provides clean, auditable access without static service account keys.
 - **Audit logging is built in.** Cloud Audit Logs record every secret access, which feeds into the overall compliance story.
 - **Versioning supports rotation.** Secrets can be rotated by creating a new version without downtime.
-- **Cost is negligible.** Secret Manager pricing is based on access operations and active secrets — for bioAF's usage (dozens of secrets, accessed at startup), the cost is effectively zero.
+- **Cost is negligible.** Secret Manager pricing is based on access operations and active secrets: for bioAF's usage (dozens of secrets, accessed at startup), the cost is effectively zero.
 
 ## Consequences
 

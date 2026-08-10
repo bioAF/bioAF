@@ -344,3 +344,57 @@ async def test_test_email_surfaces_smtp_error_detail(client: AsyncClient, admin_
         assert data["status"] == "failed"
         assert "rejected the From address" in data["detail"]
         assert "not verified" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_editing_another_field_does_not_wipe_the_stored_password(
+    client: AsyncClient, admin_token: str, session: AsyncSession
+):
+    """A partial save must preserve the stored SMTP password.
+
+    GET /smtp-settings returns the password MASKED, so the settings form
+    deliberately leaves its password input empty (there is no real value to
+    populate it with). When an admin edits only the From Address and saves, the
+    form therefore submits an empty password. That must not overwrite the stored
+    credential: doing so silently breaks every outbound email on the platform
+    (invites, password resets, notifications) with no error shown.
+    """
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    await client.post(
+        "/api/bootstrap/configure-smtp",
+        json={
+            "host": "smtp.example.com",
+            "port": 587,
+            "username": "user@example.com",
+            "password": "original-secret",
+            "from_address": "noreply@example.com",
+            "encryption": "starttls",
+        },
+        headers=headers,
+    )
+
+    # The admin corrects only the From Address. The password box was never
+    # touched, so the form sends "".
+    resp = await client.post(
+        "/api/bootstrap/configure-smtp",
+        json={
+            "host": "smtp.example.com",
+            "port": 587,
+            "username": "user@example.com",
+            "password": "",
+            "from_address": "alerts@example.com",
+            "encryption": "starttls",
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    # Read back through the API. smtp_password is an EncryptedString column, so raw
+    # SQL returns ciphertext; the GET endpoint derives its mask from the decrypted
+    # value, which makes it a faithful (and non-leaking) probe of what is stored.
+    after = (await client.get("/api/bootstrap/smtp-settings", headers=headers)).json()
+    assert after["from_address"] == "alerts@example.com", "the edited field should be saved"
+    assert after["password"] == "or***et", (
+        "the untouched password was wiped by a partial save: outbound email is now broken"
+    )

@@ -58,7 +58,9 @@ it("closes on backdrop click but not on inside click", async () => {
   fireEvent.click(screen.getByTestId("generic-qc")); // inside
   expect(onClose).not.toHaveBeenCalled();
 
-  fireEvent.click(screen.getByTestId("qc-report-modal")); // backdrop
+  // The backdrop belongs to the shared Modal shell now, so it carries the
+  // shell's testid. Same click, same expectation.
+  fireEvent.click(screen.getByTestId("modal-backdrop"));
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 

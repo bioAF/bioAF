@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature, type LitReviewRun } from "@/lib/literature";
+import { Button } from "@/components/ui/Button";
 
 interface ProjectSummary {
   id: number;
@@ -37,8 +38,10 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
   const [projectId, setProjectId] = useState<string>("");
   const [experimentId, setExperimentId] = useState<string>("");
   const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const cancelRef = useRef(false);
 
   useEffect(() => {
     api
@@ -84,6 +87,8 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
 
   async function submit() {
     if (!experimentId) return;
+    cancelRef.current = false;
+    setElapsed(0);
     setRunning(true);
     setMessage(null);
     setError(null);
@@ -92,9 +97,13 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
       setMessage(
         `AI Lit Review run ${run.id} queued. Recommended papers will be added to the Library with an AI note as the run completes.`,
       );
-      // Poll briefly to surface completion in the same UI flow.
+      // The run exposes only a coarse status (no per-step signal), so we can't show
+      // a real percentage: poll until terminal and surface elapsed time instead.
       for (let i = 0; i < 60; i++) {
+        if (cancelRef.current) break;
         await new Promise((r) => setTimeout(r, 1000));
+        if (cancelRef.current) break;
+        setElapsed(i + 1);
         const r2 = await literature.getRun(run.id);
         if (
           r2.status === "complete" ||
@@ -113,6 +122,16 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
     } finally {
       setRunning(false);
     }
+  }
+
+  // Stop the client from waiting. The run keeps going server-side and its papers
+  // land in the Library as it completes; the poll loop notices the flag and exits.
+  function stopWatching() {
+    cancelRef.current = true;
+    setRunning(false);
+    setMessage(
+      "The review keeps running in the background; recommended papers will appear in the Library as it completes.",
+    );
   }
 
   return (
@@ -168,14 +187,35 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
             ))}
           </select>
         </div>
-        <button
+        <Button
           onClick={submit}
-          disabled={running || !experimentId}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={running || !experimentId}>
           {running ? "Running..." : "Run AI Lit Review"}
-        </button>
+        </Button>
       </div>
+      {running && (
+        <div className="mt-3" data-testid="lit-review-progress">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm text-gray-700">
+              Running AI Lit Review... {elapsed}s
+            </span>
+            <button
+              type="button"
+              onClick={stopWatching}
+              className="text-sm text-gray-600 hover:text-gray-900 underline"
+            >
+              Stop watching
+            </button>
+          </div>
+          <div
+            className="h-1.5 w-full overflow-hidden rounded bg-gray-100"
+            role="progressbar"
+            aria-label="AI Lit Review in progress"
+          >
+            <div className="h-full w-full animate-pulse rounded bg-bioaf-600" />
+          </div>
+        </div>
+      )}
       {message && <div className="text-sm text-green-700 mt-2">{message}</div>}
       {error && <div className="text-sm text-red-700 mt-2">{error}</div>}
     </div>

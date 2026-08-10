@@ -6,16 +6,16 @@
 
 ## Context
 
-Every computational biology analysis depends on external reference data: genome sequences, gene annotations, genome indices, reference cell atlases, marker gene lists, and gene ontology databases. In bioAF's current architecture, there is no concept of reference data. The GCS bucket structure (raw, working, results) is designed for experiment-specific data. Reference data — which is shared across all experiments and all users — has no managed home.
+Every computational biology analysis depends on external reference data: genome sequences, gene annotations, genome indices, reference cell atlases, marker gene lists, and gene ontology databases. In bioAF's current architecture, there is no concept of reference data. The GCS bucket structure (raw, working, results) is designed for experiment-specific data. Reference data: which is shared across all experiments and all users, has no managed home.
 
 In practice, this means one of two things happens at every lab:
 
 1. Someone manually downloads reference files to a shared directory on the cluster. Everyone uses them. Nobody tracks versions. Six months later, someone updates the genome annotation and silently breaks reproducibility for every pipeline run that used the old version.
 2. Each user downloads their own copy of reference data into their home directory or working space. Disk usage balloons. Different users end up using different versions of the same reference without realizing it.
 
-Both scenarios are common and both undermine bioAF's core promise of provenance and reproducibility. If a pipeline run used GRCh38 + GENCODE v43, but the reference directory has since been updated to GENCODE v44, re-running the pipeline silently produces different results — and there's no record of the change.
+Both scenarios are common and both undermine bioAF's core promise of provenance and reproducibility. If a pipeline run used GRCh38 + GENCODE v43, but the reference directory has since been updated to GENCODE v44, re-running the pipeline silently produces different results, and there's no record of the change.
 
-The key insight from the product owner: **"If Brent added a file that in no way impacts my run, I don't care. If he replaced a file I need, I very much care."** This means versioning alone is insufficient. The system must be *impact-aware* — capable of answering "which pipeline runs used this reference version, and are any of them affected by this change?"
+The key insight from the product owner: **"If Brent added a file that in no way impacts my run, I don't care. If he replaced a file I need, I very much care."** This means versioning alone is insufficient. The system must be *impact-aware*: capable of answering "which pipeline runs used this reference version, and are any of them affected by this change?"
 
 ## Decision
 
@@ -51,7 +51,7 @@ Directory structure:
     └── star_GRCh38_gencode_v43/
 ```
 
-The path structure encodes the reference identity and version, making it human-readable and POSIX-friendly. Scientists reference data at paths like `/data/references/genomes/GRCh38/v43/genes.gtf` — no API calls needed for read access.
+The path structure encodes the reference identity and version, making it human-readable and POSIX-friendly. Scientists reference data at paths like `/data/references/genomes/GRCh38/v43/genes.gtf`: no API calls needed for read access.
 
 ### Metadata Registry
 
@@ -129,7 +129,7 @@ These are shared across the organization and used by pipelines. Changes affect e
 
 **Lab-internal references (`scope = 'internal'`):**
 
-These are custom reference files created by the team — marker gene lists, custom atlases, in-house annotation models.
+These are custom reference files created by the team: marker gene lists, custom atlases, in-house annotation models.
 
 - Any comp_bio or admin user can upload or update.
 - No approval required, but every change is logged in the audit trail and triggers a notification to users who have used the previous version in a pipeline run within the last 90 days.
@@ -159,7 +159,7 @@ GET    /api/v1/pipeline-runs/{id}/references       → Which references were use
 
 - **POSIX paths are non-negotiable.** Scientists reference data by file path in their code: `sc.read("/data/references/atlases/tabula_sapiens_v1/...")`. Any solution that requires API calls to access reference data will not be adopted. The FUSE mount ensures reference data appears as normal files on the filesystem.
 - **Impact awareness is the differentiator.** Every lab has a `/data/references` directory. What they don't have is an answer to "what happens if I update this genome annotation?" Impact-aware versioning makes reference updates a deliberate, informed decision rather than a silent time bomb.
-- **Two governance models match reality.** Public genome annotations require care — an accidental update can invalidate months of work. Custom marker gene lists are more fluid and don't need the same ceremony. One governance model for both would be either too permissive (dangerous for genomes) or too cumbersome (annoying for marker lists).
+- **Two governance models match reality.** Public genome annotations require care: an accidental update can invalidate months of work. Custom marker gene lists are more fluid and don't need the same ceremony. One governance model for both would be either too permissive (dangerous for genomes) or too cumbersome (annoying for marker lists).
 - **Pipeline run linkage closes the provenance gap.** Without reference linkage, the provenance chain has a hidden dependency: the pipeline run records its parameters but not which genome version was at the referenced path when it ran. With linkage, reproducibility is fully specified.
 - **Pre-seeding reduces time-to-first-pipeline.** Downloading and indexing a genome takes hours. If this happens automatically during setup, the first pipeline run can start immediately.
 

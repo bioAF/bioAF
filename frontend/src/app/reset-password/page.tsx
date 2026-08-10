@@ -4,6 +4,8 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
+import { Button } from "@/components/ui/Button";
 
 function ResetPasswordInner() {
   const router = useRouter();
@@ -12,6 +14,11 @@ function ResetPasswordInner() {
 
   const [checking, setChecking] = useState(true);
   const [valid, setValid] = useState(false);
+  // A link that could not be CHECKED is not a link that has EXPIRED. The
+  // backend answers `{valid: false}` for a genuinely dead token and never
+  // raises for one, so every rejection here is an outage.
+  const [checkFailed, setCheckFailed] = useState(false);
+  const [recheckKey, setRecheckKey] = useState(0);
 
   const [code, setCode] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -32,14 +39,18 @@ function ResetPasswordInner() {
           `/api/auth/reset-password/validate?token=${encodeURIComponent(token)}`,
         );
         setValid(res.valid);
-      } catch {
+        // A retry that succeeds must leave the failure state behind it.
+        setCheckFailed(false);
+      } catch (e) {
+        logError("checking whether a password reset link is still valid", e);
         setValid(false);
+        setCheckFailed(true);
       } finally {
         setChecking(false);
       }
     }
     validate();
-  }, [token]);
+  }, [token, recheckKey]);
 
   // Redirect to login shortly after a successful reset.
   useEffect(() => {
@@ -81,7 +92,7 @@ function ResetPasswordInner() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-canvas">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-bioaf-700">bioAF</h1>
@@ -104,6 +115,31 @@ function ResetPasswordInner() {
                 Go to sign in
               </Link>
             </>
+          ) : checkFailed ? (
+            <div data-testid="reset-check-failed">
+              <h2 className="text-xl font-semibold mb-4">We could not check your link</h2>
+              <p className="text-sm text-gray-600 mb-6">
+                Something went wrong while checking whether this reset link is
+                still valid, so we cannot tell you either way yet. Your link has
+                not been used up. Try again in a moment.
+              </p>
+              <button
+                type="button"
+                data-testid="reset-check-retry"
+                onClick={() => {
+                  setChecking(true);
+                  setRecheckKey((k) => k + 1);
+                }}
+                className="block w-full text-center bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700"
+              >
+                Try again
+              </button>
+              <div className="mt-4 text-center">
+                <Link href="/login" className="text-sm text-bioaf-600 hover:text-bioaf-700">
+                  Back to sign in
+                </Link>
+              </div>
+            </div>
           ) : !valid ? (
             <>
               <h2 className="text-xl font-semibold mb-4">Link expired or invalid</h2>
@@ -180,13 +216,10 @@ function ResetPasswordInner() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={submitting}
-                className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-              >
+              <Button className="w-full" type="submit"
+                disabled={submitting}>
                 {submitting ? "Resetting..." : "Reset password"}
-              </button>
+              </Button>
             </form>
           )}
         </div>

@@ -1,4 +1,4 @@
-"""TDD: ReferenceImportProgress model — tracks GKE-job-driven import state.
+"""TDD: ReferenceImportProgress model, tracks GKE-job-driven import state.
 
 Spec §3: progress writes go to a `reference_import_progress` table.
 """

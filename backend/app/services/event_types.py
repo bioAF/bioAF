@@ -135,6 +135,23 @@ ALL_WEBHOOK_EVENT_TYPES = [
     WEBHOOK_FILE_READY,
 ]
 
+# Notifications raised by calling InAppChannel directly rather than through the event bus, so they
+# are deliberately NOT in ALL_EVENT_TYPES (the router must not subscribe and deliver them twice).
+# They still reach users, so they still need a preference toggle: see USER_CONFIGURABLE_EVENT_TYPES.
+SDR_OWNER_ASSIGNED = "sdr_owner_assigned"
+SDR_REASSESSMENT_FLAGGED = "sdr_reassessment_flagged"
+SDR_REASSESSMENT_WARNING = "sdr_reassessment_warning"
+LAB_GLOSSARY_SCAN_COMPLETE = "lab_glossary_scan_complete"
+LAB_GLOSSARY_SCAN_FAILED = "lab_glossary_scan_failed"
+
+DIRECT_NOTIFICATION_EVENT_TYPES = [
+    SDR_OWNER_ASSIGNED,
+    SDR_REASSESSMENT_FLAGGED,
+    SDR_REASSESSMENT_WARNING,
+    LAB_GLOSSARY_SCAN_COMPLETE,
+    LAB_GLOSSARY_SCAN_FAILED,
+]
+
 ALL_EVENT_TYPES = [
     PIPELINE_STARTED,
     PIPELINE_COMPLETED,
@@ -192,6 +209,11 @@ ALL_EVENT_TYPES = [
     LITERATURE_COMMENT_REPLIED,
     LITERATURE_PAPER_DISMISSED,
 ]
+
+# Every event type a user can actually be notified about, and therefore every one that must have a
+# toggle on the profile Notifications page. A notification a user cannot switch off is not a
+# preference system. Pinned by test_every_deliverable_event_type_has_a_preference_toggle.
+USER_CONFIGURABLE_EVENT_TYPES = ALL_EVENT_TYPES + DIRECT_NOTIFICATION_EVENT_TYPES
 
 # Severity mapping for event types
 EVENT_SEVERITY = {

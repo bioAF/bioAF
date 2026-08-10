@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import ActivityFeedPage from "@/app/activity/page";
+import ActivityFeedPage from "@/app/(app)/activity/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({

@@ -1,4 +1,4 @@
-"""Reference data service — CRUD, governance, and impact assessment for reference datasets."""
+"""Reference data service: CRUD, governance, and impact assessment for reference datasets."""
 
 import asyncio
 import logging
@@ -100,7 +100,7 @@ class ReferenceDataService:
     ) -> tuple[list[ReferenceDataset], int]:
         """Return every version of a (name, category) within an org, newest first.
 
-        Spec §4 versioning UX — drives the version-history view on the
+        Spec §4 versioning UX: drives the version-history view on the
         reference detail page in a single round-trip.
         """
         query = (
@@ -335,7 +335,7 @@ class ReferenceDataService:
     ) -> ImpactSummary:
         """Compute impact assessment: which pipeline runs and experiments used this reference.
 
-        Single query with JOINs — no N+1.
+        Single query with JOINs: no N+1.
         """
         # Verify reference exists
         ref_exists = await session.execute(
@@ -440,7 +440,7 @@ class ReferenceDataService:
                 )
             )
 
-    # --- Upload (resumable session) flow — spec §2 -----------------------------
+    # --- Upload (resumable session) flow: spec §2 -----------------------------
 
     @staticmethod
     async def _get_references_bucket(session: AsyncSession) -> str:
@@ -611,7 +611,7 @@ class ReferenceDataService:
         org_id: int,
         user_id: int,
     ) -> ReferenceDataset:
-        """Finalize a resumable upload — list GCS, verify, persist files, flip status.
+        """Finalize a resumable upload: list GCS, verify, persist files, flip status.
 
         Lifecycle (spec §2):
           - status='uploading' → 'active' (internal scope)

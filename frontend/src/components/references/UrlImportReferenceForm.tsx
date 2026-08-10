@@ -8,6 +8,7 @@ import type {
   ReferenceImportStartResponse,
 } from "@/lib/types";
 import { extractModeForUrl, predictNextVersion } from "./referenceVersioning";
+import { Button } from "@/components/ui/Button";
 
 const CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"];
 const SCOPES = ["public", "internal"];
@@ -128,7 +129,7 @@ export function UrlImportReferenceForm({
         <label className="block">
           <span className="text-sm font-medium text-gray-700">
             Version
-            <span className="ml-2 text-xs font-normal text-gray-400">
+            <span className="ml-2 text-xs font-normal text-gray-500">
               (auto, override to keep your own scheme)
             </span>
           </span>
@@ -202,7 +203,7 @@ export function UrlImportReferenceForm({
       <label className="block">
         <span className="text-sm font-medium text-gray-700">
           Extract
-          <span className="ml-2 text-xs font-normal text-gray-400">(auto from URL extension)</span>
+          <span className="ml-2 text-xs font-normal text-gray-500">(auto from URL extension)</span>
         </span>
         <select
           value={extract}
@@ -242,13 +243,10 @@ export function UrlImportReferenceForm({
         >
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+        <Button type="submit"
+          disabled={submitting}>
           {submitting ? "Starting..." : "Start import"}
-        </button>
+        </Button>
       </div>
     </form>
   );

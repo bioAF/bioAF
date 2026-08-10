@@ -16,15 +16,15 @@ All data, infrastructure state, and configuration are stored in resources owned 
 
 | Asset | Location | Format | Accessible Without bioAF |
 |---|---|---|---|
-| Raw sequencing data (FASTQs) | GCS bucket in customer's project | Standard FASTQ files | Yes — standard GCS access |
-| Processed data (BAMs, h5ad, figures) | GCS bucket in customer's project | Standard bioinformatics formats | Yes — standard GCS access |
-| Experiment tracking database | Cloud SQL in customer's project | PostgreSQL | Yes — standard Postgres tools (pg_dump, psql, any SQL client) |
-| Audit log | Same Cloud SQL instance | PostgreSQL table | Yes — same as above |
-| Infrastructure definitions | GitHub repo in customer's org | Terraform HCL + YAML | Yes — standard Terraform |
-| Environment definitions | Same GitHub repo | Conda YAML, R package lists | Yes — standard conda/R tooling |
-| Pipeline configurations | Same GitHub repo | Nextflow configs, JSON parameter files | Yes — standard Nextflow |
-| Terraform state | GCS bucket in customer's project | Terraform state JSON | Yes — standard Terraform |
-| Platform config backups | GCS bucket in customer's project | JSON files | Yes — human-readable JSON |
+| Raw sequencing data (FASTQs) | GCS bucket in customer's project | Standard FASTQ files | Yes: standard GCS access |
+| Processed data (BAMs, h5ad, figures) | GCS bucket in customer's project | Standard bioinformatics formats | Yes: standard GCS access |
+| Experiment tracking database | Cloud SQL in customer's project | PostgreSQL | Yes: standard Postgres tools (pg_dump, psql, any SQL client) |
+| Audit log | Same Cloud SQL instance | PostgreSQL table | Yes: same as above |
+| Infrastructure definitions | GitHub repo in customer's org | Terraform HCL + YAML | Yes: standard Terraform |
+| Environment definitions | Same GitHub repo | Conda YAML, R package lists | Yes: standard conda/R tooling |
+| Pipeline configurations | Same GitHub repo | Nextflow configs, JSON parameter files | Yes: standard Nextflow |
+| Terraform state | GCS bucket in customer's project | Terraform state JSON | Yes: standard Terraform |
+| Platform config backups | GCS bucket in customer's project | JSON files | Yes: human-readable JSON |
 
 ### Teardown Flow
 
@@ -43,9 +43,9 @@ A one-click export feature (database dump as JSON/CSV, configuration archive) is
 
 ## Rationale
 
-- **Trust and adoption.** Open-source infrastructure tools live or die by trust. If customers feel locked in, they won't adopt. Knowing they can walk away at any time — with all their data, in standard formats — removes the biggest adoption barrier.
+- **Trust and adoption.** Open-source infrastructure tools live or die by trust. If customers feel locked in, they won't adopt. Knowing they can walk away at any time: with all their data, in standard formats, removes the biggest adoption barrier.
 - **No data sovereignty concerns.** Data never transits through bioAF infrastructure or any third party. It stays in the customer's GCP project from ingestion to analysis.
-- **Standard formats everywhere.** FASTQs, BAMs, h5ad, PostgreSQL, Terraform, conda YAML — these are all industry-standard formats that work with thousands of other tools. bioAF adds value through orchestration and UI, not through proprietary formats.
+- **Standard formats everywhere.** FASTQs, BAMs, h5ad, PostgreSQL, Terraform, conda YAML: these are all industry-standard formats that work with thousands of other tools. bioAF adds value through orchestration and UI, not through proprietary formats.
 - **GitOps repo as documentation.** Even if the customer never looks at the repo during normal use, it serves as complete documentation of their infrastructure if they ever need to operate without bioAF.
 
 ## Consequences

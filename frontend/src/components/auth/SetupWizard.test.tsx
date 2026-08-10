@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@/testing/renderWithProviders";
 import userEvent from "@testing-library/user-event";
 import { SetupWizard } from "./SetupWizard";
 

@@ -1,4 +1,4 @@
-"""TDD: POST /api/references/upload-init route — spec §2.
+"""TDD: POST /api/references/upload-init route, spec §2.
 
 Wraps ReferenceDataService.init_upload behind a FastAPI endpoint. Permission:
 `references:upload`. The browser uses the response to PUT bytes to GCS directly.

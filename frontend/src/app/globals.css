@@ -1,3 +1,110 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* -------------------------------------------------------------------------- */
+/* Theme tokens                                                               */
+/* Semantic colors as RGB channels (space-separated so Tailwind's             */
+/* rgb(var(--x) / <alpha-value>) can apply opacity). Light is the default;    */
+/* `.dark` on <html> (set by ThemeProvider / THEME_INIT_SCRIPT) swaps them.   */
+/* -------------------------------------------------------------------------- */
+@layer base {
+  :root {
+    --color-canvas: 249 250 251; /* page background (gray-50) */
+    --color-surface: 255 255 255; /* cards, header, inputs (white) */
+    --color-surface-muted: 249 250 251; /* subtle hover lift */
+    --color-elevated: 243 244 246; /* chips, tracks (gray-100) */
+    --color-ink: 17 24 39; /* primary text (gray-900) */
+    --color-ink-muted: 55 65 81; /* secondary text (gray-700) */
+    --color-ink-subtle: 107 114 128; /* muted labels (gray-500) */
+    --color-hairline: 229 231 235; /* borders/dividers (gray-200) */
+    --color-focus-ring: 3 105 161; /* keyboard focus outline (bioaf-600) */
+  }
+
+  .dark {
+    --color-canvas: 13 17 23;
+    --color-surface: 22 27 34;
+    --color-surface-muted: 28 33 40;
+    --color-elevated: 33 38 46;
+    --color-ink: 230 233 238;
+    --color-ink-muted: 173 181 192;
+    --color-ink-subtle: 138 146 158;
+    --color-hairline: 48 54 63;
+    --color-focus-ring: 56 189 248; /* bioaf-400, brighter on dark surfaces */
+  }
+
+  html {
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
+
+  /* Keyboard-only focus ring. `:focus-visible` fires for keyboard / assistive-tech
+     navigation but not mouse clicks, so pointer users see no outline while keyboard
+     users get a clear, brand-colored indicator on every interactive element. The app
+     previously shipped zero focus-visible styling, so tab-focus was invisible. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--color-focus-ring));
+    outline-offset: 2px;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Dark mode                                                                  */
+/*                                                                            */
+/* There is no override layer here any more, and that is the point. Dark mode */
+/* used to be a list of `.dark .bg-gray-50 {}` rules in this file, one per     */
+/* utility. An override matches the BARE class, so it needed a fresh rule for */
+/* every variant, every colour family and every gray step, forever, and it    */
+/* had already lost: 444 coloured tint sites went unremapped, `disabled:`     */
+/* appeared zero times against 27 sites, and `bg-blue-50/50` could not match  */
+/* `.dark .bg-blue-50` at all because that is a different class name.         */
+/*                                                                            */
+/* The flip now lives in each utility's own VALUE                             */
+/* (`rgb(var(--bg-red-50, 254 242 242) / <alpha-value>)`), so every variant   */
+/* reads the same variable and needs no rule. The variables and the single    */
+/* formula behind them are in ../../tailwind.tokens.js; the `.dark` block      */
+/* holding their values is emitted by the plugin in tailwind.config.js.       */
+/*                                                                            */
+/* Only two things still belong here: the semantic surfaces above, and the    */
+/* typography plugin's generated `.prose` styles below, which are not         */
+/* utilities and so cannot be tokenized the same way.                         */
+/* -------------------------------------------------------------------------- */
+
+/* Long-form markdown rendered by the typography plugin */
+.dark .prose {
+  color: rgb(var(--color-ink-muted));
+}
+.dark .prose :where(h1, h2, h3, h4, h5, h6, strong, th, td, blockquote, code, li):not(:where([class~="not-prose"] *)) {
+  color: rgb(var(--color-ink));
+}
+.dark .prose :where(a):not(:where([class~="not-prose"] *)) {
+  color: rgb(56 189 248);
+}
+.dark .prose :where(hr, thead, tbody tr):not(:where([class~="not-prose"] *)) {
+  border-color: rgb(var(--color-hairline));
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reduced motion                                                             */
+/*                                                                            */
+/* `LoadingSpinner` carries `motion-reduce:animate-none` itself and covers 63  */
+/* of the app's spinner sites, but 15 others hand-roll `animate-spin` and the  */
+/* skeletons use `animate-pulse`. Handling it here catches those and anything  */
+/* added later, instead of relying on every future author remembering the      */
+/* variant.                                                                   */
+/*                                                                            */
+/* Scoped to the looping utilities deliberately: it is continuous, unending    */
+/* motion that triggers vestibular symptoms. Nearly every transition in this   */
+/* app is `transition-colors`, which is not a motion trigger, so a blanket     */
+/* `transition-duration: 0` reset would change a great deal to fix nothing.    */
+/* -------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse,
+  .animate-bounce,
+  .animate-ping {
+    animation: none;
+  }
+}

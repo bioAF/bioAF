@@ -1,8 +1,12 @@
 "use client";
 
+import { useToast } from "@/components/shared/Toast";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { ReviewBadge } from "./ReviewBadge";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import type {
   PipelineRunReview,
   PipelineRunReviewListResponse,
@@ -16,9 +20,15 @@ interface ReviewPanelProps {
 }
 
 export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: ReviewPanelProps) {
+  const toast = useToast();
   const [reviews, setReviews] = useState<PipelineRunReview[]>([]);
   const [activeReview, setActiveReview] = useState<PipelineRunReview | null>(null);
   const [loading, setLoading] = useState(true);
+  // A run whose review history could not be read is not a run that was never
+  // reviewed. Both states left `reviews` at [] and `activeReview` at null, so
+  // they rendered identically -- and the panel then invited a second review
+  // over a verdict the reviewer could not see.
+  const [reviewsFailed, setReviewsFailed] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [verdict, setVerdict] = useState<ReviewVerdict>("approved");
   const [notes, setNotes] = useState("");
@@ -39,8 +49,10 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
       ]);
       setReviews(reviewList.reviews);
       setActiveReview(active);
-    } catch {
-      // ignore
+      setReviewsFailed(false);
+    } catch (e) {
+      logError(`loading the reviews for pipeline run ${pipelineRunId}`, e);
+      setReviewsFailed(true);
     } finally {
       setLoading(false);
     }
@@ -58,18 +70,28 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
       loadReviews();
       onReviewSubmitted?.();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to submit review");
+      toast.error(err instanceof Error ? err.message : "Failed to submit review");
     } finally {
       setSubmitting(false);
     }
   }
 
   if (loading) {
-    return <p className="text-sm text-gray-400">Loading reviews...</p>;
+    return <p className="text-sm text-gray-500">Loading reviews...</p>;
   }
 
   return (
     <div className="space-y-4">
+      {reviewsFailed && (
+        <p
+          data-testid="reviews-load-failed"
+          className="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3"
+        >
+          {loadFailureMessage("This run's reviews")} Until they load, a new
+          review cannot be filed, because there may already be one.
+        </p>
+      )}
+
       {activeReview && (
         <div className="bg-white rounded-lg shadow p-4 border-l-4 border-green-500">
           <div className="flex items-center justify-between mb-2">
@@ -84,7 +106,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
             <p className="text-sm text-gray-500 mt-2 bg-gray-50 p-2 rounded">{activeReview.notes}</p>
           )}
           {activeReview.recommended_exclusions && activeReview.recommended_exclusions.length > 0 && (
-            <p className="text-xs text-gray-400 mt-2">
+            <p className="text-xs text-gray-500 mt-2">
               Recommended exclusions: sample IDs {activeReview.recommended_exclusions.join(", ")}
             </p>
           )}
@@ -93,17 +115,21 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
 
       {canReview && (
         <div>
-          <button
+          <Button
             onClick={() => setShowForm(!showForm)}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+            disabled={reviewsFailed}
+            title={
+              reviewsFailed
+                ? "The existing reviews could not be loaded, so a new one cannot be filed yet."
+                : undefined
+            }>
             {activeReview ? "Submit New Review" : "Submit Review"}
-          </button>
+          </Button>
         </div>
       )}
 
       {showForm && (
-        <div className="bg-white rounded-lg shadow p-4">
+        <Card padding="sm">
           <h3 className="font-semibold text-sm mb-3">Pipeline Run Review</h3>
           <div className="space-y-3">
             <div>
@@ -143,7 +169,7 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
               </button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {reviews.length > 1 && (
@@ -156,11 +182,11 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
                 <div key={r.id} className="bg-gray-50 rounded p-3 text-sm">
                   <div className="flex items-center justify-between">
                     <span className="text-gray-500">
-                      {r.reviewer.name || r.reviewer.email} — {new Date(r.reviewed_at).toLocaleString()}
+                      {r.reviewer.name || r.reviewer.email}: {new Date(r.reviewed_at).toLocaleString()}
                     </span>
                     <ReviewBadge verdict={r.verdict} />
                   </div>
-                  {r.notes && <p className="text-gray-400 text-xs mt-1">{r.notes}</p>}
+                  {r.notes && <p className="text-gray-500 text-xs mt-1">{r.notes}</p>}
                 </div>
               ))}
           </div>

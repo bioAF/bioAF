@@ -93,7 +93,7 @@ export interface NavItem {
   adminOnly?: boolean;
 }
 
-// Phase 2 — Experiment Tracking
+// Phase 2: Experiment Tracking
 
 export type ExperimentStatus =
   | "registered"
@@ -904,7 +904,7 @@ export interface CustomPipelineVersionCreateRequest {
   qc_config_json?: Record<string, unknown> | null;
 }
 
-// Phase 5 — Data Management + Visualization
+// Phase 5: Data Management + Visualization
 
 export interface PipelineRunRef {
   id: number;
@@ -1246,7 +1246,7 @@ export interface ProvenanceChain {
   qc_dashboards: ProvenanceNode[];
 }
 
-// Phase 6 — GitOps + Package Management
+// Phase 6: GitOps + Package Management
 
 export interface GitOpsRepoStatus {
   initialized: boolean;
@@ -1405,7 +1405,7 @@ export interface TemplateNotebookListResponse {
   total: number;
 }
 
-// Phase 8 — MINSEQE Metadata + Pipeline Reviews
+// Phase 8: MINSEQE Metadata + Pipeline Reviews
 
 export type ReviewVerdict = "approved" | "approved_with_caveats" | "rejected" | "revision_requested";
 
@@ -1670,7 +1670,7 @@ export interface SnapshotComparison {
   cell_count_series: CellCountPoint[];
 }
 
-// Phase 13 — Auto-Ingest, Naming Profiles, Pipeline Triggers
+// Phase 13: Auto-Ingest, Naming Profiles, Pipeline Triggers
 //
 // Naming Profiles were redesigned (see local/Naming Profiles/redesign-plan.md).
 // The closed enum of field names is gone; profiles now carry an optional

@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import NetworkingSettingsPage from "@/app/settings/networking/page";
+import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";
+import NetworkingSettingsPage from "@/app/(app)/settings/networking/page";
 
 const mockPush = jest.fn();
 jest.mock("next/navigation", () => ({
@@ -349,11 +349,30 @@ describe("Networking Settings Page", () => {
     await waitFor(() => screen.getByTestId("apply-https-button"));
 
     fireEvent.click(screen.getByTestId("apply-https-button"));
+
+    // Restarting both services logs out every signed-in user, so this confirms
+    // now. It used to fire on the first click.
+    await screen.findByText(/Apply HTTPS and restart bioAF\?/i);
+    expect(mockApiPost).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: /Apply and restart/i }));
     await waitFor(() => {
       expect(mockApiPost).toHaveBeenCalledWith(
         expect.stringContaining("/api/v1/settings/networking/enforce-https"),
         { enabled: true },
       );
     });
+  });
+
+  it("does not restart anything if the HTTPS confirmation is cancelled", async () => {
+    setNetworkingConfig(certActiveConfig);
+    render(<NetworkingSettingsPage />);
+    await waitFor(() => screen.getByTestId("apply-https-button"));
+
+    fireEvent.click(screen.getByTestId("apply-https-button"));
+    await screen.findByText(/Apply HTTPS and restart bioAF\?/i);
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/i }));
+
+    await waitFor(() => expect(mockApiPost).not.toHaveBeenCalled());
   });
 });

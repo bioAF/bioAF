@@ -19,7 +19,7 @@ Biotech companies routinely outsource sequencing and primary data processing to 
 
 Example: `2026-03-10_ProjectX_RNASeq_DiffExpr_SmithE_v001.txt`
 
-These naming conventions are standardized within a given CRO engagement but differ between CROs. When a company switches CROs or works with multiple simultaneously, the naming scheme changes. bioAF needs to parse these file names to automatically catalog incoming data and link it to the correct project, experiment, and sample records — but the parsing rules must be configurable rather than hardcoded.
+These naming conventions are standardized within a given CRO engagement but differ between CROs. When a company switches CROs or works with multiple simultaneously, the naming scheme changes. bioAF needs to parse these file names to automatically catalog incoming data and link it to the correct project, experiment, and sample records, but the parsing rules must be configurable rather than hardcoded.
 
 ### Industry Conventions
 
@@ -125,7 +125,7 @@ The profile includes a mapping table that translates CRO-specific codes to bioAF
 - **Mapped codes:** File is automatically linked to the correct project/experiment
 - **Unmapped codes:** The auto-ingest system (ADR-024) auto-creates the project/experiment in "unclaimed" status, as described in that ADR
 
-Administrators configure these mappings through the naming profile UI. Mappings can be added at any time — including retroactively, which triggers a re-evaluation of previously unclaimed files.
+Administrators configure these mappings through the naming profile UI. Mappings can be added at any time: including retroactively, which triggers a re-evaluation of previously unclaimed files.
 
 ### Profile Matching Logic
 
@@ -187,7 +187,7 @@ The naming profile management page (accessible under Settings or Data & Files) p
 **Positive:**
 
 - Incoming data is automatically parsed and cataloged without manual intervention
-- CRO naming conventions are captured as configuration, not code — no engineering effort to support a new CRO
+- CRO naming conventions are captured as configuration, not code: no engineering effort to support a new CRO
 - Multiple CROs can be supported simultaneously with different active profiles
 - The test parser prevents misconfiguration before it affects real data
 - Unmapped codes auto-create entities rather than silently failing, ensuring no data is lost
@@ -196,7 +196,7 @@ The naming profile management page (accessible under Settings or Data & Files) p
 
 - Naming profiles add configuration complexity for administrators
 - Ambiguous filenames (matching multiple profiles) require manual resolution
-- Profiles are only as good as the CRO's adherence to their own convention — inconsistent naming from the CRO will produce parse failures
+- Profiles are only as good as the CRO's adherence to their own convention: inconsistent naming from the CRO will produce parse failures
 - The assumption that filenames are the primary identifier may not hold for all data delivery methods (e.g., CROs that deliver via API or structured manifests)
 
 **Neutral:**
@@ -207,5 +207,5 @@ The naming profile management page (accessible under Settings or Data & Files) p
 
 ## References
 
-- ADR-024 (GCS event-driven auto-ingest — consumes parse results)
-- ADR-013 (MINSEQE metadata — parsed fields contribute to metadata completeness)
+- ADR-024 (GCS event-driven auto-ingest: consumes parse results)
+- ADR-013 (MINSEQE metadata: parsed fields contribute to metadata completeness)

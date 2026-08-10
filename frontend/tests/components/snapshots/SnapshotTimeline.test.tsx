@@ -11,7 +11,7 @@ jest.mock("@/lib/api", () => ({
   },
 }));
 
-// SnapshotComparison is lazily imported — mock it so the dynamic import resolves
+// SnapshotComparison is lazily imported: mock it so the dynamic import resolves
 jest.mock("@/components/SnapshotComparison", () => ({
   __esModule: true,
   default: () => <div data-testid="snapshot-comparison">Comparison content</div>,

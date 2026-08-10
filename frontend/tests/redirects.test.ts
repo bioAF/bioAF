@@ -99,7 +99,7 @@ describe("Route Redirects", () => {
 
     const newPagePath = path.resolve(
       __dirname,
-      "../src/app/projects/experiments/new/page.tsx",
+      "../src/app/(app)/projects/experiments/new/page.tsx",
     );
     expect(fs.existsSync(newPagePath)).toBe(true);
   });

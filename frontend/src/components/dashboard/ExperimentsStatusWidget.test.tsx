@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { ExperimentsStatusWidget } from "./ExperimentsStatusWidget";
 
 jest.mock("next/link", () => {
@@ -60,4 +60,20 @@ test("shows an error when the fetch fails", async () => {
   mockGet.mockRejectedValueOnce(new Error("boom"));
   render(<ExperimentsStatusWidget />);
   await waitFor(() => expect(screen.getByTestId("widget-error")).toBeInTheDocument());
+});
+
+// That no widget reloads the page at all is held repo-wide by
+// src/__tests__/dashboard-widget-retry.test.ts.
+test("Retry refetches this widget rather than starting over", async () => {
+  mockGet.mockRejectedValueOnce(new Error("boom"));
+  mockGet.mockResolvedValueOnce({ experiments: [{ id: 3, name: "Recovered", status: "active" }], total: 1 });
+
+  render(<ExperimentsStatusWidget />);
+  await waitFor(() => expect(screen.getByTestId("widget-error")).toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByText("Recovered")).toBeInTheDocument();
+  expect(screen.queryByTestId("widget-error")).not.toBeInTheDocument();
+  expect(mockGet).toHaveBeenCalledTimes(2);
 });

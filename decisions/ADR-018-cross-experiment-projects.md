@@ -6,22 +6,22 @@
 
 ## Context
 
-bioAF's data model is experiment-centric by design (ADR-006). Every pipeline run, notebook session, file, and visualization links back to a single experiment. This is correct for the upstream workflow: bench scientists register experiments, upload FASTQs, and run alignment pipelines — all of which are inherently single-experiment.
+bioAF's data model is experiment-centric by design (ADR-006). Every pipeline run, notebook session, file, and visualization links back to a single experiment. This is correct for the upstream workflow: bench scientists register experiments, upload FASTQs, and run alignment pipelines, all of which are inherently single-experiment.
 
-But downstream analysis — the work computational biologists spend most of their time on — frequently spans multiple experiments. Common scenarios:
+But downstream analysis: the work computational biologists spend most of their time on, frequently spans multiple experiments. Common scenarios:
 
 1. **Integration studies.** "Combine tumor samples from experiment 12 with healthy controls from experiment 7 to build a comparative atlas." This is how most cell atlases are built.
 2. **Longitudinal analysis.** "Compare the Day 0, Day 7, and Day 30 timepoint experiments to track differentiation." Each timepoint may be a separate experiment because they were sequenced months apart.
 3. **Meta-analysis.** "Pool all six experiments from this quarter to increase statistical power for rare cell type detection."
 4. **Cross-project comparison.** "How do the germ cell populations in our fertility dataset compare to the published reference from experiment 3?"
 
-In all these cases, the computational biologist needs to select samples from multiple experiments, feed them into a shared analysis, and track the results. bioAF's current `projects` table exists but is purely organizational — a label that groups experiments. It doesn't support pipeline runs, notebook sessions, or provenance tracking at the project level.
+In all these cases, the computational biologist needs to select samples from multiple experiments, feed them into a shared analysis, and track the results. bioAF's current `projects` table exists but is purely organizational: a label that groups experiments. It doesn't support pipeline runs, notebook sessions, or provenance tracking at the project level.
 
-The consequence: when Sarah integrates data from three experiments in a notebook, bioAF can only link that notebook session to *one* experiment. The provenance chain for the other two experiments is broken. And when it's time to publish, the GEO submission (ADR-014) can only export one experiment at a time — there's no concept of a multi-experiment submission.
+The consequence: when Sarah integrates data from three experiments in a notebook, bioAF can only link that notebook session to *one* experiment. The provenance chain for the other two experiments is broken. And when it's time to publish, the GEO submission (ADR-014) can only export one experiment at a time: there's no concept of a multi-experiment submission.
 
 ## Decision
 
-Elevate `projects` from an organizational label to a first-class analytical entity. A project can reference samples from multiple experiments and has its own pipeline runs, notebook sessions, analysis snapshots, and provenance chain. The existing experiment-centric model is preserved — projects are an additional layer, not a replacement.
+Elevate `projects` from an organizational label to a first-class analytical entity. A project can reference samples from multiple experiments and has its own pipeline runs, notebook sessions, analysis snapshots, and provenance chain. The existing experiment-centric model is preserved: projects are an additional layer, not a replacement.
 
 ### Data Model Changes
 
@@ -34,7 +34,7 @@ ALTER TABLE projects ADD COLUMN hypothesis TEXT;
 ALTER TABLE projects ADD COLUMN owner_user_id INTEGER REFERENCES users(id);
 ```
 
-**New linkage table — project ↔ samples (not experiments):**
+**New linkage table: project ↔ samples (not experiments):**
 
 ```sql
 project_samples (
@@ -67,7 +67,7 @@ ALTER TABLE analysis_snapshots ADD COLUMN project_id INTEGER REFERENCES projects
 ALTER TABLE files ADD COLUMN project_id INTEGER REFERENCES projects(id);
 ```
 
-The `experiment_id` columns remain and are not made nullable — existing single-experiment workflows are unchanged. For cross-experiment work, `project_id` is set *in addition to* or *instead of* `experiment_id`. The API accepts either or both.
+The `experiment_id` columns remain and are not made nullable: existing single-experiment workflows are unchanged. For cross-experiment work, `project_id` is set *in addition to* or *instead of* `experiment_id`. The API accepts either or both.
 
 ### Provenance: From Tree to DAG
 
@@ -103,7 +103,7 @@ The provenance view (F-072) must render this as a DAG, not a tree. The implement
 
 **Project creation:**
 
-Projects are created from the existing Projects page or from the dataset browser. The scientist selects samples from one or more experiments using the dataset browser's existing filters (organism, tissue, batch, experiment, QC status) and adds them to a new or existing project. The selection UI is a multi-select table with checkboxes — not a new paradigm.
+Projects are created from the existing Projects page or from the dataset browser. The scientist selects samples from one or more experiments using the dataset browser's existing filters (organism, tissue, batch, experiment, QC status) and adds them to a new or existing project. The selection UI is a multi-select table with checkboxes: not a new paradigm.
 
 **Project detail page:**
 
@@ -131,7 +131,7 @@ ADR-014 (GEO Export) must be updated to support project-level export. A cross-ex
 - A SuperSeries metadata file that links them together
 - A unified file manifest covering all experiments
 
-This is a natural extension of the single-experiment export — it runs the same export logic per experiment and wraps the results in GEO's SuperSeries structure.
+This is a natural extension of the single-experiment export: it runs the same export logic per experiment and wraps the results in GEO's SuperSeries structure.
 
 ### What a Project Is NOT
 
@@ -153,7 +153,7 @@ This mirrors how computational biology actually works: upstream processing is pe
 
 ## Consequences
 
-- The `projects` table is upgraded with new columns (non-breaking migration — all new columns are nullable).
+- The `projects` table is upgraded with new columns (non-breaking migration: all new columns are nullable).
 - The `project_samples` linkage table is added.
 - `pipeline_runs`, `compute_sessions`, `analysis_snapshots`, and `files` gain an optional `project_id` column.
 - The provenance view (F-072) must be updated to render DAGs. This is the most significant UI change. Libraries like `dagre` or `d3-dag` can handle the layout.

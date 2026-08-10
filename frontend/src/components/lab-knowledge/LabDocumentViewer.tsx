@@ -114,7 +114,7 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
   }, [page, numPages, kind]);
 
   if (loading) {
-    return <div className="text-sm text-gray-400 p-4">Loading document...</div>;
+    return <div className="text-sm text-gray-500 p-4">Loading document...</div>;
   }
   if (error) {
     return <div className="text-sm text-red-700 p-4">{error}</div>;

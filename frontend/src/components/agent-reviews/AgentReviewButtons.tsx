@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SectionBuilderModal } from "./SectionBuilderModal";
+import { Button } from "@/components/ui/Button";
 
 interface AgentReviewButtonsProps {
   mode: "pipeline_run" | "experiment";
@@ -49,12 +50,10 @@ export function AgentReviewButtons({
 
   return (
     <div className="flex items-center gap-2">
-      <button
-        onClick={() => setOpen(true)}
-        className="px-3 py-1.5 text-sm bg-bioaf-600 hover:bg-bioaf-700 text-white rounded"
-      >
+      <Button size="sm"
+        onClick={() => setOpen(true)}>
         {label}
-      </button>
+      </Button>
       {error && (
         <span className="text-red-600 text-sm" role="alert">
           {error}

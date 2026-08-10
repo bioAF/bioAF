@@ -19,9 +19,12 @@ describe("ExperimentStatusBadge", () => {
     expect(screen.getByText(expectedLabel)).toBeInTheDocument();
   });
 
-  it("pipeline_complete renders with teal styling", () => {
+  it("pipeline_complete renders on the later band of the brand ramp", () => {
+    // Was teal. The lifecycle moved off nine unrelated hues onto a two-step brand
+    // ramp so colour encodes how far along the experiment is rather than which step
+    // it is; see lib/statusStyles.test.ts. The label is unchanged.
     render(<ExperimentStatusBadge status="pipeline_complete" />);
-    expect(screen.getByText("Pipeline Complete")).toHaveClass("bg-teal-100", "text-teal-800");
+    expect(screen.getByText("Pipeline Complete")).toHaveClass("bg-bioaf-100", "text-bioaf-800");
   });
 
   it("complete renders with green styling", () => {

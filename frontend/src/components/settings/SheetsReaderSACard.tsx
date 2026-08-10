@@ -1,11 +1,14 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ReaderSAStatus, ReaderSACreateResponse } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 export function SheetsReaderSACard() {
   const [status, setStatus] = useState<ReaderSAStatus | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
@@ -40,9 +43,13 @@ export function SheetsReaderSACard() {
   }
 
   async function handleDelete() {
-    if (!confirm("Delete the Google Sheets reader service account? Users will no longer be able to import columns from Google Sheets.")) {
-      return;
-    }
+    const ok = await confirm({
+      title: "Delete the Google Sheets reader service account?",
+      message: "Users will no longer be able to import columns from Google Sheets.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     setLoading(true);
     setError("");
     try {
@@ -96,7 +103,7 @@ export function SheetsReaderSACard() {
             </code>
             <button
               onClick={copyEmail}
-              className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+              className="text-xs text-blue-700 hover:text-blue-900 whitespace-nowrap"
             >
               {copied ? "Copied" : "Copy"}
             </button>
@@ -118,13 +125,11 @@ export function SheetsReaderSACard() {
 
       <div className="flex items-center gap-2">
         {!status.exists ? (
-          <button
+          <Button size="sm"
             onClick={handleCreate}
-            disabled={loading}
-            className="text-sm px-3 py-1.5 bg-bioaf-600 text-white rounded-md hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={loading}>
             {loading ? "Creating..." : "Create Reader Account"}
-          </button>
+          </Button>
         ) : (
           <button
             onClick={handleDelete}
@@ -136,7 +141,7 @@ export function SheetsReaderSACard() {
         )}
         <button
           onClick={() => setShowInfo(!showInfo)}
-          className="text-gray-400 hover:text-gray-600 w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-xs font-medium"
+          className="text-gray-500 hover:text-gray-600 w-5 h-5 flex items-center justify-center rounded-full border border-gray-300 text-xs font-medium"
           title="What is a reader account?"
         >
           ?

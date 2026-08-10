@@ -30,7 +30,7 @@ const SECTION_FOR_ENTITY: Record<string, string> = {
   backup: "/infrastructure/backup",
   work_node: "/workbench/work-nodes",
   notebook_session: "/notebooks",
-  literature_review_run: "/data/literature",
+  literature_review_run: "/lab-knowledge/literature",
 };
 
 function asInt(value: unknown): number | null {

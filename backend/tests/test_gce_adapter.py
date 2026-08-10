@@ -235,7 +235,7 @@ async def test_load_gcp_config_includes_bootstrap_sa_email_key():
 
 def test_work_node_sa_resolution_drops_legacy_email_fallback():
     """The SA attached to the work-node VM must NOT fall back to
-    gcp_service_account_email — that key now points at bioaf-bootstrap.
+    gcp_service_account_email: that key now points at bioaf-bootstrap.
     """
     cfg = {
         "gcp_service_account_email": "bioaf-bootstrap@p.iam.gserviceaccount.com",

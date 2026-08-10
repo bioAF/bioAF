@@ -1,12 +1,5 @@
-import { getValidationStatus, type ValidationStatusTone } from "@/lib/validationStatus";
-
-// Tone -> palette, matching the app's status colors (see lib/statusStyles).
-const TONE_CLASSES: Record<ValidationStatusTone, string> = {
-  positive: "bg-green-100 text-green-800",
-  caution: "bg-yellow-100 text-yellow-800",
-  negative: "bg-red-100 text-red-800",
-  neutral: "bg-gray-100 text-gray-700",
-};
+import { getValidationStatus } from "@/lib/validationStatus";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 /**
  * Renders a validation study's outcome as a pill, from a confidence percentage
@@ -30,7 +23,7 @@ export function ValidationStatusBadge({
     <span className="inline-flex items-center gap-1.5">
       <span
         title={status.description}
-        className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${TONE_CLASSES[status.tone]}`}
+        className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass("validationTone", status.tone)}`}
       >
         {status.label}
       </span>

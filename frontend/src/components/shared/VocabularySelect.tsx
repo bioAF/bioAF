@@ -23,7 +23,7 @@ export function VocabularySelect({
 
   if (loading) {
     return (
-      <select disabled className={className}>
+      <select disabled aria-label={placeholder ?? fieldName} className={className}>
         <option>Loading...</option>
       </select>
     );
@@ -31,6 +31,7 @@ export function VocabularySelect({
 
   return (
     <select
+      aria-label={placeholder ?? fieldName}
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       className={className}

@@ -1,10 +1,16 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePermissions } from "@/hooks/usePermissions";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { STATUS_STYLES, statusBadgeClass, statusLabel } from "@/lib/statusStyles";
+
+import { clickableRow } from "@/lib/a11y";
+import { Modal } from "@/components/shared/Modal";
 
 interface UserSummary {
   id: number;
@@ -93,6 +99,10 @@ export function SdrBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  // The list refetches on this, not on every keystroke: typing "brca" used to
+  // send four requests for three states nobody wanted, and a late answer for
+  // "brc" could land after the one for "brca".
+  const settledQuery = useDebouncedValue(query, 300);
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [sort, setSort] = useState("number");
@@ -105,7 +115,7 @@ export function SdrBrowser() {
     setLoading(true);
     setError(null);
     const params = new URLSearchParams();
-    if (query.trim()) params.set("q", query.trim());
+    if (settledQuery.trim()) params.set("q", settledQuery.trim());
     if (statusFilter) params.set("status", statusFilter);
     if (categoryFilter) params.set("category_id", categoryFilter);
     if (sort) params.set("sort", sort);
@@ -118,7 +128,7 @@ export function SdrBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [query, statusFilter, categoryFilter, sort, showHistorical]);
+  }, [settledQuery, statusFilter, categoryFilter, sort, showHistorical]);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -136,14 +146,11 @@ export function SdrBrowser() {
     fetchCategories();
   }, [fetchCategories]);
 
-  if (loading) {
-    return (
-      <div data-testid="sdr-loading" className="p-8 text-gray-500">
-        Loading decision records...
-      </div>
-    );
-  }
-
+  // NOTE: deliberately no `if (loading) return ...` early return here. `query` is a
+  // dependency of the fetch, so every keystroke sets loading=true; returning early
+  // unmounted the whole toolbar, taking the search input (and the caret) with it, so
+  // only the first character of a search ever landed. The loading state is rendered
+  // in the results region instead, below, and the toolbar stays mounted.
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
@@ -207,7 +214,7 @@ export function SdrBrowser() {
               <button
                 type="button"
                 onClick={() => setShowCreate(true)}
-                className="bg-blue-600 text-white rounded px-4 py-1.5 text-sm font-medium"
+                className="bg-bioaf-600 text-white rounded px-4 py-1.5 text-sm font-medium"
               >
                 New SDR
               </button>
@@ -227,7 +234,11 @@ export function SdrBrowser() {
 
       {error && <div className="text-red-600 text-sm mb-3">{error}</div>}
 
-      {sdrs.length === 0 ? (
+      {loading ? (
+        <div data-testid="sdr-loading" className="text-gray-500 py-12 text-center">
+          Loading decision records...
+        </div>
+      ) : sdrs.length === 0 ? (
         <div className="text-gray-500 py-12 text-center">
           No decision records yet. {canAuthor ? "Create one to capture a scientific decision." : ""}
         </div>
@@ -235,19 +246,19 @@ export function SdrBrowser() {
         <table className="w-full text-sm border rounded">
           <thead className="bg-gray-50 text-left text-xs text-gray-500">
             <tr>
-              <th className="p-2 w-20">Number</th>
-              <th className="p-2">Title</th>
-              <th className="p-2 w-36">Category</th>
-              <th className="p-2 w-36">Status</th>
-              <th className="p-2 w-32">Owner</th>
-              <th className="p-2 w-28">Trigger</th>
+              <th scope="col" className="p-2 w-20">Number</th>
+              <th scope="col" className="p-2">Title</th>
+              <th scope="col" className="p-2 w-36">Category</th>
+              <th scope="col" className="p-2 w-36">Status</th>
+              <th scope="col" className="p-2 w-32">Owner</th>
+              <th scope="col" className="p-2 w-28">Trigger</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {sdrs.map((s) => (
               <tr
                 key={s.id}
-                onClick={() => router.push(`/lab-knowledge/decision-records/${s.id}`)}
+                {...clickableRow(() => router.push(`/lab-knowledge/decision-records/${s.id}`))}
                 className="hover:bg-gray-50 cursor-pointer"
               >
                 <td className="p-2 font-mono text-xs">{sdrCode(s.sdr_number)}</td>
@@ -298,6 +309,7 @@ export function SdrDetailView({
   const canManage = canAccess("sdr", "manage");
 
   const [sdr, setSdr] = useState<SdrDetail | null>(null);
+  const confirm = useConfirm();
   const [categories, setCategories] = useState<Category[]>([]);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -340,7 +352,13 @@ export function SdrDetailView({
   };
 
   const remove = async () => {
-    if (!window.confirm("Permanently delete this decision record?")) return;
+    const ok = await confirm({
+      title: "Permanently delete this decision record?",
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     await api.delete(`${API_BASE}/sdrs/${sdrId}`);
     onDeleted();
   };
@@ -358,7 +376,7 @@ export function SdrDetailView({
   return (
     <div className="bg-white rounded shadow p-6 max-w-3xl">
       <div className="mb-3">
-        <span className="font-mono text-xs text-gray-400">{sdrCode(sdr.sdr_number)}</span>
+        <span className="font-mono text-xs text-gray-500">{sdrCode(sdr.sdr_number)}</span>
         <h2 className="text-xl font-bold">{sdr.title}</h2>
         <div className="mt-1">
           <StatusBadge status={sdr.status} />
@@ -381,11 +399,11 @@ export function SdrDetailView({
         ) : (
           <>
             <section className="mb-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-1">Decision</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-1">Decision</h3>
               <p className="text-sm text-gray-800 whitespace-pre-wrap">{sdr.decision}</p>
             </section>
             <section className="mb-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-1">Justification</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-1">Justification</h3>
               <p className="text-sm text-gray-800 whitespace-pre-wrap">{sdr.justification}</p>
             </section>
 
@@ -429,7 +447,7 @@ export function SdrDetailView({
             )}
 
             <section className="border-t pt-4 mt-4">
-              <h3 className="text-xs uppercase text-gray-400 mb-2">Status History</h3>
+              <h3 className="text-xs uppercase text-gray-500 mb-2">Status History</h3>
               <ul className="space-y-2">
                 {sdr.transitions.map((t) => (
                   <li key={t.id} className="text-xs text-gray-600">
@@ -437,7 +455,7 @@ export function SdrDetailView({
                       {STATUS_LABELS[t.from_status] ?? t.from_status} -&gt;{" "}
                       {STATUS_LABELS[t.to_status] ?? t.to_status}
                     </span>{" "}
-                    <span className="text-gray-400">
+                    <span className="text-gray-500">
                       {new Date(t.transitioned_at).toLocaleString()} ·{" "}
                       {t.transitioned_by?.name ?? t.transitioned_by?.email ?? "System"}
                     </span>
@@ -474,6 +492,7 @@ function SdrActions({
   setErr: (s: string | null) => void;
 }) {
   const [showSupersede, setShowSupersede] = useState(false);
+  const [showRepeal, setShowRepeal] = useState(false);
   const [showUphold, setShowUphold] = useState(false);
   const [showOwner, setShowOwner] = useState(false);
 
@@ -522,20 +541,44 @@ function SdrActions({
           <button
             type="button"
             disabled={busy}
-            onClick={() => onTransition("repealed")}
+            onClick={() => setShowRepeal(true)}
             className="text-sm text-red-600"
           >
             Repeal
           </button>
         </>
       )}
+      <ConfirmDialog
+        open={showRepeal}
+        variant="danger"
+        title={`Repeal ${sdrCode(sdr.sdr_number)}?`}
+        message={
+          <>
+            <p>
+              Repealing retires this decision record permanently. It is a terminal
+              state: the record cannot be reactivated, superseded, or edited afterwards.
+            </p>
+            <p>
+              If a newer decision replaces this one, use Supersede instead so the link
+              between them is preserved.
+            </p>
+          </>
+        }
+        confirmLabel="Repeal"
+        busy={busy}
+        onConfirm={() => {
+          setShowRepeal(false);
+          onTransition("repealed");
+        }}
+        onCancel={() => setShowRepeal(false)}
+      />
       {(canAuthor || canManage) && (
-        <button type="button" onClick={onEdit} className="text-sm text-blue-600">
+        <button type="button" onClick={onEdit} className="text-sm text-bioaf-600">
           Edit
         </button>
       )}
       {canManage && (
-        <button type="button" onClick={() => setShowOwner(true)} className="text-sm text-blue-600">
+        <button type="button" onClick={() => setShowOwner(true)} className="text-sm text-bioaf-600">
           Reassign Owner
         </button>
       )}
@@ -589,16 +632,13 @@ function ModalShell({
   children: React.ReactNode;
   onClose: () => void;
 }) {
+  // One shell for all five SDR dialogs, so putting it on the shared Modal
+  // converts them together. Each child brings its own action row, so the
+  // footer stays empty rather than competing with them.
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60]"
-      onClick={onClose}
-    >
-      <div className="bg-white rounded-lg w-[30rem] p-6" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-bold mb-4">{title}</h2>
-        {children}
-      </div>
-    </div>
+    <Modal open title={title} onClose={onClose} size="md">
+      {children}
+    </Modal>
   );
 }
 
@@ -699,7 +739,7 @@ function CreateSdrModal({
           type="button"
           onClick={submit}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           {busy ? "Saving..." : "Create"}
         </button>
@@ -795,7 +835,7 @@ function EditSdrForm({
           type="button"
           onClick={save}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           Save
         </button>
@@ -836,7 +876,7 @@ function UpholdModal({
         <button
           type="button"
           onClick={() => (note.trim() ? onConfirm(note.trim()) : setErr("A note is required."))}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Uphold
         </button>
@@ -893,7 +933,7 @@ function SupersedeModal({
           onClick={() =>
             targetId ? onConfirm(Number(targetId)) : setErr("Select a superseding SDR.")
           }
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Supersede
         </button>
@@ -949,7 +989,7 @@ function OwnerModal({
         <button
           type="button"
           onClick={save}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5"
         >
           Reassign
         </button>
@@ -1001,7 +1041,7 @@ function CategoryManagerModal({
     <ModalShell title="SDR Categories" onClose={onClose}>
       <ul className="divide-y border rounded mb-3">
         {categories.length === 0 ? (
-          <li className="p-2 text-sm text-gray-400">No categories.</li>
+          <li className="p-2 text-sm text-gray-500">No categories.</li>
         ) : (
           categories.map((c) => (
             <li key={c.id} className="p-2 flex items-center justify-between text-sm">
@@ -1030,7 +1070,7 @@ function CategoryManagerModal({
           type="button"
           onClick={add}
           disabled={busy}
-          className="bg-blue-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
+          className="bg-bioaf-600 text-white text-sm rounded px-4 py-1.5 disabled:opacity-50"
         >
           Add
         </button>

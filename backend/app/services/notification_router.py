@@ -25,6 +25,18 @@ from app.services.notification_channels.slack_adapter import SlackChannel
 
 logger = logging.getLogger("bioaf.notification_router")
 
+# Channels that deliver when the user has expressed no preference for an event type.
+#
+# In-app is the platform's default surface (the bell), so it is on unless the user turns it off.
+# Email is OPT-IN: defaulting it on mails every user for every one of the ~40 event types, and
+# recipient resolution fans out to all org admins when no rule exists, so a silent default-on is a
+# mail flood nobody asked for. Slack only reaches this check from inside a rule loop, so it is
+# already gated by the org rule that names the channel.
+#
+# The profile UI renders the same defaults per channel (frontend NotificationsTab CHANNELS.defaultOn);
+# the two must agree or the toggles lie about what will be delivered.
+DEFAULT_ON_CHANNELS = {"in_app", "slack"}
+
 
 def build_notification_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     """Compose the metadata persisted on an in-app notification.
@@ -101,11 +113,12 @@ class NotificationRouter:
             # Resolve recipients
             recipients = await self._resolve_recipients(session, org_id, rules, payload)
 
-            # Deliver to each recipient via each channel
+            # Deliver to each recipient via each channel. In-app and email are preference-driven per
+            # user (the toggles the UI writes); slack stays rule/OAuth-driven (org-level channels).
             slack_delivered_via_rule = False
             first_notification_id = None
             for recipient_user in recipients:
-                # In-app always delivered
+                # In-app honors the user's in-app preference (InAppChannel returns None when disabled).
                 notification = await InAppChannel.deliver(
                     session=session,
                     org_id=org_id,
@@ -116,12 +129,24 @@ class NotificationRouter:
                     severity=severity,
                     metadata=notification_metadata,
                 )
-                if first_notification_id is None:
+                notification_id = notification.id if notification is not None else None
+                if notification is not None and first_notification_id is None:
                     first_notification_id = notification.id
 
-                # Check email/slack delivery per rules and preferences
+                # Email: driven purely by the user's preference (default on) + a mandatory rule
+                # override, delivered via the configured SMTP. No per-org rule is required.
+                if await self._channel_enabled(session, recipient_user.id, event_type, "email", rules):
+                    success = await EmailChannel.deliver(
+                        to=recipient_user.email,
+                        title=title,
+                        message=message,
+                        severity=severity,
+                    )
+                    await self._log_delivery(session, notification_id, "email", "sent" if success else "failed")
+
+                # Slack via explicit rules (role filter + preference/mandatory), unchanged.
                 for rule in rules:
-                    if rule.channel == "in_app":
+                    if rule.channel != "slack":
                         continue
                     if rule.role_filter:
                         from app.services import role_service
@@ -129,42 +154,18 @@ class NotificationRouter:
                         user_role = await role_service.get_role_by_id(session, recipient_user.role_id)
                         if not user_role or user_role.name != rule.role_filter:
                             continue
-
-                    # Check user preference (unless mandatory)
                     if not rule.mandatory:
-                        pref_enabled = await self._check_preference(
-                            session, recipient_user.id, event_type, rule.channel
-                        )
-                        if not pref_enabled:
+                        if not await self._check_preference(session, recipient_user.id, event_type, "slack"):
                             continue
+                    slack_delivered_via_rule = True
+                    await self._deliver_slack(session, org_id, event_type, notification_id, title, message, severity)
 
-                    if rule.channel == "email":
-                        success = await EmailChannel.deliver(
-                            to=recipient_user.email,
-                            title=title,
-                            message=message,
-                            severity=severity,
-                        )
-                        await self._log_delivery(
-                            session,
-                            notification.id,
-                            "email",
-                            "sent" if success else "failed",
-                        )
-                    elif rule.channel == "slack":
-                        slack_delivered_via_rule = True
-                        await self._deliver_slack(
-                            session,
-                            org_id,
-                            event_type,
-                            notification.id,
-                            title,
-                            message,
-                            severity,
-                        )
-
-            # Deliver to Slack via OAuth channel mappings (independent of rules)
-            if not slack_delivered_via_rule and first_notification_id is not None:
+            # Deliver to Slack via OAuth channel mappings (independent of rules).
+            # Gate on there being someone to notify, NOT on an in-app row having been created:
+            # first_notification_id is only an anchor for the delivery log (and _log_delivery
+            # already no-ops on None), so keying delivery off it made one user's in-app opt-out
+            # silence the org's Slack channel.
+            if not slack_delivered_via_rule and recipients:
                 await self._deliver_slack(
                     session,
                     org_id,
@@ -219,6 +220,21 @@ class NotificationRouter:
 
         return recipients
 
+    async def _channel_enabled(
+        self,
+        session: AsyncSession,
+        user_id: int,
+        event_type: str,
+        channel: str,
+        rules: list[NotificationRule],
+    ) -> bool:
+        """Whether to deliver ``channel`` to this user for this event: a mandatory enabled org rule
+        forces it; otherwise it follows the user's preference (default on when unset)."""
+        for rule in rules:
+            if rule.channel == channel and rule.enabled and rule.mandatory:
+                return True
+        return await self._check_preference(session, user_id, event_type, channel)
+
     async def _check_preference(
         self,
         session: AsyncSession,
@@ -226,7 +242,11 @@ class NotificationRouter:
         event_type: str,
         channel: str,
     ) -> bool:
-        """Check if user has opted in/out for this event+channel. Default is enabled."""
+        """Check if user has opted in/out for this event+channel.
+
+        With no stored preference the answer is the channel's default (see DEFAULT_ON_CHANNELS):
+        in-app delivers, email does not.
+        """
         result = await session.execute(
             select(NotificationPreference).where(
                 NotificationPreference.user_id == user_id,
@@ -236,7 +256,7 @@ class NotificationRouter:
         )
         pref = result.scalar_one_or_none()
         if pref is None:
-            return True  # default enabled
+            return channel in DEFAULT_ON_CHANNELS
         return pref.enabled
 
     async def _deliver_slack(
@@ -244,7 +264,7 @@ class NotificationRouter:
         session: AsyncSession,
         org_id: int,
         event_type: str,
-        notification_id: int,
+        notification_id: int | None,
         title: str,
         message: str,
         severity: str,
@@ -316,10 +336,15 @@ class NotificationRouter:
     async def _log_delivery(
         self,
         session: AsyncSession,
-        notification_id: int,
+        notification_id: int | None,
         channel: str,
         status: str,
     ) -> None:
+        # The delivery log is anchored to an in-app notification; when the user suppressed in-app but
+        # still gets email/slack, there is no row to anchor to, so skip the log (the channel adapters
+        # still log the send to the app log). Avoids a schema change to make the FK nullable.
+        if notification_id is None:
+            return
         log = NotificationDeliveryLog(
             notification_id=notification_id,
             channel=channel,

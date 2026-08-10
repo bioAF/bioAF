@@ -8,7 +8,7 @@
 
 ADR-015 introduces the Analysis Snapshot SDK, which captures structured metadata from AnnData and Seurat objects at scientist-defined checkpoints. Those snapshots are stored in PostgreSQL and accessible via API. But snapshots in a database are only useful if scientists can see them, compare them, and use them to make decisions.
 
-The core use case is parametric comparison: "I tried three clustering resolutions — which one produced the most biologically meaningful clusters?" This is something computational biologists do constantly but currently manage by visual memory, screenshots, or notes scribbled in notebook markdown cells.
+The core use case is parametric comparison: "I tried three clustering resolutions, which one produced the most biologically meaningful clusters?" This is something computational biologists do constantly but currently manage by visual memory, screenshots, or notes scribbled in notebook markdown cells.
 
 bioAF already has a precedent for this pattern: pipeline run comparison (F-032) supports side-by-side parameter diffs between pipeline runs. Snapshot comparison extends this concept into the interactive analysis layer.
 
@@ -50,7 +50,7 @@ The system computes a structured diff between the `parameters_json` fields. Only
 ─────────────────────────────────────────────────────────────────────────
 neighbors.n_neighbors     15                            15
 leiden.resolution         0.5                           0.5
-batch_correction          —                             harmony (theta=2.0)    ← NEW
+batch_correction: harmony (theta=2.0)    ← NEW
 cell_count                8,432                         8,430                  ← CHANGED
 cluster_count             9                             11                     ← CHANGED
 embeddings                [X_pca, X_umap]               [X_pca, X_harmony,    ← CHANGED
@@ -100,8 +100,8 @@ For comparing more than two snapshots (common when sweeping a parameter), the UI
 
 ```text
 Label                    Resolution  Correction  Cells   Clusters  Notes
-leiden_0.8_none          0.8         —           8,432   14        Over-clustered
-leiden_0.5_none          0.5         —           8,432   9
+leiden_0.8_none          0.8: 8,432   14        Over-clustered
+leiden_0.5_none          0.5: 8,432   9
 leiden_0.5_harmony       0.5         Harmony     8,430   11        Batch 2 splits oddly
 ★ leiden_0.3_scvi        0.3         scVI        8,430   7         Clean separation
 ```
@@ -145,7 +145,7 @@ The snapshot comparison UI is accessible from three places:
 
 ## Rationale
 
-- **The diff is the value, not the snapshot itself.** A single snapshot in isolation is marginally useful (it records what happened). The diff between two snapshots is where the scientific insight lives — it answers "what did I change, and what effect did it have?" The UI must make diffing the primary interaction, not an afterthought.
+- **The diff is the value, not the snapshot itself.** A single snapshot in isolation is marginally useful (it records what happened). The diff between two snapshots is where the scientific insight lives: it answers "what did I change, and what effect did it have?" The UI must make diffing the primary interaction, not an afterthought.
 - **Timeline grouped by session reflects how scientists think.** A scientist doesn't think "show me snapshot #47." They think "show me what I tried on Tuesday afternoon." Grouping by notebook session maps to natural memory.
 - **Starring marks decisions.** The iterative exploration produces many snapshots, but only one (or a few) represent the chosen approach. Starring makes this explicit and provides a filtered view for publication and provenance.
 - **Command log diff is uniquely powerful for Seurat.** No other tool surfaces Seurat's `@commands` slot as a diffable record. This alone could drive adoption among R-focused bioinformaticians, because it gives them something they've never had: a concrete answer to "what exactly did I do differently between these two attempts?"

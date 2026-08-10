@@ -100,7 +100,7 @@ resource "google_storage_bucket" "results" {
   }
 }
 
-# Reference data bucket — backing store for ReferenceDataset rows. Per
+# Reference data bucket: backing store for ReferenceDataset rows. Per
 # spec-reference-data-ingest §1, browsers PUT chunks directly via GCS
 # resumable session URLs returned by ReferenceDataService.init_upload.
 resource "google_storage_bucket" "references" {

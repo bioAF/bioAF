@@ -461,7 +461,7 @@ class PipelineMonitorService:
                 )
             )
             if not other_active.first():
-                # No other active runs — advance experiment to "pipeline_complete"
+                # No other active runs: advance experiment to "pipeline_complete"
                 # (review step now precedes "analysis" per ADR-019)
                 try:
                     from app.services.experiment_service import ExperimentService

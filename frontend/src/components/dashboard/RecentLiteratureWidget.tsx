@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo } from "@/components/dashboard/time";
 
@@ -20,22 +20,14 @@ interface PaperList {
 }
 
 export function RecentLiteratureWidget() {
-  const [items, setItems] = useState<Paper[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<PaperList>("/api/literature/papers?sort=added&page_size=6")
-      .then((res) => setItems(res.items || []))
-      .catch(() => setError("Failed to load literature"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<PaperList>("/api/literature/papers?sort=added&page_size=6");
+      return res.items || [];
+    },
+    "Literature",
+  );
+  const items = data;
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-recent-literature">
@@ -43,7 +35,7 @@ export function RecentLiteratureWidget() {
         Recent literature
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading papers...</span>
         </div>
@@ -52,7 +44,7 @@ export function RecentLiteratureWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry
@@ -60,7 +52,7 @@ export function RecentLiteratureWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No papers shared yet.
         </p>
       )}
@@ -70,11 +62,11 @@ export function RecentLiteratureWidget() {
             {items.map((p) => (
               <li key={p.id}>
                 <Link
-                  href={`/data/literature/papers/${p.id}`}
+                  href={`/lab-knowledge/literature/papers/${p.id}`}
                   className="block rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="block truncate text-sm text-gray-800">{p.title}</span>
-                  <span className="block truncate text-xs text-gray-400">
+                  <span className="block truncate text-xs text-gray-500">
                     {p.journal || "Unknown journal"} &middot; {timeAgo(p.created_at)}
                   </span>
                 </Link>
@@ -82,7 +74,7 @@ export function RecentLiteratureWidget() {
             ))}
           </ul>
           <Link
-            href="/data/literature"
+            href="/lab-knowledge/literature"
             className="text-xs text-bioaf-600 hover:underline mt-2 inline-block"
           >
             View literature

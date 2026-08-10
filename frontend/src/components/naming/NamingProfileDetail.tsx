@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import type {
   NamingProfile,
   NamingProfileDelimiter,
@@ -44,45 +46,40 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
   const example = buildExampleFilename(profile);
 
   return (
-    <div
-      role="dialog"
-      aria-label={`Naming profile ${profile.name}`}
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    <Modal
+      open
+      title={profile.name}
+      onClose={onClose}
+      size="xl"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+          <Button onClick={onEdit}>Edit profile</Button>
+        </>
+      }
     >
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-3xl p-6 space-y-5 max-h-[90vh] overflow-y-auto">
-        <div className="flex items-start justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">{profile.name}</h3>
-            {profile.description && (
-              <p className="text-sm text-gray-500">{profile.description}</p>
-            )}
-          </div>
-          <button
-            type="button"
-            aria-label="close detail"
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
-          >
-            ✕
-          </button>
-        </div>
+      <div className="space-y-5">
+        {profile.description && (
+          <p className="text-sm text-gray-500">{profile.description}</p>
+        )}
 
         <section className="grid grid-cols-2 gap-4 text-sm">
           <div>
-            <div className="text-xs uppercase text-gray-400">Delimiter</div>
+            <div className="text-xs uppercase text-gray-500">Delimiter</div>
             <div className="font-mono">{profile.delimiter}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Strip extension</div>
+            <div className="text-xs uppercase text-gray-500">Strip extension</div>
             <div>{profile.strip_extension ? "Yes" : "No"}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Status</div>
+            <div className="text-xs uppercase text-gray-500">Status</div>
             <div>{profile.status}</div>
           </div>
           <div>
-            <div className="text-xs uppercase text-gray-400">Template</div>
+            <div className="text-xs uppercase text-gray-500">Template</div>
             <div>
               {profile.experiment_template_id == null
                 ? "(none)"
@@ -92,7 +89,7 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
         </section>
 
         <section>
-          <div className="text-xs uppercase text-gray-400 mb-1">Segments</div>
+          <div className="text-xs uppercase text-gray-500 mb-1">Segments</div>
           <ul className="space-y-1 text-sm">
             {profile.segments.map((s, idx) => (
               <li key={`${s.field_name}-${idx}`} className="font-mono">
@@ -103,7 +100,7 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
         </section>
 
         <section>
-          <div className="text-xs uppercase text-gray-400 mb-1">Example filename</div>
+          <div className="text-xs uppercase text-gray-500 mb-1">Example filename</div>
           <code
             data-testid="example-filename"
             className="block bg-gray-50 border rounded px-3 py-2 font-mono text-sm break-all"
@@ -127,13 +124,10 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
               placeholder="Paste a real filename..."
               className="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
             />
-            <button
-              type="button"
-              onClick={handleTest}
-              className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-            >
+            <Button
+              onClick={handleTest}>
               Parse
-            </button>
+            </Button>
           </div>
           {testResult && (
             <div
@@ -183,24 +177,8 @@ export function NamingProfileDetail({ profile, onClose, onEdit }: Props) {
           )}
         </section>
 
-        <div className="flex gap-2 pt-2 border-t">
-          <button
-            type="button"
-            onClick={onEdit}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-          >
-            Edit profile
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-          >
-            Close
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

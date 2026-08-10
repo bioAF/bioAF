@@ -133,7 +133,7 @@ def upgrade() -> None:
     )
     op.create_index("idx_template_notebooks_org", "template_notebooks", ["organization_id"])
 
-    # Grant permissions (conditionally — bioaf_app role may not exist in dev/POC)
+    # Grant permissions (conditionally: bioaf_app role may not exist in dev/POC)
     op.execute("""
         DO $$
         BEGIN

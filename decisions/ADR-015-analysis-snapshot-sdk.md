@@ -6,9 +6,9 @@
 
 ## Context
 
-bioAF provides excellent provenance for structured, automated workflows: pipeline runs record their parameters, inputs, outputs, and container versions (F-032). But the most scientifically important work — interactive analysis in Jupyter and RStudio — is effectively a black box. bioAF tracks *that* a notebook session happened and which files it touched, but not *what* the scientist did inside it.
+bioAF provides excellent provenance for structured, automated workflows: pipeline runs record their parameters, inputs, outputs, and container versions (F-032). But the most scientifically important work: interactive analysis in Jupyter and RStudio, is effectively a black box. bioAF tracks *that* a notebook session happened and which files it touched, but not *what* the scientist did inside it.
 
-Computational biologists work iteratively. A typical analysis session involves dozens of parameter variations: trying different clustering resolutions, comparing batch correction methods, adjusting filtering thresholds, testing cell type annotation strategies. The scientist converges on a final result through a process of exploration that is invisible to the platform — and often invisible to the scientist themselves a week later.
+Computational biologists work iteratively. A typical analysis session involves dozens of parameter variations: trying different clustering resolutions, comparing batch correction methods, adjusting filtering thresholds, testing cell type annotation strategies. The scientist converges on a final result through a process of exploration that is invisible to the platform, and often invisible to the scientist themselves a week later.
 
 This matters for three reasons:
 
@@ -16,13 +16,13 @@ This matters for three reasons:
 2. **Collaboration.** When Jake takes over an analysis Sarah started, he needs to understand her decision history, not just the final notebook state.
 3. **Provenance completeness.** bioAF's provenance chain (ADR-006, F-072) currently has a gap between "pipeline produced h5ad" and "figure appeared in publication." The interactive analysis in between is untracked.
 
-Existing tools (MLflow, Weights & Biases, Neptune) solve this for machine learning workflows but are poorly suited for computational biology. They assume a train/evaluate/deploy paradigm, not an explore/annotate/visualize paradigm. They don't understand AnnData or Seurat objects. They add significant configuration overhead that computational biologists — who are not ML engineers — won't tolerate.
+Existing tools (MLflow, Weights & Biases, Neptune) solve this for machine learning workflows but are poorly suited for computational biology. They assume a train/evaluate/deploy paradigm, not an explore/annotate/visualize paradigm. They don't understand AnnData or Seurat objects. They add significant configuration overhead that computational biologists: who are not ML engineers, won't tolerate.
 
 The key design constraint: **the solution must not change how scientists work.** If it requires launching analysis through a bioAF UI, structuring code in a specific way, or adding more than one line of code per checkpoint, adoption will be zero. Computational biologists will simply not use it.
 
 ## Decision
 
-bioAF ships a lightweight client library (`bioaf-sdk`) for Python and R that provides a single-function interface for capturing analysis state snapshots. Snapshots are opt-in, explicit, and require exactly one line of code. The SDK reads provenance metadata that scanpy and Seurat already record internally — it does not require the scientist to manually describe what they did.
+bioAF ships a lightweight client library (`bioaf-sdk`) for Python and R that provides a single-function interface for capturing analysis state snapshots. Snapshots are opt-in, explicit, and require exactly one line of code. The SDK reads provenance metadata that scanpy and Seurat already record internally: it does not require the scientist to manually describe what they did.
 
 ### Core Interface
 
@@ -34,7 +34,7 @@ import bioaf
 # One-time setup (auto-configured in bioAF-launched notebooks)
 bioaf.connect(api_url="https://bioaf.example.com", token="...")
 
-# Capture a snapshot — one line
+# Capture a snapshot: one line
 bioaf.snapshot(adata, label="leiden_0.5_no_batch_correction")
 ```
 
@@ -46,7 +46,7 @@ library(bioaf)
 # One-time setup (auto-configured in bioAF-launched RStudio)
 bioaf_connect(api_url="https://bioaf.example.com", token="...")
 
-# Capture a snapshot — one line
+# Capture a snapshot: one line
 bioaf_snapshot(seurat_obj, label="leiden_0.5_no_batch_correction")
 ```
 
@@ -83,7 +83,7 @@ The SDK extracts metadata that the analysis tools already record. It does not re
 | Default assay | `DefaultAssay(seurat_obj)` | "SCT" |
 | Metadata columns | `colnames(seurat_obj@meta.data)` | ["orig.ident", "nCount_RNA", "condition"] |
 
-**Seurat's `@commands` slot is particularly valuable.** Every time a Seurat function is called, it logs the function name, all arguments (including defaults), and a timestamp. This means the Seurat snapshot can reconstruct the *exact sequence of operations* without the scientist doing anything special — it's already recorded by Seurat itself.
+**Seurat's `@commands` slot is particularly valuable.** Every time a Seurat function is called, it logs the function name, all arguments (including defaults), and a timestamp. This means the Seurat snapshot can reconstruct the *exact sequence of operations* without the scientist doing anything special: it's already recorded by Seurat itself.
 
 ### Additional Snapshot Options
 
@@ -156,14 +156,14 @@ This means `bioaf.connect()` with no arguments works out of the box in bioAF-lau
 
 ### SDK Distribution
 
-- **Python:** Published to PyPI as `bioaf-sdk`. Zero heavy dependencies — only `requests` and standard library. AnnData/scanpy are optional imports (the SDK detects what's available).
+- **Python:** Published to PyPI as `bioaf-sdk`. Zero heavy dependencies: only `requests` and standard library. AnnData/scanpy are optional imports (the SDK detects what's available).
 - **R:** Published to CRAN (or installable from GitHub) as `bioaf`. Dependencies: `httr2`, `jsonlite`. Seurat is a suggested dependency, not required.
 - **Both packages are also pre-installed** in bioAF's managed environments.
 
 ## Rationale
 
 - **One line of code is the adoption threshold.** Every additional line of configuration, every required structural change to the scientist's workflow, reduces adoption geometrically. `bioaf.snapshot(adata, label="...")` is the absolute minimum surface area.
-- **Read what the tools already record.** scanpy writes to `adata.uns`. Seurat writes to `@commands`. The provenance data already exists — the SDK just reads it and ships it. This is fundamentally different from tools like MLflow that require `mlflow.log_param()` calls for every parameter.
+- **Read what the tools already record.** scanpy writes to `adata.uns`. Seurat writes to `@commands`. The provenance data already exists: the SDK just reads it and ships it. This is fundamentally different from tools like MLflow that require `mlflow.log_param()` calls for every parameter.
 - **Aggregate, not cell-level.** Storing per-cell embeddings for every snapshot would be prohibitively expensive (8,000 cells × 50 dimensions × dozens of snapshots). Aggregate statistics (cell count, cluster counts, parameter values) are sufficient for comparison and are tiny (a few KB per snapshot).
 - **Opt-in, not automatic.** Automatically snapshotting on every scanpy/Seurat function call was considered and rejected. It would generate enormous noise (dozens of intermediate states per analysis session), create performance overhead, and feel intrusive. Scientists should snapshot when they've reached a meaningful checkpoint worth comparing.
 - **Separate from the notebook file.** The notebook captures code; the snapshot captures state. These are complementary. A notebook can be re-executed to reproduce results, but a snapshot tells you *what the results were* without re-executing.

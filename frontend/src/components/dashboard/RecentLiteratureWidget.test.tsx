@@ -29,7 +29,7 @@ test("renders recently added papers, linking each to its detail page", async () 
   );
   expect(screen.getByText("Single-cell atlas of the liver").closest("a")).toHaveAttribute(
     "href",
-    "/data/literature/papers/9",
+    "/lab-knowledge/literature/papers/9",
   );
 });
 

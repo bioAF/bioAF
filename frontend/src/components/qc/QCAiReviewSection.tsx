@@ -15,6 +15,7 @@ import {
   ReviewModal,
 } from "@/components/agent-reviews/reviewItems";
 import { SectionBuilderModal } from "@/components/agent-reviews/SectionBuilderModal";
+import { Button } from "@/components/ui/Button";
 
 interface ListResponse {
   items: AgentReviewSummary[];
@@ -97,12 +98,10 @@ export function QCAiReviewSection({ pipelineRunId }: { pipelineRunId: number }) 
     <div className="mb-6 space-y-3" data-testid="qc-ai-review-section">
       {canUse && (
         <div>
-          <button
-            onClick={() => setTriggerOpen(true)}
-            className="px-3 py-1.5 text-sm bg-bioaf-600 hover:bg-bioaf-700 text-white rounded"
-          >
+          <Button size="sm"
+            onClick={() => setTriggerOpen(true)}>
             {triggerLabel}
-          </button>
+          </Button>
         </div>
       )}
 

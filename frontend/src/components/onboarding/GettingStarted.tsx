@@ -243,13 +243,18 @@ export function GettingStarted({ onComplete, standalone }: GettingStartedProps) 
 
       {/* Dot indicators */}
       <div className="flex gap-1.5 mb-4">
-        {SLIDES.map((_, i) => (
+        {SLIDES.map((slide, i) => (
           <button
             key={i}
             data-testid="slide-dot"
             onClick={() => setCurrent(i)}
+            // A dot has no text of its own, so it needs a name that says where
+            // it goes. The slide title is what makes one dot different from the
+            // other twelve; the position tells the user where they are in the tour.
+            aria-label={`Go to slide ${i + 1} of ${SLIDES.length}: ${slide.title}`}
+            aria-current={i === current ? "true" : undefined}
             className={`w-2 h-2 rounded-full transition-colors ${
-              i === current ? "bg-bioaf-600" : "bg-gray-300"
+              i === current ? "bg-bioaf-600" : "bg-gray-400"
             }`}
           />
         ))}

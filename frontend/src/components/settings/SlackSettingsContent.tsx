@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { api } from "@/lib/api";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface SlackStatus {
   configured: boolean;
@@ -113,7 +117,9 @@ const EVENT_CATEGORIES: Record<string, { label: string; events: string[] }> = {
 };
 
 export function SlackSettingsContent() {
+  const confirm = useConfirm();
   const [status, setStatus] = useState<SlackStatus | null>(null);
+  const [pendingDestructive, setPendingDestructive] = useState<"startOver" | "disconnect" | null>(null);
   const [channels, setChannels] = useState<SlackChannel[]>([]);
   const [mappings, setMappings] = useState<ChannelMapping[]>([]);
   const [manifest, setManifest] = useState<SlackManifest | null>(null);
@@ -314,6 +320,29 @@ export function SlackSettingsContent() {
   };
 
   const handleDeleteMapping = async (id: number) => {
+    // Org-wide effect with no gate, two hundred lines from an exemplary
+    // disconnect confirmation in the same file. The channel silently stops
+    // receiving notifications and the event selection is not recoverable.
+    const mapping = mappings.find((m) => m.id === id);
+    const ok = await confirm({
+      title: mapping ? `Stop sending notifications to ${mapping.channel_name}?` : "Remove this channel mapping?",
+      message: (
+        <>
+          <p>
+            Nobody in {mapping ? mapping.channel_name : "that channel"} will receive bioAF
+            notifications any more. This affects the whole organisation, not just you.
+          </p>
+          <p>
+            The list of event types chosen for this channel is not kept, so re-adding it means
+            picking them again.
+          </p>
+        </>
+      ),
+      confirmLabel: "Remove mapping",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     try {
       await api.delete(`/api/notifications/slack/channel-mappings/${id}`);
       setMappings(mappings.filter((m) => m.id !== id));
@@ -445,7 +474,7 @@ export function SlackSettingsContent() {
 
             {/* Phase 1: Setup wizard (no Slack App configured yet) */}
             {!status?.configured && !status?.connected && (
-              <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <Card className="mb-6">
                 <h2 className="font-semibold mb-2">Set Up Slack App</h2>
                 <p className="text-sm text-gray-600 mb-4">
                   Before connecting, you need to create a Slack App in your workspace.
@@ -453,12 +482,10 @@ export function SlackSettingsContent() {
                 </p>
 
                 {!manifest ? (
-                  <button
-                    onClick={handleGenerateManifest}
-                    className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm font-medium"
-                  >
+                  <Button
+                    onClick={handleGenerateManifest}>
                     Generate Slack App Manifest
-                  </button>
+                  </Button>
                 ) : (
                   <div className="space-y-6">
                     {/* Step 1: Manifest */}
@@ -515,8 +542,8 @@ export function SlackSettingsContent() {
                       </p>
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Client ID</label>
-                          <input
+                          <label htmlFor="client-id" className="block text-xs font-medium text-gray-600 mb-1">Client ID</label>
+                          <input id="client-id"
                             type="text"
                             value={clientId}
                             onChange={(e) => setClientId(e.target.value)}
@@ -525,8 +552,8 @@ export function SlackSettingsContent() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Client Secret</label>
-                          <input
+                          <label htmlFor="client-secret" className="block text-xs font-medium text-gray-600 mb-1">Client Secret</label>
+                          <input id="client-secret"
                             type="password"
                             value={clientSecret}
                             onChange={(e) => setClientSecret(e.target.value)}
@@ -535,8 +562,8 @@ export function SlackSettingsContent() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Signing Secret</label>
-                          <input
+                          <label htmlFor="signing-secret" className="block text-xs font-medium text-gray-600 mb-1">Signing Secret</label>
+                          <input id="signing-secret"
                             type="password"
                             value={signingSecret}
                             onChange={(e) => setSigningSecret(e.target.value)}
@@ -544,23 +571,21 @@ export function SlackSettingsContent() {
                             className="w-full px-3 py-2 border rounded text-sm font-mono"
                           />
                         </div>
-                        <button
+                        <Button
                           onClick={handleSaveCredentials}
-                          disabled={savingCreds || !clientId || !clientSecret || !signingSecret}
-                          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 text-sm font-medium disabled:opacity-50"
-                        >
+                          disabled={savingCreds || !clientId || !clientSecret || !signingSecret}>
                           {savingCreds ? "Saving..." : "Save Credentials"}
-                        </button>
+                        </Button>
                       </div>
                     </div>
                   </div>
                 )}
-              </div>
+              </Card>
             )}
 
             {/* Phase 2: Configured but not connected */}
             {status?.configured && !status?.connected && (
-              <div className="bg-white rounded-lg shadow p-6 mb-6">
+              <Card className="mb-6">
                 <h2 className="font-semibold mb-4">Connection</h2>
                 <div className="text-center py-8">
                   <p className="text-gray-500 mb-4">
@@ -581,21 +606,21 @@ export function SlackSettingsContent() {
                   </button>
                   <div className="mt-6">
                     <button
-                      onClick={handleStartOver}
+                      onClick={() => setPendingDestructive("startOver")}
                       className="text-sm text-red-500 hover:text-red-700"
                     >
                       Start Over
                     </button>
                   </div>
                 </div>
-              </div>
+              </Card>
             )}
 
             {/* Phase 3: Connected */}
             {status?.connected && (
               <>
                 {/* Connection status */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-4">Connection</h2>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -609,16 +634,16 @@ export function SlackSettingsContent() {
                       </div>
                     </div>
                     <button
-                      onClick={handleDisconnect}
+                      onClick={() => setPendingDestructive("disconnect")}
                       className="text-sm text-red-500 hover:text-red-700"
                     >
                       Disconnect
                     </button>
                   </div>
-                </div>
+                </Card>
 
                 {/* Channel mappings */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-2">Channel Mappings</h2>
                   <p className="text-sm text-gray-500 mb-4">
                     Choose which Slack channels receive bioAF notifications and what types of events each channel gets.
@@ -627,7 +652,7 @@ export function SlackSettingsContent() {
                   {/* Add new mapping */}
                   <div className="mb-6">
                     <div className="flex gap-3 mb-3">
-                      <select
+                      <select aria-label="Selected channel"
                         value={selectedChannel}
                         onChange={(e) => setSelectedChannel(e.target.value)}
                         className="flex-1 px-3 py-2 border rounded text-sm"
@@ -684,19 +709,17 @@ export function SlackSettingsContent() {
                             );
                           })}
                         </div>
-                        <button
-                          onClick={handleAddMapping}
-                          className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700"
-                        >
+                        <Button
+                          onClick={handleAddMapping}>
                           Save Channel Mapping
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
 
                   {/* Existing mappings list */}
                   {mappings.length === 0 && !selectedChannel && (
-                    <div className="text-center py-6 text-gray-400 text-sm border rounded border-dashed">
+                    <div className="text-center py-6 text-gray-500 text-sm border rounded border-dashed">
                       No channel mappings yet. Select a channel above to get started.
                     </div>
                   )}
@@ -784,33 +807,29 @@ export function SlackSettingsContent() {
                                   );
                                 })}
                               </div>
-                              <button
-                                onClick={handleSaveEdit}
-                                className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700"
-                              >
+                              <Button
+                                onClick={handleSaveEdit}>
                                 Save Changes
-                              </button>
+                              </Button>
                             </div>
                           )}
                         </div>
                       ))}
                     </div>
                   )}
-                </div>
+                </Card>
 
                 {/* Test channel mappings */}
-                <div className="bg-white rounded-lg shadow p-6 mb-6">
+                <Card className="mb-6">
                   <h2 className="font-semibold mb-2">Test Channel Mappings</h2>
                   <p className="text-sm text-gray-500 mb-4">
                     Send a test message to all mapped channels to verify everything is working.
                   </p>
-                  <button
+                  <Button
                     onClick={handleTestSlack}
-                    disabled={testing}
-                    className="px-4 py-2 bg-bioaf-600 text-white rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-                  >
+                    disabled={testing}>
                     {testing ? "Sending..." : "Test Channel Mappings"}
-                  </button>
+                  </Button>
 
                   {testResults && (
                     <div className="mt-4 space-y-2">
@@ -838,10 +857,43 @@ export function SlackSettingsContent() {
                       ))}
                     </div>
                   )}
-                </div>
+                </Card>
               </>
             )}
           </div>
+      <ConfirmDialog
+        open={pendingDestructive !== null}
+        variant="danger"
+        title={pendingDestructive === "startOver" ? "Delete the stored Slack app credentials?" : "Disconnect this Slack workspace?"}
+        message={
+          pendingDestructive === "startOver" ? (
+            <>
+              <p>
+                This deletes the stored client secret and signing secret. They cannot be
+                recovered: you would have to fetch them again from api.slack.com to set
+                Slack up.
+              </p>
+              <p>Every channel mapping is removed as well.</p>
+            </>
+          ) : (
+            <>
+              <p>
+                This uninstalls the bioAF app from the workspace and removes every channel
+                mapping. Slack notifications stop immediately.
+              </p>
+              <p>Your stored app credentials are kept, so you can reconnect later.</p>
+            </>
+          )
+        }
+        confirmLabel={pendingDestructive === "startOver" ? "Delete credentials" : "Disconnect"}
+        onConfirm={() => {
+          const which = pendingDestructive;
+          setPendingDestructive(null);
+          if (which === "startOver") handleStartOver();
+          else if (which === "disconnect") handleDisconnect();
+        }}
+        onCancel={() => setPendingDestructive(null)}
+      />
     </>
   );
 }

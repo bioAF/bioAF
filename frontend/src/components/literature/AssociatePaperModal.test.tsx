@@ -45,6 +45,30 @@ test("renders nothing when there are no papers", () => {
   expect(container).toBeEmptyDOMElement();
 });
 
+test("is a real dialog: role, aria-modal, and an accessible name", async () => {
+  render(
+    <AssociatePaperModal paperIds={[5]} onClose={jest.fn()} onAssociated={jest.fn()} />,
+  );
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+
+  const dialog = screen.getByRole("dialog");
+  expect(dialog).toHaveAttribute("aria-modal", "true");
+  expect(dialog).toHaveAccessibleName(/Associate paper/i);
+});
+
+test("closes on Escape", async () => {
+  const onClose = jest.fn();
+  render(
+    <AssociatePaperModal paperIds={[5]} onClose={onClose} onAssociated={jest.fn()} />,
+  );
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+
+  screen.getAllByRole("combobox")[0].focus();
+  await userEvent.keyboard("{Escape}");
+
+  expect(onClose).toHaveBeenCalled();
+});
+
 test("associates at project scope when only a project is chosen", async () => {
   const onClose = jest.fn();
   const onAssociated = jest.fn();

@@ -58,7 +58,7 @@ def test_generate_generic_sheet():
 
 
 def test_sheet_with_no_linked_files():
-    """Handle samples with no linked files — empty paths."""
+    """Handle samples with no linked files: empty paths."""
     samples = [_make_sample(1, "NO_FILES")]
     parameters = {}
     result = SampleSheetService.generate_scrnaseq_sheet(samples, parameters)

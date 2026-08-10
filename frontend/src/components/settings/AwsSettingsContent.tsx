@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
+import { Button } from "@/components/ui/Button";
 
 // AWS settings panel (stage 8d), the structural parallel of GcpSettingsContent.
 //
@@ -167,8 +168,8 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
       <div className="bg-white rounded-lg shadow p-6 max-w-2xl space-y-5">
         {/* AWS Account ID */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">AWS Account ID</label>
-          <input
+          <label htmlFor="aws-account-id" className="block text-sm font-medium text-gray-700 mb-1">AWS Account ID</label>
+          <input id="aws-account-id"
             data-testid="aws-account-id-input"
             type="text"
             value={accountId}
@@ -180,8 +181,8 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* Region */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
-          <select
+          <label htmlFor="default-region" className="block text-sm font-medium text-gray-700 mb-1">Default Region</label>
+          <select id="default-region"
             data-testid="aws-region-select"
             value={region}
             onChange={(e) => setRegion(e.target.value)}
@@ -197,11 +198,11 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* Bootstrap role ARN */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="bootstrap-role-arn-provisioning-terrafor" className="block text-sm font-medium text-gray-700 mb-1">
             Bootstrap Role ARN
-            <span className="ml-1 text-gray-400 font-normal text-xs">(provisioning / Terraform)</span>
+            <span className="ml-1 text-gray-500 font-normal text-xs">(provisioning / Terraform)</span>
           </label>
-          <input
+          <input id="bootstrap-role-arn-provisioning-terrafor"
             data-testid="aws-bootstrap-role-arn-input"
             type="text"
             value={bootstrapRoleArn}
@@ -213,11 +214,11 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* App role ARN */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="app-role-arn-runtime-ec2-instance-profil" className="block text-sm font-medium text-gray-700 mb-1">
             App Role ARN
-            <span className="ml-1 text-gray-400 font-normal text-xs">(runtime / EC2 instance profile)</span>
+            <span className="ml-1 text-gray-500 font-normal text-xs">(runtime / EC2 instance profile)</span>
           </label>
-          <input
+          <input id="app-role-arn-runtime-ec2-instance-profil"
             data-testid="aws-app-role-arn-input"
             type="text"
             value={appRoleArn}
@@ -229,11 +230,11 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* Org Slug */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="organization-slug-used-for-s3-bucket-nam" className="block text-sm font-medium text-gray-700 mb-1">
             Organization Slug
-            <span className="ml-1 text-gray-400 font-normal text-xs">(used for S3 bucket names)</span>
+            <span className="ml-1 text-gray-500 font-normal text-xs">(used for S3 bucket names)</span>
           </label>
-          <input
+          <input id="organization-slug-used-for-s3-bucket-nam"
             data-testid="aws-org-slug-input"
             type="text"
             value={orgSlug}
@@ -256,14 +257,12 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
 
         {/* Action buttons */}
         <div className="flex gap-3 pt-2">
-          <button
+          <Button
             data-testid="save-aws-config-btn"
             onClick={handleSave}
-            disabled={saving || validating}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={saving || validating}>
             {saving ? "Saving..." : validating ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
           <button
             data-testid="validate-aws-btn"
             onClick={handleValidate}
@@ -289,7 +288,7 @@ export function AwsSettingsContent({ initialConfig }: AwsSettingsContentProps = 
           <ul className="space-y-2">
             {validationResult.checks.map((check) => (
               <li key={check.name} className="flex items-start gap-2 text-sm">
-                <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-400" : "text-red-600"}`}>
+                <span className={`mt-0.5 ${check.passed ? "text-green-600" : check.status === "skipped" ? "text-gray-500" : "text-red-600"}`}>
                   {check.passed ? "✓" : check.status === "skipped" ? "–" : "✗"}
                 </span>
                 <div>

@@ -64,7 +64,7 @@ export function ExtensibleVocabularySelect({
 
   if (loading) {
     return (
-      <select disabled className={className}>
+      <select disabled aria-label={placeholder ?? fieldName} className={className}>
         <option>Loading...</option>
       </select>
     );
@@ -73,6 +73,7 @@ export function ExtensibleVocabularySelect({
   return (
     <div>
       <select
+        aria-label={placeholder ?? fieldName}
         value={value ?? ""}
         onChange={(e) => {
           onChange(e.target.value || null);
@@ -102,6 +103,7 @@ export function ExtensibleVocabularySelect({
       {adding && (
         <div className="flex items-center gap-2 mt-2">
           <input
+            aria-label={`New ${fieldName.replace(/_/g, " ")}`}
             type="text"
             value={newValue}
             onChange={(e) => setNewValue(e.target.value)}

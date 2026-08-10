@@ -19,6 +19,8 @@ export function searchHitHref(hit: QuickSearchHit): string {
       return `/pipelines/runs/${hit.entity_id}`;
     case "file":
       return `/data/files?file=${hit.entity_id}`;
+    case "literature_paper":
+      return `/lab-knowledge/literature/papers/${hit.entity_id}`;
     case "lab_document":
       return `/lab-knowledge/documents/${hit.entity_id}`;
     case "lab_glossary_term":

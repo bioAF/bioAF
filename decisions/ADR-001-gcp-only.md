@@ -27,5 +27,5 @@ bioAF will support Google Cloud Platform (GCP) only. AWS and Azure support are e
 
 - bioAF is inaccessible to teams committed to AWS or Azure unless community support is built.
 - All Terraform modules, CLI tooling, and documentation assume GCP.
-- Where practical, GCP-specific abstractions should be isolated (e.g., storage access through a thin wrapper, not direct GCS SDK calls everywhere) to reduce the eventual cost of multi-cloud support if it becomes a priority. However, this is a soft goal, not a constraint — we will not over-abstract at the expense of simplicity or development speed.
+- Where practical, GCP-specific abstractions should be isolated (e.g., storage access through a thin wrapper, not direct GCS SDK calls everywhere) to reduce the eventual cost of multi-cloud support if it becomes a priority. However, this is a soft goal, not a constraint: we will not over-abstract at the expense of simplicity or development speed.
 - The architecture spec should document which GCP services are used and what their equivalents would be on other providers, to help potential community contributors.

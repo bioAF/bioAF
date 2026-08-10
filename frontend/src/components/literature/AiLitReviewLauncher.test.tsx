@@ -120,6 +120,33 @@ test("submit is disabled until an experiment is chosen", async () => {
   expect(button).not.toBeDisabled();
 });
 
+test("shows an indeterminate progress indicator + Stop watching while running, and stopping ends the wait", async () => {
+  mockRun.mockResolvedValue({
+    id: 555,
+    experiment_id: 103,
+    status: "running",
+    recommendation_count: null,
+    score_threshold: 0.65,
+    expansion_queries_json: null,
+  });
+  // Keep the poll non-terminal so the running UI stays up until the user acts.
+  mockGetRun.mockResolvedValue({ id: 555, status: "running", recommendation_count: null });
+
+  const user = userEvent.setup();
+  render(<AiLitReviewLauncher onSubmitted={() => {}} />);
+  const expSelect = await screen.findByLabelText(/experiment/i);
+  await user.selectOptions(expSelect, "103");
+  await user.click(await screen.findByRole("button", { name: /run ai lit review/i }));
+
+  // The run is indeterminate (no per-step signal), so we show an animated bar + elapsed, not a %.
+  expect(await screen.findByTestId("lit-review-progress")).toBeInTheDocument();
+  expect(screen.getByRole("progressbar")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /stop watching/i }));
+  await waitFor(() => expect(screen.queryByTestId("lit-review-progress")).not.toBeInTheDocument());
+  expect(screen.getByText(/keeps running in the background/i)).toBeInTheDocument();
+});
+
 test("submitting calls runLitReview with the chosen experiment id", async () => {
   mockRun.mockResolvedValue({
     id: 555,

@@ -8,7 +8,7 @@
 
 ## Context
 
-bioAF's original architecture required manual pipeline launches — a user selects a pipeline, configures parameters, picks input files, and clicks "Run." This is fine for small teams processing a handful of experiments, but practitioners report that even after a year or two, teams outgrow manual triggering. One team reported running approximately 500 pipeline runs per day.
+bioAF's original architecture required manual pipeline launches: a user selects a pipeline, configures parameters, picks input files, and clicks "Run." This is fine for small teams processing a handful of experiments, but practitioners report that even after a year or two, teams outgrow manual triggering. One team reported running approximately 500 pipeline runs per day.
 
 The manual-only model creates a bottleneck: bioinformaticians spend significant time on the repetitive task of kicking off pipeline runs when their expertise should be directed at notebook-based downstream analysis. The desired state is that bench scientists act as a constant input source for new data, CROs deliver processed files automatically, and pipelines run without human intervention. Scientists only need to intervene when something goes wrong or when budget limits are reached.
 
@@ -200,7 +200,7 @@ pipeline_cost_history (
 | Trigger evaluation failed (error) | Admins | Warning |
 | Batching window closed, N files collected for run | Trigger creator | Info |
 
-### UI — Pipeline Scheduling Page
+### UI: Pipeline Scheduling Page
 
 A new page under the Pipelines nav section:
 
@@ -226,19 +226,19 @@ A new page under the Pipelines nav section:
 
 - Automated triggers can produce a high volume of pipeline runs, increasing compute costs if budget guardrails are set too high
 - The batching window adds latency between file arrival and pipeline start
-- Misconfigured triggers (wrong file type filter, wrong project filter) can submit incorrect pipeline runs — the trigger test feature mitigates this but doesn't eliminate it
+- Misconfigured triggers (wrong file type filter, wrong project filter) can submit incorrect pipeline runs: the trigger test feature mitigates this but doesn't eliminate it
 - Budget estimation is inherently approximate; edge cases may still result in runs exceeding budget
 
 **Neutral:**
 
-- Manual pipeline launching is unchanged — existing workflows continue to work
+- Manual pipeline launching is unchanged: existing workflows continue to work
 - The trigger configuration is stored per-pipeline, not globally, so different pipelines can have different trigger strategies
 
 ---
 
 ## References
 
-- ADR-024 (GCS event-driven auto-ingest — provides the ingest events that drive event-driven triggers)
-- ADR-023 (CRO naming profiles — determines which files match which projects/experiments)
-- ADR-020 (BioAF Adapter Layer — pipeline submission goes through the compute adapter)
-- ADR-021 (Kubernetes compute backend — where triggered pipeline runs execute)
+- ADR-024 (GCS event-driven auto-ingest: provides the ingest events that drive event-driven triggers)
+- ADR-023 (CRO naming profiles: determines which files match which projects/experiments)
+- ADR-020 (BioAF Adapter Layer: pipeline submission goes through the compute adapter)
+- ADR-021 (Kubernetes compute backend: where triggered pipeline runs execute)

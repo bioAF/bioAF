@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface ComponentCost {
@@ -72,26 +72,18 @@ function formatCurrency(value: number | string, currency: string): string {
 }
 
 export function CostBudgetWidget() {
-  const [data, setData] = useState<CostData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<CostSummaryResponse>("/api/costs/summary")
-      .then((res) => {
-        setData({
-          current_spend: res.current_month_spend,
-          monthly_budget: res.monthly_budget,
-          breakdown: res.breakdown_by_component || [],
-          currency: res.currency || "USD",
-        });
-      })
-      .catch(() => setError("Failed to load budget data"))
-      .finally(() => { clearTimeout(timeout); setLoading(false); });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData<CostData>(
+    async () => {
+      const res = await api.getWithRetry<CostSummaryResponse>("/api/costs/summary");
+      return {
+        current_spend: res.current_month_spend,
+        monthly_budget: res.monthly_budget,
+        breakdown: res.breakdown_by_component || [],
+        currency: res.currency || "USD",
+      };
+    },
+    "Budget data",
+  );
 
   const hasBudget = data?.monthly_budget != null;
   const pct = hasBudget
@@ -106,7 +98,7 @@ export function CostBudgetWidget() {
         Cost vs. Budget
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading costs...</span>
         </div>
       )}
@@ -114,7 +106,7 @@ export function CostBudgetWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <div className="mt-2 flex gap-2">
-            <button onClick={() => window.location.reload()} className="text-bioaf-600 hover:underline">
+            <button onClick={retry} className="text-bioaf-600 hover:underline">
               Retry
             </button>
             <Link href="/infrastructure/cost-center" className="text-bioaf-600 hover:underline">
@@ -144,7 +136,7 @@ export function CostBudgetWidget() {
               <p className="text-xs text-gray-500 mt-1">{Math.round(pct)}% of monthly budget</p>
             </>
           ) : (
-            <p className="text-xs text-gray-400 mt-1" data-testid="widget-no-budget">
+            <p className="text-xs text-gray-500 mt-1" data-testid="widget-no-budget">
               No budget set.{" "}
               <Link href="/infrastructure/cost-center" className="text-bioaf-600 hover:underline">
                 Configure in Cost Center

@@ -1,4 +1,4 @@
-"""TDD: ReferenceDataService.init_upload() — spec §2 Upload flow.
+"""TDD: ReferenceDataService.init_upload(), spec §2 Upload flow.
 
 The init_upload service method:
 - creates a ReferenceDataset row in status='uploading' (no files persisted yet)

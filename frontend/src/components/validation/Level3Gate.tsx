@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
+import { type Arm, type ManifestSample, SampleManifestPicker, sampleId } from "./SampleManifestPicker";
 
 // Shapes mirror the backend plan surface (ReproductionPlanResponse.differential_design / finding_claim).
 export interface Contrast {
@@ -72,6 +73,32 @@ function formatSubjects(m?: Record<string, string> | null): string {
     .join("\n");
 }
 
+const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
+
+// Pre-group the fetched samples so the scientist confirms rather than constructs: an accession the
+// extractor already placed in an arm wins; otherwise a condition that matches the extractor's
+// test/reference condition text places it; otherwise it starts excluded for the human to assign.
+function seedAssignments(samples: ManifestSample[], design?: DifferentialDesign | null): Record<string, Arm> {
+  const primary = design?.contrasts?.[0];
+  const testSet = new Set((primary?.test_samples ?? []).map(norm));
+  const refSet = new Set((primary?.reference_samples ?? []).map(norm));
+  const testCond = norm(primary?.test_condition);
+  const refCond = norm(primary?.reference_condition);
+  const out: Record<string, Arm> = {};
+  for (const s of samples) {
+    const id = sampleId(s);
+    if (!id) continue;
+    const keys = [id, s.run_accession, s.sample_accession].map(norm);
+    const cond = norm(s.condition);
+    if (keys.some((k) => k && testSet.has(k))) out[id] = "test";
+    else if (keys.some((k) => k && refSet.has(k))) out[id] = "reference";
+    else if (testCond && cond.includes(testCond)) out[id] = "test";
+    else if (refCond && cond.includes(refCond)) out[id] = "reference";
+    else out[id] = "exclude";
+  }
+  return out;
+}
+
 /**
  * C1-gate Level-3 controls (ADR-069 / spec-08). At `plan_ready`, before spending compute, the human
  * (1) ratifies/corrects the paper's differential design (the extractor's sample labels rarely match
@@ -109,8 +136,39 @@ export function Level3Gate({
   const [error, setError] = useState<string | null>(null);
   const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
+  // Sample picker (recognition over accession typing). When the study's real sample manifest resolves,
+  // it replaces the blind free-text sample inputs; on failure the gate degrades to free text.
+  const [manifest, setManifest] = useState<ManifestSample[]>([]);
+  const [manifestReason, setManifestReason] = useState<string | null>(null);
+  const [assignments, setAssignments] = useState<Record<string, Arm>>({});
+  const [pickerSubjects, setPickerSubjects] = useState<Record<string, string>>({});
+  const [manualIds, setManualIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get<{ samples?: ManifestSample[]; unavailable_reason?: string | null }>(
+          `/api/validation-studies/${studyId}/sample-manifest`,
+        );
+        if (cancelled) return;
+        const samples = res.samples ?? [];
+        setManifest(samples);
+        setManifestReason(res.unavailable_reason ?? null);
+        if (samples.length > 0) setAssignments(seedAssignments(samples, design));
+      } catch (e) {
+        if (!cancelled) setManifestReason(e instanceof Error ? e.message : "Could not load the sample list.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studyId]);
+
   if (!canAccess("lit_validation", "approve")) return null;
 
+  const usingPicker = manifest.length > 0;
   const base = `/api/validation-studies/${studyId}`;
   const input = "w-full rounded border border-gray-300 px-2 py-1 text-sm";
   const btn = "rounded px-4 py-2 text-sm font-medium disabled:opacity-50";
@@ -127,16 +185,29 @@ export function Level3Gate({
     }
   }
 
+  function pickerArms(): { test: string[]; reference: string[]; subjects: Record<string, string> } {
+    const ids = [...manifest.map(sampleId).filter(Boolean), ...manualIds];
+    const test = ids.filter((id) => assignments[id] === "test");
+    const reference = ids.filter((id) => assignments[id] === "reference");
+    const subjects: Record<string, string> = {};
+    for (const id of ids) {
+      const label = (pickerSubjects[id] ?? "").trim();
+      if (label && assignments[id] !== "exclude") subjects[id] = label;
+    }
+    return { test, reference, subjects };
+  }
+
   function saveDesign() {
+    const picked = usingPicker ? pickerArms() : null;
     const payload = {
       contrasts: [
         {
           name: name.trim() || null,
           test_condition: testCondition.trim() || null,
           reference_condition: refCondition.trim() || null,
-          test_samples: parseList(testSamples),
-          reference_samples: parseList(refSamples),
-          subjects: parseSubjects(subjectsText),
+          test_samples: picked ? picked.test : parseList(testSamples),
+          reference_samples: picked ? picked.reference : parseList(refSamples),
+          subjects: picked ? picked.subjects : parseSubjects(subjectsText),
         },
       ],
       thresholds: { log2fc: numOrNull(lfc), padj: numOrNull(padj) },
@@ -230,41 +301,66 @@ export function Level3Gate({
               onChange={(e) => setRefCondition(e.target.value)}
             />
           </label>
-          <label className="text-xs text-gray-600">
-            Test samples (matrix columns, comma-separated)
-            <input
-              className={input}
-              aria-label="Test samples"
-              value={testSamples}
-              onChange={(e) => setTestSamples(e.target.value)}
-            />
-          </label>
-          <label className="text-xs text-gray-600">
-            Reference samples (comma-separated)
-            <input
-              className={input}
-              aria-label="Reference samples"
-              value={refSamples}
-              onChange={(e) => setRefSamples(e.target.value)}
-            />
-          </label>
-          <label className="text-xs text-gray-600 sm:col-span-2">
-            Subject / donor pairing (optional, matched-pairs)
-            <textarea
-              className={`${input} font-mono`}
-              aria-label="Subject pairing"
-              rows={3}
-              value={subjectsText}
-              onChange={(e) => setSubjectsText(e.target.value)}
-              placeholder={"SRX...=donorA\nSRX...=donorB\n..."}
-            />
-            <span className="mt-1 block text-[11px] leading-snug text-gray-500">
-              One <code>sample=subject</code> per line. Each subject must appear in BOTH arms; the run then
-              models <code>~ subject + condition</code> (paired), cancelling donor-to-donor baseline
-              variance. Leave blank for an unpaired design.
-            </span>
-          </label>
+          {!usingPicker && (
+            <>
+              <label className="text-xs text-gray-600">
+                Test samples (matrix columns, comma-separated)
+                <input
+                  className={input}
+                  aria-label="Test samples"
+                  value={testSamples}
+                  onChange={(e) => setTestSamples(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-gray-600">
+                Reference samples (comma-separated)
+                <input
+                  className={input}
+                  aria-label="Reference samples"
+                  value={refSamples}
+                  onChange={(e) => setRefSamples(e.target.value)}
+                />
+              </label>
+              <label className="text-xs text-gray-600 sm:col-span-2">
+                Subject / donor pairing (optional, matched-pairs)
+                <textarea
+                  className={`${input} font-mono`}
+                  aria-label="Subject pairing"
+                  rows={3}
+                  value={subjectsText}
+                  onChange={(e) => setSubjectsText(e.target.value)}
+                  placeholder={"SRX...=donorA\nSRX...=donorB\n..."}
+                />
+                <span className="mt-1 block text-[11px] leading-snug text-gray-500">
+                  One <code>sample=subject</code> per line. Each subject must appear in BOTH arms; the run
+                  then models <code>~ subject + condition</code> (paired), cancelling donor-to-donor
+                  baseline variance. Leave blank for an unpaired design.
+                </span>
+              </label>
+            </>
+          )}
         </div>
+
+        {usingPicker ? (
+          <SampleManifestPicker
+            samples={manifest}
+            manualIds={manualIds}
+            assignments={assignments}
+            subjects={pickerSubjects}
+            onAssign={(id, arm) => setAssignments((a) => ({ ...a, [id]: arm }))}
+            onSubject={(id, subject) => setPickerSubjects((s) => ({ ...s, [id]: subject }))}
+            onManualAdd={(id) => {
+              setManualIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+              setAssignments((a) => (a[id] ? a : { ...a, [id]: "test" }));
+            }}
+          />
+        ) : (
+          manifestReason && (
+            <p className="text-[11px] leading-snug text-gray-500">
+              Sample list unavailable: {manifestReason} Enter the matrix column ids manually above.
+            </p>
+          )
+        )}
         <button
           className={`${btn} bg-bioaf-600 text-white hover:bg-bioaf-700`}
           disabled={busy !== null}

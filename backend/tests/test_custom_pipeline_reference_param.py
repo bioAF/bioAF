@@ -1,4 +1,4 @@
-"""TDD: custom-pipeline `reference` parameter type — spec §5.
+"""TDD: custom-pipeline `reference` parameter type, spec §5.
 
 The custom pipeline editor needs a new variable_type='reference' that, when
 launched, renders a searchable dropdown filtered by reference_category.
@@ -25,7 +25,7 @@ async def admin_test(client, admin_user, admin_token, session):
     session.add(pipeline)
     await session.flush()
 
-    # find an environment_version_id; just use any existing — tests can fake
+    # find an environment_version_id; just use any existing: tests can fake
     # by inserting a minimal env_version row.
     await session.execute(
         text(

@@ -27,15 +27,32 @@ describe("ValidationStudyActions", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it("offers Approve and Decline at plan_ready and posts to /approve", async () => {
+  it("offers Approve and Decline at plan_ready and posts to /approve once confirmed", async () => {
     const onChanged = jest.fn();
     render(<ValidationStudyActions study={{ id: 3, state: "plan_ready" }} onChanged={onChanged} />);
 
     expect(screen.getByRole("button", { name: /decline/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /^approve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+
+    // Approving starts a real, billable pipeline run, so it is confirmed first.
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /approve and run/i }));
 
     await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/3/approve", undefined));
     expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("does not spend compute if the approve confirmation is dismissed", async () => {
+    const onChanged = jest.fn();
+    render(<ValidationStudyActions study={{ id: 3, state: "plan_ready" }} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(onChanged).not.toHaveBeenCalled();
   });
 
   it("offers the six classification buckets at comparing and posts the chosen one", async () => {

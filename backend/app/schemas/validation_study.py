@@ -54,6 +54,25 @@ class FindingSetRequest(BaseModel):
     source_locator: str | None = None
 
 
+class SampleManifestEntry(BaseModel):
+    """One recognizable sample for the Level-3 picker: what the scientist reads (title + condition)
+    plus the accessions the picker stores + the resolver later maps to a fetched Sample."""
+
+    experiment_accession: str = ""
+    run_accession: str = ""
+    sample_accession: str = ""
+    title: str = ""
+    condition: str = ""
+
+
+class SampleManifestResponse(BaseModel):
+    """The study's per-sample manifest for the Level-3 picker, or an explicit unavailable reason (200,
+    never a 500) so the gate degrades to free-text sample entry."""
+
+    samples: list[SampleManifestEntry] = []
+    unavailable_reason: str | None = None
+
+
 class ComparisonTargetResponse(BaseModel):
     metric_key: str
     claimed_value: float | None = None
@@ -87,6 +106,9 @@ class ValidationStudySummary(BaseModel):
 
     id: int
     state: str
+    # Display title resolved server-side: the source paper's title -> DOI -> accession -> "Study #{id}"
+    # (so a scientist scanning the list sees which paper each study reproduces, not a bare id).
+    title: str = ""
     classification: str | None = None
     confidence: float | None = None
     paper_id: int | None = None
@@ -99,6 +121,8 @@ class ValidationStudySummary(BaseModel):
 class ValidationStudyResponse(BaseModel):
     id: int
     state: str
+    # Display title resolved server-side via the paper.title -> DOI -> accession -> "Study #{id}" ladder.
+    title: str = ""
     classification: str | None = None
     # "% confident the results were validated" (0-100), derived from the classification for the UI status
     # badge (frontend lib/validationStatus). None = validation could not be run/concluded, or the study

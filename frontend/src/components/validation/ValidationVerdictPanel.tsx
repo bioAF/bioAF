@@ -1,16 +1,10 @@
 import type { ClassificationResult } from "@/components/validation/ValidationEvidenceTable";
-import { classificationLabel, classificationTone, type ValidationTone } from "@/lib/validationClassification";
+import { classificationLabel, classificationTone } from "@/lib/validationClassification";
+import { statusBadgeClass } from "@/lib/statusStyles";
 
 // The automatic classifier's (E2/E3/E4) suggested verdict + why. Rendered once the classifier has run
 // (at comparing, or after a classified study). When the study is still at comparing this is a
 // SUGGESTION a human ratifies via the Classify control; auto_finalize studies were closed on it.
-
-const TONE_CLASSES: Record<ValidationTone, string> = {
-  positive: "bg-green-100 text-green-800",
-  negative: "bg-red-100 text-red-800",
-  caution: "bg-yellow-100 text-yellow-800",
-  neutral: "bg-gray-100 text-gray-700",
-};
 
 export function ValidationVerdictPanel({ result }: { result: ClassificationResult | null | undefined }) {
   if (!result || !result.classification) return null;
@@ -25,7 +19,7 @@ export function ValidationVerdictPanel({ result }: { result: ClassificationResul
         <span className="text-sm font-semibold text-gray-700">
           {result.auto_finalize ? "Verdict" : "Suggested verdict"}
         </span>
-        <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${TONE_CLASSES[tone]}`}>
+        <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass("validationTone", tone)}`}>
           {classificationLabel(result.classification)}
         </span>
         {result.auto_finalize ? (
