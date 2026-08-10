@@ -71,9 +71,14 @@ export function applyResolvedTheme(resolved: ResolvedTheme): void {
  * Inline, self-contained script injected into <head> so the resolved theme is set
  * before first paint (no flash of the wrong theme). Mirrors the logic above in a
  * form safe to run before the bundle loads. Kept in sync with resolveTheme/getStoredTheme.
+ *
+ * The storage key is written out as a literal rather than interpolated from
+ * `THEME_STORAGE_KEY`. Interpolating anything into a string that becomes
+ * executable code is code construction, which CodeQL flags
+ * (`js/bad-code-sanitization`) whether or not the value happens to be a
+ * compile-time constant today. `theme.test.ts` fails if the literal and the
+ * constant drift apart, which is the only thing the interpolation was buying.
  */
-export const THEME_INIT_SCRIPT = `(function(){try{var k=${JSON.stringify(
-  THEME_STORAGE_KEY,
-)};/* localStorage can throw in a blocked-cookie context; falling back to the
+export const THEME_INIT_SCRIPT = `(function(){try{var k="bioaf-theme";/* localStorage can throw in a blocked-cookie context; falling back to the
    system preference is the whole point, and no UI exists yet to report into. */
 var c=null;try{c=localStorage.getItem(k);}catch(e){}if(c!=="light"&&c!=="dark"){c=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";}var r=document.documentElement;if(c==="dark"){r.classList.add("dark");}else{r.classList.remove("dark");}r.style.colorScheme=c;}catch(e){}})();`;

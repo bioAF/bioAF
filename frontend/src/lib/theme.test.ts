@@ -1,4 +1,5 @@
 import {
+  THEME_INIT_SCRIPT,
   THEME_STORAGE_KEY,
   resolveTheme,
   getStoredTheme,
@@ -67,5 +68,18 @@ describe("applyResolvedTheme", () => {
     applyResolvedTheme("light");
     expect(document.documentElement.classList.contains("dark")).toBe(false);
     expect(document.documentElement.style.colorScheme).toBe("light");
+  });
+});
+
+describe("THEME_INIT_SCRIPT", () => {
+  // The key is a literal inside the script rather than an interpolation, so that
+  // the string never becomes constructed code (CodeQL js/bad-code-sanitization).
+  // This is what keeps the literal and the constant from drifting apart.
+  it("reads the same storage key the rest of the module writes", () => {
+    expect(THEME_INIT_SCRIPT).toContain(`var k="${THEME_STORAGE_KEY}"`);
+  });
+
+  it("builds no part of itself from a value", () => {
+    expect(THEME_INIT_SCRIPT).not.toMatch(/\$\{/);
   });
 });

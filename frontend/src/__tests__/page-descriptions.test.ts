@@ -36,12 +36,32 @@ function resolvePage(route: string, depth = 0): string | null {
 
 const DESCRIPTION = /<p[^>]*data-testid="page-description"[^>]*>\s*([\s\S]*?)\s*<\/p>/;
 
+/**
+ * Strip JSX tags from a fragment of this repo's own source.
+ *
+ * NOT a sanitizer, and deliberately not shaped like one. A single
+ * `.replace(/<[^>]+>/g, "")` pass is incomplete multi-character sanitization
+ * (CodeQL `js/incomplete-multi-character-sanitization`): removing one round of
+ * tags can splice the remains of two into a new one, so `<<p>p>` survives a
+ * single pass. Nothing untrusted reaches this and nothing it returns is
+ * rendered, but a tag-stripping regex that only runs once is worth not writing
+ * at all, in a repo where someone may copy it somewhere that matters. Repeat
+ * until the string stops changing.
+ */
+function stripTags(input: string): string {
+  let out = input;
+  for (let previous = ""; out !== previous; ) {
+    previous = out;
+    out = out.replace(/<[^<>]*>/g, "");
+  }
+  return out;
+}
+
 /** The description's visible words, with JSX entities and tags flattened. */
 function describedAs(file: string): string | null {
   const m = DESCRIPTION.exec(readFileSync(file, "utf8"));
   if (!m) return null;
-  return m[1]
-    .replace(/<[^>]+>/g, "")
+  return stripTags(m[1])
     .replace(/\{"\s*"\}/g, " ")
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&")
