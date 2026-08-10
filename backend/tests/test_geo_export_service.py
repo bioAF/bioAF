@@ -251,12 +251,8 @@ def test_validation_report_uses_geo_tag_value_convention():
         ),
         series_fields=[field],
         protocol_fields=[],
-        sample_validations=[
-            SampleValidation(sample_id=1, sample_name="S1", fields=[field])
-        ],
-        file_manifest=FileManifestStatus(
-            total_files=0, files_with_checksums=0, files_missing_checksums=0, files=[]
-        ),
+        sample_validations=[SampleValidation(sample_id=1, sample_name="S1", fields=[field])],
+        file_manifest=FileManifestStatus(total_files=0, files_with_checksums=0, files_missing_checksums=0, files=[]),
     )
 
     text = _format_validation_report(report)

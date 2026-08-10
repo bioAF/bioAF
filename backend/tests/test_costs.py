@@ -346,9 +346,7 @@ async def test_local_cost_rates_from_settings(admin_user, session):
 
 
 @pytest.mark.asyncio
-async def test_summary_lazy_sync_survives_the_request(
-    client: AsyncClient, admin_token: str, admin_user, session
-):
+async def test_summary_lazy_sync_survives_the_request(client: AsyncClient, admin_token: str, admin_user, session):
     """The lazy sync inside /summary must commit, not just flush.
 
     Proven on the demo 2026-08-09: /summary reported $76.90 of month-to-date spend
@@ -380,9 +378,7 @@ async def test_summary_lazy_sync_survives_the_request(
 
 
 @pytest.mark.asyncio
-async def test_history_reports_what_summary_reported(
-    client: AsyncClient, admin_token: str, admin_user, session
-):
+async def test_history_reports_what_summary_reported(client: AsyncClient, admin_token: str, admin_user, session):
     """The two cost endpoints must not disagree about whether spend exists.
 
     This is the user-visible defect: the Cost Center page (/summary) shows spend

@@ -15,8 +15,6 @@ field is a column name and must never be taken from user input unchecked.
 import pytest
 import pytest_asyncio
 
-from app.services.auth_service import AuthService
-
 
 @pytest_asyncio.fixture
 async def experiment(session, admin_user):
@@ -83,9 +81,7 @@ async def test_default_order_is_unchanged(client, admin_token, three_runs):
 
 @pytest.mark.asyncio
 async def test_sort_by_id_ascending(client, admin_token, three_runs):
-    r = await client.get(
-        "/api/pipeline-runs?sort_by=id&sort_dir=asc&page_size=100", headers=_auth(admin_token)
-    )
+    r = await client.get("/api/pipeline-runs?sort_by=id&sort_dir=asc&page_size=100", headers=_auth(admin_token))
     assert r.status_code == 200
     ids = [run["id"] for run in r.json()["runs"]]
     assert ids == sorted(ids)
@@ -131,24 +127,18 @@ async def test_sort_by_status_and_pipeline_name(client, admin_token, three_runs)
 async def test_unknown_sort_field_is_refused(client, admin_token, three_runs):
     """A sort field is a column name. It is never taken from input unchecked."""
     for bad in ("password_hash", "organization_id", "id; DROP TABLE pipeline_runs", ""):
-        r = await client.get(
-            f"/api/pipeline-runs?sort_by={bad}", headers=_auth(admin_token)
-        )
+        r = await client.get(f"/api/pipeline-runs?sort_by={bad}", headers=_auth(admin_token))
         assert r.status_code == 422, f"{bad!r} was not refused"
 
 
 @pytest.mark.asyncio
 async def test_unknown_sort_direction_is_refused(client, admin_token, three_runs):
-    r = await client.get(
-        "/api/pipeline-runs?sort_by=id&sort_dir=sideways", headers=_auth(admin_token)
-    )
+    r = await client.get("/api/pipeline-runs?sort_by=id&sort_dir=sideways", headers=_auth(admin_token))
     assert r.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_sorting_does_not_leak_across_organizations(
-    client, admin_token, three_runs, session, admin_user
-):
+async def test_sorting_does_not_leak_across_organizations(client, admin_token, three_runs, session, admin_user):
     """Sorting must not become a way to read another org's rows.
 
     The ordering is applied to a query that is already scoped by

@@ -142,9 +142,7 @@ class NotificationRouter:
                         message=message,
                         severity=severity,
                     )
-                    await self._log_delivery(
-                        session, notification_id, "email", "sent" if success else "failed"
-                    )
+                    await self._log_delivery(session, notification_id, "email", "sent" if success else "failed")
 
                 # Slack via explicit rules (role filter + preference/mandatory), unchanged.
                 for rule in rules:
@@ -160,9 +158,7 @@ class NotificationRouter:
                         if not await self._check_preference(session, recipient_user.id, event_type, "slack"):
                             continue
                     slack_delivered_via_rule = True
-                    await self._deliver_slack(
-                        session, org_id, event_type, notification_id, title, message, severity
-                    )
+                    await self._deliver_slack(session, org_id, event_type, notification_id, title, message, severity)
 
             # Deliver to Slack via OAuth channel mappings (independent of rules).
             # Gate on there being someone to notify, NOT on an in-app row having been created:

@@ -443,8 +443,7 @@ REAL_PLOTS = [
     # The sibling directory, one path segment away from the chrome above.
     "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/"
     "Transcript coverage histogram.png",
-    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/"
-    "Junction Analysis.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/Junction Analysis.png",
     "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/"
     "Coverage Profile Along Genes (High).png",
     "experiments/12/pipeline-runs/17/multiqc/multiqc_plots/png/fastqc_sequence_counts_plot-cnt.png",

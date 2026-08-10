@@ -53,8 +53,18 @@ def test_parse_ena_filereport_maps_rows():
     )
     rows = parse_ena_filereport(tsv)
     assert rows == [
-        {"run_accession": "SRR1", "experiment_accession": "SRX1", "sample_accession": "SRS1", "sample_title": "Tumor 1"},
-        {"run_accession": "SRR2", "experiment_accession": "SRX2", "sample_accession": "SRS2", "sample_title": "Normal 1"},
+        {
+            "run_accession": "SRR1",
+            "experiment_accession": "SRX1",
+            "sample_accession": "SRS1",
+            "sample_title": "Tumor 1",
+        },
+        {
+            "run_accession": "SRR2",
+            "experiment_accession": "SRX2",
+            "sample_accession": "SRS2",
+            "sample_title": "Normal 1",
+        },
     ]
 
 
@@ -94,9 +104,9 @@ _GEO_MATRIX = (
     '!Sample_relation\t"SRA: https://www.ncbi.nlm.nih.gov/sra?term=SRX1596112"'
     '\t"SRA: https://www.ncbi.nlm.nih.gov/sra?term=SRX1596113"'
     '\t"SRA: https://www.ncbi.nlm.nih.gov/sra?term=SRX1596114"\n'
-    '!series_matrix_table_begin\n'
+    "!series_matrix_table_begin\n"
     '"ID_REF"\t"GSM2055667"\t"GSM2055668"\t"GSM2055669"\n'
-    '!series_matrix_table_end\n'
+    "!series_matrix_table_end\n"
 )
 
 _GEO_ENA_TSV = (

@@ -202,8 +202,20 @@ async def test_sample_manifest_unions_and_dedupes_across_accessions(client, admi
     from app.services.literature.accession_manifest_service import AccessionManifestService, ManifestResult
 
     async def _fake(accession, *, fetcher=None):
-        shared = {"experiment_accession": "SRX_SHARED", "run_accession": "", "sample_accession": "", "title": "Shared", "condition": ""}
-        unique = {"experiment_accession": f"SRX_{accession}", "run_accession": "", "sample_accession": "", "title": accession, "condition": ""}
+        shared = {
+            "experiment_accession": "SRX_SHARED",
+            "run_accession": "",
+            "sample_accession": "",
+            "title": "Shared",
+            "condition": "",
+        }
+        unique = {
+            "experiment_accession": f"SRX_{accession}",
+            "run_accession": "",
+            "sample_accession": "",
+            "title": accession,
+            "condition": "",
+        }
         return ManifestResult(samples=[shared, unique])
 
     monkeypatch.setattr(AccessionManifestService, "fetch_manifest", _fake)

@@ -324,7 +324,7 @@ async def override_samples(
     current_user: dict = require_permission("lit_validation", "approve"),
     session: AsyncSession = Depends(get_session),
 ):
-    """"Run with the samples we have": advance a study held in ``samples_mismatch`` (a picked sample was
+    """ "Run with the samples we have": advance a study held in ``samples_mismatch`` (a picked sample was
     not fetched) to ``setup``. The design was already rewritten to the fetched samples, so the reduced
     reproduction runs cleanly. Records who overrode; approve-gated."""
     org_id = int(current_user["org_id"])

@@ -32,9 +32,7 @@ router = APIRouter(prefix="/api/pipeline-runs", tags=["pipeline-runs"])
 # reaches the service. A sort field ends up as a column name in ORDER BY; it is
 # never taken from input unchecked. Kept in step with
 # PipelineRunService.SORTABLE, which holds the same names.
-SortableRunField = Literal[
-    "id", "status", "pipeline_name", "created_at", "started_at", "completed_at"
-]
+SortableRunField = Literal["id", "status", "pipeline_name", "created_at", "started_at", "completed_at"]
 SortDirection = Literal["asc", "desc"]
 
 

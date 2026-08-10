@@ -287,6 +287,7 @@ async def test_acquiring_data_resolves_picks_and_rewrites_design_to_external_ids
     await session.refresh(study)
     assert study.state == "setup"
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    assert plan is not None and plan.differential_design_json is not None
     contrast = plan.differential_design_json["contrasts"][0]
     assert contrast["test_samples"] == ["GSM_A_SRR1"]  # resolved from SRX1
     assert contrast["reference_samples"] == ["GSM_B_SRR2"]  # resolved from SRX2
@@ -319,6 +320,7 @@ async def test_acquiring_data_parks_in_samples_mismatch_when_a_pick_was_not_fetc
     assert spy.calls == []  # no analysis launched: zero compute spent
     # the design is rewritten to the samples we DO have, so an override runs the reduced design cleanly
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    assert plan is not None and plan.differential_design_json is not None
     contrast = plan.differential_design_json["contrasts"][0]
     assert contrast["test_samples"] == ["GSM_A_SRR1"]
     assert contrast["reference_samples"] == []  # the unfetched SRX3 dropped

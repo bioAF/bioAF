@@ -596,7 +596,7 @@ class PipelineRunService:
         column = PipelineRunService.SORTABLE.get(sort_by) if sort_by else None
         if column is None:
             column = PipelineRun.created_at
-        direction = (column.asc() if sort_dir == "asc" else column.desc())
+        direction = column.asc() if sort_dir == "asc" else column.desc()
         query = query.order_by(direction, PipelineRun.id.desc())
         query = query.offset((page - 1) * page_size).limit(page_size)
 

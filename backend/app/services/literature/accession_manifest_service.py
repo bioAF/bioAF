@@ -86,10 +86,7 @@ def geo_series_matrix_url(accession: str) -> str | None:
 def _ena_filereport_url(accession: str) -> str:
     """Build the ENA portal filereport (read_run TSV) URL for any SRA/ENA/INSDC accession."""
     fields = ",".join(_ENA_FIELDS)
-    return (
-        f"{_ENA_FILEREPORT}?accession={accession}&result=read_run"
-        f"&fields={fields}&format=tsv&download=false"
-    )
+    return f"{_ENA_FILEREPORT}?accession={accession}&result=read_run&fields={fields}&format=tsv&download=false"
 
 
 def parse_ena_filereport(tsv: str) -> list[dict]:
@@ -161,9 +158,7 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
 
     samples: list[dict] = []
     for i, title in enumerate(titles):
-        condition = "; ".join(
-            line[i] for line in conditions_lines if i < len(line) and line[i]
-        )
+        condition = "; ".join(line[i] for line in conditions_lines if i < len(line) and line[i])
         samples.append(
             {
                 "title": title,

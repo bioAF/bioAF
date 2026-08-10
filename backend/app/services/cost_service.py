@@ -163,9 +163,7 @@ class CostService:
         so two syncs racing on a day with no rows yet would both insert and
         double that day's spend. The lock releases when the caller commits.
         """
-        await session.execute(
-            select(func.pg_advisory_xact_lock(_COST_SYNC_LOCK_NAMESPACE, org_id))
-        )
+        await session.execute(select(func.pg_advisory_xact_lock(_COST_SYNC_LOCK_NAMESPACE, org_id)))
         logger.info("Syncing billing data for org %d", org_id)
         today = date.today()
         month_start = date(today.year, today.month, 1)

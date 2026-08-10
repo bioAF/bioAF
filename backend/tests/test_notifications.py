@@ -391,9 +391,7 @@ async def test_in_app_notification_suppressed_when_preference_disabled(session, 
     from app.services.notification_router import NotificationRouter
 
     session.add(
-        NotificationPreference(
-            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="in_app", enabled=False
-        )
+        NotificationPreference(user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="in_app", enabled=False)
     )
     await session.commit()
 
@@ -409,12 +407,16 @@ async def test_in_app_notification_suppressed_when_preference_disabled(session, 
     )
 
     rows = (
-        await session.execute(
-            select(Notification).where(
-                Notification.event_type == PIPELINE_COMPLETED, Notification.user_id == admin_user.id
+        (
+            await session.execute(
+                select(Notification).where(
+                    Notification.event_type == PIPELINE_COMPLETED, Notification.user_id == admin_user.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []  # the disabled in-app preference is honored
 
 
@@ -441,9 +443,7 @@ async def test_email_opt_in_delivers_without_an_org_rule(session, admin_user, mo
     from app.services.notification_router import NotificationRouter
 
     session.add(
-        NotificationPreference(
-            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=True
-        )
+        NotificationPreference(user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=True)
     )
     await session.commit()
 
@@ -532,13 +532,17 @@ async def test_review_reminder_in_app_on_email_off(session, admin_user, monkeypa
     )
 
     rows = (
-        await session.execute(
-            select(Notification).where(
-                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
-                Notification.user_id == admin_user.id,
+        (
+            await session.execute(
+                select(Notification).where(
+                    Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                    Notification.user_id == admin_user.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1  # in-app delivered
     assert admin_user.email not in calls  # and NOT diverted to email
 
@@ -551,9 +555,7 @@ async def test_email_not_sent_when_preference_disabled(session, admin_user, monk
     from app.services.notification_router import NotificationRouter
 
     session.add(
-        NotificationPreference(
-            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
-        )
+        NotificationPreference(user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False)
     )
     await session.commit()
 
@@ -604,13 +606,17 @@ async def test_every_selected_channel_delivers(session, admin_user, monkeypatch)
     )
 
     rows = (
-        await session.execute(
-            select(Notification).where(
-                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
-                Notification.user_id == admin_user.id,
+        (
+            await session.execute(
+                select(Notification).where(
+                    Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                    Notification.user_id == admin_user.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1
     assert admin_user.email in calls
 
@@ -652,13 +658,17 @@ async def test_disabled_on_every_channel_delivers_nothing(session, admin_user, m
     )
 
     rows = (
-        await session.execute(
-            select(Notification).where(
-                Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
-                Notification.user_id == admin_user.id,
+        (
+            await session.execute(
+                select(Notification).where(
+                    Notification.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                    Notification.user_id == admin_user.id,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows == []
     assert calls == []
 
@@ -911,9 +921,7 @@ async def test_saving_some_preferences_does_not_wipe_the_rest(session, admin_use
     from app.services.notification_service import NotificationService
 
     session.add(
-        NotificationPreference(
-            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
-        )
+        NotificationPreference(user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False)
     )
     await session.commit()
 
@@ -925,10 +933,10 @@ async def test_saving_some_preferences_does_not_wipe_the_rest(session, admin_use
     await session.commit()
 
     rows = (
-        await session.execute(
-            select(NotificationPreference).where(NotificationPreference.user_id == admin_user.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(NotificationPreference).where(NotificationPreference.user_id == admin_user.id)))
+        .scalars()
+        .all()
+    )
     stored = {(r.event_type, r.channel): r.enabled for r in rows}
     assert stored[(PIPELINE_COMPLETED, "email")] is False  # untouched row survived
     assert stored[(PIPELINE_RUN_REVIEW_REMINDER, "in_app")] is True
@@ -960,14 +968,18 @@ async def test_resaving_a_preference_updates_it_in_place(session, admin_user):
     await session.commit()
 
     rows = (
-        await session.execute(
-            select(NotificationPreference).where(
-                NotificationPreference.user_id == admin_user.id,
-                NotificationPreference.event_type == PIPELINE_RUN_REVIEW_REMINDER,
-                NotificationPreference.channel == "in_app",
+        (
+            await session.execute(
+                select(NotificationPreference).where(
+                    NotificationPreference.user_id == admin_user.id,
+                    NotificationPreference.event_type == PIPELINE_RUN_REVIEW_REMINDER,
+                    NotificationPreference.channel == "in_app",
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(rows) == 1  # updated in place, not duplicated
     assert rows[0].enabled is True
 
@@ -990,9 +1002,7 @@ async def test_mandatory_email_rule_overrides_disabled_preference(session, admin
         )
     )
     session.add(
-        NotificationPreference(
-            user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False
-        )
+        NotificationPreference(user_id=admin_user.id, event_type=PIPELINE_COMPLETED, channel="email", enabled=False)
     )
     await session.commit()
 

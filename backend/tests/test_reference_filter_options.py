@@ -29,9 +29,7 @@ async def test_filter_options_returns_the_model_vocabularies(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_filter_options_covers_every_category_the_upload_form_can_create(
-    client: AsyncClient, admin_token: str
-):
+async def test_filter_options_covers_every_category_the_upload_form_can_create(client: AsyncClient, admin_token: str):
     resp = await client.get(
         "/api/references/filter-options",
         headers={"Authorization": f"Bearer {admin_token}"},
