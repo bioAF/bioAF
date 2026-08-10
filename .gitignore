@@ -13,6 +13,9 @@ graphify-out/
 local/
 documentation/
 
+# Impeccable design-review snapshots (local archive/backlog)
+.impeccable/
+
 # Environment
 .env
 

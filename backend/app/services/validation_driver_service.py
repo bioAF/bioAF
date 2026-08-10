@@ -23,6 +23,7 @@ machinery; this driver is the orchestration glue that sequences it and moves the
 """
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -155,6 +156,40 @@ async def _has_runnable_samples(session: AsyncSession, experiment_id: int) -> bo
     return row is not None
 
 
+# The run/experiment/sample accession tokens the fetchngs ingest writes into Sample.prep_notes.
+_ACCESSION_TOKEN_RE = re.compile(r"(?:run_accession|experiment_accession|sample_accession)=(\S+)")
+
+
+def _sample_accession_keys(sample: Sample) -> set[str]:
+    """Every accession a runnable sample can be matched on: its minted ``external_id`` plus the
+    run/experiment/sample accession tokens the fetchngs ingest wrote into ``prep_notes``. Lowercased
+    for case-insensitive resolution."""
+    keys: set[str] = set()
+    if sample.external_id:
+        keys.add(sample.external_id.strip().lower())
+    for value in _ACCESSION_TOKEN_RE.findall(sample.prep_notes or ""):
+        v = value.strip().lower()
+        if v:
+            keys.add(v)
+    return keys
+
+
+async def _load_runnable_samples(session: AsyncSession, experiment_id: int) -> list[Sample]:
+    """The experiment's samples that have a linked input file (what becomes the analysis matrix)."""
+    return list(
+        (
+            await session.execute(
+                select(Sample)
+                .join(sample_files, Sample.id == sample_files.c.sample_id)
+                .where(Sample.experiment_id == experiment_id)
+            )
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
 class ValidationDriverService:
     # ---- Comprehension half (synchronous, request-driven) ----
 
@@ -283,10 +318,88 @@ class ValidationDriverService:
             )
             return True
 
+        # Resolve the scientist's picked accessions to the real minted external_ids and rewrite the
+        # design so the DE run matches the matrix columns by construction. A pick that was not fetched
+        # is genuine missing data: park in samples_mismatch (zero compute) for a human to decide.
+        status, reason = await ValidationDriverService._resolve_sample_design(session, study)
+        if status == "mismatch":
+            study.failure_reason = reason
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "samples_mismatch"
+            )
+            return True
+
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "setup"
         )
         return True
+
+    @staticmethod
+    async def _resolve_sample_design(session: AsyncSession, study: ValidationStudy) -> tuple[str, str | None]:
+        """Resolve the picked accessions in the study's differential design to the real fetched
+        ``Sample.external_id``s and rewrite the design in place (test/reference arms + subject keys),
+        so the DE run matches the count-matrix columns by construction (spec-08 net-C).
+
+        Returns ``("ok", None)`` when every pick resolved (or the study is QC-only with no design), or
+        ``("mismatch", reason)`` when a picked sample was not fetched. In the mismatch case the design
+        is still rewritten to the samples we DO have, so an override ("run with the samples we have")
+        launches the reduced design cleanly."""
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        design = (plan.differential_design_json if plan else None) or {}
+        contrasts = design.get("contrasts") or []
+        picked: set[str] = set()
+        for contrast in contrasts:
+            picked.update(contrast.get("test_samples") or [])
+            picked.update(contrast.get("reference_samples") or [])
+        if not picked:
+            return "ok", None  # QC-only paper: no differential design to resolve
+
+        runnable = await _load_runnable_samples(session, study.experiment_id)
+        lookup: dict[str, list[str]] = {}
+        for sample in runnable:
+            for key in _sample_accession_keys(sample):
+                bucket = lookup.setdefault(key, [])
+                if sample.external_id and sample.external_id not in bucket:
+                    bucket.append(sample.external_id)
+
+        def _resolve(pick: str) -> list[str]:
+            return lookup.get((pick or "").strip().lower(), [])
+
+        def _remap(ids: list[str] | None) -> list[str]:
+            out: list[str] = []
+            for pick in ids or []:
+                for external_id in _resolve(pick):
+                    if external_id not in out:
+                        out.append(external_id)
+            return out
+
+        new_contrasts = []
+        for contrast in contrasts:
+            new_subjects: dict[str, str] = {}
+            for pick, label in (contrast.get("subjects") or {}).items():
+                for external_id in _resolve(pick):
+                    new_subjects[external_id] = label
+            new_contrasts.append(
+                {
+                    **contrast,
+                    "test_samples": _remap(contrast.get("test_samples")),
+                    "reference_samples": _remap(contrast.get("reference_samples")),
+                    "subjects": new_subjects,
+                }
+            )
+        plan.differential_design_json = {**design, "contrasts": new_contrasts}
+        await session.flush()
+
+        unresolved = sorted({pick for pick in picked if not _resolve(pick)})
+        if unresolved:
+            available = sorted({s.external_id for s in runnable if s.external_id})
+            reason = (
+                "Held before spending compute: these picked samples were not fetched (embargoed, "
+                f"withdrawn, or the download failed): {', '.join(unresolved)}. "
+                f"Fetched samples available: {', '.join(available) if available else 'none'}."
+            )
+            return "mismatch", reason
+        return "ok", None
 
     @staticmethod
     async def _handle_setup(session: AsyncSession, study: ValidationStudy) -> bool:

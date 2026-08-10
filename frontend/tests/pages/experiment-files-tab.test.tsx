@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import ExperimentDetailPage from "@/app/experiments/[id]/page";
+import { render, screen, fireEvent, waitFor } from "@/testing/renderWithProviders";
+import ExperimentDetailPage from "@/app/(app)/experiments/[id]/page";
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
@@ -7,12 +7,6 @@ jest.mock("next/navigation", () => ({
   useSearchParams: () => ({ get: () => null }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar" />,
-}));
-jest.mock("@/components/layout/Header", () => ({
-  Header: () => <div data-testid="header" />,
-}));
 jest.mock("@/components/experiments/ExperimentStatusBadge", () => ({
   ExperimentStatusBadge: () => <span data-testid="status-badge" />,
 }));

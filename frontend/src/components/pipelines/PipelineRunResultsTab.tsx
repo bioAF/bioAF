@@ -6,8 +6,11 @@ import { GenericQCDashboard } from "@/components/qc/GenericQCDashboard";
 import { QCAiReviewSection } from "@/components/qc/QCAiReviewSection";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { PlotModal } from "@/components/shared/PlotModal";
-import { api, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { api, ApiError, fileContentUrl, plotThumbnailContentUrl } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { useFileContentUrl, usePlotThumbnailContentUrl } from "@/hooks/useContentUrl";
+import { Card } from "@/components/ui/Card";
 import type {
   PlotArchiveListResponse,
   PlotArchiveResponse,
@@ -33,7 +36,7 @@ function QCDashboardPlot({
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
       {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
+        <span className="text-gray-500 text-sm">Failed to load plot</span>
       ) : url ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -54,7 +57,7 @@ function QCDashboardPlot({
           </button>
         </>
       ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
+        <span className="text-gray-500 text-sm">Loading plot...</span>
       )}
     </div>
   );
@@ -86,7 +89,7 @@ function PlotThumbnail({
         <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
           PDF
         </div>
-        <span className="text-xs text-gray-400">No preview</span>
+        <span className="text-xs text-gray-500">No preview</span>
       </button>
     );
   }
@@ -101,7 +104,7 @@ function PlotThumbnail({
         <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
           {fileType || "?"}
         </div>
-        <span className="text-xs text-gray-400">No preview</span>
+        <span className="text-xs text-gray-500">No preview</span>
       </button>
     );
   }
@@ -111,24 +114,40 @@ function PlotThumbnail({
   }
 
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={imgUrl}
-      alt={plot.title ?? "Plot"}
-      className="w-full h-full object-cover cursor-pointer"
+    // A real button rather than role="button" on the image: the thumbnail
+    // opens the full plot, and a clickable image is mouse-only. Wrapping keeps
+    // native focus and Enter/Space handling, and the alt text becomes the
+    // button's accessible name instead of being replaced by one.
+    <button
+      type="button"
       onClick={onClick}
-      onError={() => setError(true)}
-    />
+      className="block w-full h-full cursor-pointer"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={imgUrl}
+        alt={plot.title ?? "Plot"}
+        className="w-full h-full object-cover"
+        onError={() => setError(true)}
+      />
+    </button>
   );
 }
 
 export function PipelineRunResultsTab({ pipelineRunId }: Props) {
   const [dashboard, setDashboard] = useState<QCDashboardResponse | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  // "missing" and "could not be read" are different answers. Only a 404 means
+  // the run genuinely has no dashboard; anything else is an outage, and saying
+  // "no QC dashboard yet" for it is a claim about the run reached from a failed
+  // HTTP call.
   const [dashboardMissing, setDashboardMissing] = useState(false);
+  const [dashboardFailed, setDashboardFailed] = useState(false);
 
   const [plots, setPlots] = useState<PlotArchiveResponse[]>([]);
   const [plotsLoading, setPlotsLoading] = useState(true);
+  const [plotsFailed, setPlotsFailed] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [expandedUrl, setExpandedUrl] = useState<string | null>(null);
   const [expandedTitle, setExpandedTitle] = useState("");
@@ -140,15 +159,20 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     (async () => {
       setDashboardLoading(true);
       setDashboardMissing(false);
+      setDashboardFailed(false);
       try {
         const data = await api.get<QCDashboardResponse>(
           `/api/qc-dashboards/by-run/${pipelineRunId}`,
         );
         if (!cancelled) setDashboard(data);
-      } catch {
+      } catch (e) {
         if (!cancelled) {
           setDashboard(null);
-          setDashboardMissing(true);
+          if (e instanceof ApiError && e.status === 404) setDashboardMissing(true);
+          else {
+            logError(`loading the QC dashboard for run ${pipelineRunId}`, e);
+            setDashboardFailed(true);
+          }
         }
       } finally {
         if (!cancelled) setDashboardLoading(false);
@@ -156,6 +180,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     })();
     (async () => {
       setPlotsLoading(true);
+      setPlotsFailed(false);
       try {
         const params = new URLSearchParams({
           pipeline_run_id: String(pipelineRunId),
@@ -164,8 +189,12 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
         });
         const data = await api.get<PlotArchiveListResponse>(`/api/plots?${params}`);
         if (!cancelled) setPlots(data.plots);
-      } catch {
-        if (!cancelled) setPlots([]);
+      } catch (e) {
+        if (!cancelled) {
+          logError(`loading the plot archive for run ${pipelineRunId}`, e);
+          setPlots([]);
+          setPlotsFailed(true);
+        }
       } finally {
         if (!cancelled) setPlotsLoading(false);
       }
@@ -173,7 +202,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [pipelineRunId]);
+  }, [pipelineRunId, reloadKey]);
 
   const handleExpand = useCallback(async (plot: PlotArchiveResponse) => {
     const isPdf = plot.file?.file_type?.toLowerCase() === "pdf";
@@ -189,7 +218,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">QC Dashboard</h2>
           <Link
@@ -201,7 +230,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
         </div>
         <QCAiReviewSection pipelineRunId={pipelineRunId} />
         {dashboardLoading ? (
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-gray-500">
             <LoadingSpinner size="sm" />
             <span>Loading QC dashboard...</span>
           </div>
@@ -230,14 +259,21 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
               </>
             )}
           </>
+        ) : dashboardFailed ? (
+          <div data-testid="qc-dashboard-load-failed">
+            <ErrorState
+              message={loadFailureMessage("The QC dashboard for this run")}
+              onRetry={() => setReloadKey((k) => k + 1)}
+            />
+          </div>
         ) : dashboardMissing ? (
           <p className="text-sm text-gray-500">
             No QC dashboard yet for this run. Dashboards are generated automatically when the run completes.
           </p>
         ) : null}
-      </div>
+      </Card>
 
-      <div className="bg-white rounded-lg shadow p-6">
+      <Card>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">Plot Archive</h2>
           <Link
@@ -248,9 +284,16 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
           </Link>
         </div>
         {plotsLoading ? (
-          <div className="flex items-center gap-2 text-gray-400">
+          <div className="flex items-center gap-2 text-gray-500">
             <LoadingSpinner size="sm" />
             <span>Loading plots...</span>
+          </div>
+        ) : plotsFailed ? (
+          <div data-testid="run-plots-load-failed">
+            <ErrorState
+              message={loadFailureMessage("The plots for this run")}
+              onRetry={() => setReloadKey((k) => k + 1)}
+            />
           </div>
         ) : plots.length === 0 ? (
           <p className="text-sm text-gray-500">No plots indexed for this run yet.</p>
@@ -265,10 +308,10 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
                   {plot.file ? (
                     <PlotThumbnail plot={plot} onClick={() => handleExpand(plot)} />
                   ) : (
-                    <span className="text-gray-400 text-xs">No preview</span>
+                    <span className="text-gray-500 text-xs">No preview</span>
                   )}
                   {plot.file && (
-                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/50 text-white text-[10px] font-semibold uppercase rounded">
+                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 bg-black/70 text-white text-[10px] font-semibold uppercase rounded">
                       {plot.file.file_type}
                     </span>
                   )}
@@ -285,7 +328,7 @@ export function PipelineRunResultsTab({ pipelineRunId }: Props) {
             ))}
           </div>
         )}
-      </div>
+      </Card>
 
       {expandedUrl && expandedPlot && (
         <PlotModal

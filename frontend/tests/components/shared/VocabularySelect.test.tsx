@@ -39,7 +39,7 @@ describe("VocabularySelect", () => {
         onChange={jest.fn()}
       />
     );
-    // display_label is null for total RNA — falls back to value
+    // display_label is null for total RNA: falls back to value
     expect(screen.getByRole("option", { name: "total RNA" })).toBeInTheDocument();
     // display_label is set for polyA RNA
     expect(screen.getByRole("option", { name: "polyA RNA (enriched)" })).toBeInTheDocument();

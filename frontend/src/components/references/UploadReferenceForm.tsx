@@ -9,6 +9,7 @@ import type {
   ReferenceUploadInitResponse,
 } from "@/lib/types";
 import { predictNextVersion } from "./referenceVersioning";
+import { Button } from "@/components/ui/Button";
 
 const CATEGORIES = ["genome", "annotation", "index", "atlas", "markers", "other"];
 const SCOPES = ["public", "internal"];
@@ -177,7 +178,7 @@ export function UploadReferenceForm({
         <label className="block">
           <span className="text-sm font-medium text-gray-700">
             Version
-            <span className="ml-2 text-xs font-normal text-gray-400">
+            <span className="ml-2 text-xs font-normal text-gray-500">
               (auto, override to keep your own scheme)
             </span>
           </span>
@@ -264,7 +265,7 @@ export function UploadReferenceForm({
               <div className="flex justify-between">
                 <span className="font-mono">{p.filename}</span>
                 <span className="text-gray-500">
-                  {formatBytes(p.uploaded)} / {formatBytes(p.size)} &mdash;{" "}
+                  {formatBytes(p.uploaded)} / {formatBytes(p.size)},{" "}
                   <span
                     className={
                       p.status === "done"
@@ -304,13 +305,10 @@ export function UploadReferenceForm({
         >
           Cancel
         </button>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-        >
+        <Button type="submit"
+          disabled={submitting}>
           {submitting ? "Uploading..." : "Start upload"}
-        </button>
+        </Button>
       </div>
     </form>
   );

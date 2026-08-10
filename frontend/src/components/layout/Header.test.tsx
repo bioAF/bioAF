@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 
 jest.mock("@/lib/auth", () => ({
   getCurrentUser: jest.fn(),
@@ -67,4 +67,32 @@ test("no longer shows the role badge", () => {
   mockUser.mockReturnValue({ email: "priya@lab.org", name: "Priya", role_name: "comp_bio" });
   render(<Header />);
   expect(screen.queryByText("comp_bio")).not.toBeInTheDocument();
+});
+
+test("offers a way to open the navigation, for the screens where it is off-canvas", () => {
+  mockUser.mockReturnValue({ email: "priya@lab.org", role_name: "comp_bio" });
+  const onOpenNav = jest.fn();
+  render(<Header onOpenNav={onOpenNav} navOpen={false} />);
+
+  const button = screen.getByRole("button", { name: "Open navigation" });
+  expect(button.className).toContain("md:hidden");
+
+  fireEvent.click(button);
+  expect(onOpenNav).toHaveBeenCalled();
+});
+
+test("says whether the navigation it controls is open", () => {
+  mockUser.mockReturnValue({ email: "priya@lab.org", role_name: "comp_bio" });
+  const { rerender } = render(<Header onOpenNav={jest.fn()} navOpen={false} />);
+
+  expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
+
+  rerender(<Header onOpenNav={jest.fn()} navOpen />);
+  expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 });

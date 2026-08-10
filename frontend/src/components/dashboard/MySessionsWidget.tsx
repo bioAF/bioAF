@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface RawSession {
@@ -29,48 +29,38 @@ interface CombinedSession {
 const ACTIVE_STATUSES = new Set(["running", "idle", "active", "starting", "ready"]);
 
 export function MySessionsWidget() {
-  const [items, setItems] = useState<CombinedSession[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    Promise.all([
-      api
-        .getWithRetry<SessionList>("/api/v1/notebooks/sessions")
-        .catch(() => ({ sessions: [] }) as SessionList),
-      api
-        .getWithRetry<SessionList>("/api/v1/work-nodes/sessions")
-        .catch(() => ({ sessions: [] }) as SessionList),
-    ])
-      .then(([notebooks, workNodes]) => {
-        const combined: CombinedSession[] = [
-          ...(notebooks.sessions || []).map((s) => ({
-            key: `nb-${s.id}`,
-            kind: "Notebook",
-            sessionType: s.session_type,
-            status: s.status,
-            url: s.proxy_url || s.access_url || null,
-            listHref: "/notebooks",
-          })),
-          ...(workNodes.sessions || []).map((s) => ({
-            key: `wn-${s.id}`,
-            kind: "Work node",
-            sessionType: s.session_type,
-            status: s.status,
-            url: s.access_url || s.proxy_url || null,
-            listHref: "/workbench/work-nodes",
-          })),
-        ].filter((s) => ACTIVE_STATUSES.has(s.status));
-        setItems(combined);
-      })
-      .catch(() => setError("Failed to load sessions"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data: items, loading, error, retry } = useWidgetData(
+    async () => {
+      // No per-source fallback: an empty list stood in for a failed fetch, so a
+      // total outage rendered "No active sessions." -- and these sessions bill by
+      // the hour, which makes a false "you have none" the expensive direction to
+      // be wrong in.
+      const [notebooks, workNodes] = await Promise.all([
+        api.getWithRetry<SessionList>("/api/v1/notebooks/sessions"),
+        api.getWithRetry<SessionList>("/api/v1/work-nodes/sessions"),
+      ]);
+      const combined: CombinedSession[] = [
+        ...(notebooks.sessions || []).map((s) => ({
+          key: `nb-${s.id}`,
+          kind: "Notebook",
+          sessionType: s.session_type,
+          status: s.status,
+          url: s.proxy_url || s.access_url || null,
+          listHref: "/notebooks",
+        })),
+        ...(workNodes.sessions || []).map((s) => ({
+          key: `wn-${s.id}`,
+          kind: "Work node",
+          sessionType: s.session_type,
+          status: s.status,
+          url: s.access_url || s.proxy_url || null,
+          listHref: "/workbench/work-nodes",
+        })),
+      ].filter((s) => ACTIVE_STATUSES.has(s.status));
+      return combined;
+    },
+    "Your sessions",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-my-sessions">
@@ -78,7 +68,7 @@ export function MySessionsWidget() {
         My active sessions
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading sessions...</span>
         </div>
@@ -87,7 +77,7 @@ export function MySessionsWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry
@@ -95,7 +85,7 @@ export function MySessionsWidget() {
         </div>
       )}
       {!loading && !error && items && items.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No active sessions.
         </p>
       )}

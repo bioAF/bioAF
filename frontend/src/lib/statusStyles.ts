@@ -36,15 +36,31 @@ function humanize(status: string): string {
 export const STATUS_STYLES: Record<string, StatusDomain> = {
   // Experiment: the fixed lifecycle (registered -> ... -> complete) plus the
   // higher-level summary statuses used by the dashboard widget.
+  //
+  // The lifecycle is ONE linear progression, so colour encodes *how far along* it
+  // is, not *which step* it is. It previously used nine unrelated hues (gray, blue,
+  // indigo, purple, yellow, teal, cyan, orange, green), which made colour an
+  // arbitrary identifier that could not be learned, and put `analysis` in orange
+  // directly beside `failed` red so a normal step read as a warning.
+  //
+  // The ramp is: neutral (not started) -> brand-light (sample in the lab) ->
+  // brand-deep (compute and interpretation) -> green (done). Red is reserved for
+  // failure and never appears in the lifecycle. The exact step is carried by the
+  // label, which is always rendered with the badge.
+  //
+  // The brand steps used to be constrained by what the dark-mode override layer
+  // happened to list. They are not any more: every tint and text step of every
+  // ramp carries a dark token (tailwind.tokens.js), so a deeper step is a design
+  // choice here rather than a rendering hazard.
   experiment: {
     registered: { badge: "bg-gray-100 text-gray-800", label: "Registered" },
-    library_prep: { badge: "bg-blue-100 text-blue-800", label: "Library Prep" },
-    sequencing: { badge: "bg-indigo-100 text-indigo-800", label: "Sequencing" },
-    fastq_uploaded: { badge: "bg-purple-100 text-purple-800", label: "FASTQ Uploaded" },
-    processing: { badge: "bg-yellow-100 text-yellow-800", label: "Processing" },
-    pipeline_complete: { badge: "bg-teal-100 text-teal-800", label: "Pipeline Complete" },
-    reviewed: { badge: "bg-cyan-100 text-cyan-800", label: "Reviewed" },
-    analysis: { badge: "bg-orange-100 text-orange-800", label: "Analysis" },
+    library_prep: { badge: "bg-bioaf-50 text-bioaf-700", label: "Library Prep" },
+    sequencing: { badge: "bg-bioaf-50 text-bioaf-700", label: "Sequencing" },
+    fastq_uploaded: { badge: "bg-bioaf-50 text-bioaf-700", label: "FASTQ Uploaded" },
+    processing: { badge: "bg-bioaf-100 text-bioaf-800", label: "Processing" },
+    pipeline_complete: { badge: "bg-bioaf-100 text-bioaf-800", label: "Pipeline Complete" },
+    reviewed: { badge: "bg-bioaf-100 text-bioaf-800", label: "Reviewed" },
+    analysis: { badge: "bg-bioaf-100 text-bioaf-800", label: "Analysis" },
     complete: { badge: "bg-green-100 text-green-800", label: "Complete" },
     // Dashboard widget summary statuses (distinct keys, do not collide above).
     active: { badge: "bg-green-100 text-green-700", label: "Active" },
@@ -154,6 +170,116 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     populated_unvalidated: { badge: "bg-yellow-500", label: "Unvalidated" },
     missing_required: { badge: "bg-red-500", label: "Missing (Required)" },
     missing_recommended: { badge: "bg-gray-400", label: "Missing (Recommended)" },
+  },
+
+  // Literature Paper provenance (how a paper entered the Library). Labels live here
+  // rather than in the page: they used to be a local PROVENANCE_LABELS map in
+  // literature/page.tsx, so the paper *detail* page had no access to them and
+  // rendered the raw enum ("user_upload") straight at the user.
+  literatureProvenance: {
+    user_upload: { badge: "bg-blue-100 text-blue-800", label: "Uploaded" },
+    source_search: { badge: "bg-green-100 text-green-800", label: "From search" },
+    lit_review_run: { badge: "bg-purple-100 text-purple-800", label: "AI Lit Review" },
+  },
+
+  // Literature Paper full-text extraction state. Values mirror the backend
+  // constants in backend/app/models/literature.py:35-38 (EXTRACTION_NONE /
+  // PENDING / COMPLETE / FAILED). The detail page rendered this column raw, so a
+  // paper with no PDF reported its extraction status as the bare word "none".
+  literatureExtraction: {
+    none: { badge: "bg-gray-100 text-gray-600", label: "Not extracted" },
+    pending: { badge: "bg-yellow-100 text-yellow-800", label: "Pending" },
+    complete: { badge: "bg-green-100 text-green-800", label: "Extracted" },
+    failed: { badge: "bg-red-100 text-red-800", label: "Failed" },
+  },
+
+  // Literature Paper reading status. Labels live here for the same reason as
+  // provenance above: the detail page rendered the bare lowercase enum.
+  literatureReading: {
+    unread: { badge: "bg-gray-100 text-gray-700", label: "Unread" },
+    reading: { badge: "bg-amber-100 text-amber-800", label: "Reading" },
+    read: { badge: "bg-emerald-100 text-emerald-800", label: "Read" },
+  },
+
+  // Literature recommendation relevance bucket (color only).
+  recommendationBucket: {
+    high: { badge: "bg-green-100 text-green-800" },
+    medium: { badge: "bg-yellow-100 text-yellow-800" },
+    low: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Literature Validation outcome tone (positive/caution/negative/neutral). The
+  // tone itself is derived in lib/validationStatus + lib/validationClassification;
+  // this is the shared palette those tones map to.
+  validationTone: {
+    positive: { badge: "bg-green-100 text-green-800" },
+    caution: { badge: "bg-yellow-100 text-yellow-800" },
+    negative: { badge: "bg-red-100 text-red-800" },
+    neutral: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Literature Validation pipeline-stage kind, shown while a study is in progress
+  // (before it reaches a classification). Keyed by ValidationStageKind
+  // (lib/validationStage). `classified` renders a validationTone badge instead.
+  validationStage: {
+    in_progress: { badge: "bg-blue-100 text-blue-800" },
+    awaiting_review: { badge: "bg-yellow-100 text-yellow-800" },
+    declined: { badge: "bg-gray-100 text-gray-700" },
+    error: { badge: "bg-red-100 text-red-800" },
+    classified: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // Sample QC status.
+  sampleQc: {
+    pass: { badge: "bg-green-100 text-green-800", label: "Pass" },
+    warning: { badge: "bg-yellow-100 text-yellow-800", label: "Warning" },
+    fail: { badge: "bg-red-100 text-red-800", label: "Fail" },
+  },
+
+  // Scientific review verdict.
+  review: {
+    approved: { badge: "bg-green-100 text-green-800", label: "Approved" },
+    approved_with_caveats: { badge: "bg-yellow-100 text-yellow-800", label: "Approved w/ Caveats" },
+    rejected: { badge: "bg-red-100 text-red-800", label: "Rejected" },
+    revision_requested: { badge: "bg-orange-100 text-orange-800", label: "Revision Requested" },
+  },
+
+  // QC quality_rating pill (excellent/good/acceptable/pending_review). An unknown
+  // rating renders red at the call site (a data error should read as alarming),
+  // so it is deliberately NOT listed here as a neutral fallback.
+  qcQuality: {
+    excellent: { badge: "bg-green-100 text-green-700" },
+    good: { badge: "bg-blue-100 text-blue-700" },
+    acceptable: { badge: "bg-yellow-100 text-yellow-700" },
+    pending_review: { badge: "bg-gray-100 text-gray-700" },
+  },
+
+  // What changed between two versions of a Custom Pipeline. The launch dialog
+  // and the detail page both label version history, and each carried its own
+  // byte-identical copy of the mapping before this entry.
+  pipelineVersionChange: {
+    initial: { badge: "bg-gray-100 text-gray-700", label: "Initial version" },
+    image: { badge: "bg-amber-100 text-amber-700", label: "Image change" },
+    config_and_image: { badge: "bg-purple-100 text-purple-700", label: "Config + image change" },
+    config: { badge: "bg-blue-100 text-blue-700", label: "Config change" },
+  },
+
+  // Event severity, shared by notifications and the activity feed. They are two
+  // views of the same scale, so they must not diverge: before this entry the
+  // notification list painted `warning` yellow and the activity feed painted it
+  // amber, on screens a user moves between. Yellow wins because it is what the
+  // rest of this registry already uses for a warning (environmentVersion
+  // building, sampleBatch partial_complete) and because yellow-700 on yellow-100
+  // measures 4.58:1, slightly ahead of amber's 4.51:1.
+  //
+  // Dots are the -500 step, matching environmentVersion, rather than the -400
+  // the activity widget used. Note that none of these dots reaches 3:1 on white:
+  // a dot is not a sufficient carrier for severity on its own, which is a
+  // separate open finding and not fixed by this entry.
+  severity: {
+    info: { badge: "bg-blue-100 text-blue-700", dot: "bg-blue-500", label: "Info" },
+    warning: { badge: "bg-yellow-100 text-yellow-700", dot: "bg-yellow-500", label: "Warning" },
+    critical: { badge: "bg-red-100 text-red-700", dot: "bg-red-500", label: "Critical" },
   },
 
   // Catch-all for mixed/generic status surfaces (component health, users,

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
 import type { Role } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 interface InviteFormProps {
   roles?: Role[];
@@ -64,14 +65,14 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
       )}
 
       <div className="flex gap-2">
-        <input
+        <input aria-label="Email address"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Email address"
           className="flex-1 px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500"
         />
-        <select
+        <select aria-label="Active role"
           value={activeRole}
           onChange={(e) => setSelectedRoleName(e.target.value)}
           className="px-3 py-2 border rounded"
@@ -80,12 +81,10 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
             <option key={r.id} value={r.name}>{r.name}</option>
           ))}
         </select>
-        <button
-          onClick={handleInvite}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded hover:bg-bioaf-700"
-        >
+        <Button
+          onClick={handleInvite}>
           Invite
-        </button>
+        </Button>
       </div>
 
       <div>
@@ -113,7 +112,7 @@ export function InviteForm({ roles = [] }: InviteFormProps) {
           <h4 className="font-medium mb-1">Invited:</h4>
           {results.map((r, i) => (
             <p key={i} className="text-gray-600">
-              {r.email} — {r.status}
+              {r.email}: {r.status}
             </p>
           ))}
         </div>

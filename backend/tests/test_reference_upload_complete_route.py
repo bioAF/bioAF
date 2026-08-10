@@ -1,4 +1,4 @@
-"""TDD: POST /api/references/{id}/upload-complete and /abort routes — spec §2."""
+"""TDD: POST /api/references/{id}/upload-complete and /abort routes, spec §2."""
 
 from unittest.mock import patch
 

@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
 import type {
   NamingProfile,
   NamingProfileDelimiter,
@@ -442,7 +444,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => addTemplateField(f)}
                   className="px-3 py-1 rounded-full border border-gray-200 bg-white text-sm text-gray-800 hover:bg-gray-50"
                 >
-                  + {f.name} <span className="text-gray-400">({f.type})</span>
+                  + {f.name} <span className="text-gray-500">({f.type})</span>
                 </button>
               ))}
             </div>
@@ -455,7 +457,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
             <div className="flex flex-wrap gap-2 mb-3">
               {customFields.map((f) => (
                 <span key={f.name} className="px-3 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800">
-                  {f.name} <span className="text-gray-400">({f.type})</span>
+                  {f.name} <span className="text-gray-500">({f.type})</span>
                 </span>
               ))}
             </div>
@@ -544,7 +546,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => moveSegment(idx, -1)}
                   aria-label={`move-up-${idx}`}
                   disabled={idx === 0}
-                  className="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                  className="text-gray-500 hover:text-gray-700 disabled:opacity-30"
                 >
                   ▲
                 </button>
@@ -553,7 +555,7 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
                   onClick={() => moveSegment(idx, 1)}
                   aria-label={`move-down-${idx}`}
                   disabled={idx === segments.length - 1}
-                  className="text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                  className="text-gray-500 hover:text-gray-700 disabled:opacity-30"
                 >
                   ▼
                 </button>
@@ -599,13 +601,10 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
             placeholder="Paste a real filename..."
             className="flex-1 border rounded-lg px-3 py-2 font-mono text-sm"
           />
-          <button
-            type="button"
-            onClick={handleTest}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={handleTest}>
             Parse
-          </button>
+          </Button>
         </div>
         {testResult && (
           <div data-testid="parse-result" className="mt-3 border rounded-lg p-3 bg-gray-50 text-sm">
@@ -654,14 +653,11 @@ export function NamingProfileWizard({ onSave, onCancel, profile }: Props) {
       )}
 
       <div className="flex gap-2 pt-2 border-t">
-        <button
-          type="button"
+        <Button
           onClick={handleSave}
-          disabled={!canSave}
-          className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50"
-        >
+          disabled={!canSave}>
           {saving ? "Saving..." : "Save profile"}
-        </button>
+        </Button>
         <button
           type="button"
           onClick={onCancel}
@@ -703,17 +699,23 @@ function PromotionModal({
   saving,
 }: PromotionModalProps) {
   return (
-    <div
-      role="dialog"
-      aria-label={`Add new segments to template '${templateName}'?`}
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    <Modal
+      open
+      title={`Add new segments to template '${templateName}'?`}
+      onClose={onCancel}
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button onClick={onConfirm} busy={saving} busyLabel="Saving...">
+            Save profile
+          </Button>
+        </>
+      }
     >
-      <div className="bg-white rounded-lg shadow-lg w-full max-w-2xl p-6 space-y-4">
-        <h3 className="text-base font-semibold text-gray-900">
-          Add new segments to template{" "}
-          <span className="font-mono">&apos;{templateName}&apos;</span>?
-        </h3>
+      <div className="space-y-4">
         <p className="text-sm text-gray-600">
           These segments aren&apos;t in the template yet. Pick which to add
           and whether each is required. Unchecked rows stay on this profile
@@ -723,10 +725,10 @@ function PromotionModal({
         <table className="min-w-full text-sm">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
-              <th className="px-3 py-2 text-left font-medium text-gray-600">Add to template</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Name</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Required</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium text-gray-600">Add to template</th>
             </tr>
           </thead>
           <tbody className="divide-y">
@@ -756,25 +758,8 @@ function PromotionModal({
             ))}
           </tbody>
         </table>
-        <div className="flex gap-2 pt-2 border-t">
-          <button
-            type="button"
-            onClick={onConfirm}
-            disabled={saving}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-lg hover:bg-bioaf-700 disabled:opacity-50"
-          >
-            {saving ? "Saving..." : "Save profile"}
-          </button>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

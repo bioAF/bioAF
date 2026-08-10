@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "@/testing/renderWithProviders";
 import { LlmSettingsContent } from "./LlmSettingsContent";
 
 jest.mock("@/lib/api", () => ({

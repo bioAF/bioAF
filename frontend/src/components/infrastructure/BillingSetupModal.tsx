@@ -1,7 +1,9 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
 
 interface BillingSetupModalProps {
   onComplete: () => void;
@@ -82,9 +84,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 p-6">
-        <h2 className="text-lg font-semibold mb-4">Set Up Billing Export</h2>
+    <Modal open title="Set Up Billing Export" onClose={onClose}>
 
         {/* Intro */}
         {step === "intro" && (
@@ -104,12 +104,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Cancel
               </button>
-              <button
-                onClick={handleEnable}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleEnable}>
                 Get Started
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -146,7 +144,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               <li>Select your project and choose the <code className="bg-gray-100 px-1 rounded text-xs">billing_export</code> dataset</li>
               <li>Click <strong>Save</strong></li>
             </ol>
-            <p className="text-xs text-gray-400 mb-4">
+            <p className="text-xs text-gray-500 mb-4">
               Data may take up to 24 hours to appear after enabling.
             </p>
             <div className="flex justify-end gap-2">
@@ -156,12 +154,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 I&apos;ll do this later
               </button>
-              <button
-                onClick={handleVerify}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleVerify}>
                 Verify
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -206,7 +202,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
         {step === "not_yet" && (
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-amber-100 text-amber-600">
+              <span className="inline-flex items-center justify-center h-6 w-6 rounded-full bg-amber-100 text-amber-700">
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01" />
                 </svg>
@@ -223,12 +219,10 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Close
               </button>
-              <button
-                onClick={handleVerify}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleVerify}>
                 Check Again
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -244,16 +238,13 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
               >
                 Close
               </button>
-              <button
-                onClick={handleEnable}
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-lg text-sm font-medium hover:bg-bioaf-700"
-              >
+              <Button
+                onClick={handleEnable}>
                 Retry
-              </button>
+              </Button>
             </div>
           </div>
         )}
-      </div>
-    </div>
+    </Modal>
   );
 }

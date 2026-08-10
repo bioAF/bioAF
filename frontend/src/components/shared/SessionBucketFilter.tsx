@@ -45,7 +45,7 @@ export function SessionBucketFilter({ value, onChange }: SessionBucketFilterProp
               rounded +
               " " +
               (selected
-                ? "bg-blue-600 text-white border-blue-600"
+                ? "bg-bioaf-600 text-white border-bioaf-600"
                 : "bg-white text-gray-700 hover:bg-gray-50")
             }
           >

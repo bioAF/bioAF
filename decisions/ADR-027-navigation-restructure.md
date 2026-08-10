@@ -14,11 +14,11 @@ In practice, this architecture-oriented navigation leads to:
 
 - Users jumping between multiple top-level sections to complete a single workflow
 - Related pages (e.g., pipeline runs and their QC dashboard results) living in different sections
-- Difficulty finding pages — features like analysis snapshots and GEO export are buried multiple clicks deep with no clear path
+- Difficulty finding pages: features like analysis snapshots and GEO export are buried multiple clicks deep with no clear path
 - Multiple routes to the same page that may render differently depending on the navigation path taken
 - The navigation menu expanding to show too many items at once, creating cognitive overload
 
-The restructure reorients navigation around user workflows rather than platform architecture. No pages, data models, or permissions change — this is purely a presentation reorganization.
+The restructure reorients navigation around user workflows rather than platform architecture. No pages, data models, or permissions change: this is purely a presentation reorganization.
 
 ---
 
@@ -67,7 +67,7 @@ Settings (admin only)
 
 **Top-level items** are always visible in the left navigation sidebar. Items with sub-pages show an expand/collapse chevron. Clicking the chevron (or the top-level item) expands to reveal the secondary navigation items. Clicking a secondary item loads that page.
 
-**Single-page items** (Dashboard, Notebooks) load directly when clicked — no expand/collapse, no secondary items.
+**Single-page items** (Dashboard, Notebooks) load directly when clicked: no expand/collapse, no secondary items.
 
 **Tertiary navigation** does not exist in the sidebar. Deeper navigation happens within pages through tabs and contextual links. For example:
 
@@ -144,14 +144,14 @@ In each case, the left sidebar highlights which section the user is in, and brea
 
 - Navigation reflects user workflows, not platform architecture
 - Fewer clicks to reach commonly used pages
-- Clear contextual data access — users understand why they see filtered vs. unfiltered data
+- Clear contextual data access: users understand why they see filtered vs. unfiltered data
 - The collapsible sidebar keeps the nav manageable even with many sections
 - New features (Pipeline Scheduling, Reference Data) have clear homes in the hierarchy
 
 **Negative:**
 
-- Existing users need to relearn where pages are — muscle memory from the old nav breaks
-- Some pages have arguable placement (e.g., Compute under Infrastructure vs. under Pipelines) — any hierarchy is a compromise
+- Existing users need to relearn where pages are: muscle memory from the old nav breaks
+- Some pages have arguable placement (e.g., Compute under Infrastructure vs. under Pipelines): any hierarchy is a compromise
 - The sidebar is still relatively long (9 top-level items); on small screens it may require scrolling
 
 **Mitigations:**
@@ -164,5 +164,5 @@ In each case, the left sidebar highlights which section the user is in, and brea
 ## References
 
 - Product Spec v0.4, Section 6.2 (original navigation structure)
-- ADR-025 (automated pipeline triggering — Pipeline Scheduling page)
-- ADR-026 (SSH access — Connect button placement in Infrastructure → Compute)
+- ADR-025 (automated pipeline triggering: Pipeline Scheduling page)
+- ADR-026 (SSH access: Connect button placement in Infrastructure → Compute)

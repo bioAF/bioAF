@@ -1,4 +1,4 @@
-"""TDD: GET /api/references/by-name — returns all versions of a reference (spec §4)."""
+"""TDD: GET /api/references/by-name, returns all versions of a reference (spec §4)."""
 
 import pytest
 import pytest_asyncio

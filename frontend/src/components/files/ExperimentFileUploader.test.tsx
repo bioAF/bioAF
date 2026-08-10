@@ -285,3 +285,54 @@ test("uploads with no sample associate to the experiment only", async () => {
   expect(opts.experimentId).toBe(42);
   expect(opts.sampleId).toBeUndefined();
 });
+
+test("the file picker is reachable by keyboard, not just by clicking the drop zone", async () => {
+  // The drop zone used to be a <div onClick> over an input with `hidden`
+  // (display:none), which is not in the tab order. Nothing on this panel could
+  // reach the file picker without a mouse, and uploading data is the platform's
+  // primary ingestion path.
+  const user = userEvent.setup();
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /upload/i }));
+
+  const input = screen.getByTestId("upload-file-input");
+
+  // `hidden` is display:none and cannot be tabbed to whatever wraps it, so the
+  // fix is not "add a key handler", it is "stop removing the element".
+  expect(input).not.toHaveClass("hidden");
+  expect(input).toHaveClass("sr-only");
+
+  // Named, because once it is clipped out of sight the name is all there is.
+  expect(input).toHaveAccessibleName(/upload files/i);
+
+  // Focusable: a focused file input opens the picker on Enter or Space
+  // natively, so reachability is the whole fix.
+  input.focus();
+  expect(input).toHaveFocus();
+});
+
+test("the drop zone still opens the picker for a mouse user", async () => {
+  // Guard against fixing the keyboard by breaking the mouse: the label must
+  // still wrap the input, which is what makes clicking anywhere in the dashed
+  // area open the picker.
+  const user = userEvent.setup();
+  render(
+    <ExperimentFileUploader
+      experimentId={42}
+      samples={SAMPLES}
+      onUploaded={() => {}}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: /upload/i }));
+
+  const input = screen.getByTestId("upload-file-input");
+  expect(screen.getByText(/drag & drop/i).closest("label")).toContainElement(
+    input,
+  );
+});

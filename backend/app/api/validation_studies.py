@@ -5,6 +5,8 @@ plan_ready or an early-exit classification), then the C1 gate (approve/decline).
 ``lit_validation`` permission. The comparison/execution back half is not wired here yet.
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy import select
@@ -13,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_beta_feature, require_permission
 from app.api.provenance_reports import ReportFormat
 from app.database import get_session
+from app.models.literature import LiteraturePaper
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
     ClassifyRequest,
@@ -22,11 +25,13 @@ from app.schemas.validation_study import (
     FindingSetRequest,
     ReadRequest,
     ReproductionPlanResponse,
+    SampleManifestResponse,
     ValidationStudyRequest,
     ValidationStudyResponse,
     ValidationStudySummary,
 )
 from app.services.audit_service import log_action
+from app.services.literature.accession_manifest_service import AccessionManifestService
 from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -74,11 +79,41 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
     )
 
 
+def _study_title(study: ValidationStudy, paper_title: str | None) -> str:
+    """A scientist-facing display title: the source paper's title, else the DOI, else the accession,
+    else 'Study #{id}' (so a study is always named by what it reproduces, never a bare id)."""
+    if paper_title:
+        return paper_title
+    if study.source_doi:
+        return study.source_doi
+    if study.source_accession:
+        return study.source_accession
+    return f"Study #{study.id}"
+
+
+async def _paper_titles(session: AsyncSession, studies: list[ValidationStudy], org_id: int) -> dict[int, str]:
+    """Batch-resolve paper titles for a set of studies in one query (avoids an N+1 in the list)."""
+    ids = {s.paper_id for s in studies if s.paper_id}
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(LiteraturePaper.id, LiteraturePaper.title).where(
+                LiteraturePaper.id.in_(ids),
+                LiteraturePaper.organization_id == org_id,
+            )
+        )
+    ).all()
+    return {pid: title for pid, title in rows}
+
+
 async def _study_response(session: AsyncSession, study: ValidationStudy, org_id: int) -> ValidationStudyResponse:
     plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+    paper_title = (await _paper_titles(session, [study], org_id)).get(study.paper_id) if study.paper_id else None
     return ValidationStudyResponse(
         id=study.id,
         state=study.state,
+        title=_study_title(study, paper_title),
         classification=study.classification,
         confidence=classification_confidence(study.classification),
         paper_id=study.paper_id,
@@ -134,10 +169,12 @@ async def list_studies(
 ):
     org_id = int(current_user["org_id"])
     studies = await ValidationStudyService.list_studies(session, org_id)
+    titles = await _paper_titles(session, studies, org_id)
     return [
         ValidationStudySummary(
             id=s.id,
             state=s.state,
+            title=_study_title(s, titles.get(s.paper_id)),
             classification=s.classification,
             confidence=classification_confidence(s.classification),
             paper_id=s.paper_id,
@@ -230,6 +267,83 @@ async def edit_differential_design(
         session, study_id, org_id, user_id, {"contrasts": data.contrasts, "thresholds": data.thresholds or {}}
     )
     study = await _load(session, study_id, org_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/sample-manifest", response_model=SampleManifestResponse)
+async def sample_manifest(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Level-3 picker source: resolve the study's deposited accession(s) into a per-sample manifest
+    (title + condition + accessions) so the scientist assigns samples to the test/reference arms by
+    RECOGNITION, never by typing accession tokens. Approve-time action (gated ``lit_validation:approve``).
+
+    Best-effort: a study with no accession, or a metadata fetch that fails, returns 200 with an
+    ``unavailable_reason`` (never a 500) so the gate degrades to today's free-text sample entry."""
+    org_id = int(current_user["org_id"])
+    await _load(session, study_id, org_id)  # 404 if missing or another org's study
+    plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+    accessions = [a for a in ((plan.accessions_json if plan else None) or []) if isinstance(a, str) and a.strip()]
+    if not accessions:
+        return SampleManifestResponse(
+            samples=[], unavailable_reason="This study has no deposited accession to list samples from."
+        )
+
+    # Union across the plan's accessions, de-duping an experiment that appears in more than one.
+    samples: list[dict] = []
+    seen: set[str] = set()
+    reasons: list[str] = []
+    for accession in accessions:
+        result = await AccessionManifestService.fetch_manifest(accession)
+        if result.unavailable_reason:
+            reasons.append(result.unavailable_reason)
+        for entry in result.samples:
+            key = (
+                entry.get("experiment_accession")
+                or entry.get("run_accession")
+                or entry.get("sample_accession")
+                or entry.get("title")
+            )
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            samples.append(entry)
+
+    if not samples:
+        reason = "; ".join(dict.fromkeys(reasons)) or "No samples were found for this study's accessions."
+        return SampleManifestResponse(samples=[], unavailable_reason=reason)
+    return SampleManifestResponse(samples=samples)
+
+
+@router.post("/{study_id}/override-samples", response_model=ValidationStudyResponse)
+async def override_samples(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """ "Run with the samples we have": advance a study held in ``samples_mismatch`` (a picked sample was
+    not fetched) to ``setup``. The design was already rewritten to the fetched samples, so the reduced
+    reproduction runs cleanly. Records who overrode; approve-gated."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    if study.state != "samples_mismatch":
+        raise HTTPException(400, "This study is not held on missing samples.")
+    study.evidence_json = {
+        **(study.evidence_json or {}),
+        "samples_override": {"user_id": user_id, "at": datetime.now(timezone.utc).isoformat()},
+    }
+    study = await ValidationStudyService.transition(session, study_id, org_id, user_id, "setup")
+    await log_action(
+        session=session,
+        user_id=user_id,
+        entity_type="validation_study",
+        entity_id=study_id,
+        action="samples_override_approved",
+    )
     await session.commit()
     return await _study_response(session, study, org_id)
 

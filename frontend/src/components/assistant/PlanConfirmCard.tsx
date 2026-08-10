@@ -1,6 +1,7 @@
 "use client";
 
 import type { AssistantPlanStep } from "@/lib/types";
+import { Button } from "@/components/ui/Button";
 
 // Human titles for the consequential tools a plan can contain. A plan may span several steps
 // (e.g. install THEN launch confirmed together), so each step is titled and, when there is more
@@ -142,14 +143,11 @@ export function PlanConfirmCard({
 
       {!resolved && (
         <div className="mt-4 flex gap-2">
-          <button
-            type="button"
+          <Button
             onClick={onConfirm}
-            disabled={busy}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded text-sm hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={busy}>
             {busy ? "Confirming..." : "Confirm"}
-          </button>
+          </Button>
           <button
             type="button"
             onClick={onCancel}

@@ -1,5 +1,6 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
 import type {
@@ -50,7 +51,7 @@ export default function SnapshotComparison({ url }: SnapshotComparisonProps) {
     }
   }
 
-  if (loading) return <div className="text-center py-8 text-gray-400">Loading comparison...</div>;
+  if (loading) return <div className="text-center py-8 text-gray-500">Loading comparison...</div>;
   if (error) return <div className="text-center py-8 text-red-500">{error}</div>;
   if (!data) return null;
 
@@ -114,9 +115,9 @@ function ParameterDiffTable({
         <table className="min-w-full text-sm border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parameter</th>
               {snapshots.map((snap, i) => (
-                <th key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
+                <th scope="col" key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
                   {snap.label}
                 </th>
               ))}
@@ -130,7 +131,7 @@ function ParameterDiffTable({
                   <td key={snap.id} className="px-3 py-2 text-xs">
                     {diff.values[snap.id] !== null && diff.values[snap.id] !== undefined
                       ? String(diff.values[snap.id])
-                      : <span className="text-gray-300">&mdash;</span>}
+                      : <span className="text-gray-500">{NOT_SET}</span>}
                   </td>
                 ))}
               </tr>
@@ -222,13 +223,13 @@ function CommandLogDiffTable({
         <table className="min-w-full text-sm border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Command</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Command</th>
               {snapshots.map((snap, i) => (
-                <th key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
+                <th scope="col" key={snap.id} className="px-3 py-2 text-left text-xs font-medium uppercase" style={{ color: COLORS[i] }}>
                   {snap.label}
                 </th>
               ))}
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -257,7 +258,7 @@ function CommandLogDiffTable({
                         <span className="text-green-600">&#10003;</span>
                       )
                     ) : (
-                      <span className="text-gray-300">&mdash;</span>
+                      <span className="text-gray-500">{NOT_SET}</span>
                     )}
                   </td>
                 ))}
@@ -267,7 +268,7 @@ function CommandLogDiffTable({
                   ) : diff.params_differ ? (
                     <span className="text-yellow-600 font-medium">CHANGED</span>
                   ) : (
-                    <span className="text-gray-400">same</span>
+                    <span className="text-gray-500">same</span>
                   )}
                 </td>
               </tr>

@@ -156,14 +156,14 @@ function StatusBadge({
   if (status === "in_progress") {
     const label = mode === "teardown" ? "Removing" : "Setting up";
     return (
-      <span className="text-xs font-medium text-blue-600 uppercase tracking-wide flex items-center gap-1.5">
-        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+      <span className="text-xs font-medium text-bioaf-600 uppercase tracking-wide flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 bg-bioaf-600 rounded-full animate-pulse" />
         {label}
       </span>
     );
   }
   return (
-    <span className="text-xs text-gray-400 uppercase tracking-wide">
+    <span className="text-xs text-gray-500 uppercase tracking-wide">
       Queued
     </span>
   );
@@ -439,17 +439,17 @@ export function TerraformProgressModal({
           )}
           {status === "running" && (
             <div>
-              <p className="text-sm text-blue-600 flex items-center gap-2">
-                <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-bioaf-600 flex items-center gap-2">
+                <span className="inline-block h-3 w-3 border-2 border-bioaf-600 border-t-transparent rounded-full animate-spin" />
                 {phaseLabel}
               </p>
               <div className="mt-2">
                 {((computePhaseStarted && mode === "deploy") || mode === "teardown") && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     This can take 10-30 minutes depending on cloud provisioning.
                   </p>
                 )}
-                <p className="text-xs text-gray-300 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   {PATIENCE_MESSAGES[patienceIndex]}
                 </p>
               </div>
@@ -474,11 +474,11 @@ export function TerraformProgressModal({
           <div data-testid="tf-progress-bar" className="mb-4">
             <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                className="bg-bioaf-600 h-2 rounded-full transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1 text-right">
+            <p className="text-xs text-gray-500 mt-1 text-right">
               {resourcesCompleted} of {resourcesTotal} components
             </p>
           </div>
@@ -500,7 +500,7 @@ export function TerraformProgressModal({
                       ? "text-gray-700"
                       : r.status === "in_progress"
                         ? "text-gray-900"
-                        : "text-gray-400"
+                        : "text-gray-500"
                   }
                 >
                   {r.label}
@@ -515,7 +515,7 @@ export function TerraformProgressModal({
           <div className="mb-4">
             <button
               onClick={() => setShowLog((v) => !v)}
-              className="text-xs text-gray-400 hover:text-gray-600 underline"
+              className="text-xs text-gray-500 hover:text-gray-600 underline"
             >
               {showLog ? "Hide" : "Show"} technical log
             </button>

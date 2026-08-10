@@ -408,3 +408,85 @@ async def test_file_delete_cleans_up_thumbnails(client, admin_token, session, ad
     mock_delete_thumb.assert_called_once()
     call_args = mock_delete_thumb.call_args
     assert call_args[0][1] == "gs://test-bucket/_thumbnails/plot_cleanup.png"
+
+
+# -- Scanner skips HTML report chrome ----------------------------------------
+#
+# 52 of the 188 entries in the deployed archive were Qualimap report theme
+# assets: `up.png`, `plus.png`, `bgtop.png`, `comment-bright.png` and friends,
+# 13 filenames across 4 samples. They were indexed because the scanner's whole
+# definition of "plot" was "an image file somewhere in the results bucket".
+#
+# The discriminator is the DIRECTORY, not the filename. Qualimap writes its
+# chrome to `<sample>/css/` and its real plots to the sibling
+# `<sample>/images_qualimapReport/`, so a filename blocklist would be endless
+# and would still let the next report tool's icons through. The paths below are
+# verbatim from the deployed bucket.
+
+REAL_CHROME = [
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/up.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/up-pressed.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/down.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/down-pressed.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/plus.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/minus.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/file.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/comment.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/comment-bright.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/comment-close.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/bgtop.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/bgfooter.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/css/qualimap_logo_small.png",
+]
+
+REAL_PLOTS = [
+    # The sibling directory, one path segment away from the chrome above.
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/"
+    "Transcript coverage histogram.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/Junction Analysis.png",
+    "experiments/12/pipeline-runs/17/star_salmon/qualimap/SRX30659361/images_qualimapReport/"
+    "Coverage Profile Along Genes (High).png",
+    "experiments/12/pipeline-runs/17/multiqc/multiqc_plots/png/fastqc_sequence_counts_plot-cnt.png",
+    "experiments/12/pipeline-runs/17/multiqc/multiqc_plots/svg/fastqc_per_base_sequence_quality_plot.svg",
+    "experiments/12/pipeline-runs/17/multiqc/multiqc_plots/pdf/general_stats_table.pdf",
+    "experiments/12/pipeline-runs/17/star_salmon/rseqc/junction_annotation/pdf/SAMPLE.junction.pdf",
+    "experiments/12/pipeline-runs/17/star_salmon/dupradar/box_plot/SAMPLE_duprateExpBoxplot.pdf",
+    "experiments/12/pipeline-runs/17/star_salmon/dupradar/scatter_plot/SAMPLE_duprateExpDens.pdf",
+    "experiments/12/pipeline-runs/17/star_salmon/dupradar/histogram/SAMPLE_expressionHist.pdf",
+    "experiments/12/pipeline-runs/17/star_salmon/deseq2_qc/deseq2.plots.pdf",
+    "experiments/12/pipeline-runs/17/star/SAMPLE-101/cellbender_removebackground/SAMPLE-101.pdf",
+]
+
+
+def test_report_chrome_is_not_a_plot():
+    """Every asset directory seen in the deployed bucket is rejected."""
+    from app.services.plot_archive_service import is_report_asset
+
+    missed = [p for p in REAL_CHROME if not is_report_asset(p)]
+    assert missed == []
+
+
+def test_real_plots_survive_the_filter():
+    """The filter must not cost us a single genuine plot.
+
+    `images_qualimapReport` starts with the word "images" and sits beside the
+    chrome; a substring match rather than a whole-segment match would delete 24
+    real Qualimap plots while fixing 52 icons.
+    """
+    from app.services.plot_archive_service import is_report_asset
+
+    rejected = [p for p in REAL_PLOTS if is_report_asset(p)]
+    assert rejected == []
+
+
+def test_filter_matches_whole_segments_only():
+    from app.services.plot_archive_service import is_report_asset
+
+    # A directory that merely CONTAINS an asset word is not an asset directory.
+    assert not is_report_asset("experiments/1/pipeline-runs/2/cssplots/heatmap.png")
+    assert not is_report_asset("experiments/1/pipeline-runs/2/my_js_report/plot.png")
+    # ...and a file whose NAME matches is still a plot; only directories count.
+    assert not is_report_asset("experiments/1/pipeline-runs/2/plots/css.png")
+    # Case does not matter, and the directory can sit at any depth.
+    assert is_report_asset("experiments/1/CSS/icon.png")
+    assert is_report_asset("a/b/c/d/_static/sphinx/arrow.png")

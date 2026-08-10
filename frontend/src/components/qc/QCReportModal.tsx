@@ -5,6 +5,7 @@
 // surface) used everywhere else, instead of a custom look-alike. Fetches the
 // dashboard by id; clicking outside or pressing Escape closes it.
 
+import { Modal } from "@/components/shared/Modal";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -14,6 +15,7 @@ import { QualityBadge } from "./QualityBadge";
 import { PlotModal } from "@/components/shared/PlotModal";
 import { useFileContentUrl } from "@/hooks/useContentUrl";
 import type { QCDashboardResponse } from "@/lib/types";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 function PlotImage({
   fileId,
@@ -30,7 +32,7 @@ function PlotImage({
   return (
     <div className="relative bg-gray-100 rounded min-h-[12rem] flex items-center justify-center group">
       {error ? (
-        <span className="text-gray-400 text-sm">Failed to load plot</span>
+        <span className="text-gray-500 text-sm">Failed to load plot</span>
       ) : url ? (
         <>
           <img src={url} alt={title} className="w-full rounded" onError={() => setError(true)} />
@@ -56,7 +58,7 @@ function PlotImage({
           </button>
         </>
       ) : (
-        <span className="text-gray-400 text-sm">Loading plot...</span>
+        <span className="text-gray-500 text-sm">Loading plot...</span>
       )}
     </div>
   );
@@ -88,13 +90,7 @@ export function QCReportModal({
     };
   }, [dashboardId]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  useDismissOnEscape(true, onClose);
 
   const pipelineLabel = dashboard?.pipeline_name
     ? `${dashboard.pipeline_name}${dashboard.pipeline_version ? ` v${dashboard.pipeline_version}` : ""}`
@@ -104,14 +100,7 @@ export function QCReportModal({
     : [];
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      data-testid="qc-report-modal"
-    >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] overflow-y-auto p-6">
+    <Modal open title="QC Dashboard" onClose={onClose} size="xl">
         {error ? (
           <div className="text-red-600 text-sm">{error}</div>
         ) : !dashboard ? (
@@ -120,12 +109,11 @@ export function QCReportModal({
           <>
             <div className="flex items-start justify-between mb-6">
               <div>
-                <h2 className="text-lg font-bold">QC Dashboard</h2>
-                <p className="text-sm text-gray-600 mt-0.5">
+                <p className="text-sm text-gray-600">
                   {contextParts.length > 0 && <span>{contextParts.join(" / ")} / </span>}
                   <Link
                     href={`/pipelines/runs/${dashboard.pipeline_run_id}`}
-                    className="text-blue-600 hover:underline"
+                    className="text-bioaf-600 hover:underline"
                   >
                     Run #{dashboard.pipeline_run_id}
                   </Link>
@@ -164,10 +152,9 @@ export function QCReportModal({
             )}
           </>
         )}
-      </div>
       {expanded && (
         <PlotModal url={expanded.url} title={expanded.title} onClose={() => setExpanded(null)} />
       )}
-    </div>
+    </Modal>
   );
 }

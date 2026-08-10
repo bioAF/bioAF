@@ -1,10 +1,13 @@
 "use client";
 
+import { useConfirm } from "@/hooks/useConfirm";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { setToken } from "@/lib/auth";
 import { ComponentPicker, type PickerComponent } from "@/components/components/ComponentPicker";
 import { AWS_REGIONS, DEFAULT_AWS_REGION } from "@/lib/aws-regions";
+import { Button } from "@/components/ui/Button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -96,6 +99,7 @@ interface SetupWizardProps {
 }
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
+  const confirm = useConfirm();
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   // The install's cloud (gcp | aws), read from /api/bootstrap/status. We do NOT
@@ -364,8 +368,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       setStep(1);
       return;
     }
-    if (completedSteps.has(0) && !confirm("Re-verify the setup code with the new value?")) {
-      return;
+    if (completedSteps.has(0)) {
+      const ok = await confirm({
+        title: "Re-verify the setup code with the new value?",
+        message: "The code you already verified is replaced by the one entered now.",
+        confirmLabel: "Re-verify",
+      });
+      if (!ok) return;
     }
     try {
       // Use raw fetch since the api module auto-redirects on 401
@@ -406,7 +415,18 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         c.name !== name ? `Name: ${c.name || "(empty)"} -> ${name || "(empty)"}` : null,
         c.password !== password ? "Password updated" : null,
       ].filter(Boolean).join("\n");
-      if (!confirm(`This will overwrite the admin account.\n\n${diff}\n\nContinue?`)) return;
+      const ok = await confirm({
+        title: "Overwrite the admin account?",
+        message: (
+          <>
+            <p>This replaces the admin account you already created:</p>
+            <p className="whitespace-pre-line font-medium text-gray-900">{diff}</p>
+          </>
+        ),
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       // Use raw fetch with setup token (not the stored auth token)
@@ -441,7 +461,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
     if (completedSteps.has(2)) {
       const c = committedValues[2] ?? {};
-      if (!confirm(`This will overwrite the organization name.\n\n${c.orgName} -> ${orgName}\n\nContinue?`)) return;
+      const ok = await confirm({
+        title: "Overwrite the organization name?",
+        message: (
+          <>
+            <p>This replaces the name you already saved:</p>
+            <p className="font-medium text-gray-900">
+              {c.orgName} -&gt; {orgName}
+            </p>
+          </>
+        ),
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       await api.post("/api/bootstrap/configure-org", { org_name: orgName });
@@ -527,7 +560,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       return;
     }
     if (completedSteps.has(4)) {
-      if (!confirm("This will overwrite the previously saved SMTP settings. Continue?")) return;
+      const ok = await confirm({
+        title: "Overwrite the saved SMTP settings?",
+        message: "The settings you already saved are replaced by the values entered now.",
+        confirmLabel: "Overwrite",
+        variant: "danger",
+      });
+      if (!ok) return;
     }
     try {
       await api.post("/api/bootstrap/configure-smtp", {
@@ -558,23 +597,49 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const handleSelectStack = async () => {
+    // The most expensive and least reversible action in the product, and it was
+    // an ordinary primary button. Re-typing a six-character setup code, two steps
+    // earlier, got a full confirmation dialog.
+    const ok = await confirm({
+      title: "Create cloud infrastructure now?",
+      message: (
+        <>
+          <p>
+            This provisions real infrastructure in your cloud account and
+            <span className="font-medium"> starts incurring charges</span>. It usually takes
+            10 to 15 minutes.
+          </p>
+          <p>
+            Undoing it means tearing the stack down again from the Infrastructure page, which
+            is not instant and not always clean.
+          </p>
+        </>
+      ),
+      confirmLabel: "Create infrastructure",
+    });
+    if (!ok) return;
+
     setError("");
     setStackDeploying(true);
     try {
       await api.post("/api/v1/infrastructure/terraform/init");
-      try {
-        await api.post("/api/v1/infrastructure/stack/deploy-background", {
-          stack_type: computeStack,
-        });
-      } catch {
-        // Deployment may fail; user can retry from Infrastructure page
-      }
+      // This POST used to be wrapped in a bare `catch {}` and the wizard advanced
+      // regardless, so step 8 asserted "Infrastructure deployment has started"
+      // whether or not it had. A user whose deploy never started would wait 15
+      // minutes and then go hunting in Infrastructure for something that was
+      // never queued. If it did not start, say so and stay put.
+      await api.post("/api/v1/infrastructure/stack/deploy-background", {
+        stack_type: computeStack,
+      });
       // Bootstrap completion is deferred until after the user has submitted
       // their component selections, so an interrupted wizard does not look
       // "complete" while still half-configured.
       setStep(7);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to initialize infrastructure");
+      logError("starting the cloud stack deployment", e);
+      setError(
+        "Infrastructure could not be started, so nothing has been created. The technical detail is in the application logs.",
+      );
     } finally {
       setStackDeploying(false);
     }
@@ -762,13 +827,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500 font-mono text-lg tracking-widest text-center"
             />
           </div>
-          <button
+          <Button className="w-full"
             onClick={handleVerifyCode}
-            disabled={setupCode.length !== 6}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={setupCode.length !== 6}>
             Verify
-          </button>
+          </Button>
         </div>
       )}
 
@@ -795,9 +858,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input id="setup-confirm-password" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
           </div>
-          <button onClick={handleCreateAdmin} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleCreateAdmin}>
             Create Admin Account
-          </button>
+          </Button>
         </div>
       )}
 
@@ -810,9 +873,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               placeholder="e.g., Acme Biotech"
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" required />
           </div>
-          <button onClick={handleConfigureOrg} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleConfigureOrg}>
             Save Organization Name
-          </button>
+          </Button>
         </div>
       )}
 
@@ -827,7 +890,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <details data-testid="gcp-prerequisites" className="bg-gray-50 border rounded p-4">
             <summary className="cursor-pointer text-sm font-semibold text-gray-700 select-none">
               Prerequisites: IAM Roles &amp; APIs
-              <span className="ml-1 text-xs font-normal text-gray-400">
+              <span className="ml-1 text-xs font-normal text-gray-500">
                 (bioaf-bootstrap: {SETUP_BOOTSTRAP_ROLES.length} roles, bioaf-app: {SETUP_APP_ROLES.length}, {SETUP_REQUIRED_APIS.length} APIs)
               </span>
             </summary>
@@ -842,7 +905,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   {SETUP_BOOTSTRAP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-1.5 text-xs">
                       <code className="bg-white px-1 py-0.5 rounded text-gray-800 border">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -853,7 +916,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   {SETUP_APP_ROLES.map(({ role, description }) => (
                     <div key={role} className="flex items-center gap-1.5 text-xs">
                       <code className="bg-white px-1 py-0.5 rounded text-gray-800 border">{role}</code>
-                      <span className="text-gray-400">{description}</span>
+                      <span className="text-gray-500">{description}</span>
                     </div>
                   ))}
                 </div>
@@ -908,7 +971,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div>
             <label htmlFor="gcp-org-slug" className="block text-sm font-medium text-gray-700 mb-1">
               Organization Slug
-              <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+              <span className="ml-1 text-gray-500 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
             </label>
             <input id="gcp-org-slug" type="text" value={gcpOrgSlug} onChange={(e) => setGcpOrgSlug(e.target.value)}
               placeholder="my-bioaf-org" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
@@ -956,7 +1019,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 ) : (
                   <div>
                     <label htmlFor="gcp-sa-email" className="block text-sm font-medium text-gray-700 mb-1">
-                      Bootstrap SA Email <span className="ml-1 text-gray-400 font-normal text-xs">(optional)</span>
+                      Bootstrap SA Email <span className="ml-1 text-gray-500 font-normal text-xs">(optional)</span>
                     </label>
                     <p className="text-xs text-gray-500 mb-2">
                       The email of the bioaf-bootstrap service account. install-gcp.sh sets this automatically;
@@ -972,10 +1035,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             )}
           </div>
 
-          <button onClick={handleSaveGcp} disabled={gcpSaving}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSaveGcp} disabled={gcpSaving}>
             {gcpSaving ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
 
           {gcpValidation && !gcpValidation.passed && (
             <div className="border rounded divide-y text-sm">
@@ -1009,7 +1071,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       <div key={p.permission} className="flex items-center gap-2 text-xs ml-4 mt-1">
                         <span className="text-red-600">{"\u2717"}</span>
                         <code className="bg-red-50 px-1 rounded">{p.permission}</code>
-                        <span className="text-gray-400">(needs {p.recommended_role})</span>
+                        <span className="text-gray-500">(needs {p.recommended_role})</span>
                       </div>
                     ))}
                   </div>
@@ -1024,7 +1086,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       <div key={p.permission} className="flex items-center gap-2 text-xs ml-4 mt-1">
                         <span className="text-red-600">{"\u2717"}</span>
                         <code className="bg-red-50 px-1 rounded">{p.permission}</code>
-                        <span className="text-gray-400">(needs {p.recommended_role})</span>
+                        <span className="text-gray-500">(needs {p.recommended_role})</span>
                       </div>
                     ))}
                   </div>
@@ -1040,7 +1102,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       <div key={p.permission} className="flex items-center gap-2 text-xs">
                         <span className="text-red-600">{"\u2717"}</span>
                         <code className="bg-red-50 px-1 rounded">{p.permission}</code>
-                        <span className="text-gray-400">(needs {p.recommended_role})</span>
+                        <span className="text-gray-500">(needs {p.recommended_role})</span>
                       </div>
                     ))}
                 </div>
@@ -1092,7 +1154,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div>
             <label htmlFor="aws-org-slug" className="block text-sm font-medium text-gray-700 mb-1">
               Organization Slug
-              <span className="ml-1 text-gray-400 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
+              <span className="ml-1 text-gray-500 font-normal text-xs">(3-30 chars, lowercase, hyphens allowed)</span>
             </label>
             <input id="aws-org-slug" type="text" value={awsOrgSlug} onChange={(e) => setAwsOrgSlug(e.target.value)}
               placeholder="my-bioaf-org" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
@@ -1101,7 +1163,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <div>
             <label htmlFor="aws-app-role-arn" className="block text-sm font-medium text-gray-700 mb-1">
               App Role ARN
-              <span className="ml-1 text-gray-400 font-normal text-xs">(runtime / EC2 instance profile)</span>
+              <span className="ml-1 text-gray-500 font-normal text-xs">(runtime / EC2 instance profile)</span>
             </label>
             <input id="aws-app-role-arn" type="text" value={awsAppRoleArn}
               onChange={(e) => setAwsAppRoleArn(e.target.value)}
@@ -1114,10 +1176,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             EC2 instance profile via IMDS; no access key is stored. install-aws.sh provisioned the role.
           </div>
 
-          <button onClick={handleSaveAws} disabled={awsSaving}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSaveAws} disabled={awsSaving}>
             {awsSaving ? "Validating..." : "Save & Validate"}
-          </button>
+          </Button>
 
           {awsValidation && !awsValidation.passed && (
             <div className="border rounded divide-y text-sm">
@@ -1151,34 +1212,34 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
-              <input type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)}
+              <label htmlFor="smtp-host" className="block text-sm font-medium text-gray-700 mb-1">SMTP Host</label>
+              <input id="smtp-host" type="text" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)}
                 className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Port</label>
-              <input type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)}
+              <label htmlFor="port" className="block text-sm font-medium text-gray-700 mb-1">Port</label>
+              <input id="port" type="number" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)}
                 className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-            <input type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)}
+            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">Username</label>
+            <input id="username" type="text" value={smtpUsername} onChange={(e) => setSmtpUsername(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-            <input type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)}
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+            <input id="password" type="password" value={smtpPassword} onChange={(e) => setSmtpPassword(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
-            <input type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)}
+            <label htmlFor="from-address" className="block text-sm font-medium text-gray-700 mb-1">From Address</label>
+            <input id="from-address" type="email" value={smtpFrom} onChange={(e) => setSmtpFrom(e.target.value)}
               className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-bioaf-500" />
           </div>
-          <button onClick={handleConfigureSmtp} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={handleConfigureSmtp}>
             Save SMTP Configuration
-          </button>
+          </Button>
           <button onClick={() => setStep(5)} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Do this later
           </button>
@@ -1193,18 +1254,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             cluster, storage buckets, and supporting resources on {cloudLabel}.
           </p>
           {!(isAws ? awsConfigured : gcpConfigured) && (
-            <p className="text-sm text-amber-600">
+            <p className="text-sm text-amber-700">
               {cloudLabel} credentials are required to set up infrastructure. You can configure them
               later in Settings.
             </p>
           )}
-          <button
+          <Button className="w-full"
             onClick={handleSetupInfrastructure}
-            disabled={!(isAws ? awsConfigured : gcpConfigured)}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={!(isAws ? awsConfigured : gcpConfigured)}>
             Set up infrastructure
-          </button>
+          </Button>
           <button onClick={handleDoInfraLater} className="w-full text-gray-500 text-sm hover:text-gray-700">
             Do this later
           </button>
@@ -1217,9 +1276,25 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           <p className="text-sm text-gray-600 mb-4">
             Choose the compute infrastructure for running pipelines and notebooks.
           </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* A radio group, not buttons: these are mutually exclusive choices
+              of one setting. role="radio" is what makes "kubernetes is the
+              selected one" available to a screen reader, which previously was
+              conveyed only by the border colour. */}
+          <div
+            role="radiogroup"
+            aria-label="Compute infrastructure"
+            className="grid grid-cols-1 md:grid-cols-2 gap-4"
+          >
             <div
               data-testid="compute-stack-kubernetes"
+              role="radio"
+              aria-checked={computeStack === "kubernetes"}
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter" && e.key !== " ") return;
+                e.preventDefault();
+                setComputeStack("kubernetes");
+              }}
               onClick={() => setComputeStack("kubernetes")}
               className={`p-4 border-2 rounded-lg cursor-pointer transition-colors ${
                 computeStack === "kubernetes"
@@ -1239,27 +1314,32 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </p>
             </div>
 
+            {/* Not yet selectable. aria-disabled rather than omitting the
+                role, so it is still announced as an option in the group and
+                its unavailability is stated rather than implied by opacity. */}
             <div
               data-testid="compute-stack-slurm"
+              role="radio"
+              aria-checked={false}
+              aria-disabled={true}
               className="p-4 border-2 border-gray-200 rounded-lg opacity-60 cursor-not-allowed"
             >
               <div className="flex items-center justify-between mb-2">
-                <h3 className="font-semibold text-gray-400">SLURM + NFS</h3>
-                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-medium">
+                <h3 className="font-semibold text-gray-500">SLURM + NFS</h3>
+                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
                   Coming Soon
                 </span>
               </div>
-              <p className="text-sm text-gray-400 mb-2">
+              <p className="text-sm text-gray-500 mb-2">
                 Traditional HPC cluster with shared filesystem.
               </p>
             </div>
           </div>
 
-          <button onClick={handleSelectStack}
-            disabled={stackDeploying}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50">
+          <Button className="w-full" onClick={handleSelectStack}
+            disabled={stackDeploying}>
             {stackDeploying ? "Initializing infrastructure..." : `Continue with ${computeStack === "kubernetes" ? k8sStackLabel : "SLURM + NFS"}`}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1280,13 +1360,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               onChange={handlePickerChange}
             />
           )}
-          <button
+          <Button className="w-full"
             onClick={handleSelectComponents}
-            disabled={componentsSubmitting || componentsLoading}
-            className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-          >
+            disabled={componentsSubmitting || componentsLoading}>
             {componentsSubmitting ? "Queueing components..." : "Continue"}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1334,9 +1412,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               ))}
             </div>
           )}
-          <button onClick={() => setStep(9)} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={() => setStep(9)}>
             Continue to Getting Started
-          </button>
+          </Button>
         </div>
       )}
 
@@ -1350,9 +1428,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               anytime from your profile page.
             </p>
           </div>
-          <button onClick={onComplete} className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700">
+          <Button className="w-full" onClick={onComplete}>
             Go to Dashboard
-          </button>
+          </Button>
         </div>
       )}
     </div>

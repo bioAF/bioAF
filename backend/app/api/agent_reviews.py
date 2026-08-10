@@ -48,7 +48,7 @@ class RunReviewRequest(BaseModel):
     entity_id: int
     included_run_ids: list[int] | None = None
     include_html_report_run_ids: list[int] | None = None
-    # Prompt source — exactly one of these three should be set. If multiple
+    # Prompt source: exactly one of these three should be set. If multiple
     # are set, custom_prompt_id wins, then custom_prompt_body, then sub-items.
     selected_sub_item_ids: list[str] | None = None
     custom_prompt_id: int | None = None

@@ -1,4 +1,4 @@
-"""TDD: backend/app/workers/reference_importer.py — the import worker.
+"""TDD: backend/app/workers/reference_importer.py, the import worker.
 
 ReferenceImporter is run from an in-process asyncio background task in
 the backend (scheduled by ReferenceDataService._schedule_import). It

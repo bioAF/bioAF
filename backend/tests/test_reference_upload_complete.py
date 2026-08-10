@@ -1,4 +1,4 @@
-"""TDD: ReferenceDataService.upload_complete() and abort_upload() — spec §2.
+"""TDD: ReferenceDataService.upload_complete() and abort_upload(), spec §2.
 
 After the browser has PUT all bytes to GCS, `upload_complete` lists the bucket
 prefix, verifies each declared file arrived, reads the GCS-reported md5 hash

@@ -1,8 +1,10 @@
 "use client";
 
+import { Modal } from "@/components/shared/Modal";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { AssembledPromptModal } from "./AssembledPromptModal";
+import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 
 interface SubItem {
   id: string;
@@ -83,6 +85,7 @@ export function SectionBuilderModal({
   onSubmitted,
   onError,
 }: Props) {
+  useDismissOnEscape(true, () => onCancel());
   const isExperiment = entityType === "experiment";
 
   const [catalog, setCatalog] = useState<SectionCatalogResponse | null>(null);
@@ -288,227 +291,222 @@ export function SectionBuilderModal({
   }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
+    <Modal
+      open
+      title={isExperiment ? "Review across experiment" : "Review this pipeline run"}
+      onClose={onCancel}
+      size="lg"
     >
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl max-h-[85vh] overflow-y-auto p-6">
-        <h3 className="text-lg font-semibold">
-          {isExperiment ? "Review across experiment" : "Review this pipeline run"}
-        </h3>
 
-        <div className="mt-4">
-          <label className="text-sm font-medium text-gray-700">Prompt source</label>
-          <select
-            className="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm"
-            value={typeof mode === "string" ? "builder" : `custom-${mode.customSavedId}`}
-            onChange={(e) => {
-              const v = e.target.value;
-              if (v === "builder") setMode("builder");
-              else setMode({ customSavedId: Number(v.replace("custom-", "")) });
-            }}
-          >
-            <option value="builder">bioAF prompt builder</option>
-            {savedPrompts.map((p) => (
-              <option key={p.id} value={`custom-${p.id}`}>
-                custom - {p.name} - {p.created_by_user_label}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="mt-4">
+        <label htmlFor="prompt-source" className="text-sm font-medium text-gray-700">Prompt source</label>
+        <select id="prompt-source"
+          className="mt-1 w-full border border-gray-300 rounded px-3 py-2 text-sm"
+          value={typeof mode === "string" ? "builder" : `custom-${mode.customSavedId}`}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "builder") setMode("builder");
+            else setMode({ customSavedId: Number(v.replace("custom-", "")) });
+          }}
+        >
+          <option value="builder">bioAF prompt builder</option>
+          {savedPrompts.map((p) => (
+            <option key={p.id} value={`custom-${p.id}`}>
+              custom - {p.name} - {p.created_by_user_label}
+            </option>
+          ))}
+        </select>
+      </div>
 
-        {!usingCustom && catalog && (
-          <div className="mt-5 space-y-2">
-            {visibleSections.map((section) => {
-              const state = sectionState(section);
-              return (
-                <div key={section.id} className="border border-gray-200 rounded">
-                  <div className="flex items-center p-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => toggleExpanded(section.id)}
-                      aria-label={
-                        expanded.has(section.id) ? "Collapse section" : "Expand section"
-                      }
-                      className="text-gray-500 hover:text-gray-800 text-sm w-4"
+      {!usingCustom && catalog && (
+        <div className="mt-5 space-y-2">
+          {visibleSections.map((section) => {
+            const state = sectionState(section);
+            return (
+              <div key={section.id} className="border border-gray-200 rounded">
+                <div className="flex items-center p-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(section.id)}
+                    aria-label={
+                      expanded.has(section.id) ? "Collapse section" : "Expand section"
+                    }
+                    className="text-gray-500 hover:text-gray-800 text-sm w-4"
+                  >
+                    {expanded.has(section.id) ? "▾" : "▸"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(section)}
+                    className="text-sm flex items-center gap-2"
+                  >
+                    <span
+                      className={`inline-flex items-center justify-center w-4 h-4 border rounded text-xs ${
+                        state === "all"
+                          ? "bg-bioaf-600 border-bioaf-600 text-white"
+                          : state === "some"
+                            ? "bg-bioaf-100 border-bioaf-400 text-bioaf-700"
+                            : "border-gray-400 text-transparent"
+                      }`}
                     >
-                      {expanded.has(section.id) ? "▾" : "▸"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => toggleSection(section)}
-                      className="text-sm flex items-center gap-2"
-                    >
-                      <span
-                        className={`inline-flex items-center justify-center w-4 h-4 border rounded text-xs ${
-                          state === "all"
-                            ? "bg-bioaf-600 border-bioaf-600 text-white"
-                            : state === "some"
-                              ? "bg-bioaf-100 border-bioaf-400 text-bioaf-700"
-                              : "border-gray-400 text-transparent"
-                        }`}
-                      >
-                        {state === "all" ? "✓" : state === "some" ? "–" : ""}
-                      </span>
-                      <span className="font-medium">{section.label}</span>
-                    </button>
-                  </div>
-                  {expanded.has(section.id) && (
-                    <div className="px-3 pb-2 pl-10 space-y-1">
-                      {section.sub_items.map((si) => (
-                        <label
-                          key={si.id}
-                          className="flex items-start gap-2 text-sm py-1"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected.has(si.id)}
-                            onChange={() => toggleSubItem(si.id)}
-                            className="mt-1"
-                          />
-                          <span>
-                            <span className="font-medium">{si.label}</span>
-                            <span className="block text-xs text-gray-500">
-                              {si.prompt_fragment}
-                            </span>
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
+                      {state === "all" ? "✓" : state === "some" ? "–" : ""}
+                    </span>
+                    <span className="font-medium">{section.label}</span>
+                  </button>
                 </div>
-              );
-            })}
-          </div>
-        )}
-
-        {usingCustom && activeCustom && (
-          <div className="mt-5">
-            <div className="text-sm text-gray-600 mb-1">
-              Saved prompt body (read-only). Use Display prompt to view and
-              optionally customize this run.
-            </div>
-            <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs whitespace-pre-wrap max-h-64 overflow-y-auto">
-              {activeCustom.body}
-            </pre>
-          </div>
-        )}
-
-        {isExperiment && (
-          <div className="mt-6">
-            <div className="mb-3 rounded border border-bioaf-200 bg-bioaf-50 p-2 text-xs text-bioaf-800">
-              Experiment metadata (name, design type, hypothesis, protocol
-              version, design variables) and every sample on this experiment
-              are automatically included with this review. The pipeline runs
-              below are added on top of that context.
-            </div>
-            <h4 className="font-medium text-sm mb-2">Included pipeline runs</h4>
-            {!otherRuns ? (
-              <div className="text-sm text-gray-500">Loading…</div>
-            ) : otherRuns.length === 0 ? (
-              <div className="text-sm text-gray-500">
-                No runs visible in this experiment.
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b">
-                    <th className="py-1 w-8">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all runs"
-                        title={allRunsSelected ? "Deselect all runs" : "Select all runs"}
-                        checked={allRunsSelected}
-                        onChange={toggleAllRuns}
-                      />
-                    </th>
-                    <th className="py-1">Run</th>
-                    <th className="py-1">Status</th>
-                    <th className="py-1 w-28">
-                      <label className="inline-flex items-center gap-1">
+                {expanded.has(section.id) && (
+                  <div className="px-3 pb-2 pl-10 space-y-1">
+                    {section.sub_items.map((si) => (
+                      <label
+                        key={si.id}
+                        className="flex items-start gap-2 text-sm py-1"
+                      >
                         <input
                           type="checkbox"
-                          aria-label="Include HTML report for all runs"
-                          title={
-                            allHtmlReportsSelected
-                              ? "Exclude HTML report for all runs"
-                              : "Include HTML report for all runs"
-                          }
-                          checked={allHtmlReportsSelected}
-                          onChange={toggleAllHtmlReports}
+                          checked={selected.has(si.id)}
+                          onChange={() => toggleSubItem(si.id)}
+                          className="mt-1"
                         />
-                        <span>HTML report</span>
+                        <span>
+                          <span className="font-medium">{si.label}</span>
+                          <span className="block text-xs text-gray-500">
+                            {si.prompt_fragment}
+                          </span>
+                        </span>
                       </label>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {otherRuns.map((r) => {
-                    const isCurrent = runId !== undefined && r.id === runId;
-                    return (
-                      <tr key={r.id} className="border-b">
-                        <td className="py-2">
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {usingCustom && activeCustom && (
+        <div className="mt-5">
+          <div className="text-sm text-gray-600 mb-1">
+            Saved prompt body (read-only). Use Display prompt to view and
+            optionally customize this run.
+          </div>
+          <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs whitespace-pre-wrap max-h-64 overflow-y-auto">
+            {activeCustom.body}
+          </pre>
+        </div>
+      )}
+
+      {isExperiment && (
+        <div className="mt-6">
+          <div className="mb-3 rounded border border-bioaf-200 bg-bioaf-50 p-2 text-xs text-bioaf-800">
+            Experiment metadata (name, design type, hypothesis, protocol
+            version, design variables) and every sample on this experiment
+            are automatically included with this review. The pipeline runs
+            below are added on top of that context.
+          </div>
+          <h4 className="font-medium text-sm mb-2">Included pipeline runs</h4>
+          {!otherRuns ? (
+            <div className="text-sm text-gray-500">Loading…</div>
+          ) : otherRuns.length === 0 ? (
+            <div className="text-sm text-gray-500">
+              No runs visible in this experiment.
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 border-b">
+                  <th scope="col" className="py-1 w-8">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all runs"
+                      title={allRunsSelected ? "Deselect all runs" : "Select all runs"}
+                      checked={allRunsSelected}
+                      onChange={toggleAllRuns}
+                    />
+                  </th>
+                  <th scope="col" className="py-1">Run</th>
+                  <th scope="col" className="py-1">Status</th>
+                  <th scope="col" className="py-1 w-28">
+                    <label htmlFor="html-report" className="inline-flex items-center gap-1">
+                      <input
+                        type="checkbox"
+                        aria-label="Include HTML report for all runs"
+                        title={
+                          allHtmlReportsSelected
+                            ? "Exclude HTML report for all runs"
+                            : "Include HTML report for all runs"
+                        }
+                        checked={allHtmlReportsSelected}
+                        onChange={toggleAllHtmlReports}
+                      />
+                      <span>HTML report</span>
+                    </label>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {otherRuns.map((r) => {
+                  const isCurrent = runId !== undefined && r.id === runId;
+                  return (
+                    <tr key={r.id} className="border-b">
+                      <td className="py-2">
+                        <input id="html-report"
+                          type="checkbox"
+                          checked={selectedRuns.has(r.id)}
+                          disabled={isCurrent}
+                          onChange={() => toggleRun(r.id)}
+                        />
+                      </td>
+                      <td className="py-2">
+                        #{r.id} {r.pipeline_name}
+                        {r.pipeline_version ? ` v${r.pipeline_version}` : ""}
+                        {isCurrent && (
+                          <span className="ml-2 text-xs text-gray-500">(current)</span>
+                        )}
+                      </td>
+                      <td className="py-2">{r.status}</td>
+                      <td className="py-2">
+                        <label className="inline-flex items-center gap-1">
                           <input
                             type="checkbox"
-                            checked={selectedRuns.has(r.id)}
-                            disabled={isCurrent}
-                            onChange={() => toggleRun(r.id)}
+                            checked={htmlReportRuns.has(r.id)}
+                            onChange={() => toggleHtmlReport(r.id)}
                           />
-                        </td>
-                        <td className="py-2">
-                          #{r.id} {r.pipeline_name}
-                          {r.pipeline_version ? ` v${r.pipeline_version}` : ""}
-                          {isCurrent && (
-                            <span className="ml-2 text-xs text-gray-500">(current)</span>
-                          )}
-                        </td>
-                        <td className="py-2">{r.status}</td>
-                        <td className="py-2">
-                          <label className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={htmlReportRuns.has(r.id)}
-                              onChange={() => toggleHtmlReport(r.id)}
-                            />
-                            <span className="text-xs text-gray-600">include</span>
-                          </label>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-
-        <div className="mt-6 flex items-center justify-end gap-2">
-          <button
-            onClick={onCancel}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={showDisplayPrompt}
-            disabled={
-              displayPromptLoading ||
-              (!usingCustom && selected.size === 0)
-            }
-            className="px-3 py-1.5 text-sm border border-bioaf-600 text-bioaf-700 rounded disabled:opacity-50"
-          >
-            {displayPromptLoading ? "Loading…" : "Display prompt"}
-          </button>
-          <button
-            onClick={() => submit(null)}
-            disabled={!canRun}
-            className="px-3 py-1.5 text-sm bg-bioaf-600 disabled:bg-gray-300 text-white rounded"
-          >
-            {submitting ? "Submitting…" : "Run review"}
-          </button>
+                          <span className="text-xs text-gray-600">include</span>
+                        </label>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
+      )}
+
+      <div className="mt-6 flex items-center justify-end gap-2">
+        <button
+          onClick={onCancel}
+          className="px-3 py-1.5 text-sm border border-gray-300 rounded"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={showDisplayPrompt}
+          disabled={
+            displayPromptLoading ||
+            (!usingCustom && selected.size === 0)
+          }
+          className="px-3 py-1.5 text-sm border border-bioaf-600 text-bioaf-700 rounded disabled:opacity-50"
+        >
+          {displayPromptLoading ? "Loading…" : "Display prompt"}
+        </button>
+        <button
+          onClick={() => submit(null)}
+          disabled={!canRun}
+          className="px-3 py-1.5 text-sm bg-bioaf-600 disabled:bg-gray-300 text-white rounded"
+        >
+          {submitting ? "Submitting…" : "Run review"}
+        </button>
       </div>
 
       {displayPromptBody !== null && (
@@ -549,6 +547,6 @@ export function SectionBuilderModal({
           }}
         />
       )}
-    </div>
+    </Modal>
   );
 }

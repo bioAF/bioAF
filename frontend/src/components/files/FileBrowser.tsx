@@ -16,6 +16,13 @@ import type {
   ProjectListResponse,
   SampleBrief,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
+
+import { clickableRow } from "@/lib/a11y";
+import { Modal } from "@/components/shared/Modal";
+import { Button } from "@/components/ui/Button";
+import { useConfirm } from "@/hooks/useConfirm";
+import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
   if (bytes == null) return "-";
@@ -64,6 +71,8 @@ export function FileBrowser({
   showUpload = false,
   focusFileId,
 }: Props) {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -267,8 +276,8 @@ export function FileBrowser({
       );
       setLinkingFileIds([]);
       fetchFiles();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not link the files.");
     }
   };
 
@@ -292,15 +301,21 @@ export function FileBrowser({
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     const count = selectedIds.size;
-    if (!confirm(`Delete ${count} ${count === 1 ? "file" : "files"}? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete ${count} ${count === 1 ? "file" : "files"}?`,
+      message: "This cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    });
+    if (!ok) return;
     try {
       await Promise.all(
         Array.from(selectedIds).map((id) => api.delete(`/api/files/${id}`)),
       );
       setSelectedIds(new Set());
       fetchFiles();
-    } catch {
-      // ignore
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the selected files. Nothing was removed.");
     }
   };
 
@@ -442,7 +457,7 @@ export function FileBrowser({
             }}
             className="flex gap-1"
           >
-            <input
+            <input aria-label="Search by filename"
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -463,7 +478,7 @@ export function FileBrowser({
                   setSearchQuery("");
                   setPage(1);
                 }}
-                className="px-2 py-2 text-gray-400 hover:text-gray-600 text-sm"
+                className="px-2 py-2 text-gray-500 hover:text-gray-600 text-sm"
               >
                 Clear
               </button>
@@ -472,7 +487,7 @@ export function FileBrowser({
         )}
 
         {showProjectFilter && (
-          <select
+          <select aria-label="Filter by project id"
             value={filterProjectId}
             onChange={(e) => {
               setFilterProjectId(e.target.value);
@@ -491,7 +506,7 @@ export function FileBrowser({
         )}
 
         {showExperimentFilter && (
-          <select
+          <select aria-label="Filter by experiment id"
             value={filterExperimentId}
             onChange={(e) => {
               setFilterExperimentId(e.target.value);
@@ -509,7 +524,7 @@ export function FileBrowser({
         )}
 
         {samples.length > 0 && (
-          <select
+          <select aria-label="Filter by sample id"
             value={filterSampleId}
             onChange={(e) => {
               setFilterSampleId(e.target.value);
@@ -526,7 +541,7 @@ export function FileBrowser({
           </select>
         )}
 
-        <select
+        <select aria-label="Filter by type"
           value={filterType}
           onChange={(e) => {
             setFilterType(e.target.value);
@@ -542,7 +557,7 @@ export function FileBrowser({
           ))}
         </select>
 
-        <select
+        <select aria-label="Filter by source"
           value={filterSource}
           onChange={(e) => {
             setFilterSource(e.target.value);
@@ -578,19 +593,15 @@ export function FileBrowser({
                 {downloading ? downloadProgress || "Downloading..." : "Download Selected"}
               </button>
             )}
-            <button
-              onClick={() => openLinkModal(Array.from(selectedIds))}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
-            >
+            <Button size="sm"
+              onClick={() => openLinkModal(Array.from(selectedIds))}>
               Associate
-            </button>
+            </Button>
             {isAdmin && (
-              <button
-                onClick={handleDeleteSelected}
-                className="px-3 py-1.5 bg-red-600 text-white rounded-md text-sm hover:bg-red-700"
-              >
+              <Button variant="danger" size="sm"
+                onClick={handleDeleteSelected}>
                 Delete
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -602,7 +613,7 @@ export function FileBrowser({
             <p className="text-sm font-medium text-amber-800">
               {stuckCount} {stuckCount === 1 ? "file needs" : "files need"} to be synced to storage
             </p>
-            <p className="text-xs text-amber-600 mt-1">
+            <p className="text-xs text-amber-700 mt-1">
               These files are linked to an experiment but haven&apos;t been moved to long-term storage yet.
             </p>
           </div>
@@ -644,41 +655,41 @@ export function FileBrowser({
       )}
 
       {loading ? (
-        <ContentLoading />
+        <ContentLoading variant="table" />
       ) : files.length === 0 && labDocHits.length === 0 ? (
-        <p className="text-gray-400 text-sm py-8 text-center">No files found.</p>
+        <p className="text-gray-500 text-sm py-8 text-center">No files found.</p>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 w-10">
-                  <input
+                <th scope="col" className="px-4 py-3 w-10">
+                  <input aria-label="Select all files"
                     type="checkbox"
                     checked={files.length > 0 && selectedIds.size === files.length}
                     onChange={toggleSelectAll}
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Filename
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Type
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Size
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Uploaded
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Creator
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                   Source
                 </th>
                 {canDownload && (
-                  <th className="px-4 py-3 w-10">
+                  <th scope="col" className="px-4 py-3 w-10">
                     <span className="sr-only">Actions</span>
                   </th>
                 )}
@@ -689,11 +700,12 @@ export function FileBrowser({
                 <tr
                   key={file.id}
                   className="hover:bg-gray-50 cursor-pointer"
-                  onClick={() => setViewingFile(file)}
+                  {...clickableRow(() => setViewingFile(file))}
                 >
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
+                      aria-label={`Select ${file.filename}`}
                       checked={selectedIds.has(file.id)}
                       onChange={() => toggleSelect(file.id)}
                     />
@@ -707,7 +719,7 @@ export function FileBrowser({
                           </svg>
                         </span>
                       )}
-                      <span className={file.storage_deleted ? "text-gray-400" : "text-blue-600"}>
+                      <span className={file.storage_deleted ? "text-gray-500" : "text-bioaf-600"}>
                         {file.filename}
                       </span>
                     </div>
@@ -726,10 +738,10 @@ export function FileBrowser({
                         className="text-xs mt-0.5 flex items-center gap-2"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <span className="text-amber-600 font-medium">Unlinked</span>
+                        <span className="text-amber-700 font-medium">Unlinked</span>
                         <button
                           onClick={() => openLinkModal([file.id])}
-                          className="text-blue-600 hover:underline"
+                          className="text-bioaf-600 hover:underline"
                         >
                           Associate
                         </button>
@@ -759,7 +771,7 @@ export function FileBrowser({
                         <button
                           onClick={() => triggerDownload(file.id)}
                           title="Download"
-                          className="text-gray-400 hover:text-blue-600"
+                          className="text-gray-500 hover:text-bioaf-600"
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" />
@@ -778,7 +790,7 @@ export function FileBrowser({
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 text-sm font-medium align-top">
                     <div className="flex items-center gap-2">
-                      <a href={doc.href} className="text-blue-600 hover:underline">
+                      <a href={doc.href} className="text-bioaf-600 hover:underline">
                         {doc.name}
                       </a>
                       <span className="text-xs shrink-0 rounded px-1.5 py-0.5 bg-indigo-50 text-indigo-700">
@@ -832,28 +844,18 @@ export function FileBrowser({
               </div>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* File detail modal */}
       {viewingFile && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => setViewingFile(null)}
+        <Modal
+          open
+          title={viewingFile.filename}
+          onClose={() => setViewingFile(null)}
+          size="md"
         >
-          <div
-            className="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
-              <h3 className="text-lg font-semibold truncate pr-4">{viewingFile.filename}</h3>
-              <button
-                onClick={() => setViewingFile(null)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
-              >
-                &times;
-              </button>
-            </div>
+          <div>
 
             {isImageFile(viewingFile.file_type) ? (
               <div className="p-4 flex justify-center bg-gray-50">
@@ -865,7 +867,7 @@ export function FileBrowser({
                     className="max-h-64 object-contain rounded"
                   />
                 ) : (
-                  <span className="text-gray-400 text-sm">Loading preview...</span>
+                  <span className="text-gray-500 text-sm">Loading preview...</span>
                 )}
               </div>
             ) : (
@@ -874,7 +876,7 @@ export function FileBrowser({
                   <div className="w-16 h-16 bg-gray-200 rounded-lg flex items-center justify-center text-gray-500 text-xs font-bold uppercase">
                     {viewingFile.file_type}
                   </div>
-                  <span className="text-xs text-gray-400">No preview available</span>
+                  <span className="text-xs text-gray-500">No preview available</span>
                 </div>
               </div>
             )}
@@ -1006,48 +1008,48 @@ export function FileBrowser({
               </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Provenance modal */}
       {showProvenance && viewingFile && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
-          onClick={() => setShowProvenance(false)}
+        <Modal
+          open
+          title={`Provenance: ${viewingFile.filename}`}
+          onClose={() => setShowProvenance(false)}
+          size="lg"
         >
-          <div
-            className="relative bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 flex items-center justify-between p-4 border-b bg-white rounded-t-lg">
-              <h3 className="text-lg font-semibold">Provenance: {viewingFile.filename}</h3>
-              <button
-                onClick={() => setShowProvenance(false)}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none px-2"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="p-4">
-              <ProvenanceReportPanel
-                entityType="artifact"
-                entityId={viewingFile.id}
-                entityName={viewingFile.filename}
-              />
-            </div>
-          </div>
-        </div>
+          <ProvenanceReportPanel
+            entityType="artifact"
+            entityId={viewingFile.id}
+            entityName={viewingFile.filename}
+          />
+        </Modal>
       )}
 
       {/* Associate modal */}
       {linkingFileIds.length > 0 && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-semibold mb-1">
-              {linkingFileIds.length === 1
-                ? "Associate File"
-                : `Associate ${linkingFileIds.length} Files`}
-            </h2>
+        <Modal
+          open
+          title={
+            linkingFileIds.length === 1
+              ? "Associate File"
+              : `Associate ${linkingFileIds.length} Files`
+          }
+          onClose={() => setLinkingFileIds([])}
+          size="sm"
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setLinkingFileIds([])}>
+                Cancel
+              </Button>
+              <Button onClick={handleLink} disabled={!linkModalHasSelection}>
+                Save
+              </Button>
+            </>
+          }
+        >
+          <div>
             <p className="text-xs text-gray-500 mb-4">
               Link to a project, experiment, or specific sample. Select the most specific level that
               applies.
@@ -1132,28 +1134,13 @@ export function FileBrowser({
                   ))}
                 </select>
                 {!linkExperimentId && (
-                  <p className="text-xs text-gray-400 mt-1">Select an experiment first</p>
+                  <p className="text-xs text-gray-500 mt-1">Select an experiment first</p>
                 )}
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-5">
-              <button
-                onClick={() => setLinkingFileIds([])}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleLink}
-                disabled={!linkModalHasSelection}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
-              >
-                Save
-              </button>
-            </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

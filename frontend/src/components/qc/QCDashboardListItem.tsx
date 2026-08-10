@@ -7,6 +7,8 @@
 import { QualityBadge } from "./QualityBadge";
 import type { QCDashboardSummary } from "@/lib/types";
 
+import { clickableCard } from "@/lib/a11y";
+
 export function QCDashboardListItem({
   dashboard,
   onClick,
@@ -24,7 +26,7 @@ export function QCDashboardListItem({
 
   return (
     <div
-      onClick={onClick}
+      {...clickableCard(onClick)}
       className="p-4 flex items-start justify-between gap-4 hover:bg-gray-50 cursor-pointer"
     >
       <div className="min-w-0 flex-1">
@@ -39,24 +41,24 @@ export function QCDashboardListItem({
         <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1 text-xs text-gray-600">
           {dashboard.project_name && (
             <div>
-              <span className="text-gray-400">Project:</span>{" "}
+              <span className="text-gray-500">Project:</span>{" "}
               <span className="text-gray-700">{dashboard.project_name}</span>
             </div>
           )}
           {dashboard.experiment_name && (
             <div>
-              <span className="text-gray-400">Experiment:</span>{" "}
+              <span className="text-gray-500">Experiment:</span>{" "}
               <span className="text-gray-700">{dashboard.experiment_name}</span>
             </div>
           )}
           {sampleDisplay && (
             <div className="sm:col-span-2 lg:col-span-1">
-              <span className="text-gray-400">Samples:</span>{" "}
+              <span className="text-gray-500">Samples:</span>{" "}
               <span className="text-gray-700">{sampleDisplay}</span>
             </div>
           )}
         </div>
-        <p className="text-xs text-gray-400 mt-1">
+        <p className="text-xs text-gray-500 mt-1">
           Generated{" "}
           {dashboard.generated_at ? new Date(dashboard.generated_at).toLocaleDateString() : "N/A"}
           {dashboard.cell_count != null && ` | ${dashboard.cell_count.toLocaleString()} cells`}

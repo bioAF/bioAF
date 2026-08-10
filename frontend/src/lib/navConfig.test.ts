@@ -37,13 +37,21 @@ const allChildren = (): NavChild[] => navConfig.flatMap((s) => s.children ?? [])
 
 describe("navConfig disambiguated labels", () => {
   it("renames the two 'Environments' entries so each says what it is", () => {
+    // Both used to be called "Environments". Three passes got here, and the
+    // property under test never changed: neither entry can be read as the other.
+    //   1. qualified as "Pipeline Environments" / "Compute Environments"
+    //   2. owner, 2026-08-08: "the 'Environments' moniker has created a lot of
+    //      confusion" -> "Workbench Images"
+    //   3. owner, same day: "'Images' is a technical term" -> both are
+    //      "... Templates", one word a non-technical reader can carry between
+    //      them, with each page explaining what its templates configure.
     const pipelines = navConfig.find((s) => s.label === "Pipelines");
     const workbench = navConfig.find((s) => s.label === "Workbench");
 
-    expect(pipelines?.children?.find((c) => c.label === "Pipeline Environments")?.path).toBe(
+    expect(pipelines?.children?.find((c) => c.label === "Pipeline Templates")?.path).toBe(
       "/pipelines/environments",
     );
-    expect(workbench?.children?.find((c) => c.label === "Compute Environments")?.path).toBe(
+    expect(workbench?.children?.find((c) => c.label === "Workbench Templates")?.path).toBe(
       "/environments",
     );
   });
@@ -77,11 +85,19 @@ describe("Experiments surfaced as a top-level section", () => {
 });
 
 describe("Validation Studies nav entry", () => {
-  it("adds a Validation Studies child under Data & Files gated on lit_validation:view", () => {
-    const data = navConfig.find((s) => s.label === "Data & Files");
-    const child = data?.children?.find((c) => c.label === "Validation Studies");
-    expect(child?.path).toBe("/validation-studies");
+  it("adds a Validation Studies child under Lab Knowledge gated on lit_validation:view", () => {
+    const labKnowledge = navConfig.find((s) => s.label === "Lab Knowledge");
+    const child = labKnowledge?.children?.find((c) => c.label === "Validation Studies");
+    expect(child?.path).toBe("/lab-knowledge/validation-studies");
     expect(child?.permission).toEqual({ resource: "lit_validation", action: "view" });
+    expect(child?.betaFlag).toBe("lit_validation");
+  });
+
+  it("no longer lists Literature or Validation Studies under Data & Files", () => {
+    const data = navConfig.find((s) => s.label === "Data & Files");
+    const labels = data?.children?.map((c) => c.label) ?? [];
+    expect(labels).not.toContain("Literature");
+    expect(labels).not.toContain("Validation Studies");
   });
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { withinHours } from "@/components/dashboard/time";
 
@@ -24,35 +24,24 @@ interface ExperimentList {
 const WEEK_HOURS = 24 * 7;
 
 export function TeamOutputWidget() {
-  const [counts, setCounts] = useState<{ runs: number; experiments: number } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    Promise.all([
-      api
-        .getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=50")
-        .catch(() => ({ runs: [] }) as RunList),
-      api
-        .getWithRetry<ExperimentList>("/api/experiments?page_size=50")
-        .catch(() => ({ experiments: [] }) as ExperimentList),
-    ])
-      .then(([runs, exps]) => {
-        setCounts({
-          runs: (runs.runs || []).filter((r) => withinHours(r.completed_at, WEEK_HOURS)).length,
-          experiments: (exps.experiments || []).filter((e) =>
-            withinHours(e.created_at, WEEK_HOURS),
-          ).length,
-        });
-      })
-      .catch(() => setError("Failed to load team output"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data: counts, loading, error, retry } = useWidgetData(
+    async () => {
+      // Both halves or neither. Substituting an empty list for a failed half
+      // reported "0 runs completed" during a total outage, indistinguishable
+      // from a genuinely quiet week.
+      const [runs, exps] = await Promise.all([
+        api.getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=50"),
+        api.getWithRetry<ExperimentList>("/api/experiments?page_size=50"),
+      ]);
+      return {
+        runs: (runs.runs || []).filter((r) => withinHours(r.completed_at, WEEK_HOURS)).length,
+        experiments: (exps.experiments || []).filter((e) =>
+          withinHours(e.created_at, WEEK_HOURS),
+        ).length,
+      };
+    },
+    "Team output",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-team-output">
@@ -60,7 +49,7 @@ export function TeamOutputWidget() {
         Team output this week
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading output...</span>
         </div>
@@ -69,7 +58,7 @@ export function TeamOutputWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

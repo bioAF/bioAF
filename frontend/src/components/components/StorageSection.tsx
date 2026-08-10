@@ -6,6 +6,9 @@ import { api } from "@/lib/api";
 import { useStackOptions } from "@/hooks/useStackOptions";
 import { storageDisplay, type StorageDisplay } from "@/lib/storageDisplay";
 import { AutoIngestControls } from "./AutoIngestControls";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useToast } from "@/components/shared/Toast";
+import { Button } from "@/components/ui/Button";
 
 interface BucketMetrics {
   bucket_name: string;
@@ -140,13 +143,13 @@ function BucketCard({
       <p className="text-xs text-gray-500 mb-2 capitalize">
         {bucket.purpose.replace("_", " ")}
       </p>
-      <div className="flex gap-4 text-xs text-gray-400">
+      <div className="flex gap-4 text-xs text-gray-500">
         <span>{formatBytes(bucket.size_bytes)}</span>
         <span>{bucket.object_count} objects</span>
         <span>{bucket.storage_class}</span>
       </div>
       {bucket.lifecycle_rules.length > 0 && (
-        <div className="mt-1 text-xs text-gray-400">
+        <div className="mt-1 text-xs text-gray-500">
           {bucket.lifecycle_rules.map((rule, i) => (
             <span key={i} className="block">
               {rule}
@@ -185,24 +188,22 @@ function DeployStorageCard({
         buckets to enable file storage.
       </p>
       {!terraformInitialized && (
-        <p className="text-xs text-amber-600 mb-3">
+        <p className="text-xs text-amber-700 mb-3">
           Terraform must be initialized before deploying storage.{" "}
           <Link
             href="/infrastructure/components"
-            className="underline hover:text-amber-800"
+            className="underline hover:text-amber-900"
           >
             Run bootstrap first
           </Link>
           .
         </p>
       )}
-      <button
+      <Button
         onClick={onDeploy}
-        disabled={!terraformInitialized}
-        className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
+        disabled={!terraformInitialized}>
         Deploy Storage
-      </button>
+      </Button>
     </div>
   );
 }
@@ -214,6 +215,7 @@ export function StorageSection({
   onDeploy,
   onUpdateStorage,
 }: StorageSectionProps) {
+  const toast = useToast();
   const [buckets, setBuckets] = useState<BucketMetrics[]>([]);
   // Provider-appropriate object-storage labels (GCS / S3), resolved from the
   // install's cloud via /stack-options; defaults to GCS so GCP is unchanged.
@@ -226,7 +228,10 @@ export function StorageSection({
     api
       .get<BucketMetricsResponse>("/api/v1/infrastructure/storage/buckets")
       .then((data) => setBuckets(data.buckets))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading bucket metrics", e);
+        toast.error(loadFailureMessage("Bucket metrics"));
+      });
   }, [storageDeployed]);
 
   if (!storageDeployed) {

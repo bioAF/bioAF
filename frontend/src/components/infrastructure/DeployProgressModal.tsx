@@ -146,14 +146,14 @@ function StatusBadge({ status, mode }: { status: ResourceStatus; mode: "deploy" 
   }
   if (status === "in_progress") {
     return (
-      <span className="text-xs font-medium text-blue-600 uppercase tracking-wide flex items-center gap-1.5">
-        <span className="inline-block h-1.5 w-1.5 bg-blue-600 rounded-full animate-pulse" />
+      <span className="text-xs font-medium text-bioaf-600 uppercase tracking-wide flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-1.5 bg-bioaf-600 rounded-full animate-pulse" />
         {mode === "teardown" ? "Removing" : "Setting up"}
       </span>
     );
   }
   return (
-    <span className="text-xs text-gray-400 uppercase tracking-wide">
+    <span className="text-xs text-gray-500 uppercase tracking-wide">
       Queued
     </span>
   );
@@ -210,7 +210,7 @@ function DeployErrorMessage({
           <li>Re-deploying in a different region with available capacity</li>
           <li>
             Requesting a quota increase from Google Cloud:{" "}
-            <a href={QUOTA_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+            <a href={QUOTA_URL} target="_blank" rel="noopener noreferrer" className="text-bioaf-600 underline">
               Managing quotas
             </a>
           </li>
@@ -315,19 +315,19 @@ export function DeployProgressModal({
           )}
           {isRunning && (
             <div>
-              <p className="text-sm text-blue-600 flex items-center gap-2">
-                <span className="inline-block h-3 w-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm text-bioaf-600 flex items-center gap-2">
+                <span className="inline-block h-3 w-3 border-2 border-bioaf-600 border-t-transparent rounded-full animate-spin" />
                 {status === "planning" || status === "awaiting_confirmation"
                   ? "Planning resources..."
                   : mode === "teardown" ? "Removing resources..." : "Applying changes..."}
               </p>
               <div className="mt-2">
                 {showTimingWarning && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-500">
                     This can take 10-30 minutes depending on cloud provisioning.
                   </p>
                 )}
-                <p className="text-xs text-gray-300 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   {PATIENCE_MESSAGES[patienceIndex]}
                 </p>
               </div>
@@ -350,11 +350,11 @@ export function DeployProgressModal({
           <div data-testid="deploy-progress-bar" className="mb-4">
             <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-500"
+                className="bg-bioaf-600 h-2 rounded-full transition-all duration-500"
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <p className="text-xs text-gray-400 mt-1 text-right">
+            <p className="text-xs text-gray-500 mt-1 text-right">
               {resourcesCompleted} of {resourcesTotal} components
             </p>
           </div>

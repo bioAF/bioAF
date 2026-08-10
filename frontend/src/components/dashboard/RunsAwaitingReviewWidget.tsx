@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { timeAgo } from "@/components/dashboard/time";
 
@@ -20,22 +20,14 @@ interface RunList {
 }
 
 export function RunsAwaitingReviewWidget() {
-  const [runs, setRuns] = useState<Run[] | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=20")
-      .then((res) => setRuns(res.runs || []))
-      .catch(() => setError("Failed to load runs"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<RunList>("/api/pipeline-runs?status=completed&page_size=20");
+      return res.runs || [];
+    },
+    "Runs",
+  );
+  const runs = data;
 
   // A completed run with no review verdict yet is awaiting review.
   const awaiting = (runs || []).filter((r) => !r.review_verdict);
@@ -46,7 +38,7 @@ export function RunsAwaitingReviewWidget() {
         Runs awaiting review
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading runs...</span>
         </div>
@@ -55,7 +47,7 @@ export function RunsAwaitingReviewWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry
@@ -63,13 +55,13 @@ export function RunsAwaitingReviewWidget() {
         </div>
       )}
       {!loading && !error && awaiting.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           Nothing awaiting review.
         </p>
       )}
       {!loading && !error && awaiting.length > 0 && (
         <div>
-          <div className="text-3xl font-bold text-amber-600">{awaiting.length}</div>
+          <div className="text-3xl font-bold text-amber-700">{awaiting.length}</div>
           <ul className="mt-2 space-y-1">
             {awaiting.slice(0, 5).map((r) => (
               <li key={r.id}>
@@ -78,7 +70,7 @@ export function RunsAwaitingReviewWidget() {
                   className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
                 >
                   <span className="truncate text-sm text-gray-800">{r.pipeline_name}</span>
-                  <span className="shrink-0 text-xs text-gray-400">
+                  <span className="shrink-0 text-xs text-gray-500">
                     {r.completed_at ? `waiting ${timeAgo(r.completed_at)}` : ""}
                   </span>
                 </Link>

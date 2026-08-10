@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface NetworkingConfig {
   hostname: string;
@@ -76,6 +78,7 @@ function describeReachability(status: string): { label: string; tone: "ok" | "wa
 }
 
 export function NetworkingSettingsContent() {
+  const confirm = useConfirm();
   const [config, setConfig] = useState<NetworkingConfig | null>(null);
   const [hostname, setHostname] = useState("");
   const [domain, setDomain] = useState("");
@@ -206,6 +209,29 @@ export function NetworkingSettingsContent() {
   }
 
   async function applyHttps() {
+    // The button label said "and restart" and the page carried a static yellow
+    // paragraph, but the click itself was ungated: one press logged every user
+    // out mid-work. The blast radius is everyone, not just the admin pressing it.
+    const ok = await confirm({
+      title: "Apply HTTPS and restart bioAF?",
+      message: (
+        <>
+          <p>
+            The backend and frontend both restart. <span className="font-medium">Every signed-in
+            user is logged out</span>, and anything they have typed and not saved is lost.
+          </p>
+          <p>
+            If single sign-on is configured, update its callback URLs to https first or sign-in
+            will fail after the restart.
+          </p>
+          <p>Running pipelines are not affected.</p>
+        </>
+      ),
+      confirmLabel: "Apply and restart",
+      variant: "danger",
+    });
+    if (!ok) return;
+
     setApplyingHttps(true);
     setError(null);
     try {
@@ -213,7 +239,8 @@ export function NetworkingSettingsContent() {
       const refreshed = await api.get<NetworkingConfig>("/api/v1/settings/networking");
       setConfig(refreshed);
     } catch (e) {
-      setError(String(e));
+      logError("applying HTTPS enforcement", e);
+      setError("HTTPS could not be applied. The technical detail is in the application logs.");
     } finally {
       setApplyingHttps(false);
     }

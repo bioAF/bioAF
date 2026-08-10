@@ -2,7 +2,10 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { logError } from "@/lib/errorReporting";
 import { statusBadgeClass } from "@/lib/statusStyles";
+import { useConfirm } from "@/hooks/useConfirm";
+import { useToast } from "@/components/shared/Toast";
 
 interface OrphanedResource {
   id: number;
@@ -32,7 +35,12 @@ const RESOURCE_LABELS: Record<string, string> = {
   s3_bucket: "S3 Bucket",
 };
 
+/** Resource types where "Clean Up" destroys stored data, not just compute. */
+const DESTROYS_DATA = new Set(["gcs_bucket", "s3_bucket"]);
+
 export function OrphanedResourcesCard() {
+  const confirm = useConfirm();
+  const toast = useToast();
   const [resources, setResources] = useState<OrphanedResource[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<number | null>(null);
@@ -46,8 +54,12 @@ export function OrphanedResourcesCard() {
       setResources(
         data.items.filter((r) => r.status === "detected" || r.status === "failed")
       );
-    } catch {
-      // Silently ignore -- card just won't render
+    } catch (err) {
+      // Was "Silently ignore -- card just won't render". These resources cost
+      // money every hour they exist, so hiding the card on a failed load hides a
+      // bill. The card still declines to render (there is nothing to list) but
+      // the failure now reaches the log instead of vanishing.
+      logError("loading orphaned cloud resources", err);
     } finally {
       setLoading(false);
     }
@@ -58,11 +70,47 @@ export function OrphanedResourcesCard() {
   }, [fetchResources]);
 
   const handleCleanup = async (id: number) => {
+    const resource = resources.find((r) => r.id === id);
+    const label = resource ? RESOURCE_LABELS[resource.resource_type] ?? resource.resource_type : "resource";
+    const destroysData = resource ? DESTROYS_DATA.has(resource.resource_type) : false;
+
+    // This button had no gate at all. On this same page, destroying object
+    // storage is gated by a checkbox plus a typed "delete my data"; a bucket
+    // reached through this card was one red click. Same act, and the weak gate
+    // reads as safe precisely because the strong one exists.
+    const ok = await confirm({
+      title: destroysData ? `Permanently delete this ${label}?` : `Delete this ${label}?`,
+      message: destroysData ? (
+        <>
+          <p>
+            <span className="font-medium">{resource?.resource_name ?? `#${id}`}</span> and{" "}
+            <span className="font-medium">everything stored in it</span> will be permanently deleted.
+            That includes any raw sample data, pipeline outputs and results it holds.
+          </p>
+          <p>This cannot be undone, and bioAF cannot recover the contents afterwards.</p>
+        </>
+      ) : (
+        <>
+          <p>
+            <span className="font-medium">{resource?.resource_name ?? `#${id}`}</span> will be
+            deleted from {resource?.gcp_project_id ?? "your cloud project"}. This cannot be undone.
+          </p>
+          <p>No data stored in bioAF is affected.</p>
+        </>
+      ),
+      confirmLabel: destroysData ? "Delete permanently" : "Delete",
+      variant: "danger",
+      requirePhrase: destroysData ? "delete my data" : undefined,
+    });
+    if (!ok) return;
+
     setActionInProgress(id);
     try {
       await api.post(`/api/v1/infrastructure/orphaned-resources/${id}/cleanup`);
       await fetchResources();
-    } catch {
+    } catch (err) {
+      logError(`cleaning up orphaned ${label} ${id}`, err);
+      toast.error(`That ${label} could not be deleted. The technical detail is in the application logs.`);
       await fetchResources();
     } finally {
       setActionInProgress(null);

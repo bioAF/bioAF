@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { statusDotClass } from "@/lib/statusStyles";
 
 interface ActivityEvent {
   id: number;
@@ -21,25 +22,13 @@ interface ActivityFeedWidgetProps {
 }
 
 export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=15")
-      .then((data) => setEvents(data.events))
-      .catch(() => setError("Failed to load activity feed"))
-      .finally(() => { clearTimeout(timeout); setLoading(false); });
-    return () => clearTimeout(timeout);
-  }, []);
-
-  const severityColor: Record<string, string> = {
-    info: "bg-blue-400",
-    warning: "bg-amber-400",
-    critical: "bg-red-400",
-  };
+  const { data, loading, error, retry } = useWidgetData(
+    async () =>
+      (await api.getWithRetry<{ events: ActivityEvent[] }>("/api/activity-feed?page_size=15"))
+        .events,
+    "The activity feed",
+  );
+  const events = data ?? [];
 
   function humanize(text: string): string {
     return text.replace(/[a-z0-9]+(_[a-z0-9]+)+/g, (match) =>
@@ -79,20 +68,20 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
         </Link>
       </div>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading activity...</span>
         </div>
       )}
       {error && !loading && (
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
-          <button onClick={() => window.location.reload()} className="ml-2 text-bioaf-600 hover:underline">
+          <button onClick={retry} className="ml-2 text-bioaf-600 hover:underline">
             Retry
           </button>
         </div>
       )}
       {!loading && !error && events.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No recent activity. Events will appear here as you use the platform.
         </p>
       )}
@@ -101,13 +90,14 @@ export function ActivityFeedWidget({ className }: ActivityFeedWidgetProps) {
           {events.map((e) => (
             <div key={e.id} className="flex items-start gap-2">
               <span
-                className={`w-1.5 h-1.5 mt-1.5 rounded-full flex-shrink-0 ${
-                  severityColor[e.severity || "info"] || severityColor.info
-                }`}
+                className={`w-1.5 h-1.5 mt-1.5 rounded-full flex-shrink-0 ${statusDotClass(
+                  "severity",
+                  e.severity || "info",
+                )}`}
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm text-gray-700 truncate">{humanize(e.summary)}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-xs text-gray-500">
                   {e.user_email && (
                     <span className="text-gray-500">executed by {e.user_email} &middot; </span>
                   )}

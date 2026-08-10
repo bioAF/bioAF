@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { VALIDATION_CLASSIFICATIONS } from "@/lib/validationClassification";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
 // The human gates on a validation study, rendered per state. `requested` needs a Read (B1 fetches the
 // full text by DOI, or paste a body); `plan_ready` is the C1 approve/decline gate; `comparing` is the
@@ -22,6 +23,7 @@ export function ValidationStudyActions({
   suggestedClassification?: string | null;
 }) {
   const { canAccess } = usePermissions();
+  const [showApprove, setShowApprove] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fullText, setFullText] = useState("");
@@ -70,7 +72,7 @@ export function ValidationStudyActions({
             Fetches the full text by DOI and extracts the reproduction plan (may take a moment).
           </span>
         </div>
-        <textarea
+        <textarea aria-label="Optional: paste the full text if the paper is not open access"
           value={fullText}
           onChange={(e) => setFullText(e.target.value)}
           placeholder="Optional: paste the full text if the paper is not open access."
@@ -86,11 +88,11 @@ export function ValidationStudyActions({
           <button
             className={`${btn} bg-green-600 text-white hover:bg-green-700`}
             disabled={busy}
-            onClick={() => run(() => api.post(`${base}/approve`, undefined))}
+            onClick={() => setShowApprove(true)}
           >
             {busy ? "Working..." : "Approve plan"}
           </button>
-          <input
+          <input aria-label="Reason (optional)"
             value={declineReason}
             onChange={(e) => setDeclineReason(e.target.value)}
             placeholder="Reason (optional)"
@@ -109,6 +111,27 @@ export function ValidationStudyActions({
         <p className="text-xs text-gray-500">
           Approving spends compute: it fetches the data and runs the reproduction pipeline.
         </p>
+        <ConfirmDialog
+          open={showApprove}
+          title="Approve this plan?"
+          message={
+            <>
+              <p>
+                This fetches the data behind the paper and runs the reproduction pipeline on it.
+                That spends compute on your cloud account, and the spend cannot be
+                recovered once the run starts.
+              </p>
+              <p>The study stays held until you approve, so nothing has been charged yet.</p>
+            </>
+          }
+          confirmLabel="Approve and run"
+          busy={busy}
+          onConfirm={() => {
+            setShowApprove(false);
+            run(() => api.post(`${base}/approve`, undefined));
+          }}
+          onCancel={() => setShowApprove(false)}
+        />
       </div>
     );
   } else if (study.state === "comparing" && canApprove) {

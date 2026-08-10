@@ -1,18 +1,28 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { getCurrentUser } from "@/lib/auth";
+import { Button } from "@/components/ui/Button";
 import { DetailModal } from "@/components/shared/DetailModal";
+import { Modal } from "@/components/shared/Modal";
 import type {
   DatasetExperimentSummary,
   DatasetSearchResult,
   Project,
   ProjectListResponse,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
+
+import { clickableRow } from "@/lib/a11y";
 
 export function DatasetBrowser() {
+  const toast = useToast();
   const [datasets, setDatasets] = useState<DatasetExperimentSummary[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [viewingDataset, setViewingDataset] = useState<DatasetExperimentSummary | null>(null);
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -30,6 +40,7 @@ export function DatasetBrowser() {
   const [selectedExperiments, setSelectedExperiments] = useState<Set<number>>(new Set());
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsFailed, setProjectsFailed] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [newProjectName, setNewProjectName] = useState("");
   const [addingToProject, setAddingToProject] = useState(false);
@@ -55,8 +66,12 @@ export function DatasetBrowser() {
       );
       setDatasets(data.experiments);
       setTotal(data.total);
-    } catch {
-      // ignore
+      // A Retry that succeeds must clear the failure it retried. Set on the way down,
+      // never cleared on the way back up, means only a page reload lost the message.
+      setLoadError(null);
+    } catch (e) {
+      logError("loading datasets", e);
+      setLoadError(loadFailureMessage("Datasets"));
     } finally {
       setLoading(false);
     }
@@ -69,7 +84,10 @@ export function DatasetBrowser() {
   useEffect(() => {
     api.get<{ organisms: string[] }>("/api/datasets/filter-options")
       .then((data) => setOrganismOptions(data.organisms))
-      .catch(() => {});
+      .catch((e) => {
+        logError("loading the organism filter", e);
+        toast.error(loadFailureMessage("The organism filter"));
+      });
   }, []);
 
   const toggleExperiment = (id: number) => {
@@ -79,12 +97,26 @@ export function DatasetBrowser() {
     setSelectedExperiments(next);
   };
 
+  const closeProjectModal = () => {
+    setShowProjectModal(false);
+    setSelectedProjectId("");
+    setNewProjectName("");
+  };
+
   const openProjectModal = async () => {
     try {
       const data = await api.get<ProjectListResponse>("/api/projects");
       setProjects(data.projects);
-    } catch {
-      // ignore
+      setProjectsFailed(false);
+    } catch (e) {
+      // Proven on the demo: with this read failing, the dialog opened offering
+      // only ["Choose a project...", "+ Create New Project"] while two real
+      // projects existed. The user cannot see whether the project they want is
+      // already there, so the only path forward creates a duplicate. A read
+      // that failed must not arm the write behind it.
+      logError("loading the projects to add the selected datasets to", e);
+      setProjects([]);
+      setProjectsFailed(true);
     }
     setShowProjectModal(true);
   };
@@ -104,17 +136,21 @@ export function DatasetBrowser() {
       }
 
       const selectedDs = datasets.filter((ds) => selectedExperiments.has(ds.experiment_id));
+
+      // Every selected experiment's samples must be read BEFORE anything is written.
+      //
+      // This loop used to toast "Could not add the datasets to the project" on a failed
+      // read and then carry on, posting the sample IDs it had managed to collect. So
+      // the user was told the operation had failed while a partial subset of their
+      // selection was silently added: the message and the outcome disagreed, and the
+      // half that landed was invisible. Now a failed read aborts before the write.
       const sampleIds: number[] = [];
       for (const ds of selectedDs) {
-        try {
-          const expData = await api.get<{ samples: Array<{ id: number }> }>(
-            `/api/experiments/${ds.experiment_id}`
-          );
-          if (expData.samples) {
-            sampleIds.push(...expData.samples.map((s) => s.id));
-          }
-        } catch {
-          // skip
+        const expData = await api.get<{ samples: Array<{ id: number }> }>(
+          `/api/experiments/${ds.experiment_id}`
+        );
+        if (expData.samples) {
+          sampleIds.push(...expData.samples.map((s) => s.id));
         }
       }
 
@@ -128,8 +164,12 @@ export function DatasetBrowser() {
       setSelectedExperiments(new Set());
       setSelectedProjectId("");
       setNewProjectName("");
-    } catch {
-      // handled by api client
+    } catch (e) {
+      // `catch { // handled by api client }` was a false comment: lib/api.ts only
+      // throws, it reports nothing. A failed POST /api/projects/{id}/samples was
+      // therefore completely silent, and the modal closed as though it had worked.
+      logError("adding the selected datasets to a project", e);
+      toast.error("The datasets could not be added to the project, so none were added.");
     } finally {
       setAddingToProject(false);
     }
@@ -138,7 +178,7 @@ export function DatasetBrowser() {
   return (
     <div className="space-y-4">
       <div className="flex gap-4 flex-wrap">
-        <input
+        <input aria-label="Search datasets"
           type="text"
           placeholder="Search datasets..."
           value={query}
@@ -148,7 +188,7 @@ export function DatasetBrowser() {
           }}
           className="flex-1 min-w-[200px] px-3 py-2 border border-gray-300 rounded-md text-sm"
         />
-        <select
+        <select aria-label="Filter by status"
           value={statusFilter}
           onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -161,7 +201,7 @@ export function DatasetBrowser() {
           <option value="analysis">Analysis</option>
           <option value="complete">Complete</option>
         </select>
-        <select
+        <select aria-label="Filter by organism"
           value={organismFilter}
           onChange={(e) => { setOrganismFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -171,7 +211,7 @@ export function DatasetBrowser() {
             <option key={org} value={org}>{org}</option>
           ))}
         </select>
-        <select
+        <select aria-label="Filter by review status"
           value={reviewStatusFilter}
           onChange={(e) => { setReviewStatusFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -182,7 +222,7 @@ export function DatasetBrowser() {
           <option value="rejected">Rejected</option>
           <option value="revision_requested">Revision Requested</option>
         </select>
-        <select
+        <select aria-label="Filter by instrument model"
           value={instrumentModelFilter}
           onChange={(e) => { setInstrumentModelFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -193,7 +233,7 @@ export function DatasetBrowser() {
           <option value="NextSeq 2000">NextSeq 2000</option>
           <option value="MiSeq">MiSeq</option>
         </select>
-        <select
+        <select aria-label="Filter by molecule type"
           value={moleculeTypeFilter}
           onChange={(e) => { setMoleculeTypeFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-gray-300 rounded-md text-sm"
@@ -205,71 +245,71 @@ export function DatasetBrowser() {
           <option value="protein">Protein</option>
         </select>
         {canModify && selectedExperiments.size > 0 && (
-          <button
-            onClick={openProjectModal}
-            className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button onClick={openProjectModal}>
             Add to Project ({selectedExperiments.size})
-          </button>
+          </Button>
         )}
       </div>
 
       {loading ? (
-        <p className="text-gray-400 text-sm">Loading...</p>
+        <p className="text-ink-subtle text-sm">Loading...</p>
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => fetchDatasets()} />
       ) : datasets.length === 0 ? (
-        <p className="text-gray-400 text-sm">No datasets found.</p>
+        <p className="text-ink-subtle text-sm">No datasets found.</p>
       ) : (
         <>
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
+          <div className="bg-surface rounded-lg shadow overflow-x-auto">
+            <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
                   {canModify && (
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-8"></th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase w-8"></th>
                   )}
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Experiment
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Organism
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Samples
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Files
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
                     Total Size
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-hairline">
                 {datasets.map((ds) => (
-                  <tr key={ds.experiment_id} className={`hover:bg-gray-50 cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} onClick={() => setViewingDataset(ds)}>
+                  <tr key={ds.experiment_id} className={`hover:bg-surface-muted cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
                     {canModify && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          aria-label={`Select ${ds.experiment_name}`}
                           checked={selectedExperiments.has(ds.experiment_id)}
                           onChange={() => toggleExperiment(ds.experiment_id)}
                           className="rounded"
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                    <td className="px-4 py-3 text-sm font-medium text-ink">
                       {ds.experiment_name}
                     </td>
                     <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-700">
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-elevated text-ink-muted">
                         {ds.status}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
-                      {ds.organism || "\u2014"}
+                      {ds.organism || NOT_SET}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-600">
                       {ds.sample_count}
@@ -286,26 +326,18 @@ export function DatasetBrowser() {
             </table>
           </div>
 
-          <div className="flex justify-between items-center text-sm text-gray-500">
+          <div className="flex justify-between items-center text-sm text-ink-subtle">
             <span>
               Showing {(page - 1) * pageSize + 1}-
               {Math.min(page * pageSize, total)} of {total}
             </span>
             <div className="space-x-2">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
+              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
                 Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => p + 1)}
-                disabled={page * pageSize >= total}
-                className="px-3 py-1 border rounded disabled:opacity-50"
-              >
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setPage((p) => p + 1)} disabled={page * pageSize >= total}>
                 Next
-              </button>
+              </Button>
             </div>
           </div>
         </>
@@ -334,33 +366,74 @@ export function DatasetBrowser() {
         />
       )}
 
-      {/* Add to Project Modal */}
-      {showProjectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold mb-4">Add to Project</h2>
-            <p className="text-sm text-gray-500 mb-4">
-              Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
-            </p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
-                <select
-                  value={selectedProjectId}
-                  onChange={(e) => setSelectedProjectId(e.target.value)}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+      {/* Add to Project. On the shared shell: measured on the demo, the
+          hand-rolled version put 12 of 12 Tab stops outside the panel. */}
+      <Modal
+        open={showProjectModal}
+        title="Add to Project"
+        onClose={closeProjectModal}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeProjectModal}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddToProject}
+              busy={addingToProject}
+              busyLabel="Adding..."
+              disabled={
+                projectsFailed ||
+                !selectedProjectId ||
+                (selectedProjectId === "new" && !newProjectName.trim())
+              }
+            >
+              Add to Project
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink-subtle mb-4">
+          Add samples from {selectedExperiments.size} experiment{selectedExperiments.size !== 1 ? "s" : ""} to a project.
+        </p>
+        <div className="space-y-4">
+              {projectsFailed ? (
+                <div
+                  data-testid="projects-load-failed"
+                  className="text-sm text-red-700 bg-red-50 border border-red-200 rounded p-3"
                 >
-                  <option value="">Choose a project...</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={String(p.id)}>{p.name}</option>
-                  ))}
-                  <option value="new">+ Create New Project</option>
-                </select>
-              </div>
+                  <p>{loadFailureMessage("Your projects")}</p>
+                  <p className="mt-2">
+                    Creating a new one from here would risk duplicating a project
+                    you already have, so nothing can be added until the list loads.
+                  </p>
+                  <button
+                    onClick={openProjectModal}
+                    className="mt-2 text-xs underline hover:no-underline"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
+                  <select id="select-project"
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                  >
+                    <option value="">Choose a project...</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={String(p.id)}>{p.name}</option>
+                    ))}
+                    <option value="new">+ Create New Project</option>
+                  </select>
+                </div>
+              )}
               {selectedProjectId === "new" && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">New Project Name</label>
-                  <input
+                  <label htmlFor="new-project-name" className="block text-sm font-medium text-ink-muted mb-1">New Project Name</label>
+                  <input id="new-project-name"
                     type="text"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
@@ -369,32 +442,8 @@ export function DatasetBrowser() {
                   />
                 </div>
               )}
-            </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                onClick={() => {
-                  setShowProjectModal(false);
-                  setSelectedProjectId("");
-                  setNewProjectName("");
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddToProject}
-                disabled={
-                  addingToProject ||
-                  (!selectedProjectId || (selectedProjectId === "new" && !newProjectName.trim()))
-                }
-                className="px-4 py-2 bg-bioaf-600 text-white rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
-              >
-                {addingToProject ? "Adding..." : "Add to Project"}
-              </button>
-            </div>
-          </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

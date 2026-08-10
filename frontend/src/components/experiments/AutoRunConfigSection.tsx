@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type {
   AutoRunConfig,
   AutoRunConfigCreate,
@@ -10,9 +12,14 @@ import type {
   PipelineCatalogListResponse,
   ParameterSchema,
 } from "@/lib/types";
+import { useToast } from "@/components/shared/Toast";
+import { ErrorState } from "@/components/shared/ErrorState";
+import { Card } from "@/components/ui/Card";
 
 export function AutoRunConfigSection({ experimentId }: { experimentId: number }) {
+  const toast = useToast();
   const [configs, setConfigs] = useState<AutoRunConfig[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -27,7 +34,10 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
     try {
       const data = await api.get<AutoRunConfig[]>(`/api/experiments/${experimentId}/auto-runs`);
       setConfigs(data);
-    } catch {} finally { setLoading(false); }
+    } catch (e) {
+      logError("loading auto-run rules", e);
+      setLoadError(loadFailureMessage("Auto-run rules"));
+    } finally { setLoading(false); }
   }
 
   async function handleToggle(config: AutoRunConfig) {
@@ -37,7 +47,9 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
         { enabled: !config.enabled },
       );
       loadConfigs();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not change the auto-run setting.");
+    }
   }
 
   async function handleDelete(configId: number) {
@@ -45,7 +57,9 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       await api.delete(`/api/experiments/${experimentId}/auto-runs/${configId}`);
       setDeleteConfirm(null);
       loadConfigs();
-    } catch {}
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete the auto-run rule.");
+    }
   }
 
   function openCreate() {
@@ -77,24 +91,26 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
       </div>
 
       {loading ? (
-        <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">Loading...</div>
+        <Card padding="none" className="p-8 text-center text-gray-500">Loading...</Card>
+      ) : loadError ? (
+        <ErrorState message={loadError} onRetry={() => loadConfigs()} />
       ) : configs.length === 0 ? (
         <div className="bg-white rounded-lg shadow p-8 text-center">
-          <p className="text-gray-400 text-sm">
+          <p className="text-gray-500 text-sm">
             No auto-run configurations. Configure one to automatically run pipelines
             when sample files arrive.
           </p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
+        <Card padding="none" className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Delay</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameters</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pipeline</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Delay</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parameters</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -138,7 +154,7 @@ export function AutoRunConfigSection({ experimentId }: { experimentId: number })
               ))}
             </tbody>
           </table>
-        </div>
+        </Card>
       )}
 
       {showModal && (
@@ -168,6 +184,7 @@ function AutoRunConfigModal({
   onSaved: () => void;
 }) {
   const isEdit = !!existingConfig;
+  const toast = useToast();
 
   const [step, setStep] = useState<1 | 2 | 3>(isEdit ? 2 : 1);
   const [pipelines, setPipelines] = useState<PipelineCatalog[]>([]);
@@ -198,7 +215,10 @@ function AutoRunConfigModal({
         const match = data.pipelines.find((p) => p.pipeline_key === existingConfig.pipeline_key);
         if (match) setSelectedPipeline(match);
       }
-    } catch {}
+    } catch (e) {
+      logError("loading the pipeline catalog", e);
+      toast.error(loadFailureMessage("The pipeline catalog"));
+    }
   }
 
   async function loadPipelineDetail(key: string) {
@@ -208,7 +228,10 @@ function AutoRunConfigModal({
       if (!isEdit && data.default_params) {
         setUserParams({ ...data.default_params });
       }
-    } catch {}
+    } catch (e) {
+      logError("loading pipeline detail", e);
+      toast.error(loadFailureMessage("Pipeline detail"));
+    }
   }
 
   async function handleSave() {
@@ -237,16 +260,15 @@ function AutoRunConfigModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold">
-              {isEdit ? "Edit Auto-Run Configuration" : "Configure Auto-Run"}
-            </h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
-          </div>
-
+    // Each step carries its own Back/Next, so the shell's footer stays empty
+    // rather than competing with them.
+    <Modal
+      open
+      title={isEdit ? "Edit Auto-Run Configuration" : "Configure Auto-Run"}
+      onClose={onClose}
+      size="lg"
+    >
+      <div>
           {/* Step indicator */}
           <div className="flex items-center gap-2 mb-6">
             {[1, 2, 3].map((s) => (
@@ -265,8 +287,8 @@ function AutoRunConfigModal({
           {/* Step 1: Select Pipeline */}
           {step === 1 && (
             <div>
-              <label className="text-sm text-gray-600 mb-2 block">Select Pipeline</label>
-              <select
+              <label htmlFor="select-pipeline" className="text-sm text-gray-600 mb-2 block">Select Pipeline</label>
+              <select id="select-pipeline"
                 value={selectedPipelineKey}
                 onChange={(e) => setSelectedPipelineKey(e.target.value)}
                 className="w-full border rounded-md px-3 py-2 text-sm"
@@ -279,7 +301,7 @@ function AutoRunConfigModal({
                 ))}
               </select>
               {selectedPipeline && (
-                <p className="text-xs text-gray-400 mt-2">{selectedPipeline.description || ""}</p>
+                <p className="text-xs text-gray-500 mt-2">{selectedPipeline.description || ""}</p>
               )}
               <div className="mt-6 flex justify-end">
                 <button
@@ -307,8 +329,15 @@ function AutoRunConfigModal({
                 <div className="text-sm text-gray-500">
                   <p className="mb-3">No parameter schema available. Enter parameters as JSON:</p>
                   <textarea
+                    aria-label="Pipeline parameters as JSON"
                     value={JSON.stringify(userParams, null, 2)}
-                    onChange={(e) => { try { setUserParams(JSON.parse(e.target.value)); } catch {} }}
+                    onChange={(e) => {
+            try {
+              setUserParams(JSON.parse(e.target.value));
+            } catch {
+              // Half-typed JSON is not a failure worth reporting; see the launch page.
+            }
+          }}
                     className="w-full h-32 border rounded px-3 py-2 font-mono text-xs"
                   />
                 </div>
@@ -325,15 +354,15 @@ function AutoRunConfigModal({
           {step === 3 && (
             <div>
               <div className="mb-6">
-                <label className="text-sm text-gray-600 block mb-1">Delay after sample completion (minutes)</label>
-                <input
+                <label htmlFor="delay-after-sample-completion-minutes" className="text-sm text-gray-600 block mb-1">Delay after sample completion (minutes)</label>
+                <input id="delay-after-sample-completion-minutes"
                   type="number"
                   min={0}
                   value={delayMinutes}
                   onChange={(e) => setDelayMinutes(Math.max(0, Number(e.target.value)))}
                   className="w-32 border rounded px-3 py-1.5 text-sm"
                 />
-                <p className="text-xs text-gray-400 mt-1">
+                <p className="text-xs text-gray-500 mt-1">
                   Pipeline will launch this many minutes after all expected files for a sample
                   are verified. Set to 0 for immediate launch.
                 </p>
@@ -369,9 +398,8 @@ function AutoRunConfigModal({
               </div>
             </div>
           )}
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -416,8 +444,8 @@ function ModalParameterForm({
                 if (prop.enum) {
                   return (
                     <div key={paramKey}>
-                      <label className="text-xs text-gray-500">{label}</label>
-                      <select value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
+                      <label id="lbl-autorunconfigsection-1" className="text-xs text-gray-500">{label}</label>
+                      <select aria-labelledby="lbl-autorunconfigsection-1" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
                         <option value="">--</option>
                         {prop.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                       </select>
@@ -428,7 +456,7 @@ function ModalParameterForm({
                 if (prop.type === "boolean") {
                   return (
                     <div key={paramKey} className="flex items-center gap-2">
-                      <input type="checkbox" checked={Boolean(value)} onChange={(e) => setValue(paramKey, e.target.checked)} />
+                      <input type="checkbox" aria-label={label} checked={Boolean(value)} onChange={(e) => setValue(paramKey, e.target.checked)} />
                       <label className="text-sm">{label}</label>
                     </div>
                   );
@@ -437,16 +465,16 @@ function ModalParameterForm({
                 if (prop.type === "number" || prop.type === "integer") {
                   return (
                     <div key={paramKey}>
-                      <label className="text-xs text-gray-500">{label}</label>
-                      <input type="number" value={value != null ? String(value) : ""} onChange={(e) => setValue(paramKey, e.target.value ? Number(e.target.value) : null)} className="w-full border rounded px-3 py-1.5 text-sm" />
+                      <label id="lbl-autorunconfigsection-2" className="text-xs text-gray-500">{label}</label>
+                      <input aria-labelledby="lbl-autorunconfigsection-2" type="number" value={value != null ? String(value) : ""} onChange={(e) => setValue(paramKey, e.target.value ? Number(e.target.value) : null)} className="w-full border rounded px-3 py-1.5 text-sm" />
                     </div>
                   );
                 }
 
                 return (
                   <div key={paramKey}>
-                    <label className="text-xs text-gray-500">{label}</label>
-                    <input type="text" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm" />
+                    <label id="lbl-autorunconfigsection-3" className="text-xs text-gray-500">{label}</label>
+                    <input aria-labelledby="lbl-autorunconfigsection-3" type="text" value={String(value ?? "")} onChange={(e) => setValue(paramKey, e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm" />
                   </div>
                 );
               })}

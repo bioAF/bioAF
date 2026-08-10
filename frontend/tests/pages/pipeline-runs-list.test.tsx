@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import PipelineRunsPage from "@/app/pipelines/runs/page";
+import PipelineRunsPage from "@/app/(app)/pipelines/runs/page";
 
 const mockPush = jest.fn();
 const mockRouter = { push: mockPush };
@@ -13,8 +13,6 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ email: "test@bioaf.org", role: "admin", sub: "1" }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 
 const mockHas = jest.fn();
 jest.mock("@/hooks/useCapabilities", () => ({

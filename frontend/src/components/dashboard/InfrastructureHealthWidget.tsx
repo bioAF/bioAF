@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { statusDotClass } from "@/lib/statusStyles";
 
@@ -36,7 +37,14 @@ export function InfrastructureHealthWidget() {
         setServices(data.services);
         setError(null);
       })
-      .catch(() => setError("Failed to load service health"))
+      // Was `setError("Failed to load service health")`: a hand-written sentence
+      // where thirteen sibling widgets share one, and it discarded the error
+      // instead of logging it. This widget keeps its own loader rather than
+      // moving to `useWidgetData` because it also polls on a 60s interval.
+      .catch((err) => {
+        logError("loading service health on the dashboard", err);
+        setError(loadFailureMessage("Service health"));
+      })
       .finally(() => setLoading(false));
   };
 
@@ -52,7 +60,7 @@ export function InfrastructureHealthWidget() {
         Service Health
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" /><span className="text-sm">Loading health...</span>
         </div>
       )}
@@ -68,7 +76,7 @@ export function InfrastructureHealthWidget() {
         </div>
       )}
       {!loading && !error && services.length === 0 && (
-        <p className="text-sm text-gray-400" data-testid="widget-empty">
+        <p className="text-sm text-gray-500" data-testid="widget-empty">
           No service activity in the last 5 minutes.
         </p>
       )}

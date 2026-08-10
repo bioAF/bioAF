@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/Button";
 
 interface ErrorStateProps {
   message: string;
@@ -55,13 +56,11 @@ export function ErrorState({ message, onRetry, details }: ErrorStateProps) {
         </>
       )}
       {onRetry && (
-        <button
+        <Button variant="danger" className="mt-4"
           data-testid="error-retry"
-          onClick={onRetry}
-          className="mt-4 px-4 py-2 text-sm font-medium text-white bg-red-500 rounded-md hover:bg-red-600 transition-colors"
-        >
+          onClick={onRetry}>
           Retry
-        </button>
+        </Button>
       )}
     </div>
   );

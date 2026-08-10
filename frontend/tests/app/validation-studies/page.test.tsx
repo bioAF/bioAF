@@ -1,9 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import ValidationStudyPage from "@/app/validation-studies/[id]/page";
+import ValidationStudyPage from "@/app/(app)/lab-knowledge/validation-studies/[id]/page";
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
   useParams: () => ({ id: "5" }),
+  usePathname: () => "/lab-knowledge/validation-studies/5",
 }));
 
 jest.mock("@/lib/api", () => ({
@@ -18,9 +19,10 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true, loading: false }),
 }));
 
+let litBeta = { available: true, flags: { lit_validation: true } as Record<string, boolean>, loading: false };
+jest.mock("@/hooks/useBetaFeatures", () => ({ useBetaFeatures: () => litBeta }));
+
 // Keep the test focused on the page body, not the app chrome.
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => null }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => null }));
 
 import { api } from "@/lib/api";
 
@@ -28,6 +30,7 @@ const mockGet = api.get as jest.Mock;
 
 beforeEach(() => {
   mockGet.mockReset();
+  litBeta = { available: true, flags: { lit_validation: true }, loading: false };
 });
 
 describe("ValidationStudyPage", () => {
@@ -45,6 +48,20 @@ describe("ValidationStudyPage", () => {
     await waitFor(() => expect(screen.getByText("Fully Validated")).toBeInTheDocument());
     expect(screen.getByText(/10\.3390\/jfb17020057/)).toBeInTheDocument();
     expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
+  });
+
+  it("renders a breadcrumb trailing to this study under Validation Studies", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "classified", classification: "validated", confidence: 100 });
+
+    render(<ValidationStudyPage />);
+
+    const breadcrumb = await screen.findByTestId("breadcrumb");
+    expect(breadcrumb).toHaveTextContent("Validation Studies");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Study #5");
+    expect(screen.getByRole("link", { name: "Validation Studies" })).toHaveAttribute(
+      "href",
+      "/lab-knowledge/validation-studies",
+    );
   });
 
   it("renders the pipeline stage (not a validation verdict) while the study is still running", async () => {
@@ -107,15 +124,70 @@ describe("ValidationStudyPage", () => {
 
     render(<ValidationStudyPage />);
 
-    await waitFor(() => expect(screen.getByText(/Validation Study #5/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Study #5/ })).toBeInTheDocument());
     expect(screen.queryByRole("button", { name: /export report/i })).not.toBeInTheDocument();
   });
 
-  it("shows a not-found message when the study cannot be loaded", async () => {
+  it("links to the in-app source paper when the study has a paper_id", async () => {
+    mockGet.mockResolvedValue({
+      id: 5,
+      state: "classified",
+      classification: "validated",
+      confidence: 100,
+      paper_id: 88,
+    });
+
+    render(<ValidationStudyPage />);
+
+    const link = await screen.findByRole("link", { name: /source paper/i });
+    expect(link).toHaveAttribute("href", "/lab-knowledge/literature/papers/88");
+  });
+
+  it("omits the source-paper link when the study has no paper_id", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: /Study #5/ })).toBeInTheDocument());
+    expect(screen.queryByRole("link", { name: /source paper/i })).not.toBeInTheDocument();
+  });
+
+  it("titles the header and breadcrumb by the resolved study title, with the id secondary", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null, title: "A Landmark RNA-seq Reproduction" });
+
+    render(<ValidationStudyPage />);
+
+    expect(await screen.findByRole("heading", { name: /A Landmark RNA-seq Reproduction/i })).toBeInTheDocument();
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("A Landmark RNA-seq Reproduction");
+    expect(screen.getByText("#5")).toBeInTheDocument();
+  });
+
+  it("falls back to 'Study #id' for the header when no title resolved", async () => {
+    mockGet.mockResolvedValue({ id: 5, state: "requested", confidence: null });
+
+    render(<ValidationStudyPage />);
+
+    expect(await screen.findByRole("heading", { name: /Study #5/i })).toBeInTheDocument();
+    // no redundant secondary id when the header already IS the fallback
+    expect(screen.queryByText(/^#5$/)).not.toBeInTheDocument();
+  });
+
+  it("shows a not-found message with a retry when the study cannot be loaded", async () => {
     mockGet.mockRejectedValue(new Error("404"));
 
     render(<ValidationStudyPage />);
 
     await waitFor(() => expect(screen.getByText(/not found/i)).toBeInTheDocument());
+    expect(screen.getByTestId("error-retry")).toBeInTheDocument();
+  });
+
+  it("shows the not-enabled notice, not the study, when the lit_validation flag is off", async () => {
+    litBeta = { available: true, flags: {}, loading: false };
+    mockGet.mockResolvedValue({ id: 5, state: "classified", classification: "validated", confidence: 100 });
+
+    render(<ValidationStudyPage />);
+
+    await waitFor(() => expect(screen.getByText(/isn't enabled/i)).toBeInTheDocument());
+    expect(screen.queryByText("Fully Validated")).not.toBeInTheDocument();
   });
 });

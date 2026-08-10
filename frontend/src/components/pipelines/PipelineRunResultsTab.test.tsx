@@ -1,6 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 
+// ApiError must be the real class: the tab now distinguishes "this run has no
+// dashboard" (404) from "the dashboard could not be read" (anything else), and
+// a module mock without it would make that check throw.
 jest.mock("@/lib/api", () => ({
+  ...jest.requireActual("@/lib/api"),
   api: { get: jest.fn() },
   fileContentUrl: jest.fn(),
   plotThumbnailContentUrl: jest.fn(),
@@ -47,8 +51,14 @@ test("surfaces the AI Review section on the QC report for the run", async () => 
 });
 
 test("shows the AI Review section even when no QC dashboard exists for the run", async () => {
+  // A real 404, not a generic Error whose message happens to read "404". The
+  // two used to be indistinguishable here, which is the defect this test's
+  // neighbour (PipelineRunResultsTab.errors.test.tsx) now pins shut.
+  const { ApiError } = jest.requireActual("@/lib/api");
   mockGet.mockImplementation((url: string) => {
-    if (url.includes("/api/qc-dashboards/by-run/42")) return Promise.reject(new Error("404"));
+    if (url.includes("/api/qc-dashboards/by-run/42")) {
+      return Promise.reject(new ApiError(404, "Not found"));
+    }
     if (url.startsWith("/api/plots")) return Promise.resolve({ plots: [] });
     return Promise.resolve({});
   });

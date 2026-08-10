@@ -4,8 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.models.reference_dataset import REFERENCE_CATEGORIES, REFERENCE_SCOPES
 from app.database import get_session
 from app.schemas.reference_dataset import (
+    ReferenceFilterOptions,
     ImpactSummary,
     ReferenceDatasetCreate,
     ReferenceDatasetDetailResponse,
@@ -74,6 +76,18 @@ async def list_references(
         references=[_response(r) for r in refs],
         total=total,
     )
+
+
+@router.get("/filter-options", response_model=ReferenceFilterOptions)
+async def get_filter_options(
+    current_user: dict = require_permission("pipelines", "view"),
+):
+    """Vocabularies for the Reference Data filter controls.
+
+    Declared before /{reference_id} so FastAPI matches the literal path instead
+    of trying to coerce "filter-options" into an id.
+    """
+    return ReferenceFilterOptions(categories=REFERENCE_CATEGORIES, scopes=REFERENCE_SCOPES)
 
 
 @router.get("/by-name", response_model=ReferenceDatasetListResponse)
@@ -236,7 +250,7 @@ async def upload_complete(
     current_user: dict = require_permission("references", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Finalize a resumable upload — list GCS, verify files, persist md5+size."""
+    """Finalize a resumable upload: list GCS, verify files, persist md5+size."""
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
 

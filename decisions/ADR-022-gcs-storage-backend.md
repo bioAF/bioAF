@@ -8,13 +8,13 @@
 
 ## Context
 
-bioAF's original architecture specified Google Filestore (NFS) as shared storage for compute nodes, notebook servers, and pipeline working directories. Filestore provides a POSIX filesystem that biologists use with standard file paths — no special tooling needed. However, Filestore has significant drawbacks:
+bioAF's original architecture specified Google Filestore (NFS) as shared storage for compute nodes, notebook servers, and pipeline working directories. Filestore provides a POSIX filesystem that biologists use with standard file paths: no special tooling needed. However, Filestore has significant drawbacks:
 
 1. **Cost:** Filestore's minimum instance is 1TB at ~$200/month (HDD) or ~$600/month (SSD). This is the single largest idle cost in the optional component stack.
 2. **Inflexibility:** You pay for provisioned capacity, not actual usage. A team storing 50GB of working data still pays for 1TB.
 3. **Scaling friction:** Increasing Filestore capacity requires a resize operation; decreasing is not supported without recreating the instance.
 
-GCS buckets, by contrast, charge only for stored data (~$0.02/GB/month for Standard class), scale infinitely, and are already used by bioAF for raw data, results, and config backups. The tradeoff is that GCS is an object store, not a POSIX filesystem — pipeline containers cannot use standard file paths without an intermediary.
+GCS buckets, by contrast, charge only for stored data (~$0.02/GB/month for Standard class), scale infinitely, and are already used by bioAF for raw data, results, and config backups. The tradeoff is that GCS is an object store, not a POSIX filesystem: pipeline containers cannot use standard file paths without an intermediary.
 
 Feedback from practitioners confirmed that the POSIX filesystem convenience is nice but not essential. Their preferred pattern: download input files from GCS to the pipeline container's local storage, run the analysis, upload results to a different GCS bucket. This is how most cloud-native data platforms work.
 
@@ -37,11 +37,11 @@ GCS Ingest Bucket          Pipeline Container              GCS Results Bucket
                               emptyDir volume                client library
 ```
 
-**Step 1 — Stage inputs:** Before a pipeline job starts, an init container (or the pipeline's own startup logic) downloads the required input files from GCS to a local volume (Kubernetes `emptyDir` backed by node SSD). The BAL storage adapter's `stage_inputs()` method generates the download commands based on the file records in the metadata database.
+**Step 1: Stage inputs:** Before a pipeline job starts, an init container (or the pipeline's own startup logic) downloads the required input files from GCS to a local volume (Kubernetes `emptyDir` backed by node SSD). The BAL storage adapter's `stage_inputs()` method generates the download commands based on the file records in the metadata database.
 
-**Step 2 — Run analysis:** The pipeline processes files using standard local file paths. From the pipeline's perspective, files are in `/data/inputs/` and outputs go to `/data/outputs/`. No special GCS tooling needed inside the pipeline code.
+**Step 2: Run analysis:** The pipeline processes files using standard local file paths. From the pipeline's perspective, files are in `/data/inputs/` and outputs go to `/data/outputs/`. No special GCS tooling needed inside the pipeline code.
 
-**Step 3 — Collect outputs:** After the pipeline completes, a sidecar container (or the pipeline's own cleanup logic) uploads output files from `/data/outputs/` to the results GCS bucket. The BAL storage adapter's `collect_outputs()` method handles the upload, registers files in the metadata database, and computes checksums.
+**Step 3: Collect outputs:** After the pipeline completes, a sidecar container (or the pipeline's own cleanup logic) uploads output files from `/data/outputs/` to the results GCS bucket. The BAL storage adapter's `collect_outputs()` method handles the upload, registers files in the metadata database, and computes checksums.
 
 ### Bucket Structure
 
@@ -53,15 +53,15 @@ GCS Ingest Bucket          Pipeline Container              GCS Results Bucket
 | `bioaf-results-{org}` | Final outputs (h5ad, figures, reports) | No expiration |
 | `bioaf-config-backups-{org}` | Platform config snapshots | Tiered retention per ADR-004 |
 
-The addition of `bioaf-ingest-{org}` is new — it serves as the monitored landing zone for the auto-ingest system (ADR-024). Files are cataloged on arrival, then copied to `bioaf-raw-{org}` for permanent storage. The original file in the ingest bucket is deleted after successful cataloging and copy (configurable retention).
+The addition of `bioaf-ingest-{org}` is new: it serves as the monitored landing zone for the auto-ingest system (ADR-024). Files are cataloged on arrival, then copied to `bioaf-raw-{org}` for permanent storage. The original file in the ingest bucket is deleted after successful cataloging and copy (configurable retention).
 
 ### Notebook Storage
 
 Interactive notebook sessions (Jupyter, RStudio) need persistent storage for home directories and working files between sessions. Two approaches, depending on session lifecycle:
 
-**Option A — GCS-backed persistence (recommended):** Each user's notebook home directory is backed by a dedicated GCS prefix (`gs://bioaf-working-{org}/notebooks/{user_id}/`). On session start, the working directory is synced from GCS to local storage. On session end (or periodically during the session), changes are synced back. This eliminates persistent volume costs entirely.
+**Option A: GCS-backed persistence (recommended):** Each user's notebook home directory is backed by a dedicated GCS prefix (`gs://bioaf-working-{org}/notebooks/{user_id}/`). On session start, the working directory is synced from GCS to local storage. On session end (or periodically during the session), changes are synced back. This eliminates persistent volume costs entirely.
 
-**Option B — Persistent Volume Claims:** For users who need guaranteed POSIX semantics during long-running sessions, a Kubernetes PersistentVolumeClaim (backed by GCE Persistent Disk) can be provisioned per user. This costs ~$0.04/GB/month — far cheaper than Filestore but not free.
+**Option B: Persistent Volume Claims:** For users who need guaranteed POSIX semantics during long-running sessions, a Kubernetes PersistentVolumeClaim (backed by GCE Persistent Disk) can be provisioned per user. This costs ~$0.04/GB/month: far cheaper than Filestore but not free.
 
 The default is Option A. Option B is available as a per-user configuration.
 
@@ -86,7 +86,7 @@ def stage_inputs(self, file_records: list[FileRecord], working_dir: str) -> list
     return paths
 ```
 
-Nextflow's native GCS support can also be used directly — Nextflow can read from and write to `gs://` URIs without staging. The adapter supports both patterns, configurable per pipeline.
+Nextflow's native GCS support can also be used directly: Nextflow can read from and write to `gs://` URIs without staging. The adapter supports both patterns, configurable per pipeline.
 
 ### Terraform Modules
 
@@ -105,7 +105,7 @@ resource "google_storage_bucket" "ingest" {
 }
 
 # Existing buckets (raw, working, results, config-backups)
-# remain as-is — they are part of the mandatory foundation
+# remain as-is: they are part of the mandatory foundation
 ```
 
 ### Cost Comparison
@@ -132,14 +132,14 @@ resource "google_storage_bucket" "ingest" {
 
 **Negative:**
 
-- Pipeline containers must explicitly stage inputs and collect outputs — adds latency for large files
+- Pipeline containers must explicitly stage inputs and collect outputs: adds latency for large files
 - No POSIX filesystem semantics without an intermediary (gcsfuse has performance limitations for random I/O)
 - Notebook home directory sync adds complexity compared to NFS mount
 - Some legacy tools expect local filesystem paths; containerization mitigates this but doesn't eliminate it
 
 **Neutral:**
 
-- Raw data, results, and config backups were already in GCS — this decision extends GCS to working storage and notebook persistence
+- Raw data, results, and config backups were already in GCS: this decision extends GCS to working storage and notebook persistence
 - The BAL abstraction (ADR-020) means pipeline definitions and UI components are unaffected by the storage backend choice
 
 ---
@@ -147,5 +147,5 @@ resource "google_storage_bucket" "ingest" {
 ## References
 
 - ADR-020 (BioAF Adapter Layer)
-- ADR-004 (tiered backups — GCS bucket protections)
-- ADR-024 (GCS event-driven auto-ingest — uses ingest bucket)
+- ADR-004 (tiered backups: GCS bucket protections)
+- ADR-024 (GCS event-driven auto-ingest: uses ingest bucket)

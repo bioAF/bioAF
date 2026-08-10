@@ -171,7 +171,7 @@ async def test_qc_filter_excludes_failed(session, export_experiment):
 async def test_auto_selects_pipeline_run(session, export_experiment):
     from app.services.geo.geo_export_service import GeoExportService
 
-    # Don't specify pipeline_run_id — should auto-select the completed run
+    # Don't specify pipeline_run_id: should auto-select the completed run
     report = await GeoExportService.validate(
         session,
         export_experiment["experiment_id"],
@@ -211,3 +211,53 @@ async def test_export_excel_readable(session, export_experiment):
     # Data should be present
     ws = wb["SAMPLES"]
     assert ws.max_row >= 2  # Header + at least 1 sample
+
+
+def test_validation_report_uses_geo_tag_value_convention():
+    """The unvalidated-values section must follow GEO's `tag: value` idiom.
+
+    GEO's SOFT format and the sample characteristics field express metadata as
+    colon-separated `tag: value` pairs (e.g. `tissue: liver`), and the sibling
+    MISSING REQUIRED lines in this same report already use `{geo_column}: ...`.
+
+    A comma separator is actively wrong here: GEO values routinely contain commas
+    (`tissue: liver, frozen`), so `column: value, message` cannot be read back
+    unambiguously. The advisory message therefore goes in parentheses.
+    """
+    from app.services.geo.geo_export_service import _format_validation_report
+    from app.services.geo.validation import (
+        FieldValidation,
+        FileManifestStatus,
+        SampleValidation,
+        ValidationReport,
+        ValidationSummary,
+    )
+
+    field = FieldValidation(
+        geo_column="tissue",
+        value="liver, frozen",
+        status="populated_unvalidated",
+        message="not in controlled vocabulary",
+    )
+    report = ValidationReport(
+        experiment_id=1,
+        pipeline_run_id=None,
+        summary=ValidationSummary(
+            total_fields=1,
+            complete=0,
+            populated_unvalidated=1,
+            missing_required=0,
+            missing_recommended=0,
+        ),
+        series_fields=[field],
+        protocol_fields=[],
+        sample_validations=[SampleValidation(sample_id=1, sample_name="S1", fields=[field])],
+        file_manifest=FileManifestStatus(total_files=0, files_with_checksums=0, files_missing_checksums=0, files=[]),
+    )
+
+    text = _format_validation_report(report)
+
+    assert "[SERIES/PROTOCOL] tissue: liver, frozen (not in controlled vocabulary)" in text
+    assert "[SAMPLE S1] tissue: liver, frozen (not in controlled vocabulary)" in text
+    # No em-dash anywhere in generated output.
+    assert "—" not in text

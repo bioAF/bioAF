@@ -85,12 +85,12 @@ async def get_reader_sa_status(session: AsyncSession) -> dict[str, object]:
 async def create_reader_sa(session: AsyncSession) -> dict[str, str]:
     """Create a keyless reader SA and grant bioaf-app token-creator on it.
 
-    No JSON key is created — the runtime impersonates the reader SA via
+    No JSON key is created: the runtime impersonates the reader SA via
     short-lived tokens. Stores the SA email + ``sheets_reader_sa_created=true``
     in ``platform_config``. Returns ``{email: str}``.
 
-    For ``service_account_key`` (legacy) installs, the SA still has no key —
-    the legacy install can't impersonate, so the in-app button is not the
+    For ``service_account_key`` (legacy) installs, the SA still has no key, so
+    the legacy install can't impersonate and the in-app button is not the
     right path there. Greenfield ``vm_default`` installs are the supported
     target; the typical greenfield flow has the installer pre-provisioning
     the reader SA so this function is a fallback.

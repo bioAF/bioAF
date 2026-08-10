@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Button } from "@/components/ui/Button";
 
 interface LoginFormProps {
   onSubmit: (email: string, password: string) => Promise<void>;
@@ -57,13 +58,10 @@ export function LoginForm({ onSubmit, error }: LoginFormProps) {
         />
       </div>
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full bg-bioaf-600 text-white py-2 rounded hover:bg-bioaf-700 disabled:opacity-50"
-      >
+      <Button className="w-full" type="submit"
+        disabled={submitting}>
         {submitting ? "Signing in..." : "Sign In"}
-      </button>
+      </Button>
 
       <div className="mt-4 text-center">
         <Link href="/forgot-password" className="text-sm text-bioaf-600 hover:text-bioaf-700">

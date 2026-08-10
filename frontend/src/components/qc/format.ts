@@ -5,12 +5,13 @@
  * percent_pct (already a %), bp, raw.
  */
 
+import { NOT_SET } from "@/lib/placeholders";
 import type { QCMetricSpec } from "@/lib/types";
 
 export type MetricStatus = "good" | "warn" | "bad" | "neutral";
 
 export function formatMetric(value: unknown, spec: QCMetricSpec | undefined): string {
-  if (value == null) return "—";
+  if (value == null) return NOT_SET;
   const fmt = spec?.format ?? "raw";
   if (typeof value !== "number") return String(value);
 

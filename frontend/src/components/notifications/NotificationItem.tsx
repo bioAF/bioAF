@@ -2,6 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { notificationHref } from "@/lib/notificationLinks";
+import { statusBadgeClass, STATUS_STYLES } from "@/lib/statusStyles";
+
+import { clickableCard } from "@/lib/a11y";
 
 interface Notification {
   id: number;
@@ -22,12 +25,6 @@ interface Props {
   /** Called right before navigating, e.g. to close the dropdown. */
   onNavigate?: () => void;
 }
-
-const severityColors: Record<string, string> = {
-  info: "bg-blue-100 text-blue-700",
-  warning: "bg-yellow-100 text-yellow-700",
-  critical: "bg-red-100 text-red-700",
-};
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -58,13 +55,14 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
       className={`px-4 py-3 border-b border-gray-50 hover:bg-gray-50 cursor-pointer ${
         !n.read ? "bg-blue-50/50" : ""
       }`}
-      onClick={handleClick}
+      {...clickableCard(handleClick)}
     >
       <div className="flex items-start gap-3">
         <span
-          className={`mt-0.5 text-xs px-1.5 py-0.5 rounded font-medium ${
-            severityColors[n.severity] || severityColors.info
-          }`}
+          className={`mt-0.5 text-xs px-1.5 py-0.5 rounded font-medium ${statusBadgeClass(
+            "severity",
+            n.severity in STATUS_STYLES.severity ? n.severity : "info",
+          )}`}
         >
           {n.severity}
         </span>
@@ -75,7 +73,7 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
           {n.message && (
             <p className="text-xs text-gray-500 mt-0.5 truncate">{n.message}</p>
           )}
-          <p className="text-xs text-gray-400 mt-1">{timeAgo(n.created_at)}</p>
+          <p className="text-xs text-gray-500 mt-1">{timeAgo(n.created_at)}</p>
         </div>
         {showActions && onDelete && (
           <button
@@ -83,7 +81,7 @@ export function NotificationItem({ notification, onMarkRead, showActions, onDele
               e.stopPropagation();
               onDelete();
             }}
-            className="text-gray-400 hover:text-red-500 text-xs"
+            className="text-gray-500 hover:text-red-500 text-xs"
           >
             Delete
           </button>

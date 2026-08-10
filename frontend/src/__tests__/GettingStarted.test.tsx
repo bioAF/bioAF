@@ -106,6 +106,24 @@ describe("GettingStarted", () => {
     expect(dots).toHaveLength(13);
   });
 
+  it("names each dot by the slide it goes to", () => {
+    // Thirteen identical unlabelled buttons are thirteen dead ends for a screen
+    // reader, and the tour is the first thing a new user meets.
+    render(<GettingStarted onComplete={onComplete} />);
+    expect(screen.getByRole("button", { name: /go to slide 1 of 13: dashboard/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /go to slide 2 of 13: experiments/i })).toBeInTheDocument();
+    for (const dot of screen.getAllByTestId("slide-dot")) {
+      expect(dot).toHaveAccessibleName();
+    }
+  });
+
+  it("marks the dot for the slide being shown", () => {
+    render(<GettingStarted onComplete={onComplete} />);
+    const dots = screen.getAllByTestId("slide-dot");
+    expect(dots[0]).toHaveAttribute("aria-current", "true");
+    expect(dots[1]).not.toHaveAttribute("aria-current", "true");
+  });
+
   it("renders highlight overlays on slides that have them", () => {
     render(<GettingStarted onComplete={onComplete} />);
     // Dashboard slide has 7 highlights

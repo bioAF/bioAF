@@ -27,6 +27,7 @@ VALIDATION_STUDY_STATES = [
     "reading",
     "plan_ready",
     "acquiring_data",
+    "samples_mismatch",  # held: a picked sample was not fetched; a human decides before any compute
     "setup",
     "running",
     "extracting",
@@ -47,7 +48,10 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "acquiring_text": ["reading", "error"],
     "reading": ["plan_ready", "classified", "error"],
     "plan_ready": ["acquiring_data", "plan_declined", "error"],
-    "acquiring_data": ["setup", "classified", "error"],
+    # samples_mismatch: a picked sample was not fetched, so the run is held before compute is spent; a
+    # human either runs with the samples we have (-> setup) or stops (-> plan_declined).
+    "acquiring_data": ["setup", "samples_mismatch", "classified", "error"],
+    "samples_mismatch": ["setup", "plan_declined", "error"],
     "setup": ["running", "error"],
     "running": ["extracting", "error"],
     # extracting routes to reproducing when Level-3 inputs are present, else straight to comparing

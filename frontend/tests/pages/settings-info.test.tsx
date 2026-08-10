@@ -1,5 +1,5 @@
 import { render, screen, act, waitFor, fireEvent } from "@testing-library/react";
-import SettingsInfoPage from "@/app/settings/info/page";
+import SettingsInfoPage from "@/app/(app)/settings/info/page";
 
 jest.mock("next/navigation", () => ({
   usePathname: () => "/settings/info",
@@ -10,8 +10,6 @@ jest.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ canAccess: () => true }),
 }));
 
-jest.mock("@/components/layout/Sidebar", () => ({ Sidebar: () => <div /> }));
-jest.mock("@/components/layout/Header", () => ({ Header: () => <div /> }));
 
 const mockApiGet = jest.fn();
 const mockApiPost = jest.fn();

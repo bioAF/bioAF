@@ -37,4 +37,4 @@ async def log_action(
             snapshot_json=snapshot,
         )
         session.add(snap)
-    # Do NOT commit here — let the caller's transaction handle it
+    # Do NOT commit here: let the caller's transaction handle it

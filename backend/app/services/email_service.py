@@ -70,7 +70,7 @@ class EmailService:
     @staticmethod
     def send_email(to: str, subject: str, body_html: str) -> bool:
         if not EmailService.is_configured():
-            logger.warning("SMTP not configured — email to %s not sent", to)
+            logger.warning("SMTP not configured: email to %s not sent", to)
             return False
 
         msg = MIMEMultipart("alternative")

@@ -1,49 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { EmptyState } from "@/components/shared/EmptyState";
 import { ErrorState } from "@/components/shared/ErrorState";
-
-describe("EmptyState", () => {
-  it("renders with title and description", () => {
-    render(
-      <EmptyState
-        icon="experiments"
-        title="No experiments"
-        description="Create your first experiment to get started."
-      />
-    );
-    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
-    expect(screen.getByTestId("empty-state-title")).toHaveTextContent(
-      "No experiments"
-    );
-    expect(screen.getByTestId("empty-state-description")).toHaveTextContent(
-      "Create your first experiment to get started."
-    );
-  });
-
-  it("renders action when provided", () => {
-    render(
-      <EmptyState
-        title="No files"
-        description="Upload a file."
-        action={<button>Upload</button>}
-      />
-    );
-    const actionContainer = screen.getByTestId("empty-state-action");
-    expect(actionContainer).toBeInTheDocument();
-    expect(actionContainer).toHaveTextContent("Upload");
-  });
-
-  it("renders without icon gracefully", () => {
-    render(
-      <EmptyState title="Empty" description="Nothing here." />
-    );
-    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
-    expect(screen.getByTestId("empty-state-title")).toHaveTextContent("Empty");
-    // No SVG should be rendered when icon is omitted
-    const container = screen.getByTestId("empty-state");
-    expect(container.querySelector("svg")).not.toBeInTheDocument();
-  });
-});
 
 describe("ErrorState", () => {
   it("renders error message", () => {

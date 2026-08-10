@@ -1,8 +1,12 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect } from "react";
 import { api } from "@/lib/api";
+import { Modal } from "@/components/shared/Modal";
 import type { AnalysisSnapshot } from "@/lib/types";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 interface SnapshotTimelineProps {
   experimentId?: number;
@@ -67,21 +71,21 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+      <Card padding="none" className="p-8 text-center text-gray-500">
         Loading snapshots...
-      </div>
+      </Card>
     );
   }
 
   if (snapshots.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow p-8 text-center text-gray-400">
+      <Card padding="none" className="p-8 text-center text-gray-500">
         <p className="text-lg font-medium mb-2">No Analysis Snapshots</p>
         <p>
           Use <code className="bg-gray-100 px-1 rounded">bioaf.snapshot(adata, label=&quot;...&quot;)</code>{" "}
           in a notebook to capture snapshots.
         </p>
-      </div>
+      </Card>
     );
   }
 
@@ -100,12 +104,10 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
       {/* Compare button */}
       {selected.size >= 2 && (
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowComparison(true)}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={() => setShowComparison(true)}>
             Compare Selected ({selected.size})
-          </button>
+          </Button>
           <button
             onClick={() => setSelected(new Set())}
             className="text-gray-500 text-sm hover:text-gray-700"
@@ -132,7 +134,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
               {groupKey === "other"
                 ? "Ungrouped Snapshots"
                 : `Session ${groupSnaps[0].notebook_session_id}`}
-              <span className="ml-2 text-gray-400 font-normal">
+              <span className="ml-2 text-gray-500 font-normal">
                 {groupSnaps[0].user_name} &middot; {groupSnaps.length} snapshot{groupSnaps.length !== 1 ? "s" : ""}
               </span>
             </h3>
@@ -148,6 +150,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
                 {/* Checkbox */}
                 <input
                   type="checkbox"
+                  aria-label={`Select snapshot ${snap.label}`}
                   checked={selected.has(snap.id)}
                   onChange={() => toggleSelection(snap.id)}
                   className="h-4 w-4 text-bioaf-600 rounded border-gray-300"
@@ -156,7 +159,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
                 {/* Star */}
                 <button
                   onClick={() => toggleStar(snap.id)}
-                  className={`text-lg ${snap.starred ? "text-yellow-500" : "text-gray-300 hover:text-yellow-400"}`}
+                  className={`text-lg ${snap.starred ? "text-yellow-500" : "text-gray-500 hover:text-yellow-500"}`}
                   title={snap.starred ? "Unstar" : "Star"}
                 >
                   {snap.starred ? "\u2605" : "\u2606"}
@@ -175,8 +178,8 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
 
                 {/* Counts */}
                 <div className="text-xs text-gray-500 text-right whitespace-nowrap">
-                  <div>{snap.cell_count?.toLocaleString() ?? "—"} cells</div>
-                  <div>{snap.cluster_count ?? "—"} clusters</div>
+                  <div>{snap.cell_count?.toLocaleString() ?? NOT_SET} cells</div>
+                  <div>{snap.cluster_count ?? NOT_SET} clusters</div>
                 </div>
 
                 {/* Figure thumbnail */}
@@ -187,7 +190,7 @@ export default function SnapshotTimeline({ experimentId, projectId }: SnapshotTi
                 )}
 
                 {/* Timestamp */}
-                <div className="text-xs text-gray-400 whitespace-nowrap">
+                <div className="text-xs text-gray-500 whitespace-nowrap">
                   {new Date(snap.created_at).toLocaleString()}
                 </div>
               </div>
@@ -211,21 +214,14 @@ function ComparisonModal({ ids, snapshots, onClose }: ComparisonModalProps) {
   );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/50 flex items-start justify-center pt-8">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-6xl mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b px-6 py-4 flex items-center justify-between z-10">
-          <h2 className="text-lg font-semibold">
-            Comparing {snapshots.length} Snapshots
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">
-            &times;
-          </button>
-        </div>
-        <div className="p-6">
-          <SnapshotComparisonContent url={comparisonUrl} snapshotLabels={snapshots} />
-        </div>
-      </div>
-    </div>
+    <Modal
+      open
+      title={`Comparing ${snapshots.length} Snapshots`}
+      onClose={onClose}
+      size="xl"
+    >
+      <SnapshotComparisonContent url={comparisonUrl} snapshotLabels={snapshots} />
+    </Modal>
   );
 }
 
@@ -246,7 +242,7 @@ function SnapshotComparisonContent({
   }, []);
 
   if (!SnapshotComparison) {
-    return <div className="text-center py-8 text-gray-400">Loading comparison...</div>;
+    return <div className="text-center py-8 text-gray-500">Loading comparison...</div>;
   }
 
   return <SnapshotComparison url={url} />;

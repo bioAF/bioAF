@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 
 interface Tier {
@@ -31,22 +31,13 @@ function statusStyle(status: string): string {
 }
 
 export function BackupStatusWidget() {
-  const [data, setData] = useState<BackupStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 60000);
-    api
-      .getWithRetry<BackupStatus>("/api/backups/status")
-      .then((res) => setData({ tiers: res.tiers || [], overall_status: res.overall_status }))
-      .catch(() => setError("Failed to load backup status"))
-      .finally(() => {
-        clearTimeout(timeout);
-        setLoading(false);
-      });
-    return () => clearTimeout(timeout);
-  }, []);
+  const { data, loading, error, retry } = useWidgetData(
+    async () => {
+      const res = await api.getWithRetry<BackupStatus>("/api/backups/status");
+      return { tiers: res.tiers || [], overall_status: res.overall_status };
+    },
+    "Backup status",
+  );
 
   return (
     <div className="bg-white rounded-lg shadow p-5" data-testid="widget-backup-status">
@@ -54,7 +45,7 @@ export function BackupStatusWidget() {
         Backup status
       </h3>
       {loading && (
-        <div className="flex items-center gap-2 text-gray-400 py-4" data-testid="widget-loading">
+        <div className="flex items-center gap-2 text-gray-500 py-4" data-testid="widget-loading">
           <LoadingSpinner size="sm" />
           <span className="text-sm">Loading backups...</span>
         </div>
@@ -63,7 +54,7 @@ export function BackupStatusWidget() {
         <div className="text-sm text-red-600" data-testid="widget-error">
           {error}
           <button
-            onClick={() => window.location.reload()}
+            onClick={retry}
             className="ml-2 text-bioaf-600 hover:underline"
           >
             Retry

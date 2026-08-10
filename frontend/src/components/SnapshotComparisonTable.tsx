@@ -1,7 +1,10 @@
 "use client";
 
+import { NOT_SET } from "@/lib/placeholders";
 import { useState, useMemo } from "react";
 import type { AnalysisSnapshot } from "@/lib/types";
+import { clickableRow } from "@/lib/a11y";
+import { Button } from "@/components/ui/Button";
 
 interface SnapshotComparisonTableProps {
   snapshots: AnalysisSnapshot[];
@@ -47,9 +50,16 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
   }, [snapshots, sortKey, sortDir]);
 
   const SortHeader = ({ label, field }: { label: string; field: SortKey }) => (
-    <th
+    // Sorting was mouse-only, and the direction was carried solely by the
+    // triangle glyph below. `aria-sort` states it in a form assistive tech can
+    // read; `clickableRow` adds the keyboard path without a role that would
+    // strip this out of the table's accessibility tree.
+    <th scope="col"
       className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700"
-      onClick={() => handleSort(field)}
+      aria-sort={
+        sortKey === field ? (sortDir === "asc" ? "ascending" : "descending") : "none"
+      }
+      {...clickableRow(() => handleSort(field))}
     >
       {label} {sortKey === field && (sortDir === "asc" ? "\u25B2" : "\u25BC")}
     </th>
@@ -59,12 +69,10 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
     <div>
       {selected.size >= 2 && (
         <div className="mb-3 flex items-center gap-3">
-          <button
-            onClick={() => onCompare(Array.from(selected))}
-            className="bg-bioaf-600 text-white px-4 py-2 rounded-md text-sm hover:bg-bioaf-700"
-          >
+          <Button
+            onClick={() => onCompare(Array.from(selected))}>
             Compare Selected ({selected.size})
-          </button>
+          </Button>
           <button
             onClick={() => setSelected(new Set())}
             className="text-gray-500 text-sm hover:text-gray-700"
@@ -77,8 +85,8 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
         <table className="min-w-full text-sm bg-white border rounded-lg overflow-hidden">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-3 py-2 w-8"></th>
-              <th className="px-3 py-2 w-8"></th>
+              <th scope="col" className="px-3 py-2 w-8"></th>
+              <th scope="col" className="px-3 py-2 w-8"></th>
               <SortHeader label="Label" field="label" />
               <SortHeader label="Date" field="created_at" />
               <SortHeader label="User" field="user_name" />
@@ -86,7 +94,7 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
               <SortHeader label="Cells" field="cell_count" />
               <SortHeader label="Genes" field="gene_count" />
               <SortHeader label="Clusters" field="cluster_count" />
-              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Figure</th>
+              <th scope="col" className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Figure</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -100,6 +108,7 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
                 <td className="px-3 py-2">
                   <input
                     type="checkbox"
+                    aria-label={`Select snapshot ${snap.label}`}
                     checked={selected.has(snap.id)}
                     onChange={() => toggleSelection(snap.id)}
                     className="h-4 w-4 text-bioaf-600 rounded border-gray-300"
@@ -122,9 +131,9 @@ export default function SnapshotComparisonTable({ snapshots, onCompare }: Snapsh
                     {snap.object_type === "anndata" ? "AnnData" : "Seurat"}
                   </span>
                 </td>
-                <td className="px-3 py-2 text-right">{snap.cell_count?.toLocaleString() ?? "—"}</td>
-                <td className="px-3 py-2 text-right">{snap.gene_count?.toLocaleString() ?? "—"}</td>
-                <td className="px-3 py-2 text-right">{snap.cluster_count ?? "—"}</td>
+                <td className="px-3 py-2 text-right">{snap.cell_count?.toLocaleString() ?? NOT_SET}</td>
+                <td className="px-3 py-2 text-right">{snap.gene_count?.toLocaleString() ?? NOT_SET}</td>
+                <td className="px-3 py-2 text-right">{snap.cluster_count ?? NOT_SET}</td>
                 <td className="px-3 py-2">
                   {snap.figure_url && (
                     <div className="w-8 h-8 rounded border overflow-hidden">

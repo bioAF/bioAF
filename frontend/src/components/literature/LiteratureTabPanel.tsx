@@ -9,6 +9,8 @@ import {
   literature,
   type Paper,
 } from "@/lib/literature";
+import { statusBadgeClass } from "@/lib/statusStyles";
+import { Card } from "@/components/ui/Card";
 
 interface Props {
   experimentId?: number;
@@ -19,12 +21,6 @@ const PROVENANCE_LABELS: Record<string, string> = {
   user_upload: "Uploaded",
   source_search: "From search",
   lit_review_run: "AI Lit Review",
-};
-
-const PROVENANCE_BADGE: Record<string, string> = {
-  user_upload: "bg-blue-100 text-blue-800",
-  source_search: "bg-green-100 text-green-800",
-  lit_review_run: "bg-purple-100 text-purple-800",
 };
 
 export function LiteratureTabPanel({ experimentId, projectId }: Props) {
@@ -68,7 +64,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
   }, [experimentId, projectId]);
 
   if (loading) {
-    return <div className="text-gray-400 text-sm">Loading literature...</div>;
+    return <div className="text-gray-500 text-sm">Loading literature...</div>;
   }
 
   if (papers.length === 0) {
@@ -84,23 +80,23 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
   return (
     <div className="space-y-3">
       <div className="text-xs text-gray-500">{total} papers</div>
-      <div className="bg-white rounded-lg shadow overflow-x-auto">
+      <Card padding="none" className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Title
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-40">
                 Authors
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-16">
                 Year
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase w-32">
                 Source
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+              <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                 Scope
               </th>
             </tr>
@@ -110,7 +106,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
               <tr key={p.id} className="align-top hover:bg-gray-50">
                 <td className="px-4 py-3 text-sm">
                   <a
-                    href={`/data/literature/papers/${p.id}`}
+                    href={`/lab-knowledge/literature/papers/${p.id}`}
                     className="text-bioaf-700 hover:underline font-medium"
                   >
                     {cleanText(p.title)}
@@ -130,7 +126,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
                 <td className="px-4 py-3 text-xs">
                   <span
                     className={`inline-block px-2 py-0.5 rounded ${
-                      PROVENANCE_BADGE[p.provenance] ?? "bg-gray-100 text-gray-700"
+                      statusBadgeClass("literatureProvenance", p.provenance)
                     }`}
                   >
                     {PROVENANCE_LABELS[p.provenance] ?? p.provenance}
@@ -152,7 +148,7 @@ export function LiteratureTabPanel({ experimentId, projectId }: Props) {
             ))}
           </tbody>
         </table>
-      </div>
+      </Card>
     </div>
   );
 }

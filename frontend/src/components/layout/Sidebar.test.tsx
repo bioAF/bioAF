@@ -6,14 +6,21 @@ jest.mock("next/navigation", () => ({
 }));
 
 jest.mock("next/link", () => {
+  // Forwards the rest of the props (onClick above all): the real next/link
+  // does, and the drawer closes itself from a link's click.
   return function MockLink({
     children,
     href,
+    ...rest
   }: {
     children: React.ReactNode;
     href: string;
-  }) {
-    return <a href={href}>{children}</a>;
+  } & React.AnchorHTMLAttributes<HTMLAnchorElement>) {
+    return (
+      <a href={href} {...rest}>
+        {children}
+      </a>
+    );
   };
 });
 
@@ -108,7 +115,7 @@ describe("Sidebar component gating", () => {
     // Expand Workbench to check children
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.queryByText("Notebooks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Notebook Sessions")).not.toBeInTheDocument();
   });
 
   test("shows Notebooks child when jupyterhub is enabled", () => {
@@ -125,7 +132,7 @@ describe("Sidebar component gating", () => {
 
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
   });
 
   test("shows Notebooks child when rstudio is enabled", () => {
@@ -142,7 +149,7 @@ describe("Sidebar component gating", () => {
 
     fireEvent.click(screen.getByText("Workbench"));
 
-    expect(screen.getByText("Notebooks")).toBeInTheDocument();
+    expect(screen.getByText("Notebook Sessions")).toBeInTheDocument();
   });
 
   test("hides QC Dashboards when qc_dashboard component is not enabled", () => {
@@ -160,7 +167,7 @@ describe("Sidebar component gating", () => {
     fireEvent.click(screen.getByText("Results"));
 
     expect(screen.queryByText("QC Dashboards")).not.toBeInTheDocument();
-    expect(screen.getByText("Cellxgene")).toBeInTheDocument();
+    expect(screen.getByText("cellxgene Explorer")).toBeInTheDocument();
   });
 
   test("hides Cellxgene when cellxgene component is not enabled", () => {
@@ -178,23 +185,13 @@ describe("Sidebar component gating", () => {
     fireEvent.click(screen.getByText("Results"));
 
     expect(screen.getByText("QC Dashboards")).toBeInTheDocument();
-    expect(screen.queryByText("Cellxgene")).not.toBeInTheDocument();
+    expect(screen.queryByText("cellxgene Explorer")).not.toBeInTheDocument();
   });
 
-  test("shows loading screen when components are still loading", () => {
-    mockComponents.mockReturnValue({
-      components: [],
-      loading: true,
-      refetch: jest.fn(),
-    });
-
-    render(<Sidebar />);
-
-    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
-    expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
-  });
-
-  test("shows loading screen when permissions are still loading", () => {
+  test("renders its container but no nav items while permissions are still loading", () => {
+    // The app-loading splash now lives in the (app) layout (see (app)/layout.test.tsx);
+    // Sidebar itself renders its container and gates nav items to empty while
+    // permissions are still loading, so no flash of the wrong nav.
     mockPermissions.mockReturnValue({
       canAccess: () => true,
       roleName: "",
@@ -210,7 +207,7 @@ describe("Sidebar component gating", () => {
 
     render(<Sidebar />);
 
-    expect(screen.getByText("Loading bioAF...")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument();
     expect(screen.queryByText("Pipelines")).not.toBeInTheDocument();
   });
 
@@ -239,14 +236,14 @@ describe("Sidebar beta gating", () => {
   test("hides Validation Studies when the lit_validation flag is off", () => {
     mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Data & Files"));
+    fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.queryByText("Validation Studies")).not.toBeInTheDocument();
   });
 
   test("shows Validation Studies when the lit_validation flag is on", () => {
     mockBetaFeatures.mockReturnValue({ available: true, flags: { lit_validation: true }, loading: false });
     render(<Sidebar />);
-    fireEvent.click(screen.getByText("Data & Files"));
+    fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.getByText("Validation Studies")).toBeInTheDocument();
   });
 
@@ -464,6 +461,51 @@ describe("Sidebar header height matches main header", () => {
   });
 });
 
+describe("Sidebar navigation icons", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("renders an icon for each top-level section when expanded", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("nav-icon-Dashboard")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Experiments")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Lab Knowledge")).toBeInTheDocument();
+  });
+
+  test("keeps navigation reachable as a labelled icon rail when collapsed", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+
+    // The rail replaces the old empty collapsed sidebar with per-section icons.
+    expect(screen.getByTestId("sidebar-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-icon-Experiments")).toBeInTheDocument();
+    // Icons are labelled for accessibility (no visible text label in the rail).
+    expect(screen.getByLabelText("Experiments")).toBeInTheDocument();
+    expect(screen.queryByText("Experiments")).not.toBeInTheDocument();
+  });
+
+  test("clicking a collapsed section icon re-expands the sidebar and opens that section", () => {
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
+    fireEvent.click(screen.getByLabelText("Pipelines"));
+
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-collapsed", "false");
+    expect(screen.getByTestId("children-Pipelines")).toBeInTheDocument();
+  });
+});
+
 describe("Sidebar collapse persistence", () => {
   const STORAGE_KEY = "bioaf-sidebar-collapsed";
 
@@ -511,4 +553,123 @@ describe("Sidebar collapse persistence", () => {
     fireEvent.click(screen.getByTestId("sidebar-collapse-toggle"));
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe("false");
   });
+});
+
+// The shell, not the pages, is what breaks a narrow screen: measured on the
+// deployed demo at 375px, no route overflowed and no table was clipped, but the
+// fixed w-64 sidebar took 256px and left 119px for everything else. Below md the
+// sidebar becomes an off-canvas drawer, so the page gets the full width and the
+// nav is one tap away.
+describe("Sidebar as a drawer on a narrow screen", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    mockComponents.mockReturnValue({
+      components: [
+        makeComponent("nextflow_k8s", "pipeline_orchestration", true),
+        makeComponent("jupyterhub", "analysis", true),
+      ],
+      loading: false,
+      refetch: jest.fn(),
+    });
+  });
+
+  test("is off-canvas below md and back in the page flow above it", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("fixed");
+    expect(sidebar.className).toContain("-translate-x-full");
+    expect(sidebar.className).toContain("md:static");
+    expect(sidebar.className).toContain("md:translate-x-0");
+  });
+
+  test("slides into view when opened", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("translate-x-0");
+    expect(sidebar.className).not.toContain("-translate-x-full");
+  });
+
+  // A transform moves the drawer off screen but leaves it in the tab order. Measured
+  // at 375px on the deployed app, the closed drawer was the first 11 tab stops, so a
+  // keyboard user tabbed through 11 controls they could not see before reaching the
+  // hamburger. `visibility: hidden` is the only one of translate/opacity/visibility
+  // that removes a subtree from the tab order.
+  test("is out of the tab order while closed below md, and back in it above md", () => {
+    render(<Sidebar />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar.className).toContain("invisible");
+    expect(sidebar.className).toContain("md:visible");
+  });
+
+  test("is in the tab order once opened", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    expect(screen.getByTestId("sidebar").className).not.toContain("invisible");
+  });
+
+  test("covers the page with a scrim only while it is open", () => {
+    const { rerender } = render(<Sidebar />);
+    expect(screen.queryByTestId("sidebar-scrim")).not.toBeInTheDocument();
+
+    rerender(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+    expect(screen.getByTestId("sidebar-scrim")).toBeInTheDocument();
+  });
+
+  test("closes when the scrim is tapped", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.click(screen.getByTestId("sidebar-scrim"));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("closes on Escape, so the keyboard has the same way out as the pointer", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("closes once the user has gone somewhere", () => {
+    const onClose = jest.fn();
+    render(<Sidebar mobileOpen onMobileClose={onClose} />);
+
+    fireEvent.click(screen.getByRole("link", { name: /Dashboard/ }));
+
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  test("takes the keyboard while it is open, and names itself", () => {
+    render(<Sidebar mobileOpen onMobileClose={jest.fn()} />);
+
+    const sidebar = screen.getByTestId("sidebar");
+    expect(sidebar).toHaveAttribute("role", "dialog");
+    expect(sidebar).toHaveAccessibleName();
+    expect(sidebar.contains(document.activeElement)).toBe(true);
+  });
+
+  test("is not a dialog when it is just the page's sidebar", () => {
+    render(<Sidebar />);
+
+    expect(screen.getByTestId("sidebar")).not.toHaveAttribute("role", "dialog");
+  });
+});
+
+// Found on the deployed demo at 375px: the drawer's own brand link goes to the
+// dashboard and left the drawer sitting over the page it had just loaded.
+test("the drawer closes when its brand link is followed too", () => {
+  window.localStorage.clear();
+  mockComponents.mockReturnValue({ components: [], loading: false, refetch: jest.fn() });
+  const onClose = jest.fn();
+
+  render(<Sidebar mobileOpen onMobileClose={onClose} />);
+  fireEvent.click(screen.getByTestId("sidebar-logo").closest("a")!);
+
+  expect(onClose).toHaveBeenCalled();
 });
