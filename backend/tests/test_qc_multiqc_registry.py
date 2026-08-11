@@ -322,8 +322,6 @@ def test_every_real_fixture_yields_at_least_one_controlled_metric():
     ):
         metrics = parse_multiqc_metrics(_fixture(name))
         populated = [
-            k
-            for k, v in metrics.items()
-            if k not in ("additional_metrics", "metric_sources") and v is not None
+            k for k, v in metrics.items() if k not in ("additional_metrics", "metric_sources") and v is not None
         ]
         assert populated, f"{name} produced no controlled metrics"
