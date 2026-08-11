@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
 import type {
   PipelineCatalog,
   Experiment,
@@ -316,6 +317,11 @@ export default function PipelineLauncherPage() {
             </div>
           )}
           <ProtocolInfo />
+          <SamplesheetInputs
+            specs={pipeline.samplesheet_inputs || []}
+            values={userParams}
+            onChange={setUserParams}
+          />
           <ParameterForm
             schema={pipeline.parameter_schema}
             defaultParams={pipeline.default_params || {}}

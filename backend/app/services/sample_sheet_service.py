@@ -288,6 +288,8 @@ _COLUMN_TO_SAMPLE_FIELD: dict[str, str] = {
     "species": "organism",
     "organism": "organism",
     "tissue": "tissue_type",
+    # optional on the sample; a pipeline requiring it blocks when it is empty
+    "sex": "sex",
     # provenance: bioAF carries one row per sample, so the sample's own external
     # id is its run accession
     "run_accession": "external_id",
@@ -297,15 +299,66 @@ _COLUMN_TO_SAMPLE_FIELD: dict[str, str] = {
 # of the pipeline key exactly as generate_sheet routes them.
 _HANDWRITTEN_GENERATORS: tuple[str, ...] = ("scrnaseq", "rnaseq", "chipseq", "atacseq", "fetchngs")
 
-# Columns supplied by a launch parameter rather than by the sample.
+# Columns supplied by a launch parameter rather than by the sample: values that
+# are constant for a whole run, so one answer applies to every row.
+#
+# Membership is a judgement about the COLUMN'S SEMANTICS and is deliberately
+# conservative, because a per-sample column collected as one run-level value
+# would relabel every row identically and still run. Two that look like they
+# belong here and do not:
+#   - riboseq's `type` (riboseq/rnaseq/tiseq): a run PAIRS ribosome-profiling
+#     samples with matched RNA-seq samples, so one value destroys the pairing.
+#   - sammyseq's `fraction`: different chromatin fractions of the SAME sample.
+# Both stay blocked until per-sample collection exists.
 _COLUMN_TO_PARAMETER: dict[str, str] = {
+    # library prep property, already a launch parameter for nf-core/rnaseq today
     "strandedness": "strandedness",
+    # the sequencer the run came off
     "instrument_platform": "instrument_platform",
+    # hlatyping: whether the library is DNA or RNA
+    "seq_type": "seq_type",
+    # fastquorum: the UMI read layout, fixed by the library prep
+    "read_structure": "read_structure",
     "expected_cells": "expected_cells",
 }
 
 
 class SampleSheetService:
+    @staticmethod
+    def required_user_inputs(contract) -> list[dict]:
+        """Run-level samplesheet columns the user must answer for this pipeline.
+
+        These are the columns that would otherwise block the launch and whose
+        value is constant across the run, so a single field collects them. The
+        allowed values come from the pipeline's own schema, so the options
+        offered cannot drift from what it accepts.
+
+        Returns nothing for a pipeline that cannot be launched from samples at
+        all: collecting answers would imply a launch that is still impossible.
+        """
+        if contract.is_empty or not contract.is_sample_launchable:
+            return []
+
+        read_columns = set(_ordered_read_columns(contract))
+        specs: list[dict] = []
+        for column in contract.column_order:
+            if column not in contract.required_without_default or column in read_columns:
+                continue
+            # Sourced from the sample itself, so there is nothing to ask.
+            if column in _COLUMN_TO_SAMPLE_FIELD:
+                continue
+            if column not in _COLUMN_TO_PARAMETER:
+                continue
+            specs.append(
+                {
+                    "name": column,
+                    "parameter": _COLUMN_TO_PARAMETER[column],
+                    "required": True,
+                    "allowed_values": contract.enum_for(column),
+                }
+            )
+        return specs
+
     @staticmethod
     def check_contract_satisfiable(contract, samples: list, parameters: dict) -> None:
         """Raise if this run cannot produce a valid samplesheet.

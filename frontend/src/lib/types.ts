@@ -641,12 +641,28 @@ export interface PipelineCatalog {
   source_url: string | null;
   version: string | null;
   parameter_schema: ParameterSchema | null;
+  /** Required samplesheet columns the user must answer at launch, from the
+   *  pipeline's assets/schema_input.json. Distinct from parameter_schema, which
+   *  carries nextflow_schema.json's pipeline parameters. A samplesheet column
+   *  such as instrument_platform appears in neither the params nor any other
+   *  form, which is why this exists. */
+  samplesheet_inputs: SamplesheetInputSpec[];
   default_params: Record<string, unknown> | null;
   is_builtin: boolean;
   enabled: boolean;
   custom_pipeline_id: number | null;
   created_by_username: string | null;
   latest_version_number: number | null;
+}
+
+/** One samplesheet column collected at launch. Only columns whose value is
+ *  constant across the run appear, so a single answer fills every row.
+ *  `allowed_values` comes from the pipeline's own schema; empty means free text. */
+export interface SamplesheetInputSpec {
+  name: string;
+  parameter: string;
+  required: boolean;
+  allowed_values: string[];
 }
 
 export interface PipelineCatalogListResponse {

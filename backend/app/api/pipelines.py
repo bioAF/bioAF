@@ -17,6 +17,8 @@ from app.schemas.pipeline import (
 )
 from app.services.nf_core_registry_service import NfCoreRegistryService
 from app.services.pipeline_catalog_service import PipelineCatalogService
+from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_schema import parse_contract
 
 router = APIRouter(prefix="/api/pipelines", tags=["pipelines"])
 
@@ -35,6 +37,13 @@ def _catalog_response(
         source_url=entry.source_url,
         version=entry.version,
         parameter_schema=entry.schema_json,
+        # Required samplesheet columns bioAF cannot source from the sample, so the
+        # launch dialog can collect them. These are NOT pipeline parameters and
+        # never appear in nextflow_schema.json, which is why the existing
+        # schema-driven parameter form cannot surface them.
+        samplesheet_inputs=SampleSheetService.required_user_inputs(parse_contract(entry.input_schema_json))
+        if not SampleSheetService.has_handwritten_generator(entry.pipeline_key)
+        else [],
         default_params=entry.default_params_json,
         is_builtin=entry.is_builtin,
         enabled=entry.enabled,
