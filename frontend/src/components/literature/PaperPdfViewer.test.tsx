@@ -33,6 +33,19 @@ beforeEach(() => {
   mockBlobFetch.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(3) });
 });
 
+// A paper PDF is attacker-supplied content: it arrives from an external
+// publisher or an upload, not from us. pdf.js runs embedded PDF JavaScript by
+// default, which is arbitrary script in our origin (GHSA-hq66-cqwq-w95j).
+// Nothing in the viewer needs it, so it stays off.
+test("loads the document with PDF JavaScript and eval disabled", async () => {
+  getDocumentMock.mockReturnValue({ promise: Promise.resolve(makePdf(1)) });
+  render(<PaperPdfViewer paperId={3} />);
+  await waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
+  expect(getDocumentMock).toHaveBeenCalledWith(
+    expect.objectContaining({ enableScripting: false, isEvalSupported: false }),
+  );
+});
+
 test("renders the page counter and a download link once the document loads", async () => {
   getDocumentMock.mockReturnValue({ promise: Promise.resolve(makePdf(5)) });
   render(<PaperPdfViewer paperId={3} />);

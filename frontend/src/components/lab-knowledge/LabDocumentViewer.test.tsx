@@ -31,6 +31,21 @@ beforeEach(() => {
   global.URL.revokeObjectURL = jest.fn();
 });
 
+// Lab documents are uploaded by users, so the bytes are untrusted. pdf.js runs
+// embedded PDF JavaScript by default, which is arbitrary script in our origin
+// (GHSA-hq66-cqwq-w95j). The viewer only paints pages, so it stays off.
+test("loads the document with PDF JavaScript and eval disabled", async () => {
+  mockBlobFetch.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(3) });
+  getDocumentMock.mockReturnValue({ promise: Promise.resolve(makePdf(1)) });
+  render(
+    <LabDocumentViewer documentId={1} mimeType="application/pdf" fileName="manual.pdf" />,
+  );
+  await waitFor(() => expect(getDocumentMock).toHaveBeenCalled());
+  expect(getDocumentMock).toHaveBeenCalledWith(
+    expect.objectContaining({ enableScripting: false, isEvalSupported: false }),
+  );
+});
+
 test("renders a paginated PDF preview", async () => {
   mockBlobFetch.mockResolvedValue({ arrayBuffer: async () => new ArrayBuffer(3) });
   getDocumentMock.mockReturnValue({ promise: Promise.resolve(makePdf(4)) });

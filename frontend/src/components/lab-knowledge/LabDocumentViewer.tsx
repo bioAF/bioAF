@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { fetchLabDocumentBlob } from "@/lib/labDocuments";
+import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
 
 // pdf.js renders on a web worker; the bundler resolves this URL to an asset on
 // our own origin (no CDN), so a strict CSP won't block it.
@@ -65,7 +66,7 @@ export function LabDocumentViewer({ documentId, version, mimeType, fileName }: P
         if (kind === "pdf") {
           const data = await blob.arrayBuffer();
           if (cancelled) return;
-          const pdf = await pdfjsLib.getDocument({ data }).promise;
+          const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
           if (cancelled) return;
           pdfRef.current = pdf;
           setNumPages(pdf.numPages);
