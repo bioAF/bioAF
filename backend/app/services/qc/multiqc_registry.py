@@ -278,6 +278,118 @@ EMPTY_METRICS: dict[str, Any] = {key: None for key in GENERIC_METRIC_KEYS}
 
 
 # --------------------------------------------------------------------------
+# Per-sample sequencing depth
+# --------------------------------------------------------------------------
+
+# Sections that are per-SAMPLE by construction: they are written after lanes are
+# merged and mates paired, so their keys are the real sample roster. FastQC is
+# deliberately absent: it has one entry per file.
+_ROSTER_MODULES: tuple[str, ...] = (
+    "star",
+    "samtools_stats",
+    "samtools_flagstat",
+    "bismark_alignment",
+    "bowtie2",
+    "hisat2",
+    "salmon",
+)
+
+
+def sample_roster(raw: dict) -> list[str]:
+    """The run's real sample ids, or [] when no per-sample section is present."""
+    for module in _ROSTER_MODULES:
+        for section in select_sections(raw or {}, module):
+            names = sorted(str(name) for name in section)
+            if names:
+                return names
+    return []
+
+
+def _attribute(entry_name: str, roster: list[str]) -> str | None:
+    """The roster sample an entry belongs to: the longest id it starts with.
+
+    FastQC decorates the sample id per file (`SAMPLE-101` -> `SAMPLE-101_1`,
+    `SRX...REP1_T1` -> `SRX...REP1_T1_2`), so prefix matching attributes files to
+    samples without having to know each pipeline's naming scheme. Longest wins so
+    `sample_1` cannot swallow `sample_10`'s files.
+    """
+    best: str | None = None
+    for sample in roster:
+        if entry_name.startswith(sample) and (best is None or len(sample) > len(best)):
+            best = sample
+    return best
+
+
+def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str, str]]:
+    """Per-sample raw read depth (mean across samples) and the sample count.
+
+    Depth stays the RAW, pre-trim FastQC count because that is what the
+    controlled key means and what papers report; the aligner's own total is
+    post-trim and would silently change the quantity. The aligner is used only to
+    establish the sample roster.
+
+    Within a sample the DISTINCT per-file counts are summed: paired mates report
+    identical counts and collapse, separate lanes differ and add. Two lanes with
+    exactly equal read counts are indistinguishable from a mate pair and collapse;
+    that is preferred over trusting FastQC's per-pipeline name suffixes.
+    """
+    raw = (data or {}).get("report_saved_raw_data")
+    if not isinstance(raw, dict):
+        raw = {}
+
+    sources: dict[str, str] = {}
+    roster = sample_roster(raw)
+
+    fastqc_sections = select_sections(raw, "fastqc")
+    entries: dict[str, float] = {}
+    if fastqc_sections:
+        for name, sample in fastqc_sections[0].items():
+            if isinstance(sample, dict):
+                for column in ("Total Sequences", "total_sequences"):
+                    if column in sample and _is_number(sample[column]):
+                        entries[str(name)] = float(sample[column])
+                        break
+
+    if not entries:
+        # No read-level section. Report the roster size when there is one, and no
+        # depth rather than a number derived from something else.
+        total_samples = len(roster) or None
+        if total_samples:
+            sources["total_samples"] = _roster_module(raw) or "aligner"
+        return None, total_samples, sources
+
+    if not roster:
+        # No trustworthy grouping. Fall back to the per-file mean rather than
+        # inventing one from entry names.
+        sources["total_sequences"] = "fastqc"
+        sources["total_samples"] = "fastqc"
+        return int(round(_mean(list(entries.values())))), len(entries), sources
+
+    grouped: dict[str, set[float]] = {sample: set() for sample in roster}
+    for name, value in entries.items():
+        owner = _attribute(name, roster)
+        # An entry matching no roster sample is still real data; keep it as its
+        # own group so it cannot silently vanish from the depth.
+        grouped.setdefault(owner if owner is not None else f"\0{name}", set()).add(value)
+
+    per_sample = [sum(values) for values in grouped.values() if values]
+    if not per_sample:
+        return None, len(roster) or None, sources
+
+    sources["total_sequences"] = "fastqc"
+    sources["total_samples"] = _roster_module(raw) or "fastqc"
+    return int(round(_mean(per_sample))), len(per_sample), sources
+
+
+def _roster_module(raw: dict) -> str | None:
+    for module in _ROSTER_MODULES:
+        for section in select_sections(raw or {}, module):
+            if section:
+                return module
+    return None
+
+
+# --------------------------------------------------------------------------
 # Extras
 # --------------------------------------------------------------------------
 
@@ -393,17 +505,21 @@ def parse_multiqc_metrics(data: dict) -> dict[str, Any]:
             metrics["metric_sources"][mapping.key] = "general_stats"
             break
 
-    metrics["total_samples"] = _count_samples(raw)
+    # Depth and sample count are derived per SAMPLE, not per FastQC file entry,
+    # so mates and lanes cannot distort them. This overrides the registry's
+    # file-level `total_sequences` above.
+    depth, total_samples, depth_sources = read_depth_and_samples(data)
+    if depth is not None:
+        metrics["total_sequences"] = depth
+    metrics["total_samples"] = total_samples
+    metrics["metric_sources"].update(depth_sources)
+
     metrics["additional_metrics"] = harvest_extras(raw, exclude=frozenset(winners))
     return metrics
 
 
 def _count_samples(raw: dict) -> int | None:
-    """Sample count, taken from the read-level section when there is one.
-
-    Matches the shipped templates, including their known quirk: a paired-end run
-    yields one FastQC entry per mate, so this counts 2 for 1 paired sample.
-    """
+    """Deprecated file-level count, kept only as the no-roster fallback path."""
     fastqc = select_sections(raw, "fastqc")
     if fastqc:
         return len(fastqc[0]) or None
@@ -421,6 +537,8 @@ __all__ = [
     "harvest_extras",
     "normalize_section_id",
     "parse_multiqc_metrics",
+    "read_depth_and_samples",
     "read_general_stats",
+    "sample_roster",
     "select_sections",
 ]
