@@ -169,27 +169,74 @@ async def test_simple_upload_returns_500_on_gcs_failure(client, admin_token, con
 # ---------------------------------------------------------------------------
 
 
+# These three pin the vm_default branch, which resolves Application Default
+# Credentials. ADC is ambient machine state: a CI runner has none, a developer
+# who has run `gcloud auth application-default login` has real ones. Reading it
+# rather than controlling it made the two "returns None" tests pass on CI for
+# the wrong reason and fail on any authenticated laptop, so the outcome is
+# forced here instead of inherited from whoever is running the suite.
+
+
 @pytest.mark.asyncio
-async def test_get_gcs_credentials_returns_none_for_vm_default(session):
-    """_get_gcs_credentials returns None when source is vm_default (use ADC)."""
+async def test_get_gcs_credentials_returns_none_when_adc_is_unavailable(session, monkeypatch):
+    """No resolvable ADC means None, not a raised DefaultCredentialsError.
+
+    This is the CI and bare-container case. The caller treats None as "sign
+    URLs some other way", so swallowing the error here is the contract.
+    """
+    import google.auth
+    from google.auth.exceptions import DefaultCredentialsError
+
     from app.models.component import PlatformConfig
     from app.services.upload_service import UploadService
+
+    def no_adc(*args, **kwargs):
+        raise DefaultCredentialsError("no credentials on this machine")
+
+    monkeypatch.setattr(google.auth, "default", no_adc)
 
     session.add(PlatformConfig(key="gcp_credential_source", value="vm_default"))
     await session.flush()
     await session.commit()
 
-    creds = await UploadService._get_gcs_credentials(session)
-    assert creds is None
+    assert await UploadService._get_gcs_credentials(session) is None
 
 
 @pytest.mark.asyncio
-async def test_get_gcs_credentials_returns_none_when_no_source_configured(session):
-    """_get_gcs_credentials returns None when gcp_credential_source is absent."""
+async def test_get_gcs_credentials_uses_adc_for_vm_default(session, monkeypatch):
+    """With ADC present, vm_default hands back those credentials.
+
+    This is what a real GCE install does, and it was the case no test covered:
+    both former tests asserted None here, which only held because CI has no
+    ADC. A regression that stopped returning credentials on a VM would have
+    been invisible.
+    """
+    import google.auth
+
+    from app.models.component import PlatformConfig
     from app.services.upload_service import UploadService
 
-    creds = await UploadService._get_gcs_credentials(session)
-    assert creds is None
+    sentinel = object()
+    monkeypatch.setattr(google.auth, "default", lambda *a, **k: (sentinel, "test-project"))
+
+    session.add(PlatformConfig(key="gcp_credential_source", value="vm_default"))
+    await session.flush()
+    await session.commit()
+
+    assert await UploadService._get_gcs_credentials(session) is sentinel
+
+
+@pytest.mark.asyncio
+async def test_get_gcs_credentials_defaults_to_vm_default_when_unset(session, monkeypatch):
+    """An absent gcp_credential_source takes the vm_default branch."""
+    import google.auth
+
+    from app.services.upload_service import UploadService
+
+    sentinel = object()
+    monkeypatch.setattr(google.auth, "default", lambda *a, **k: (sentinel, "test-project"))
+
+    assert await UploadService._get_gcs_credentials(session) is sentinel
 
 
 @pytest.mark.asyncio
