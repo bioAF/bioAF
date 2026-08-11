@@ -59,19 +59,21 @@ def render_config() -> dict:
                 "title": "Alignment",
                 "metrics": ["reads_mapped_genome", "reads_mapped_genome_unique", "percent_duplicates"],
             },
-            {
-                "id": "additional",
-                "title": "Additional Metrics",
-                "description": (
-                    "Everything else this pipeline's MultiQC report carried, named by the tool that "
-                    "reported it. These are shown for review and are not scored."
-                ),
-                "source": "additional_metrics",
-            },
         ],
-        "metrics": {},
+        "metrics": {
+            "total_samples": {"label": "Samples", "format": "integer"},
+            "total_sequences": {"label": "Reads per Sample (mean)", "format": "integer"},
+            "avg_sequence_length": {"label": "Read Length (mean)", "format": "raw"},
+            "percent_gc": {"label": "GC Content", "format": "percent"},
+            "reads_mapped_genome": {"label": "Mapped to Genome", "format": "fraction_percent"},
+            "reads_mapped_genome_unique": {"label": "Uniquely Mapped", "format": "fraction_percent"},
+            "percent_duplicates": {"label": "Duplication", "format": "percent"},
+        },
         "charts": [],
-        "plots": [plot_type for _, _, plot_type in MULTIQC_PLOTS],
+        "plots": [
+            {"file_glob": f"multiqc/multiqc_plots/png/{png}", "title": title, "type": plot_type}
+            for png, title, plot_type in MULTIQC_PLOTS
+        ],
     }
 
 

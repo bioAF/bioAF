@@ -89,6 +89,27 @@ def test_render_config_is_labelled_generic_not_scrnaseq():
     assert config["sections"]
 
 
+def test_render_config_satisfies_the_dashboard_response_schema():
+    """The config is served straight back through QCDashboardConfig, so a shape
+    the schema rejects 500s the dashboard endpoint rather than failing here."""
+    from app.schemas.qc_dashboard import QCDashboardConfig
+
+    config = QCDashboardConfig(**generic.render_config())
+
+    assert config.template == "generic"
+    assert all(plot.file_glob for plot in config.plots)
+
+
+def test_every_metric_the_engine_emits_has_a_display_label():
+    """A metric with no spec renders as a bare key, which is how a dashboard
+    ends up showing `reads_mapped_genome_unique` to a scientist."""
+    from app.services.qc.multiqc_registry import GENERIC_METRIC_KEYS
+
+    labelled = set(generic.render_config()["metrics"])
+
+    assert set(GENERIC_METRIC_KEYS) <= labelled
+
+
 def test_quality_is_not_invented_without_metrics():
     """The generic engine has no type-specific thresholds, so it must not
     manufacture a pass/fail verdict."""

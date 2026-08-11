@@ -152,7 +152,14 @@ async def test_resolves_custom_pipeline_version_with_override(session, org_user_
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_scrnaseq_when_no_match(session, org_user_exp):
+async def test_falls_back_to_generic_when_no_match(session, org_user_exp):
+    """An unmatched pipeline resolves to the generic MultiQC template.
+
+    This used to fall back to `scrnaseq`, which applied the single-cell
+    extractor, render config, and plot list to whatever the pipeline actually
+    was. The generic template reads the run's own MultiQC report instead, so an
+    unrecognized type produces its real metrics or an honest nothing.
+    """
     from app.models.pipeline_run import PipelineRun
     from app.services.qc.resolver import resolve_template_for_run
 
@@ -170,8 +177,8 @@ async def test_falls_back_to_scrnaseq_when_no_match(session, org_user_exp):
     await session.flush()
 
     template_name, cfg = await resolve_template_for_run(session, run)
-    assert template_name == "scrnaseq"
-    assert cfg["template"] == "scrnaseq"
+    assert template_name == "generic"
+    assert cfg["template"] == "generic"
 
 
 @pytest.mark.asyncio
