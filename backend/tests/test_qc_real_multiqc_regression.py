@@ -12,8 +12,6 @@ These assert the parsers' OUTPUT, not how they get there.
 import json
 from pathlib import Path
 
-import pytest
-
 from app.services.qc.templates import atacseq, bulk_rnaseq, chipseq, scrnaseq
 
 FIXTURES = Path(__file__).parent / "fixtures" / "multiqc"
@@ -72,34 +70,42 @@ def test_atacseq_parses_real_run24_report():
     assert metrics["tss_enrichment"] is None
 
 
-@pytest.mark.xfail(
-    reason=(
-        "MultiQC 1.31 changed report_general_stats_data from a list of per-sample dicts to a dict "
-        "keyed by module. The scrnaseq parser iterates it as a list, so on 1.31 output it hits "
-        "'str' object has no attribute 'items', swallows the error, and returns all-null metrics. "
-        "Pending owner decision (the generic engine handles both shapes)."
-    ),
-    strict=True,
-)
 def test_scrnaseq_parses_real_run11_report():
-    """STAR + FastQC output, MultiQC 1.31."""
+    """STAR + FastQC output, MultiQC 1.31, where general_stats is a dict keyed by
+    module rather than a list of per-sample dicts.
+
+    These five fields were null on every scRNA-seq run in the demo (runs 1, 3 and
+    11), while the STARsolo-derived metrics on the same dashboards were fine.
+    """
     metrics = scrnaseq.read_multiqc_metrics(_fixture("scrnaseq_run11.json"))
 
-    assert metrics["total_sequences"] is not None
-    assert metrics["percent_gc"] is not None
+    assert metrics["total_sequences"] == 133_203_774
+    assert metrics["total_samples"] == 4
+    assert metrics["percent_gc"] == 46.0
+    assert metrics["avg_sequence_length"] == 59.5
+    assert metrics["percent_duplicates"] == 50.4
 
 
-def test_scrnaseq_currently_returns_null_metrics_on_multiqc_131():
-    """Characterization of the bug above: it degrades to all-null rather than
-    raising, so a dashboard renders empty instead of erroring. Locked so the fix
-    (whenever it is authorized) has to change this test deliberately."""
-    metrics = scrnaseq.read_multiqc_metrics(_fixture("scrnaseq_run11.json"))
+def test_scrnaseq_reads_module_qualified_general_stats_columns():
+    """1.31 prefixes column ids with the module (`fastqc-total_sequences`), so
+    handling the container shape alone is not enough: the column lookup has to
+    match the qualified name too."""
+    metrics = scrnaseq.read_multiqc_metrics(
+        json.dumps(
+            {
+                "report_general_stats_data": {
+                    "fastqc": {
+                        "s1": {"fastqc-total_sequences": 1_000_000, "fastqc-percent_gc": 50.0},
+                        "s2": {"fastqc-total_sequences": 2_000_000, "fastqc-percent_gc": 48.0},
+                    }
+                }
+            }
+        )
+    )
 
-    assert metrics["total_sequences"] is None
-    assert metrics["total_samples"] is None
-    assert metrics["percent_gc"] is None
-    assert metrics["avg_sequence_length"] is None
-    assert metrics["percent_duplicates"] is None
+    assert metrics["total_sequences"] == 3_000_000
+    assert metrics["total_samples"] == 2
+    assert metrics["percent_gc"] == 49.0
 
 
 def test_fixtures_span_multiple_multiqc_majors():
