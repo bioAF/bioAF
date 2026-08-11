@@ -292,6 +292,8 @@ async def test_produces_metrics_for_a_report_the_scrnaseq_parser_cannot_read(sto
 
     metrics = await generic.extract(None, RUN, results_bucket=BUCKET)
 
-    assert metrics["total_sequences"] == 33_300_944
+    # One sample across four files (two lanes x two mates); depth is per sample.
+    assert metrics["total_sequences"] == 66_601_887
+    assert metrics["total_samples"] == 1
     assert metrics["reads_mapped_genome_unique"] == 0.8755
     assert metrics["percent_gc"] == 46.0

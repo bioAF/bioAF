@@ -43,7 +43,11 @@ def test_chipseq_parses_real_run22_report():
     assert metrics["frip"] == 0.135
     assert metrics["nsc"] == 1.044
     assert metrics["rsc"] == 0.222
-    assert metrics["total_samples"] == 4
+    # 2 samples, each with an R1 and an R2 FastQC entry. This asserted 4 while
+    # sample counts were taken from file entries.
+    assert metrics["total_samples"] == 2
+    # Unchanged: paired mates report identical counts, so averaging over files
+    # happened to give the right per-sample depth here.
     assert metrics["total_sequences"] == 24_427_238
     assert metrics["reads_mapped_genome"] == 0.9988
     assert metrics["percent_duplicates"] == 20.7
@@ -60,7 +64,8 @@ def test_atacseq_parses_real_run24_report():
 
     assert metrics["peak_count"] == 31_914
     assert metrics["frip"] == 0.0508
-    assert metrics["total_samples"] == 2
+    # 1 paired-end sample written across 2 FastQC entries. This asserted 2.
+    assert metrics["total_samples"] == 1
     assert metrics["total_sequences"] == 58_365_790
     assert metrics["reads_mapped_genome"] == 0.9978
     assert metrics["percent_duplicates"] == 49.0
@@ -79,8 +84,11 @@ def test_scrnaseq_parses_real_run11_report():
     """
     metrics = scrnaseq.read_multiqc_metrics(_fixture("scrnaseq_run11.json"))
 
-    assert metrics["total_sequences"] == 133_203_774
-    assert metrics["total_samples"] == 4
+    # One 10x sample across four files (two lanes x two mates). This template
+    # used to SUM the FastQC entries and reported 133,203,774, double-counting
+    # every mate; the true depth matches STAR's own total_reads exactly.
+    assert metrics["total_sequences"] == 66_601_887
+    assert metrics["total_samples"] == 1
     assert metrics["percent_gc"] == 46.0
     assert metrics["avg_sequence_length"] == 59.5
     assert metrics["percent_duplicates"] == 50.4
@@ -103,7 +111,10 @@ def test_scrnaseq_reads_module_qualified_general_stats_columns():
         )
     )
 
-    assert metrics["total_sequences"] == 3_000_000
+    # Per-sample mean, not a sum across entries: two samples at 1M and 2M is 1.5M
+    # per sample. There is no aligner section here, so this exercises the
+    # no-roster fallback.
+    assert metrics["total_sequences"] == 1_500_000
     assert metrics["total_samples"] == 2
     assert metrics["percent_gc"] == 49.0
 
