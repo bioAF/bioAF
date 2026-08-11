@@ -54,9 +54,9 @@ async def _resolve_template_and_override(session: AsyncSession, run: PipelineRun
         )
         entry = result.scalar_one_or_none()
         if entry is not None:
-            return (entry.qc_template or "scrnaseq", entry.qc_config_json)
+            return (entry.qc_template or "generic", entry.qc_config_json)
 
-    return ("scrnaseq", None)
+    return ("generic", None)
 
 
 def _build_config(template_name: str, override: dict | None) -> dict[str, Any]:

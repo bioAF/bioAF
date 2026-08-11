@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.multiqc_registry import read_general_stats
 
 logger = logging.getLogger("bioaf.qc.scrnaseq")
 
@@ -420,30 +421,22 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
     }
     try:
         data = json.loads(multiqc_json_text)
-        general_stats = data.get("report_general_stats_data", [])
 
-        total_seqs: list[float] = []
-        dup_pcts: list[float] = []
-        gc_pcts: list[float] = []
-        seq_lengths: list[float] = []
+        # MultiQC 1.31 changed report_general_stats_data from a LIST of per-sample
+        # dicts to a DICT keyed by module, and qualified the column ids with the
+        # module name (`fastqc-total_sequences`). Reading it as a list walked the
+        # module names and threw, which left these five fields null on every
+        # scRNA-seq run whose report came from 1.31 or later; the STARsolo-derived
+        # metrics on the same dashboard were unaffected. `read_general_stats`
+        # handles both shapes and both column-id conventions.
+        total_seqs = read_general_stats(data, "total_sequences") or read_general_stats(data, "Total Sequences")
+        gc_pcts = read_general_stats(data, "percent_gc") or read_general_stats(data, "%GC")
+        seq_lengths = read_general_stats(data, "avg_sequence_length")
 
-        for stats_section in general_stats:
-            for _sample_name, sample_stats in stats_section.items():
-                for key in ("total_sequences", "Total Sequences"):
-                    if key in sample_stats:
-                        total_seqs.append(sample_stats[key])
-                        break
-                for key in ("percent_duplicates", "total_deduplicated_percentage"):
-                    if key in sample_stats:
-                        val = sample_stats[key]
-                        dup_pcts.append(100 - val if "deduplicated" in key else val)
-                        break
-                for key in ("percent_gc", "%GC"):
-                    if key in sample_stats:
-                        gc_pcts.append(sample_stats[key])
-                        break
-                if "avg_sequence_length" in sample_stats:
-                    seq_lengths.append(sample_stats["avg_sequence_length"])
+        dup_pcts = read_general_stats(data, "percent_duplicates")
+        if not dup_pcts:
+            # FastQC reports the share REMAINING after deduplication.
+            dup_pcts = [100 - v for v in read_general_stats(data, "total_deduplicated_percentage")]
 
         if total_seqs:
             metrics["total_sequences"] = int(sum(total_seqs))

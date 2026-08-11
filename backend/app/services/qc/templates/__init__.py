@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from app.services.qc.templates import atacseq, bulk_rnaseq, chipseq, custom, scrnaseq
+from app.services.qc.templates import atacseq, bulk_rnaseq, chipseq, custom, generic, scrnaseq
 
 TEMPLATES: dict[str, ModuleType] = {
     "scrnaseq": scrnaseq,
@@ -16,9 +16,14 @@ TEMPLATES: dict[str, ModuleType] = {
     "chipseq": chipseq,
     "atacseq": atacseq,
     "custom": custom,
+    "generic": generic,
 }
 
-DEFAULT_TEMPLATE = "scrnaseq"
+# The fallback for a pipeline type nobody has written a tailored template for.
+# It reads whatever MultiQC the run actually wrote, which is the honest default;
+# falling back to a specific assay's template (this was `scrnaseq`) applied that
+# assay's extractor, render config, and plot list to unrelated pipelines.
+DEFAULT_TEMPLATE = "generic"
 
 
 def get_template(name: str | None) -> ModuleType:
