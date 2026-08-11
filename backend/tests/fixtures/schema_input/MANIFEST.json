@@ -1,0 +1,47 @@
+{
+  "bacass": {
+    "bytes": 3180,
+    "tag": "2.6.0",
+    "url": "https://raw.githubusercontent.com/nf-core/bacass/2.6.0/assets/schema_input.json"
+  },
+  "demo": {
+    "bytes": 1374,
+    "tag": "1.2.0",
+    "url": "https://raw.githubusercontent.com/nf-core/demo/1.2.0/assets/schema_input.json"
+  },
+  "funcscan": {
+    "bytes": 2593,
+    "tag": "4.0.0",
+    "url": "https://raw.githubusercontent.com/nf-core/funcscan/4.0.0/assets/schema_input.json"
+  },
+  "genomeqc": {
+    "bytes": 2323,
+    "tag": "dev",
+    "url": "https://raw.githubusercontent.com/nf-core/genomeqc/dev/assets/schema_input.json"
+  },
+  "mag": {
+    "bytes": 3073,
+    "tag": "5.5.0",
+    "url": "https://raw.githubusercontent.com/nf-core/mag/5.5.0/assets/schema_input.json"
+  },
+  "rnasplice": {
+    "bytes": 1891,
+    "tag": "1.0.4",
+    "url": "https://raw.githubusercontent.com/nf-core/rnasplice/1.0.4/assets/schema_input.json"
+  },
+  "rnastructurome": {
+    "bytes": 5377,
+    "tag": "dev",
+    "url": "https://raw.githubusercontent.com/nf-core/rnastructurome/dev/assets/schema_input.json"
+  },
+  "sarek": {
+    "bytes": 6125,
+    "tag": "3.9.0",
+    "url": "https://raw.githubusercontent.com/nf-core/sarek/3.9.0/assets/schema_input.json"
+  },
+  "taxprofiler": {
+    "bytes": 2858,
+    "tag": "2.0.1",
+    "url": "https://raw.githubusercontent.com/nf-core/taxprofiler/2.0.1/assets/schema_input.json"
+  }
+}
