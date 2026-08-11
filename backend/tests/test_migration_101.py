@@ -8,35 +8,15 @@ left in place (a later migration drops them once all callers are migrated), so
 this step is fully reversible.
 """
 
-from pathlib import Path
-
 import pytest
 from sqlalchemy import text
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-MIGRATION_FILE = MIGRATIONS_DIR / "101_neutral_compute_job_ref.py"
 
-
-def test_migration_file_exists():
-    assert MIGRATION_FILE.exists(), f"Expected migration at {MIGRATION_FILE}"
-
-
-def test_migration_chains_to_100():
-    content = MIGRATION_FILE.read_text()
-    assert 'revision = "101"' in content
-    assert 'down_revision = "100"' in content
-
-
-def test_migration_adds_and_drops_neutral_columns():
-    content = MIGRATION_FILE.read_text()
-    # additive on both tables (notebook sessions live in the compute_sessions table)
-    assert "pipeline_runs" in content
-    assert "compute_sessions" in content
-    assert "add_column" in content
-    assert "compute_job_ref" in content
-    assert "provider_metadata" in content
-    # reversible: downgrade drops them
-    assert "drop_column" in content
+# The file-exists, revision-string and add_column/drop_column substring tests
+# that used to sit here were removed. test_migrations_apply.py runs the chain
+# and then compares the resulting schema to the models, so it proves the columns
+# are really there; grepping the migration for the string "add_column" proved
+# only that the word appears in the file.
 
 
 @pytest.mark.asyncio

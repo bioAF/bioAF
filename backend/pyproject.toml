@@ -14,15 +14,19 @@ dependencies = [
     "asyncpg>=0.29",
     "alembic>=1.13",
     "pydantic>=2.6",
-    "pydantic-settings>=2.1",
+    # Security floors below mirror requirements.txt, which is what CI and the
+    # backend image actually install. Keep the two in step: a looser floor here
+    # lets `uv lock` resolve back onto a vulnerable version.
+    "pydantic-settings>=2.14.2",
     "bcrypt>=4.1",
     "google-cloud-secret-manager>=2.18",
     "google-cloud-iam>=2.14",
     "google-cloud-compute>=1.19",
     "httpx>=0.27",
-    "python-multipart>=0.0.6",
+    "python-multipart>=0.0.31",
     "pyyaml>=6.0",
-    "PyJWT[crypto]>=2.8",
+    "PyJWT[crypto]>=2.13.0",
+    "pyasn1>=0.6.4",
     "h5py>=3.10",
     "PyMuPDF>=1.24",
 ]

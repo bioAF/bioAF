@@ -13,47 +13,17 @@ Covers:
 """
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-
 import pytest
 import pytest_asyncio
 
 from app.services.auth_service import AuthService
 
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-MIGRATION_FILE = MIGRATIONS_DIR / "094_session_failure_taxonomy.py"
-
-
-# ----- migration file shape -----
-
-
-def test_migration_file_exists():
-    assert MIGRATION_FILE.exists(), (
-        f"Expected migration file at {MIGRATION_FILE}. "
-        "It should add failure_reason, failure_message, requested_disk_gb to compute_sessions."
-    )
-
-
-def test_migration_chains_to_093():
-    content = MIGRATION_FILE.read_text()
-    assert 'revision = "094"' in content
-    assert 'down_revision = "093"' in content, "migration 094 must chain to 093 so alembic upgrade head picks it up"
-
-
-def test_migration_adds_failure_taxonomy_columns():
-    content = MIGRATION_FILE.read_text()
-    assert "failure_reason" in content, "upgrade() must add failure_reason column"
-    assert "failure_message" in content, "upgrade() must add failure_message column"
-    assert "requested_disk_gb" in content, "upgrade() must add requested_disk_gb column"
-    # All three are nullable so the migration is non-blocking for existing rows.
-    for col in ("failure_reason", "failure_message", "requested_disk_gb"):
-        assert f"'{col}'" in content or f'"{col}"' in content, f"migration must reference column {col} by name"
-
-
-def test_migration_downgrade_drops_the_columns():
-    content = MIGRATION_FILE.read_text()
-    assert "drop_column" in content, "downgrade() must drop the columns it added"
+# The four migration-file tests that used to sit here (exists, chains to 093,
+# mentions the three column names, mentions drop_column) were removed.
+# test_migrations_apply.py runs the chain and diffs the result against the
+# models, which is a real check that these columns exist on compute_sessions;
+# reading the migration for its own column names was not.
 
 
 # ----- response schema shape -----

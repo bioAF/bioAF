@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import { fetchPaperPdfBlob } from "@/lib/literature";
+import { HARDENED_PDF_OPTIONS } from "@/lib/pdfSecurity";
 
 // pdf.js renders on a web worker. The bundler (Next/webpack) resolves this URL
 // to an emitted asset served from our own origin, so there is no CDN dependency
@@ -56,7 +57,7 @@ export function PaperPdfViewer({ paperId, filename, onReachPage }: Props) {
         setDownloadUrl(createdUrl);
         const data = await blob.arrayBuffer();
         if (cancelled) return;
-        const pdf = await pdfjsLib.getDocument({ data }).promise;
+        const pdf = await pdfjsLib.getDocument({ data, ...HARDENED_PDF_OPTIONS }).promise;
         if (cancelled) return;
         pdfRef.current = pdf;
         setNumPages(pdf.numPages);

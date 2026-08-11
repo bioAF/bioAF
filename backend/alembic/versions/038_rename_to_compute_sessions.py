@@ -73,11 +73,18 @@ def upgrade() -> None:
     # The FK constraint names from migration 018 need updating
     conn = op.get_bind()
     # Check if analysis_snapshots has a FK to the old table name
+    # table_schema is pinned to the schema this migration is actually running
+    # in. information_schema spans every schema the role can see, so without it
+    # the lookup returns constraints belonging to some other schema's
+    # analysis_snapshots and the drop below fails with "constraint ... does not
+    # exist". On a single-schema database this finds exactly the same row it
+    # always did.
     result = conn.execute(
         sa.text(
             "SELECT constraint_name FROM information_schema.table_constraints "
             "WHERE table_name = 'analysis_snapshots' AND constraint_type = 'FOREIGN KEY' "
-            "AND constraint_name LIKE '%notebook_session%'"
+            "AND constraint_name LIKE '%notebook_session%' "
+            "AND table_schema = current_schema()"
         )
     )
     for row in result.fetchall():

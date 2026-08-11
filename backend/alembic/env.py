@@ -108,7 +108,18 @@ def run_migrations_online() -> None:
     asyncio.run(run_async_migrations())
 
 
-if context.is_offline_mode():
+# A caller may hand us an already-open (sync) Connection through
+# `config.attributes`. Alembic documents this for driving migrations from a
+# test, which is the only user here: it lets the suite run `upgrade head`
+# against a throwaway schema on a connection it controls, instead of letting
+# env.py build its own engine from settings.database_url and reach for the
+# real database. Nothing sets this attribute in production, so the deploy path
+# below is unchanged.
+_injected_connection = config.attributes.get("connection", None)
+
+if _injected_connection is not None:
+    do_run_migrations(_injected_connection)
+elif context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
