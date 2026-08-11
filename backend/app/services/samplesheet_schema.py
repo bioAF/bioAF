@@ -76,6 +76,11 @@ class SamplesheetContract:
     defaulted: set[str] = field(default_factory=set)
     enums: dict[str, list[str]] = field(default_factory=dict)
     read_columns: set[str] = field(default_factory=set)
+    # The schema's own declared property order. This is the order the pipeline's
+    # documentation and example sheets use, so a generated sheet someone opens to
+    # debug a run looks like the one they are comparing it against. nf-schema
+    # reads by header name, so this is legibility, not correctness.
+    column_order: tuple[str, ...] = ()
     is_empty: bool = False
 
     @property
@@ -157,15 +162,19 @@ def parse_contract(schema: object) -> SamplesheetContract:
         if _declares_fastq(spec) or col in FASTQ_COLUMNS:
             read_columns.add(col)
 
-    columns = {str(c) for c in properties}
+    declared = [str(c) for c in properties]
+    columns = set(declared)
     # A schema that requires a column it never defines is self-inconsistent, but
-    # it is the pipeline's own published contract, so honor the requirement.
+    # it is the pipeline's own published contract, so honor the requirement. Such
+    # a column has no declared position, so it goes last.
+    undeclared = sorted(required - columns)
     return SamplesheetContract(
         required=required,
         columns=columns | required,
         defaulted=defaulted,
         enums=enums,
         read_columns=read_columns,
+        column_order=tuple(declared + undeclared),
         is_empty=False,
     )
 

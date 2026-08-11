@@ -148,7 +148,178 @@ def _antibody_label(sample) -> str:
     return re.sub(r"\s+", "_", _safe_sample_name(sample))
 
 
+def _ordered_columns(contract) -> list[str]:
+    """The schema's columns in the order the schema itself declares them."""
+    return list(contract.column_order)
+
+
+# A read column for a sequencing technology bioAF does not register samples for.
+# mag and detaxizer accept both short and long reads in one sheet; the Illumina
+# FASTQs bioAF holds belong in the short-read columns, and putting them in
+# `long_reads` would hand Nanopore/PacBio tooling Illumina data.
+_LONG_READ_MARKER = re.compile(r"long|ont|hifi|nanopore|pacbio", re.IGNORECASE)
+
+
+def _ordered_read_columns(contract) -> list[str]:
+    """The mate-1 and mate-2 columns, in that order.
+
+    Lexical sorting is not enough: mag defines `long_reads`, `short_reads_1` and
+    `short_reads_2`, and sorting puts `long_reads` first, which would place R1
+    into the long-read column. Columns are paired on their trailing `_1`/`_2`
+    instead, and a complete short-read pair wins over anything else.
+    """
+    columns = contract.read_columns
+    if not columns:
+        return []
+
+    # Group by base name: short_reads_1 / short_reads_2 -> "short_reads".
+    pairs: dict[str, dict[str, str]] = {}
+    singles: list[str] = []
+    for column in columns:
+        match = re.fullmatch(r"(.*?)[_]?([12])", column)
+        if match and match.group(1):
+            pairs.setdefault(match.group(1), {})[match.group(2)] = column
+        else:
+            singles.append(column)
+
+    def rank(base: str) -> tuple[int, int, str]:
+        mates = pairs[base]
+        # complete pairs first, then short-read over long-read, then stable
+        return (0 if len(mates) == 2 else 1, 1 if _LONG_READ_MARKER.search(base) else 0, base)
+
+    for base in sorted(pairs, key=rank):
+        if _LONG_READ_MARKER.search(base) and len(pairs) > 1:
+            continue
+        mates = pairs[base]
+        return [mates[m] for m in ("1", "2") if m in mates]
+
+    # Single-end schemas: one unpaired read column (nf-core/demo's `fastq`,
+    # genomeqc's `fastq`). R2, if any, is simply never placed.
+    return sorted(c for c in singles if not _LONG_READ_MARKER.search(c))[:1]
+
+
+def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]) -> str:
+    """The value for one column of one row, or empty when bioAF cannot source it.
+
+    Order matters: reads first (the schema named them), then the explicit sample
+    mapping, then launch parameters. An enum-constrained column only accepts a
+    value the schema lists.
+    """
+    if column in reads:
+        return reads[column]
+
+    value = ""
+    field = _COLUMN_TO_SAMPLE_FIELD.get(column)
+    if field == "external_id":
+        value = _safe_sample_name(sample)
+    elif field:
+        value = getattr(sample, field, None) or ""
+    else:
+        parameter = _COLUMN_TO_PARAMETER.get(column)
+        if parameter:
+            raw = parameters.get(parameter)
+            value = "" if raw is None else str(raw)
+
+    if not value:
+        return ""
+
+    # A value outside the schema's enum would produce a sheet that passes bioAF's
+    # own checks and dies in Nextflow. bioAF's "auto" strandedness default is
+    # exactly this: legal for nf-core/rnaseq, absent from rnasplice's enum.
+    allowed = contract.enum_for(column)
+    if allowed and value not in allowed:
+        logger.info(
+            "Dropping %s=%r: not in this pipeline's allowed values %s",
+            column,
+            value,
+            allowed,
+        )
+        return ""
+
+    return value
+
+
+# -- Schema-driven generation ------------------------------------------------
+#
+# What a samplesheet column may be filled from, keyed on the column name the
+# pipeline's own schema uses. Two disciplines apply, both carried over from the
+# generic MultiQC engine:
+#
+# 1. EXACT, EXPLICIT MATCHING. A column is filled only if it appears here. There
+#    is no reflection onto same-named Sample attributes, because a name collision
+#    is not evidence of a shared meaning.
+#
+# 2. IDENTITY AND PROVENANCE ONLY. Every entry below names something bioAF
+#    already knows about the sample itself. Columns that define EXPERIMENTAL
+#    DESIGN are deliberately absent and must never be added: mag's `group`
+#    controls co-assembly, rnasplice's `condition` defines the differential
+#    contrast, and rnastructurome's `condition` is an rf-norm chemistry enum
+#    (treated/untreated/denatured) that merely shares a name with
+#    Sample.treatment_condition. Guessing any of them yields a scientifically
+#    wrong result that still runs green, which is worse than a refused launch.
+_COLUMN_TO_SAMPLE_FIELD: dict[str, str] = {
+    # the sample's own name, spelled four ways across the catalog
+    "sample": "external_id",
+    "sample_id": "external_id",
+    "id": "external_id",
+    "ID": "external_id",
+    "sample_name": "external_id",
+    # which individual the material came from (sarek/rnadnavar: meta [patient])
+    "patient": "donor_source",
+    "subject_id": "donor_source",
+    "donor": "donor_source",
+    # organism and anatomy
+    "species": "organism",
+    "organism": "organism",
+    "tissue": "tissue_type",
+    # provenance: bioAF carries one row per sample, so the sample's own external
+    # id is its run accession
+    "run_accession": "external_id",
+}
+
+# Columns supplied by a launch parameter rather than by the sample.
+_COLUMN_TO_PARAMETER: dict[str, str] = {
+    "strandedness": "strandedness",
+    "instrument_platform": "instrument_platform",
+    "expected_cells": "expected_cells",
+}
+
+
 class SampleSheetService:
+    @staticmethod
+    def generate_from_contract(contract, samples: list, parameters: dict) -> str:
+        """Build a samplesheet from a pipeline's own ``schema_input.json``.
+
+        The header is the schema's column set. Each cell is filled from the
+        sample, from a launch parameter, or left empty; a column bioAF cannot
+        source is emitted blank rather than dropped, because nf-schema reads by
+        header name and a shifting header shape is harder to debug than a blank.
+
+        Whether the resulting sheet is actually launchable is decided upstream in
+        ``PipelineRunService``: this builds the best sheet it can and reports
+        nothing, so that the blocking decision lives in one place.
+        """
+        columns = _ordered_columns(contract)
+        input_paths = parameters.get("input_paths", {})
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(columns)
+
+        read_columns = _ordered_read_columns(contract)
+        for sample in samples:
+            paths = input_paths.get(str(sample.id), [])
+            if paths:
+                pairs = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+            else:
+                pairs = _extract_fastq_lane_pairs(sample)
+
+            for fastq_1, fastq_2 in pairs:
+                reads = dict(zip(read_columns, (fastq_1, fastq_2)))
+                writer.writerow([_cell(contract, column, sample, parameters, reads) for column in columns])
+
+        return output.getvalue()
+
     @staticmethod
     def generate_scrnaseq_sheet(samples: list, parameters: dict) -> str:
         """Generate nf-core/scrnaseq sample sheet CSV.
