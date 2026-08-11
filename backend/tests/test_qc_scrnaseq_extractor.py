@@ -66,7 +66,11 @@ def test_read_multiqc_metrics_aggregates_across_samples():
         ]
     }
     metrics = scrnaseq.read_multiqc_metrics(json.dumps(multiqc))
-    assert metrics["total_sequences"] == 3_000_000
+    # Per-sample depth, not a grand total. This asserted the SUM (3,000,000),
+    # which was inconsistent with every other template and with the per-sample
+    # basis the lit_validation comparison uses, so a paper's "reads per sample"
+    # claim could never match on a scRNA-seq run.
+    assert metrics["total_sequences"] == 1_500_000
     assert metrics["total_samples"] == 2
     assert metrics["percent_duplicates"] == 25.0
     assert metrics["percent_gc"] == 49.0

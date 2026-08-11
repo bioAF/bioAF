@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
-from app.services.qc.multiqc_registry import read_general_stats
+from app.services.qc.multiqc_registry import read_depth_and_samples, read_general_stats
 
 logger = logging.getLogger("bioaf.qc.scrnaseq")
 
@@ -438,8 +438,20 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
             # FastQC reports the share REMAINING after deduplication.
             dup_pcts = [100 - v for v in read_general_stats(data, "total_deduplicated_percentage")]
 
-        if total_seqs:
-            metrics["total_sequences"] = int(sum(total_seqs))
+        # Depth and sample count come from the shared per-SAMPLE derivation
+        # (aligner roster, raw FastQC counts, lanes added and mates collapsed).
+        # This template used to SUM the FastQC entries, which double-counted
+        # paired mates: demo run 11 is one 10x sample written across four files
+        # (two lanes x two mates) and reported 133,203,774 against a true
+        # 66,601,887. Summing also disagreed with every other template, which
+        # meant a paper's per-sample depth claim could never match on scRNA.
+        depth, total_samples, _sources = read_depth_and_samples(data)
+        if depth is not None:
+            metrics["total_sequences"] = depth
+        if total_samples is not None:
+            metrics["total_samples"] = total_samples
+        elif total_seqs:
+            metrics["total_sequences"] = int(round(sum(total_seqs) / len(total_seqs)))
             metrics["total_samples"] = len(total_seqs)
         if dup_pcts:
             metrics["percent_duplicates"] = round(sum(dup_pcts) / len(dup_pcts), 1)

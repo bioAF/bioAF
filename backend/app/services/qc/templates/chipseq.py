@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
+from app.services.qc.multiqc_registry import read_depth_and_samples
 
 logger = logging.getLogger("bioaf.qc.chipseq")
 
@@ -304,8 +305,14 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
         dedup = _numbers(fastqc, "total_deduplicated_percentage")
         lengths = _numbers(fastqc, "avg_sequence_length")
         if total_seqs:
-            metrics["total_sequences"] = int(round(_mean(total_seqs)))
-            metrics["total_samples"] = len(total_seqs)
+            # Per-SAMPLE derivation (aligner roster, raw FastQC counts, lanes
+            # added and mates collapsed). ChIP runs are paired-end, so counting
+            # FastQC entries reported twice the samples that exist.
+            depth, total_samples, _sources = read_depth_and_samples(data)
+            if depth is not None:
+                metrics["total_sequences"] = depth
+            if total_samples is not None:
+                metrics["total_samples"] = total_samples
         if gc:
             metrics["percent_gc"] = round(_mean(gc), 1)
         if dedup:
