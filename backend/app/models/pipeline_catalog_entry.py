@@ -19,6 +19,10 @@ class PipelineCatalogEntry(Base):
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     schema_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The pipeline's own assets/schema_input.json: the samplesheet contract.
+    # NULL means "not fetched yet" (resolved lazily on first launch), which is
+    # distinct from the stored absent marker meaning "this pipeline ships none".
+    input_schema_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     default_params_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

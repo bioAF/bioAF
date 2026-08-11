@@ -3,7 +3,23 @@ import io
 import logging
 import re
 
+from app.exceptions import (
+    PipelineNotSampleLaunchableError,
+    SamplesMissingRequiredFieldsError,
+)
+
 logger = logging.getLogger("bioaf.sample_sheet")
+
+
+def _join(items) -> str:
+    """Join names for a message read by a scientist, not a parser."""
+    items = list(items)
+    if not items:
+        return "a different input"
+    if len(items) == 1:
+        return f"'{items[0]}'"
+    return ", ".join(f"'{i}'" for i in items[:-1]) + f" and '{items[-1]}'"
+
 
 _ILLUMINA_READ_RE = re.compile(r"_(R[12]|I[12])_")
 
@@ -277,6 +293,10 @@ _COLUMN_TO_SAMPLE_FIELD: dict[str, str] = {
     "run_accession": "external_id",
 }
 
+# Pipelines whose sheet is built by a tailored generator, matched as substrings
+# of the pipeline key exactly as generate_sheet routes them.
+_HANDWRITTEN_GENERATORS: tuple[str, ...] = ("scrnaseq", "rnaseq", "chipseq", "atacseq", "fetchngs")
+
 # Columns supplied by a launch parameter rather than by the sample.
 _COLUMN_TO_PARAMETER: dict[str, str] = {
     "strandedness": "strandedness",
@@ -286,6 +306,47 @@ _COLUMN_TO_PARAMETER: dict[str, str] = {
 
 
 class SampleSheetService:
+    @staticmethod
+    def check_contract_satisfiable(contract, samples: list, parameters: dict) -> None:
+        """Raise if this run cannot produce a valid samplesheet.
+
+        Called before the run row exists, so a refusal costs the user nothing.
+        Silent when the contract is empty: no schema means "we do not know", and
+        refusing on ignorance would regress every pipeline that works today.
+        """
+        if contract.is_empty:
+            return
+
+        if not contract.is_sample_launchable:
+            wants = contract.required_non_fastq_inputs
+            raise PipelineNotSampleLaunchableError(
+                "This pipeline does not run on sequencing reads, so it cannot be launched from "
+                f"samples. It expects {_join(wants)} instead.",
+                details={"required_inputs": wants},
+            )
+
+        read_columns = set(_ordered_read_columns(contract))
+        missing: dict[str, dict] = {}
+        for column in sorted(contract.required_without_default):
+            if column in read_columns:
+                continue
+
+            offenders = [s for s in samples if not _cell(contract, column, s, parameters, {})]
+            if not offenders:
+                continue
+
+            missing[column] = {
+                "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+                "allowed_values": contract.enum_for(column),
+                "samples": [{"id": s.id, "external_id": s.external_id} for s in offenders],
+            }
+
+        if missing:
+            raise SamplesMissingRequiredFieldsError(
+                f"This pipeline requires {_join(sorted(missing))}, which is missing for some samples.",
+                details={"missing_columns": missing},
+            )
+
     @staticmethod
     def generate_from_contract(contract, samples: list, parameters: dict) -> str:
         """Build a samplesheet from a pipeline's own ``schema_input.json``.
@@ -481,8 +542,24 @@ class SampleSheetService:
         return "\n".join(ids) + ("\n" if ids else "")
 
     @staticmethod
-    def generate_sheet(pipeline_key: str, samples: list, parameters: dict) -> str:
-        """Route to the correct sheet generator based on pipeline type."""
+    def has_handwritten_generator(pipeline_key: str) -> bool:
+        """Whether a tailored generator owns this pipeline.
+
+        These build sheets a schema cannot describe: chipseq pairs each IP sample
+        with a detected control and labels its antibody, and fetchngs emits an
+        accession list rather than a samplesheet at all. They are exempt from
+        schema-driven generation and from its blocking checks.
+        """
+        return any(k in pipeline_key for k in _HANDWRITTEN_GENERATORS)
+
+    @staticmethod
+    def generate_sheet(pipeline_key: str, samples: list, parameters: dict, contract=None) -> str:
+        """Route to the correct sheet generator based on pipeline type.
+
+        The four tailored generators and fetchngs keep priority. Everything else
+        is built from the pipeline's own schema when one is available, and falls
+        back to the fixed generic sheet when it is not.
+        """
         if "scrnaseq" in pipeline_key:
             return SampleSheetService.generate_scrnaseq_sheet(samples, parameters)
         elif "rnaseq" in pipeline_key:
@@ -493,5 +570,7 @@ class SampleSheetService:
             return SampleSheetService.generate_atacseq_sheet(samples, parameters)
         elif "fetchngs" in pipeline_key:
             return SampleSheetService.generate_fetchngs_ids(parameters)
+        elif contract is not None and not contract.is_empty:
+            return SampleSheetService.generate_from_contract(contract, samples, parameters)
         else:
             return SampleSheetService.generate_generic_sheet(samples, parameters)

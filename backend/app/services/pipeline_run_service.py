@@ -40,21 +40,49 @@ _MACS_GSIZE_BY_GENOME: dict[str, float] = {
 
 class PipelineRunService:
     @staticmethod
-    def _requires_per_sample_fastq(pipeline) -> bool:
+    def _requires_per_sample_fastq(pipeline, contract=None) -> bool:
         """Whether this pipeline consumes per-sample FASTQ input.
 
-        nf-core sequencing pipelines (demo/rnaseq/scrnaseq/...) read each
-        sample's reads from the sample sheet, so every selected sample must have
-        linked files. Builtin no-input pipelines (e.g. bioaf-system-test) and
-        custom uploads do not, and fetch-style pipelines (fetchngs) pull their
-        own data from accessions rather than per-sample files.
+        The pipeline's own samplesheet contract answers this exactly, so it wins
+        when we have one. The name-based heuristic below is the fallback for the
+        pipelines that publish no contract, and it is wrong in a specific way:
+        it returns True for EVERY nf-core pipeline, so it demands FASTQ files
+        for assembly, variant and imaging pipelines that never read them.
         """
+        if contract is not None and not contract.is_empty:
+            return contract.is_sample_launchable
+
         key = (getattr(pipeline, "pipeline_key", "") or "").lower()
         if "fetchngs" in key:
             return False
         if "rnaseq" in key or "scrnaseq" in key:
             return True
         return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+    @staticmethod
+    async def _resolve_contract(session, pipeline):
+        """The pipeline's samplesheet contract, fetched once and cached on the entry.
+
+        Entries installed before the contract existed carry NULL, so the first
+        launch resolves and persists it. A fetch failure records nothing and
+        returns an empty contract, which every caller treats as "we do not
+        know" and falls back on.
+        """
+        from app.services.samplesheet_schema import is_absent_marker, parse_contract
+
+        stored = getattr(pipeline, "input_schema_json", None)
+        if stored is None and (getattr(pipeline, "source_type", "") or "").lower() == "nf-core":
+            fetched = await PipelineCatalogService.fetch_input_schema(
+                getattr(pipeline, "source_url", None), getattr(pipeline, "version", None)
+            )
+            if fetched is not None:
+                pipeline.input_schema_json = fetched
+                await session.flush()
+                stored = fetched
+
+        if stored is None or is_absent_marker(stored):
+            return parse_contract(None)
+        return parse_contract(stored)
 
     # File source types that are pipeline/notebook DERIVATIVES, not raw inputs.
     # By default these are excluded from a run's inputs so a previous run's
@@ -135,7 +163,11 @@ class PipelineRunService:
         # own input files. Reject (or, if asked, drop) samples with none. The old
         # behaviour back-filled file-less samples with the WHOLE experiment's
         # files, which cross-contaminated one sample's run with another's reads.
-        if PipelineRunService._requires_per_sample_fastq(pipeline):
+        # 3c. The pipeline's own samplesheet contract, which decides both whether
+        # it reads FASTQ at all and whether bioAF can fill every required column.
+        contract = await PipelineRunService._resolve_contract(session, pipeline)
+
+        if PipelineRunService._requires_per_sample_fastq(pipeline, contract):
             missing = [s for s in samples if not s._input_files]
             if missing:
                 if not data.drop_samples_without_files:
@@ -185,6 +217,16 @@ class PipelineRunService:
                 if gsize is not None:
                     merged_params["macs_gsize"] = gsize
 
+        # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
+        # is still free to do so. Deliberately BEFORE the run row, the sample
+        # linkage and the compute call: the failure this replaces is a run that
+        # scales up a node, pulls containers, and dies inside Nextflow on a
+        # schema error the user did not write. Pipelines with a hand-written
+        # generator are exempt, because those build a sheet the schema alone
+        # cannot describe (chipseq's control detection, fetchngs' accession list).
+        if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            SampleSheetService.check_contract_satisfiable(contract, samples, merged_params)
+
         # 7. Create pipeline_runs record
         run = PipelineRun(
             organization_id=org_id,
@@ -232,6 +274,7 @@ class PipelineRunService:
             pipeline.pipeline_key,
             samples,
             merged_params,
+            contract=contract,
         )
 
         # 9. Submit job via the compute adapter (BAL)

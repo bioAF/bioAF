@@ -60,6 +60,39 @@ class SamplesMissingFilesError(ValidationError):
     code = "samples_missing_files"
 
 
+class PipelineNotSampleLaunchableError(ValidationError):
+    """The pipeline does not consume per-sample sequencing reads, so it cannot be
+    launched from bioAF samples at all.
+
+    Its own ``assets/schema_input.json`` declares no FASTQ column: it wants
+    assemblies, variant sets, alignments, images or spectra. Emitting a
+    ``sample,fastq_1,fastq_2`` sheet for it produces a run that dies inside
+    Nextflow minutes after launch, so the launch is refused instead.
+
+    Carries ``details["required_inputs"]`` (what the pipeline actually asks for)
+    so the message can tell the user why, not just that.
+    """
+
+    code = "pipeline_not_sample_launchable"
+
+
+class SamplesMissingRequiredFieldsError(ValidationError):
+    """A column the pipeline requires has no value bioAF can supply.
+
+    Either the sourcing field is empty on some samples (sarek's ``patient``
+    comes from ``Sample.donor_source``), or the column defines experimental
+    design and is deliberately never guessed (mag's ``group`` controls
+    co-assembly).
+
+    Carries ``details["missing_columns"]``, keyed by column, each with the
+    ``sample_field`` that would supply it (``None`` when nothing would), any
+    ``allowed_values`` from the schema's enum, and the ids and external ids of
+    the ``samples`` actually missing it, so the UI can link straight to them.
+    """
+
+    code = "samples_missing_required_fields"
+
+
 class NotFoundError(DomainError):
     """A referenced entity does not exist."""
 

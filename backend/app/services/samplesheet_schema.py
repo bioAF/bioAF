@@ -46,6 +46,18 @@ _FASTQ_EXTENSION = re.compile(r"\.(fastq|fq)")
 #    into a sheet that cannot work.
 FASTQ_COLUMNS: frozenset[str] = frozenset({"fastq_1", "fastq_2", "fastq", "R1", "R2"})
 
+# Stored in place of a schema for a pipeline that ships none, so the lazy
+# launch-time fetch does not re-request a known 404 on every launch. Distinct
+# from NULL, which means "not fetched yet", and from a transient fetch failure,
+# which records nothing so the next launch retries.
+SCHEMA_ABSENT: dict = {"__bioaf_schema_input__": "absent"}
+
+
+def is_absent_marker(schema: object) -> bool:
+    """Whether ``schema`` records that the pipeline publishes no contract."""
+    return isinstance(schema, dict) and schema.get("__bioaf_schema_input__") == "absent"
+
+
 # The sample's own name, spelled four ways across the catalog. Excluded from the
 # "what does this pipeline actually want" refusal message, because naming the
 # sample id back at the user explains nothing about why the launch was refused.
@@ -179,4 +191,10 @@ def parse_contract(schema: object) -> SamplesheetContract:
     )
 
 
-__all__ = ["FASTQ_COLUMNS", "SamplesheetContract", "parse_contract"]
+__all__ = [
+    "FASTQ_COLUMNS",
+    "SCHEMA_ABSENT",
+    "SamplesheetContract",
+    "is_absent_marker",
+    "parse_contract",
+]
