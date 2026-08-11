@@ -12,51 +12,17 @@ local/gke-capacity/gke-capacity-issue.md). e2-standard-8 spills onto any
 available host generation, so it almost never stocks out.
 """
 
-from pathlib import Path
-
 import pytest
 from sqlalchemy import text
 
 
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "alembic" / "versions"
-MIGRATION_FILE = MIGRATIONS_DIR / "093_default_interactive_machine_to_e2_standard_8.py"
-
-
-def test_migration_file_exists():
-    assert MIGRATION_FILE.exists(), (
-        f"Expected migration file at {MIGRATION_FILE}. Run TDD: add the migration that "
-        "updates k8s_interactive_machine_type from n2-standard-4 to e2-standard-8."
-    )
-
-
-def test_migration_chains_to_092():
-    content = MIGRATION_FILE.read_text()
-    assert 'revision = "093"' in content
-    assert 'down_revision = "092"' in content, "migration 093 must chain to 092 so alembic upgrade head picks it up"
-
-
-def test_migration_only_updates_rows_that_still_hold_the_prior_default():
-    """Mirror migration 055's pattern: UPDATE ... WHERE value = '<prior default>'.
-
-    Users who already picked something other than n2-standard-4 must keep
-    their selection; this is a default-bump migration, not a forced rewrite.
-    """
-    content = MIGRATION_FILE.read_text()
-    assert "k8s_interactive_machine_type" in content
-    assert "e2-standard-8" in content
-    assert "n2-standard-4" in content, "upgrade() must scope its UPDATE to rows whose value is still n2-standard-4"
-    # The WHERE clause must include both the key and the prior-default guard;
-    # a bare UPDATE on the key would overwrite user-customized values.
-    assert "WHERE key = 'k8s_interactive_machine_type' AND value = 'n2-standard-4'" in content, (
-        "upgrade() must guard on both the key and the prior default value"
-    )
-
-
-def test_downgrade_restores_n2_standard_4_only_when_value_is_e2_standard_8():
-    content = MIGRATION_FILE.read_text()
-    assert "WHERE key = 'k8s_interactive_machine_type' AND value = 'e2-standard-8'" in content, (
-        "downgrade() must scope its UPDATE so users who set their own value stay put"
-    )
+# The file-exists, revision-string and WHERE-clause-substring tests that used to
+# sit here were removed. The first two are covered by
+# test_migrations_apply.py, which runs the whole chain instead of reading it,
+# and the last two asserted the SQL text of the same UPDATE that the two
+# database-backed tests below already execute and check the results of. Greping
+# a migration for its own WHERE clause restates the implementation and passes
+# even if the statement never runs.
 
 
 @pytest.mark.asyncio
