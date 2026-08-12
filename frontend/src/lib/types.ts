@@ -614,22 +614,29 @@ export interface SessionProvenance {
 export type PipelineRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type PipelineProcessStatus = "pending" | "running" | "completed" | "failed" | "cached";
 
-export interface ParameterSchema {
-  definitions?: Record<string, {
-    title?: string;
-    properties?: Record<string, {
-      type?: string;
-      description?: string;
-      default?: unknown;
-      enum?: string[];
-      hidden?: boolean;
-      format?: string;
-      minimum?: number;
-      maximum?: number;
-      fa_icon?: string;
-    }>;
-    required?: string[];
+export interface ParameterGroup {
+  title?: string;
+  properties?: Record<string, {
+    type?: string;
+    description?: string;
+    default?: unknown;
+    enum?: string[];
+    hidden?: boolean;
+    format?: string;
+    minimum?: number;
+    maximum?: number;
+    fa_icon?: string;
   }>;
+  required?: string[];
+}
+
+export interface ParameterSchema {
+  /** JSON Schema 2020-12 renamed `definitions` to `$defs`, and the current
+   *  nf-core template emits `$defs`. Both spellings are in the catalog today
+   *  (13 `$defs` vs 7 `definitions` across the 20 most popular pipelines), so
+   *  any reader must accept either. */
+  $defs?: Record<string, ParameterGroup>;
+  definitions?: Record<string, ParameterGroup>;
 }
 
 export interface PipelineCatalog {

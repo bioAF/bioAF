@@ -11,6 +11,7 @@ import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
 import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
+import { ParameterForm } from "@/components/pipelines/ParameterForm";
 import type {
   PipelineCatalog,
   Experiment,
@@ -18,7 +19,6 @@ import type {
   SampleBrief,
   PipelineRunLaunchRequest,
   PipelineRun,
-  ParameterSchema,
 } from "@/lib/types";
 
 type Step = 1 | 2 | 3 | 4;
@@ -376,101 +376,6 @@ export default function PipelineLauncherPage() {
   );
 }
 
-// Auto-generated parameter form from nextflow_schema.json
-function ParameterForm({
-  schema,
-  defaultParams,
-  values,
-  onChange,
-}: {
-  schema: ParameterSchema | null;
-  defaultParams: Record<string, unknown>;
-  values: Record<string, unknown>;
-  onChange: (v: Record<string, unknown>) => void;
-}) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  if (!schema?.definitions) {
-    return (
-      <div className="text-sm text-gray-500">
-        <p className="mb-3">No parameter schema available. Enter parameters as JSON:</p>
-        <textarea
-          aria-label="Pipeline parameters as JSON"
-          value={JSON.stringify(values, null, 2)}
-          onChange={(e) => {
-              try {
-                onChange(JSON.parse(e.target.value));
-              } catch {
-                // Typing JSON means passing through invalid states on the way to a
-                // valid one. Reporting each keystroke would be noise, not help.
-              }
-            }}
-          className="w-full h-40 border rounded px-3 py-2 font-mono text-xs"
-        />
-      </div>
-    );
-  }
-
-  const managedParams = new Set(["input", "outdir"]);
-
-  function setValue(key: string, val: unknown) {
-    onChange({ ...values, [key]: val });
-  }
-
-  const groups = Object.entries(schema.definitions);
-
-  return (
-    <div className="space-y-6">
-      {groups.map(([groupKey, group]) => {
-        if (!group.properties) return null;
-        const entries = Object.entries(group.properties).filter(
-          ([k, prop]) => !managedParams.has(k) && !prop.hidden,
-        );
-        const advancedEntries = Object.entries(group.properties).filter(
-          ([k, prop]) => !managedParams.has(k) && prop.hidden,
-        );
-
-        if (entries.length === 0 && advancedEntries.length === 0) return null;
-
-        return (
-          <div key={groupKey}>
-            <h3 className="font-medium text-sm text-gray-700 mb-3">{group.title || groupKey}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {entries.map(([paramKey, prop]) => (
-                <ParameterField
-                  key={paramKey}
-                  paramKey={paramKey}
-                  prop={prop}
-                  required={group.required?.includes(paramKey)}
-                  value={values[paramKey] ?? prop.default ?? defaultParams[paramKey]}
-                  onChange={(v) => setValue(paramKey, v)}
-                />
-              ))}
-            </div>
-            {advancedEntries.length > 0 && (
-              <details className="mt-3">
-                <summary className="text-sm text-gray-500 cursor-pointer">Advanced ({advancedEntries.length} params)</summary>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
-                  {advancedEntries.map(([paramKey, prop]) => (
-                    <ParameterField
-                      key={paramKey}
-                      paramKey={paramKey}
-                      prop={prop}
-                      required={group.required?.includes(paramKey)}
-                      value={values[paramKey] ?? prop.default ?? defaultParams[paramKey]}
-                      onChange={(v) => setValue(paramKey, v)}
-                    />
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 function ProtocolInfo() {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -500,72 +405,3 @@ function ProtocolInfo() {
   );
 }
 
-function ParameterField({
-  paramKey,
-  prop,
-  required,
-  value,
-  onChange,
-}: {
-  paramKey: string;
-  prop: NonNullable<NonNullable<ParameterSchema["definitions"]>[string]["properties"]>[string];
-  required?: boolean;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  const label = paramKey.replace(/_/g, " ");
-
-  if (prop.enum) {
-    return (
-      <div>
-        <label id="lbl-page-1" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <select aria-labelledby="lbl-page-1" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
-          <option value="">--</option>
-          {prop.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
-        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-      </div>
-    );
-  }
-
-  if (prop.type === "boolean") {
-    return (
-      <div className="flex items-center gap-2">
-        <input type="checkbox" aria-label={label} checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        <label className="text-sm">{label}{required ? " *" : ""}</label>
-        {prop.description && <span className="text-xs text-gray-500">({prop.description})</span>}
-      </div>
-    );
-  }
-
-  if (prop.type === "number" || prop.type === "integer") {
-    return (
-      <div>
-        <label id="lbl-page-2" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <input aria-labelledby="lbl-page-2"
-          type="number"
-          value={value != null ? String(value) : ""}
-          min={prop.minimum}
-          max={prop.maximum}
-          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className="w-full border rounded px-3 py-1.5 text-sm"
-        />
-        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-      </div>
-    );
-  }
-
-  // Default: string
-  return (
-    <div>
-      <label id="lbl-page-3" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-      <input aria-labelledby="lbl-page-3"
-        type="text"
-        value={String(value ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border rounded px-3 py-1.5 text-sm"
-      />
-      {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-    </div>
-  );
-}
