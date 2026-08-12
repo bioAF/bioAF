@@ -38,17 +38,28 @@ export function detectProtocol(samples: SampleBrief[]): string | null {
  *  received `10XV3` in a real parameter of the same name whose meaning is the
  *  input sample type ('DNA' | 'cDNA' | 'directRNA').
  *
- *  So the question is asked of the pipeline's own schema, never of its name:
- *  does it declare `protocol`, and does it list this value? A `protocol`
- *  parameter with no enum is treated as NOT accepting it, because a free-text
- *  parameter that merely shares the name is exactly how the nanoseq case
- *  arose. */
+ *  The question is asked of the pipeline's own schema, never of its name, in
+ *  two steps because the catalog answers it two ways:
+ *
+ *  1. An `enum` is authoritative. nanoseq lists DNA/cDNA/directRNA, so 10XV3 is
+ *     rejected outright.
+ *  2. With no enum, the pipeline's own prose decides. nf-core/scrnaseq declares
+ *     `protocol` as free text precisely so unusual platforms pass through to
+ *     the aligner, and names the values it recognises ('10XV1', '10XV2',
+ *     '10XV3', '10XV4') in its description. Demanding an enum there would
+ *     switch the feature off for the one pipeline it exists for.
+ *
+ *  A `protocol` parameter that neither lists nor mentions the value is
+ *  rejected, which is what stops a same-named free-text parameter on some
+ *  future pipeline from reintroducing the bug. */
 export function pipelineAcceptsProtocol(schema: ParameterSchema | null, value: string | null): boolean {
   if (!schema || !value) return false;
 
   for (const [, group] of parameterGroups(schema)) {
     const prop = group.properties?.protocol;
-    if (prop) return Array.isArray(prop.enum) && prop.enum.includes(value);
+    if (!prop) continue;
+    if (Array.isArray(prop.enum)) return prop.enum.includes(value);
+    return `${prop.description ?? ""} ${prop.help_text ?? ""}`.includes(value);
   }
   return false;
 }

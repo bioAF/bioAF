@@ -622,6 +622,7 @@ export interface ParameterGroup {
     default?: unknown;
     enum?: string[];
     hidden?: boolean;
+    help_text?: string;
     format?: string;
     minimum?: number;
     maximum?: number;

@@ -74,11 +74,33 @@ describe("pipelineAcceptsProtocol", () => {
     expect(pipelineAcceptsProtocol(schemaWithProtocol(["10XV3"]), null)).toBe(false);
   });
 
-  it("accepts an unconstrained protocol parameter only when it looks like a 10x one", () => {
-    // No enum to check against. Guessing would reintroduce the bug on any
-    // pipeline that happens to call a free-text parameter "protocol", so the
-    // conservative answer is no.
+  it("rejects a free-text protocol parameter that never mentions the value", () => {
+    // Nothing to check against. Guessing would reintroduce the bug on any
+    // pipeline that happens to call a free-text parameter "protocol".
     expect(pipelineAcceptsProtocol(schemaWithProtocol(undefined), "10XV3")).toBe(false);
+  });
+
+  it("accepts a free-text protocol parameter that documents the value", () => {
+    // nf-core/scrnaseq's real shape: no enum, because unusual platforms are
+    // passed to the aligner verbatim, with the recognised values named in the
+    // description. This is the one pipeline the feature exists for.
+    const scrnaseq = {
+      $defs: {
+        opts: {
+          title: "o",
+          properties: {
+            protocol: {
+              type: "string",
+              default: "auto",
+              description:
+                "Can be 'auto' (cellranger only), '10XV1', '10XV2', '10XV3', '10XV4', or any other protocol string.",
+            },
+          },
+        },
+      },
+    } as ParameterSchema;
+    expect(pipelineAcceptsProtocol(scrnaseq, "10XV3")).toBe(true);
+    expect(pipelineAcceptsProtocol(scrnaseq, "10XV9")).toBe(false);
   });
 
   it("finds the parameter under the legacy definitions spelling too", () => {
