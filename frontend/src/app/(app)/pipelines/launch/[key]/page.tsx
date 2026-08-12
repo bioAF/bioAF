@@ -12,6 +12,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
 import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
 import { ParameterForm } from "@/components/pipelines/ParameterForm";
+import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
 import type {
   PipelineCatalog,
   Experiment,
@@ -22,33 +23,6 @@ import type {
 } from "@/lib/types";
 
 type Step = 1 | 2 | 3 | 4;
-
-const CHEMISTRY_TO_PROTOCOL: Record<string, string> = {
-  "v1": "10XV1",
-  "v2": "10XV2",
-  "v3": "10XV3",
-  "v3.1": "10XV3",
-  "nextgem v3.1": "10XV3",
-  "nextgem v3": "10XV3",
-  "10x chromium 3' v1": "10XV1",
-  "10x chromium 3' v2": "10XV2",
-  "10x chromium 3' v3": "10XV3",
-  "10x chromium 3' v3.1": "10XV3",
-  "10x chromium 5' v1": "10XV1",
-  "10x chromium 5' v2": "10XV2",
-  "10x chromium 5' v3": "10XV3",
-};
-
-function detectProtocol(samples: SampleBrief[]): string | null {
-  const versions = new Set(
-    samples
-      .map((s) => s.chemistry_version?.trim().toLowerCase())
-      .filter(Boolean) as string[],
-  );
-  if (versions.size !== 1) return null;
-  const version = [...versions][0];
-  return CHEMISTRY_TO_PROTOCOL[version] || null;
-}
 
 export default function PipelineLauncherPage() {
   const router = useRouter();
@@ -114,10 +88,15 @@ export default function PipelineLauncherPage() {
       const data = await api.get<SampleBrief[]>(`/api/experiments/${experimentId}/samples`);
       setSamples(data);
       setSelectedSampleIds(data.map((s) => s.id));
-      // Auto-detect protocol from sample chemistry_version
+      // Auto-detect the 10x protocol from sample chemistry, but only offer it to
+      // a pipeline whose own schema declares that parameter and accepts that
+      // value. Injecting it blindly sent `protocol: 10XV3` to every pipeline,
+      // including ones with no such parameter (sarek) and one whose parameter of
+      // the same name means the input sample type (nanoseq).
       const protocol = detectProtocol(data);
-      setDetectedProtocol(protocol);
-      if (protocol) {
+      const accepted = pipelineAcceptsProtocol(pipeline?.parameter_schema ?? null, protocol);
+      setDetectedProtocol(accepted ? protocol : null);
+      if (accepted && protocol) {
         setUserParams((prev) => ({ ...prev, protocol }));
       }
     } catch (e) {
@@ -316,7 +295,10 @@ export default function PipelineLauncherPage() {
               Protocol auto-detected as <span className="font-semibold">{detectedProtocol}</span> from sample chemistry version.
             </div>
           )}
-          <ProtocolInfo />
+          {/* Explains 10x Chromium barcode/UMI layout, so it belongs only to a
+              pipeline that actually takes a 10x protocol. It used to render for
+              every pipeline, which put a scRNA-seq primer on top of sarek. */}
+          {pipelineAcceptsProtocol(pipeline.parameter_schema, detectedProtocol) && <ProtocolInfo />}
           <SamplesheetInputs
             specs={pipeline.samplesheet_inputs || []}
             values={userParams}
