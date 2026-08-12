@@ -5,7 +5,13 @@ from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.exceptions import ConflictError, NotFoundError, SamplesMissingFilesError, ValidationError
+from app.exceptions import (
+    ConflictError,
+    DomainError,
+    NotFoundError,
+    SamplesMissingFilesError,
+    ValidationError,
+)
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.pipeline_run_input_file import PipelineRunInputFile
@@ -58,6 +64,43 @@ class PipelineRunService:
         if "rnaseq" in key or "scrnaseq" in key:
             return True
         return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+    @staticmethod
+    async def preflight(session, org_id: int, data) -> dict:
+        """Whether this launch would succeed, without creating anything.
+
+        Runs the same checks ``launch_run`` runs, so the dialog can say what is
+        wrong while the user can still fix it. Returns the failure instead of
+        raising, because a pipeline that cannot run is an answer here, not an
+        error: the caller asked a question.
+        """
+        pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
+        if not pipeline:
+            raise NotFoundError(f"Pipeline {data.pipeline_key} not found")
+
+        sample_query = (
+            select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
+        )
+        if data.sample_ids:
+            sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
+        samples = list((await session.execute(sample_query)).scalars().all())
+        for sample in samples:
+            sample._input_files = PipelineRunService._input_eligible_files(sample.files, False)
+
+        contract = await PipelineRunService._resolve_contract(session, pipeline)
+        if SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            return {"can_launch": True, "code": None, "reason": None, "details": {}}
+
+        try:
+            SampleSheetService.check_contract_satisfiable(contract, samples, data.parameters or {})
+        except DomainError as exc:
+            return {
+                "can_launch": False,
+                "code": exc.code,
+                "reason": str(exc),
+                "details": exc.details,
+            }
+        return {"can_launch": True, "code": None, "reason": None, "details": {}}
 
     @staticmethod
     async def _resolve_contract(session, pipeline):

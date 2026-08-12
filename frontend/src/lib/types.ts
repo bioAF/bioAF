@@ -672,6 +672,26 @@ export interface SamplesheetInputSpec {
   allowed_values: string[];
 }
 
+/** Whether a launch would succeed, asked before anything is created. Mirrors
+ *  the domain error the launch itself would raise, so the dialog shows the same
+ *  explanation while the user can still act on it. */
+export interface PipelineRunPreflight {
+  can_launch: boolean;
+  code: string | null;
+  reason: string | null;
+  details: {
+    required_inputs?: string[];
+    missing_columns?: Record<
+      string,
+      {
+        sample_field: string | null;
+        allowed_values: string[];
+        samples: { id: number; external_id: string | null }[];
+      }
+    >;
+  };
+}
+
 export interface PipelineCatalogListResponse {
   pipelines: PipelineCatalog[];
   total: number;

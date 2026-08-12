@@ -17,6 +17,7 @@ from app.schemas.pipeline_run import (
     PipelineRunCompareResponse,
     PipelineRunDetailResponse,
     PipelineRunLaunchRequest,
+    PipelineRunPreflightResponse,
     PipelineRunListResponse,
     PipelineRunResponse,
     SampleSummary,
@@ -172,6 +173,23 @@ async def launch_run(
     # Reload with relationships
     run = await PipelineRunService.get_run(session, run.id, org_id)
     return _run_response(run)
+
+
+@router.post("/preflight", response_model=PipelineRunPreflightResponse)
+async def preflight_run(
+    data: PipelineRunLaunchRequest,
+    current_user: dict = require_permission("pipelines", "launch"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Would this launch succeed? Answers without creating a run.
+
+    Declared before /{run_id} so the path converter does not swallow it.
+    """
+    org_id = int(current_user["org_id"])
+    result = await PipelineRunService.preflight(session, org_id, data)
+    # The lazy schema fetch may have stored a contract worth keeping.
+    await session.commit()
+    return PipelineRunPreflightResponse(**result)
 
 
 @router.get("/{run_id}", response_model=PipelineRunDetailResponse)

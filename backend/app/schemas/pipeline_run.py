@@ -133,3 +133,18 @@ class PipelineRunCompareResponse(BaseModel):
 
 class ProvenanceExportRequest(BaseModel):
     format: str = "json"
+
+
+class PipelineRunPreflightResponse(BaseModel):
+    """Whether a launch would succeed, asked before anything is created.
+
+    ``code`` and ``details`` mirror the domain error the launch would raise, so
+    the dialog can render the same explanation the API would have returned:
+    which columns are missing, which samples lack them, and what the pipeline
+    wants instead when it does not read sequences at all.
+    """
+
+    can_launch: bool
+    code: str | None = None
+    reason: str | None = None
+    details: dict = {}

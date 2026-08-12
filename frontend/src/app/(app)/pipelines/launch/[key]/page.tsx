@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/Card";
 import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
 import { ParameterForm } from "@/components/pipelines/ParameterForm";
 import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
+import { LaunchBlockedNotice } from "@/components/pipelines/LaunchBlockedNotice";
 import type {
   PipelineCatalog,
   Experiment,
@@ -20,6 +21,7 @@ import type {
   SampleBrief,
   PipelineRunLaunchRequest,
   PipelineRun,
+  PipelineRunPreflight,
 } from "@/lib/types";
 
 type Step = 1 | 2 | 3 | 4;
@@ -48,6 +50,7 @@ export default function PipelineLauncherPage() {
   const [userParams, setUserParams] = useState<Record<string, unknown>>({});
 
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<PipelineRunPreflight | null>(null);
 
   useEffect(() => {
     loadData();
@@ -58,6 +61,30 @@ export default function PipelineLauncherPage() {
     if (selectedExperimentId && pipeline) loadSamples(selectedExperimentId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExperimentId, pipeline]);
+
+  // Ask whether this run could start, while the user can still change the
+  // answer. The same checks run at launch; this only moves when they are heard.
+  useEffect(() => {
+    if (!selectedExperimentId || !pipeline) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await api.post<PipelineRunPreflight>("/api/pipeline-runs/preflight", {
+          pipeline_key: pipelineKey,
+          experiment_id: selectedExperimentId,
+          sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
+          parameters: userParams,
+        });
+        if (!cancelled) setPreflight(result);
+      } catch (e) {
+        // A preflight that cannot run must not block a launch that would work.
+        logError("checking whether this pipeline can run", e);
+        if (!cancelled) setPreflight(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams]);
 
   async function loadData() {
     try {
@@ -304,6 +331,9 @@ export default function PipelineLauncherPage() {
             values={userParams}
             onChange={setUserParams}
           />
+          {/* Shown here as well as on Review: a user who cannot run this at all
+              should not spend time filling in parameters first. */}
+          <LaunchBlockedNotice preflight={preflight} />
           <ParameterForm
             schema={pipeline.parameter_schema}
             defaultParams={pipeline.default_params || {}}
@@ -344,9 +374,14 @@ export default function PipelineLauncherPage() {
               </dd>
             </div>
           </dl>
+          <LaunchBlockedNotice preflight={preflight} />
           <div className="flex justify-between">
             <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => handleLaunch()} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
+            <button
+              onClick={() => handleLaunch()}
+              disabled={launching || preflight?.can_launch === false}
+              className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50"
+            >
               {launching ? "Launching..." : "Launch Pipeline"}
             </button>
           </div>
