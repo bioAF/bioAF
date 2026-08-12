@@ -165,8 +165,42 @@ def _antibody_label(sample) -> str:
 
 
 def _ordered_columns(contract) -> list[str]:
-    """The schema's columns in the order the schema itself declares them."""
+    """Every column the schema declares, in its own declared order."""
     return list(contract.column_order)
+
+
+def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: dict) -> list[str]:
+    """The columns this sheet will actually carry.
+
+    Emits required columns, the chosen read columns, and any column bioAF fills
+    for at least one sample. Unfilled optional columns are dropped rather than
+    emitted empty: nf-schema treats an absent optional as absent, and a sheet of
+    mostly-empty columns is both unreadable and, for a schema with exclusive
+    input styles, invalid.
+
+    When the schema declares mutually exclusive styles (ampliseq's legacy vs
+    standardized columns), the branch bioAF can satisfy is chosen and the other
+    style's columns are excluded, because that schema forbids mixing them.
+    """
+    read_columns = set(_ordered_read_columns(contract))
+
+    filled: set[str] = set()
+    for column in contract.column_order:
+        if column in read_columns:
+            continue
+        for sample in samples:
+            reads = rows_by_sample.get(sample.id, [{}])[0]
+            if _cell(contract, column, sample, parameters, reads):
+                filled.add(column)
+                break
+
+    keep = set(contract.required) | read_columns | filled
+
+    branch = contract.select_branch(keep)
+    if branch is not None:
+        keep = (keep | branch.required) - branch.forbidden
+
+    return [c for c in contract.column_order if c in keep]
 
 
 # A read column for a sequencing technology bioAF does not register samples for.
@@ -404,32 +438,38 @@ class SampleSheetService:
     def generate_from_contract(contract, samples: list, parameters: dict) -> str:
         """Build a samplesheet from a pipeline's own ``schema_input.json``.
 
-        The header is the schema's column set. Each cell is filled from the
-        sample, from a launch parameter, or left empty; a column bioAF cannot
-        source is emitted blank rather than dropped, because nf-schema reads by
-        header name and a shifting header shape is harder to debug than a blank.
+        The header carries the required columns, the read columns, and whatever
+        else bioAF can actually fill. Unfilled optional columns are dropped, and
+        where a schema declares mutually exclusive input styles only the chosen
+        one is emitted.
 
         Whether the resulting sheet is actually launchable is decided upstream in
         ``PipelineRunService``: this builds the best sheet it can and reports
         nothing, so that the blocking decision lives in one place.
         """
-        columns = _ordered_columns(contract)
         input_paths = parameters.get("input_paths", {})
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(columns)
-
         read_columns = _ordered_read_columns(contract)
+
+        # Resolve each sample's rows once: the header depends on what the rows
+        # turn out to contain, and re-deriving them per column would rescan
+        # every sample's files for every column.
+        rows_by_sample: dict[int, list[dict[str, str]]] = {}
         for sample in samples:
             paths = input_paths.get(str(sample.id), [])
             if paths:
                 pairs = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
             else:
                 pairs = _extract_fastq_lane_pairs(sample)
+            rows_by_sample[sample.id] = [dict(zip(read_columns, pair)) for pair in pairs]
 
-            for fastq_1, fastq_2 in pairs:
-                reads = dict(zip(read_columns, (fastq_1, fastq_2)))
+        columns = _emitted_columns(contract, samples, parameters, rows_by_sample)
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(columns)
+
+        for sample in samples:
+            for reads in rows_by_sample[sample.id]:
                 writer.writerow([_cell(contract, column, sample, parameters, reads) for column in columns])
 
         return output.getvalue()

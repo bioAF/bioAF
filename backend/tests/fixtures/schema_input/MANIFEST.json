@@ -1,4 +1,9 @@
 {
+  "ampliseq": {
+    "bytes": 4607,
+    "tag": "2.18.0",
+    "url": "https://raw.githubusercontent.com/nf-core/ampliseq/2.18.0/assets/schema_input.json"
+  },
   "bacass": {
     "bytes": 3180,
     "tag": "2.6.0",

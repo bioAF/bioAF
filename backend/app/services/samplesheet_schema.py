@@ -75,6 +75,49 @@ def _declares_fastq(spec: object) -> bool:
 
 
 @dataclass(frozen=True)
+class ExclusiveBranch:
+    """One of a schema's mutually exclusive input styles.
+
+    nf-core/ampliseq accepts either the legacy ``sampleID``/``forwardReads``
+    columns or the standardized ``sample``/``fastq_1`` ones, and its schema
+    forbids mixing them. Emitting every declared column emits both at once,
+    which that rule rejects.
+
+    ``forbidden`` comes from the branch's ``not.anyOf[].required``: the columns
+    that must be ABSENT for this branch to hold.
+    """
+
+    required: frozenset[str] = frozenset()
+    forbidden: frozenset[str] = frozenset()
+
+
+def _parse_branches(items: dict) -> tuple[ExclusiveBranch, ...]:
+    """Read mutually exclusive input styles out of a row schema.
+
+    Only branches carrying a ``not`` are collected: a branch that forbids
+    nothing cannot make a sheet invalid, so it needs no choice. Measured across
+    the catalog, exactly one schema (ampliseq) does this, but the shape is read
+    from the schema rather than special-cased by pipeline name.
+    """
+    branches: list[ExclusiveBranch] = []
+    for keyword in ("oneOf", "anyOf"):
+        for raw in items.get(keyword) or []:
+            if not isinstance(raw, dict) or "not" not in raw:
+                continue
+            required = {str(c) for c in (raw.get("required") or []) if isinstance(c, str)}
+            forbidden: set[str] = set()
+            negated = raw.get("not")
+            if isinstance(negated, dict):
+                for clause in negated.get("anyOf") or []:
+                    if isinstance(clause, dict):
+                        forbidden |= {str(c) for c in (clause.get("required") or []) if isinstance(c, str)}
+                forbidden |= {str(c) for c in (negated.get("required") or []) if isinstance(c, str)}
+            if required or forbidden:
+                branches.append(ExclusiveBranch(frozenset(required), frozenset(forbidden)))
+    return tuple(branches)
+
+
+@dataclass(frozen=True)
 class SamplesheetContract:
     """What a pipeline's samplesheet must look like.
 
@@ -93,7 +136,23 @@ class SamplesheetContract:
     # debug a run looks like the one they are comparing it against. nf-schema
     # reads by header name, so this is legibility, not correctness.
     column_order: tuple[str, ...] = ()
+    # Mutually exclusive input styles, when the schema declares any.
+    branches: tuple[ExclusiveBranch, ...] = ()
     is_empty: bool = False
+
+    def select_branch(self, sourceable: set[str]) -> ExclusiveBranch | None:
+        """The exclusive input style bioAF should commit to, if any.
+
+        Picks the first branch whose required columns bioAF can all supply, so
+        the choice follows what the platform actually holds rather than schema
+        order alone. None when the schema declares no branches, or when none is
+        satisfiable (in which case the caller emits what it can and the
+        satisfiability check reports the gap).
+        """
+        for branch in self.branches:
+            if branch.required <= sourceable:
+                return branch
+        return None
 
     @property
     def is_sample_launchable(self) -> bool:
@@ -187,6 +246,7 @@ def parse_contract(schema: object) -> SamplesheetContract:
         enums=enums,
         read_columns=read_columns,
         column_order=tuple(declared + undeclared),
+        branches=_parse_branches(items),
         is_empty=False,
     )
 

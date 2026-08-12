@@ -156,13 +156,19 @@ def test_rnastructurome_condition_is_not_filled_from_treatment_condition():
 
 def test_an_unmapped_column_is_never_filled_from_a_same_named_sample_attribute():
     """No attribute-name reflection. A column is filled only via the explicit
-    alias table, so a Sample field that happens to share a name is not enough."""
+    alias table, so a Sample field that happens to share a name is not enough.
+
+    Originally asserted the column was present and empty. Unfilled optional
+    columns are now dropped entirely (see
+    test_sample_sheet_exclusive_columns.py), so absence from the header is the
+    stronger form of the same guarantee: the value never reached the sheet."""
     sample = _make_sample(1, "S1")
     sample.status = "SHOULD_NOT_APPEAR"
 
     csv_text = SampleSheetService.generate_from_contract(_contract("sarek"), [sample], {})
 
-    assert _col(csv_text, "status") == ""
+    assert "status" not in _header(csv_text)
+    assert "SHOULD_NOT_APPEAR" not in csv_text
 
 
 # -- Structural behavior --
@@ -174,13 +180,23 @@ def test_header_is_the_schemas_own_columns():
     assert _header(csv_text) == ["sample", "fastq_1", "fastq_2"]
 
 
-def test_optional_column_with_no_source_is_emitted_empty_not_omitted():
-    """Dropping the column would change the header shape between runs of the
-    same pipeline; nf-schema reads by header name, so an empty cell is correct."""
+def test_optional_column_with_no_source_is_omitted():
+    """DELIBERATE REVERSAL of this test's original assertion, owner-approved in
+    plan-launch-ux-fixes.md item 1.
+
+    It used to require the column be present and empty, on the reasoning that
+    nf-schema reads by header name so a stable header is harmless. Driving the
+    real UI disproved that: nf-core/ampliseq forbids mixing its two input
+    styles, and emitting every declared column emits both at once. Sarek was
+    also producing seventeen mostly-empty columns.
+
+    Unfilled optional columns are now dropped. Required columns are still always
+    emitted (see test_a_required_column_is_emitted_even_when_it_cannot_be_sourced)."""
     csv_text = SampleSheetService.generate_from_contract(_contract("sarek"), [_make_sample(1, "S1")], {})
 
-    assert "sex" in _header(csv_text)
-    assert _col(csv_text, "sex") == ""
+    assert "sex" not in _header(csv_text)
+    assert "bam" not in _header(csv_text)
+    assert "patient" in _header(csv_text)
 
 
 def test_numeric_external_id_is_still_prefixed():
