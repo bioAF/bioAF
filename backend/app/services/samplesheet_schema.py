@@ -131,10 +131,12 @@ class SamplesheetContract:
     defaulted: set[str] = field(default_factory=set)
     enums: dict[str, list[str]] = field(default_factory=dict)
     read_columns: set[str] = field(default_factory=set)
-    # The schema's own declared property order. This is the order the pipeline's
-    # documentation and example sheets use, so a generated sheet someone opens to
-    # debug a run looks like the one they are comparing it against. nf-schema
-    # reads by header name, so this is legibility, not correctness.
+    # The property order as parsed. NOT a reliable stand-in for the order the
+    # pipeline documents: a schema read back from the catalog's JSONB column has
+    # been normalised by PostgreSQL (shortest key first, then bytewise), so this
+    # matches the published file only when the schema came straight from one.
+    # The emitted header order is chosen explicitly in sample_sheet_service
+    # rather than inherited from here.
     column_order: tuple[str, ...] = ()
     # Mutually exclusive input styles, when the schema declares any.
     branches: tuple[ExclusiveBranch, ...] = ()

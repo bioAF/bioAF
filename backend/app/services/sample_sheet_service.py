@@ -164,9 +164,25 @@ def _antibody_label(sample) -> str:
     return re.sub(r"\s+", "_", _safe_sample_name(sample))
 
 
-def _ordered_columns(contract) -> list[str]:
-    """Every column the schema declares, in its own declared order."""
-    return list(contract.column_order)
+def _ordered_columns(contract, read_columns: list[str]) -> list[str]:
+    """A stable header order: identity, then reads, then the rest alphabetically.
+
+    This used to follow the schema's own declared order, so a generated sheet
+    would look like the pipeline's documented example. That does not survive
+    storage: catalog schemas live in a JSONB column and PostgreSQL normalises
+    object key order, so sarek's stored schema returns
+    ``bai, bam, sex, vcf, crai, ...`` where its file declares
+    ``patient, sample, sex, status, ...``. The declared order therefore held only
+    in tests that read the fixture file.
+
+    nf-schema reads by header name, so order is legibility rather than
+    correctness. What matters is that it is the same wherever the schema came
+    from, which an explicit order gives and an inherited one does not.
+    """
+    identity = [c for c in contract.column_order if _COLUMN_TO_SAMPLE_FIELD.get(c) == "external_id"]
+    leading = identity + [c for c in read_columns if c not in identity]
+    rest = sorted(c for c in contract.column_order if c not in leading)
+    return leading + rest
 
 
 def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: dict) -> list[str]:
@@ -200,7 +216,7 @@ def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: 
     if branch is not None:
         keep = (keep | branch.required) - branch.forbidden
 
-    return [c for c in contract.column_order if c in keep]
+    return [c for c in _ordered_columns(contract, _ordered_read_columns(contract)) if c in keep]
 
 
 # A read column for a sequencing technology bioAF does not register samples for.
