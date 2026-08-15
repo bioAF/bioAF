@@ -40,20 +40,6 @@
     color-scheme: dark;
   }
 
-  /* The authenticated shell is a 100vh box and every page scrolls inside its own
-     `<main>`, so nothing at the document root is meant to move. Measured on the
-     deployed demo, the root has zero scrollable height at every viewport.
-
-     That alone does not hold it still. When an inner scroller reaches its end
-     the browser chains the rest of the gesture outward, and macOS elastic
-     overscroll then drags the WHOLE app, sidebar and header included, out of
-     view for as long as the gesture continues. Refusing the chain at the root
-     stops that without touching any inner scroller. */
-  html,
-  body {
-    overscroll-behavior: none;
-  }
-
   /* Every page scrolls inside its own `<main>`, so that is where an absolutely
      positioned descendant belongs. Without a containing block here it resolves
      against the INITIAL containing block, which is the document, and its static
