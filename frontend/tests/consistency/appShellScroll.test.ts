@@ -52,3 +52,16 @@ test("the rule covers both html and body", () => {
   expect(selector).toMatch(/\bhtml\b/);
   expect(selector).toMatch(/\bbody\b/);
 });
+
+test("the page scroller is a containing block for absolute descendants", () => {
+  const text = css();
+
+  // `sr-only` is position:absolute. With no positioned ancestor its containing
+  // block is the document, so its static position sets a floor on
+  // documentElement.scrollHeight that the 100vh shell cannot shrink below. On a
+  // window shorter than that floor the root becomes genuinely scrollable and the
+  // whole app can be dragged out of view. Measured on the deployed demo at a
+  // 480px viewport: 140px of root overflow, and 0 once <main> is positioned.
+  const rule = text.match(/(^|[},;\s])main[^{}]*\{[^{}]*position\s*:\s*relative[^{}]*\}/m);
+  expect(rule).not.toBeNull();
+});
