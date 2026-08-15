@@ -4,10 +4,15 @@ Today a pipeline bioAF cannot build a sheet for still launches: a node scales up
 containers pull, and the run dies inside Nextflow on a schema error the user did
 not write. These decide the same thing before anything is provisioned.
 
-Two refusals, because they have different remedies:
-  - the pipeline does not consume reads at all (funcscan wants assemblies), so
-    no amount of sample metadata will help
+Two outcomes, because they have different remedies:
   - a required column has no source, which the user can fix by filling the field
+    or attaching the file the pipeline asked for
+  - the pipeline wants no per-sample file at all, so no amount of sample metadata
+    or attached files will help and the launch is refused outright
+
+funcscan moved from the second to the first: it wants an assembly rather than
+reads, and bioAF holds arbitrary files per sample, so a sample carrying one can
+launch it. See test_sample_sheet_file_columns.py.
 """
 
 import json
@@ -44,25 +49,46 @@ def _check(contract, samples, parameters=None):
     return SampleSheetService.check_contract_satisfiable(contract, samples, parameters or {})
 
 
-# -- Class B: the pipeline does not consume per-sample reads --
+# -- Class B: the pipeline wants a file this sample does not carry --
 
 
-def test_non_read_pipeline_is_refused():
-    """nf-core/funcscan takes assemblies. Handing it a FASTQ sheet cannot work,
-    so bioAF refuses instead of provisioning compute to find out."""
-    with pytest.raises(PipelineNotSampleLaunchableError) as exc:
+def test_non_read_pipeline_blocks_on_the_file_it_wants():
+    """nf-core/funcscan takes assemblies. A sample with no assembly cannot feed
+    it, so the launch stops before compute is provisioned. It is a BLOCK rather
+    than a refusal because it is actionable: attach one and the run proceeds."""
+    with pytest.raises(SamplesMissingRequiredFieldsError) as exc:
         _check(_contract("funcscan"), [_make_sample(1, "S1")])
 
-    assert exc.value.details["required_inputs"] == ["fasta"]
+    assert "fasta" in exc.value.details["missing_columns"]
 
 
-def test_the_refusal_says_what_the_pipeline_actually_wants():
-    """A refusal the user cannot act on is barely better than the crash it
-    replaces, so the message names the input, not just the failure."""
-    with pytest.raises(PipelineNotSampleLaunchableError) as exc:
+def test_the_block_says_what_the_pipeline_actually_wants():
+    """A stop the user cannot act on is barely better than the crash it replaces,
+    so the message names the input, not just the failure."""
+    with pytest.raises(SamplesMissingRequiredFieldsError) as exc:
         _check(_contract("funcscan"), [_make_sample(1, "S1")])
 
     assert "fasta" in str(exc.value)
+
+
+def test_a_pipeline_wanting_no_per_sample_file_is_still_refused():
+    """The refusal survives for the case it was always right for: nothing the
+    user attaches can make this pipeline sample-launchable."""
+    contract = parse_contract(
+        {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["taxid"],
+                "properties": {"sample": {"type": "string", "pattern": r"^\S+$"}, "taxid": {"type": "integer"}},
+            },
+        }
+    )
+
+    with pytest.raises(PipelineNotSampleLaunchableError) as exc:
+        _check(contract, [_make_sample(1, "S1")])
+
+    assert exc.value.details["required_inputs"] == ["taxid"]
 
 
 def test_a_read_consuming_pipeline_is_not_refused_for_this_reason():

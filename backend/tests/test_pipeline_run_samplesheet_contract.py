@@ -20,7 +20,6 @@ from sqlalchemy import func, select
 from app.adapters.compute.kubernetes import _job_submit_result_from_dict
 
 from app.exceptions import (
-    PipelineNotSampleLaunchableError,
     SamplesMissingRequiredFieldsError,
 )
 from app.models.experiment import Experiment
@@ -153,18 +152,18 @@ async def _counts(session, experiment_id: int):
 
 class TestContractBlocksBeforeAnythingIsProvisioned:
     @pytest.mark.asyncio
-    async def test_non_read_pipeline_is_refused(self, session, base):
-        """nf-core/funcscan wants assemblies. Today it would receive a FASTQ
-        sheet and fail inside Nextflow."""
+    async def test_pipeline_missing_its_input_file_is_blocked(self, session, base):
+        """nf-core/funcscan wants an assembly. This sample carries only reads, so
+        it would receive a sheet with no fasta and fail inside Nextflow."""
         org, user, exp = base["org"], base["user"], base["exp"]
         s = await _sample_with_reads(session, org, exp, "SAMPLE-201", donor_source="D1")
         await session.commit()
 
         req = PipelineRunLaunchRequest(pipeline_key="nf-core/funcscan", experiment_id=exp.id, sample_ids=[s.id])
-        with pytest.raises(PipelineNotSampleLaunchableError) as ei:
+        with pytest.raises(SamplesMissingRequiredFieldsError) as ei:
             await PipelineRunService.launch_run(session, org.id, user.id, req)
 
-        assert "fasta" in ei.value.details["required_inputs"]
+        assert "fasta" in ei.value.details["missing_columns"]
 
     @pytest.mark.asyncio
     async def test_refusal_creates_no_run_and_no_linkage(self, session, base):
@@ -177,7 +176,7 @@ class TestContractBlocksBeforeAnythingIsProvisioned:
         before = await _counts(session, exp_id)
 
         req = PipelineRunLaunchRequest(pipeline_key="nf-core/funcscan", experiment_id=exp_id, sample_ids=[sample_id])
-        with pytest.raises(PipelineNotSampleLaunchableError):
+        with pytest.raises(SamplesMissingRequiredFieldsError):
             await PipelineRunService.launch_run(session, org_id, user_id, req)
         await session.rollback()
 
@@ -193,7 +192,7 @@ class TestContractBlocksBeforeAnythingIsProvisioned:
         req = PipelineRunLaunchRequest(pipeline_key="nf-core/funcscan", experiment_id=exp.id, sample_ids=[s.id])
         with patch("app.services.pipeline_run_service.get_compute_adapter") as adapter:
             adapter.return_value.submit_job = AsyncMock()
-            with pytest.raises(PipelineNotSampleLaunchableError):
+            with pytest.raises(SamplesMissingRequiredFieldsError):
                 await PipelineRunService.launch_run(session, org.id, user.id, req)
             adapter.return_value.submit_job.assert_not_called()
 

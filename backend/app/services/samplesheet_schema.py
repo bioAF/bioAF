@@ -74,6 +74,25 @@ def _declares_fastq(spec: object) -> bool:
     return bool(_FASTQ_EXTENSION.search(_REGEX_META.sub("", pattern).lower()))
 
 
+def _declares_file(spec: object) -> bool:
+    """Whether a column holds a per-sample FILE of any kind, not just a read.
+
+    ``format: "file-path"`` is the nf-core convention and is what every non-read
+    file column in the catalog declares (funcscan's ``fasta``, sarek's
+    ``bam``/``cram``/``vcf``, genomeqc's ``gff``). It is the pipeline stating the
+    fact machine-readably, so it is preferred over inspecting the pattern.
+
+    The FASTQ pattern check is kept as a second route because a handful of
+    schemas (rnasplice) declare a read column with a pattern and no ``format``.
+
+    A column with neither is NOT treated as a file. That is the safe direction:
+    it keeps today's behavior rather than inventing a file bioAF cannot identify.
+    """
+    if not isinstance(spec, dict):
+        return False
+    return spec.get("format") == "file-path" or _declares_fastq(spec)
+
+
 @dataclass(frozen=True)
 class ExclusiveBranch:
     """One of a schema's mutually exclusive input styles.
@@ -131,6 +150,15 @@ class SamplesheetContract:
     defaulted: set[str] = field(default_factory=set)
     enums: dict[str, list[str]] = field(default_factory=dict)
     read_columns: set[str] = field(default_factory=set)
+    # Every column holding a per-sample file, reads included. A pipeline whose
+    # input is an assembly, an alignment or a variant set declares these and no
+    # read column; bioAF stores arbitrary files per sample, so such a pipeline is
+    # launchable whenever the samples carry what it asks for.
+    file_columns: set[str] = field(default_factory=set)
+    # Each column's declared regex, used to decide which of a sample's files
+    # belongs in it. Matching on the schema's own pattern is what nf-schema will
+    # do, so it needs no extension list of bioAF's own to drift out of date.
+    patterns: dict[str, str] = field(default_factory=dict)
     # The property order as parsed. NOT a reliable stand-in for the order the
     # pipeline documents: a schema read back from the catalog's JSONB column has
     # been normalised by PostgreSQL (shortest key first, then bytewise), so this
@@ -158,14 +186,23 @@ class SamplesheetContract:
 
     @property
     def is_sample_launchable(self) -> bool:
-        """Whether this pipeline consumes per-sample FASTQ reads.
+        """Whether this pipeline consumes a per-sample FILE of any kind.
 
-        False for pipelines whose primary input is an assembly, a variant set, an
-        alignment, an image bundle or spectra. Those cannot be launched from
-        bioAF samples at all, so the honest response is to refuse with an
-        explanation rather than emit a FASTQ sheet Nextflow will reject.
+        This used to mean "declares a FASTQ column", which refused every pipeline
+        whose input is an assembly, an alignment or a variant set. bioAF holds
+        arbitrary files per sample, so that refused runs the platform could
+        actually feed: funcscan wants an assembly, and a sample carrying one can
+        launch it.
+
+        False only when the pipeline asks for no per-sample file at all (a bare
+        taxid, an accession). No amount of attaching files changes that, so the
+        honest response is still to refuse.
+
+        Whether THESE samples can satisfy the columns is a separate question,
+        answered per sample in ``check_contract_satisfiable`` so the user is told
+        which column and which samples, rather than being turned away.
         """
-        return bool(self.read_columns)
+        return bool(self.read_columns or self.file_columns)
 
     @property
     def required_without_default(self) -> set[str]:
@@ -178,7 +215,7 @@ class SamplesheetContract:
 
     @property
     def required_non_fastq_inputs(self) -> list[str]:
-        """The non-read inputs this pipeline requires, for the refusal message.
+        """The inputs this pipeline requires, for the refusal message.
 
         Only meaningful when the pipeline is not sample-launchable; it is what
         tells the user what the pipeline actually wants.
@@ -186,6 +223,15 @@ class SamplesheetContract:
         if self.is_sample_launchable:
             return []
         return sorted(self.required - _IDENTITY_COLUMNS)
+
+    @property
+    def non_read_file_columns(self) -> set[str]:
+        """File columns resolved from the sample's own files rather than reads.
+
+        Reads are paired and lane-grouped by the read path, so they are excluded
+        here even though they are file columns too.
+        """
+        return self.file_columns - self.read_columns
 
     def enum_for(self, column: str) -> list[str]:
         """Legal values for ``column``, or empty when it is unconstrained.
@@ -223,6 +269,8 @@ def parse_contract(schema: object) -> SamplesheetContract:
     defaulted: set[str] = set()
     enums: dict[str, list[str]] = {}
     read_columns: set[str] = set()
+    file_columns: set[str] = set()
+    patterns: dict[str, str] = {}
     for name, spec in properties.items():
         if not isinstance(spec, dict):
             continue
@@ -232,8 +280,13 @@ def parse_contract(schema: object) -> SamplesheetContract:
         allowed = spec.get("enum")
         if isinstance(allowed, list) and allowed:
             enums[col] = [v for v in allowed if isinstance(v, str)]
+        pattern = spec.get("pattern")
+        if isinstance(pattern, str) and pattern:
+            patterns[col] = pattern
         if _declares_fastq(spec) or col in FASTQ_COLUMNS:
             read_columns.add(col)
+        if _declares_file(spec):
+            file_columns.add(col)
 
     declared = [str(c) for c in properties]
     columns = set(declared)
@@ -247,6 +300,8 @@ def parse_contract(schema: object) -> SamplesheetContract:
         defaulted=defaulted,
         enums=enums,
         read_columns=read_columns,
+        file_columns=file_columns,
+        patterns=patterns,
         column_order=tuple(declared + undeclared),
         branches=_parse_branches(items),
         is_empty=False,

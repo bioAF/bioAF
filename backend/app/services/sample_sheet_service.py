@@ -2,6 +2,7 @@ import csv
 import io
 import logging
 import re
+from functools import lru_cache
 
 from app.exceptions import (
     PipelineNotSampleLaunchableError,
@@ -81,21 +82,178 @@ def _get_lane(f) -> str:
     return "000"
 
 
-def _extract_fastq_lane_pairs(sample) -> list[tuple[str, str]]:
+def _input_files(sample) -> list:
+    """The sample's input-eligible files.
+
+    Prefers the set the launcher resolves (raw inputs only, with prior
+    pipeline/notebook outputs excluded by default). Falls back to all linked
+    files for callers that don't set it. The isinstance guard stops a MagicMock
+    auto-vivifying the attribute in unit tests.
+    """
+    files = getattr(sample, "_input_files", None)
+    if not isinstance(files, list):
+        files = getattr(sample, "files", None) or []
+    return [f for f in files if getattr(f, "storage_uri", None)]
+
+
+@lru_cache(maxsize=512)
+def _compiled(pattern: str):
+    """A column's declared regex, or None when the schema's pattern is invalid.
+
+    Never raises: a malformed pattern in a published schema must not take a
+    launch down, and returning None simply means nothing matches that column.
+    """
+    try:
+        return re.compile(pattern)
+    except re.error:
+        logger.info("Ignoring unparseable samplesheet column pattern %r", pattern)
+        return None
+
+
+def _file_matches(pattern: str, f) -> bool:
+    """Whether a file satisfies a column's own declared pattern.
+
+    Checked against both the bare filename and the full storage URI, because
+    catalog patterns are written both ways: sarek anchors ``^\\S+\\.bam$`` (which
+    a URI satisfies, since ``\\S`` covers the scheme and slashes) while others
+    anchor an optional leading path explicitly.
+    """
+    regex = _compiled(pattern)
+    if regex is None:
+        return False
+    for candidate in (getattr(f, "filename", "") or "", getattr(f, "storage_uri", "") or ""):
+        if candidate and regex.search(candidate):
+            return True
+    return False
+
+
+def _files_for_column(contract, column: str, sample) -> list:
+    """The sample's files eligible for one file column.
+
+    A column with no declared pattern yields nothing: bioAF cannot identify which
+    file belongs there, and guessing is what this whole project exists to stop.
+
+    Column patterns OVERLAP, so a file matching this column may belong to
+    another. funcscan's ``protein`` accepts ``^\\S+\\.(faa|fasta)(\\.gz)?$``, which
+    an assembly named ``.fasta`` satisfies just as well as the ``fasta`` column
+    does; filling both hands a nucleotide assembly to a protein input. An
+    OPTIONAL column therefore takes a file only when no other file column claims
+    it, while a REQUIRED column takes its match regardless, because the pipeline
+    has said it cannot run without one.
+
+    Known limit: two REQUIRED columns whose patterns both match the same lone
+    file would both take it. No catalog schema does this, and blocking on a case
+    nothing exhibits would be untested complexity.
+    """
+    patterns = getattr(contract, "patterns", {})
+    pattern = patterns.get(column)
+    if not pattern:
+        return []
+
+    matches = [f for f in _input_files(sample) if _file_matches(pattern, f)]
+    if not matches or column in contract.required:
+        return matches
+
+    rivals = [patterns[c] for c in contract.file_columns - {column} if patterns.get(c)]
+    return [f for f in matches if not any(_file_matches(rival, f) for rival in rivals)]
+
+
+def _read_pattern(contract, read_columns: list[str]) -> str | None:
+    """The pattern a file must satisfy to BE a read for this pipeline.
+
+    None when the schema declares none (bacass names its columns R1/R2 and
+    describes nothing), in which case today's unfiltered behavior stands.
+    """
+    patterns = getattr(contract, "patterns", {})
+    return next((patterns[c] for c in read_columns if patterns.get(c)), None)
+
+
+def _eligible_reads(contract, sample, read_columns: list[str]) -> tuple[list, list]:
+    """The sample's files split into (accepted as reads, present but rejected).
+
+    The second half is what stops a silent drop. Filtering by the read pattern
+    is correct (an uncompressed FASTQ is not something a `.gz`-only pipeline can
+    read), but dropping the file without saying so turns a schema error that
+    named the problem into an empty column that does not.
+    """
+    files = _input_files(sample)
+    pattern = _read_pattern(contract, read_columns)
+    if not pattern:
+        return files, []
+    accepted = [f for f in files if _file_matches(pattern, f)]
+    return accepted, [f for f in files if f not in accepted]
+
+
+def _read_rows(contract, sample, parameters: dict, read_columns: list[str]) -> list[dict[str, str]]:
+    """One dict of read values per lane for a sample.
+
+    Shared by generation and the satisfiability check so the check reports what
+    generation will actually produce, rather than assuming reads resolve.
+    """
+    if not read_columns:
+        return [{}]
+    paths = parameters.get("input_paths", {}).get(str(sample.id), [])
+    if paths:
+        pairs = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+    else:
+        accepted, _ = _eligible_reads(contract, sample, read_columns)
+        pairs = _extract_fastq_lane_pairs(sample, files=accepted)
+    return [dict(zip(read_columns, pair)) for pair in pairs]
+
+
+def _unusable_reads_gap(contract, samples: list, parameters: dict, read_columns: list[str]) -> dict | None:
+    """Samples whose attached files cannot serve as this pipeline's reads.
+
+    Deliberately narrow. It fires only when a sample HAS files, none of them
+    qualify as reads, and no other file column is filled either, so the row would
+    carry nothing the pipeline can act on. A sample with no files attached at all
+    is a different situation, handled elsewhere in the launch path, and is left
+    exactly as it behaves today.
+    """
+    pattern = _read_pattern(contract, read_columns)
+    if not pattern:
+        return None
+
+    offenders = []
+    for sample in samples:
+        if parameters.get("input_paths", {}).get(str(sample.id)):
+            continue
+        accepted, rejected = _eligible_reads(contract, sample, read_columns)
+        if accepted or not rejected:
+            continue
+        # An alternative input (sarek's bam/cram) is a legitimate reason to have
+        # no reads, so it is not a gap. It only counts when EXACTLY ONE file
+        # matches, because that is the condition under which it will actually be
+        # filled; an ambiguous alternative resolves to empty, and treating it as
+        # satisfied would emit a row with no input in it at all.
+        if any(len(_files_for_column(contract, c, sample)) == 1 for c in contract.non_read_file_columns):
+            continue
+        offenders.append(sample)
+
+    if not offenders:
+        return None
+    return {
+        "sample_field": None,
+        "allowed_values": [],
+        "reason": "no_matching_file",
+        "pattern": pattern,
+        "samples": [{"id": s.id, "external_id": s.external_id} for s in offenders],
+    }
+
+
+def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[str, str]]:
     """Extract (fastq_1, fastq_2) pairs grouped by lane.
 
     Excludes index reads (I1, I2). Uses tags_json read type when available,
     falls back to Illumina filename convention (_R1_/_R2_).
     Returns one tuple per lane, sorted by lane number.
+
+    ``files`` lets the schema-driven path pass only the files that satisfy the
+    read column's own pattern. Without it the unclassified fallback below will
+    place ANY attached file into fastq_1, so a sample carrying only an alignment
+    would hand a BAM to a read column.
     """
-    # Prefer the input-eligible set the launcher resolves (raw inputs only, with
-    # prior pipeline/notebook outputs excluded by default). Fall back to all
-    # linked files for callers that don't set it. isinstance guards against a
-    # MagicMock auto-vivifying the attribute in unit tests.
-    files = getattr(sample, "_input_files", None)
-    if not isinstance(files, list):
-        files = getattr(sample, "files", None) or []
-    fastq_files = [f for f in files if getattr(f, "storage_uri", None)]
+    fastq_files = _input_files(sample) if files is None else [f for f in files if getattr(f, "storage_uri", None)]
     if not fastq_files:
         return [("", "")]
 
@@ -210,7 +368,16 @@ def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: 
                 filled.add(column)
                 break
 
-    keep = set(contract.required) | read_columns | filled
+    keep = set(contract.required) | filled
+
+    # Read columns are normally emitted whether or not they resolved, because a
+    # read-driven pipeline expects them. The exception is a row fed by an
+    # ALTERNATIVE input: a BAM-only sarek row has no reads by design, and
+    # carrying `fastq_1,fastq_2` as empty columns states something false about
+    # it. A required read column stays regardless, since it is in `required`.
+    reads_used = any(value for rows in rows_by_sample.values() for row in rows for value in row.values())
+    if reads_used or not (filled & contract.non_read_file_columns):
+        keep |= read_columns
 
     branch = contract.select_branch(keep)
     if branch is not None:
@@ -264,6 +431,47 @@ def _ordered_read_columns(contract) -> list[str]:
     return sorted(c for c in singles if not _LONG_READ_MARKER.search(c))[:1]
 
 
+def _file_column_gap(contract, column: str, samples: list) -> dict | None:
+    """Why a required file column cannot be filled, or None when it can.
+
+    Two distinct gaps, because they need opposite instructions. No matching file
+    means "attach one"; several matching files means "say which", and telling a
+    user to attach an assembly when two are already attached would send them the
+    wrong way.
+
+    Ambiguity is reported ahead of absence: if some samples are ambiguous the
+    user has to resolve that regardless, and a run cannot proceed on a column
+    where bioAF would otherwise be picking a file at random.
+    """
+    zero: list = []
+    ambiguous: list = []
+    candidates: set[str] = set()
+    for sample in samples:
+        matches = _files_for_column(contract, column, sample)
+        if not matches:
+            zero.append(sample)
+        elif len(matches) > 1:
+            ambiguous.append(sample)
+            candidates.update(getattr(f, "filename", "") or f.storage_uri for f in matches)
+
+    if ambiguous:
+        return {
+            "sample_field": None,
+            "allowed_values": contract.enum_for(column),
+            "reason": "ambiguous",
+            "candidates": sorted(candidates),
+            "samples": [{"id": s.id, "external_id": s.external_id} for s in ambiguous],
+        }
+    if zero:
+        return {
+            "sample_field": None,
+            "allowed_values": contract.enum_for(column),
+            "reason": "missing",
+            "samples": [{"id": s.id, "external_id": s.external_id} for s in zero],
+        }
+    return None
+
+
 def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]) -> str:
     """The value for one column of one row, or empty when bioAF cannot source it.
 
@@ -273,6 +481,22 @@ def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]
     """
     if column in reads:
         return reads[column]
+
+    # A per-sample file column (funcscan's assembly, sarek's bam) is resolved
+    # from the sample's own files by the column's declared pattern. Exactly one
+    # match fills it; two is ambiguity and stays empty, so the satisfiability
+    # check reports it rather than this silently choosing.
+    if column in getattr(contract, "non_read_file_columns", frozenset()):
+        # Reads and their alternatives are exclusive per row: sarek takes FASTQs
+        # OR an alignment, never both, and its schema declares no `oneOf` that
+        # would catch the combination. So once reads resolved, an OPTIONAL file
+        # column is an alternative input and filling it produces a row the
+        # pipeline cannot act on. A REQUIRED file column is not an alternative
+        # (funcscan wants its assembly regardless) and is still filled.
+        if any(reads.values()) and column not in contract.required:
+            return ""
+        matches = _files_for_column(contract, column, sample)
+        return matches[0].storage_uri if len(matches) == 1 else ""
 
     value = ""
     field = _COLUMN_TO_SAMPLE_FIELD.get(column)
@@ -423,15 +647,32 @@ class SampleSheetService:
         if not contract.is_sample_launchable:
             wants = contract.required_non_fastq_inputs
             raise PipelineNotSampleLaunchableError(
-                "This pipeline does not run on sequencing reads, so it cannot be launched from "
-                f"samples. It expects {_join(wants)} instead.",
+                "This pipeline cannot be launched from samples, because it does not take a "
+                f"per-sample file. It expects {_join(wants)} instead.",
                 details={"required_inputs": wants},
             )
 
-        read_columns = set(_ordered_read_columns(contract))
+        ordered_reads = _ordered_read_columns(contract)
+        read_columns = set(ordered_reads)
+        file_columns = contract.non_read_file_columns
         missing: dict[str, dict] = {}
+
+        # Reads are resolved rather than read off the row, so a sample whose
+        # files exist but do not satisfy the read pattern is reported here
+        # instead of silently producing an empty read column.
+        if ordered_reads:
+            unusable = _unusable_reads_gap(contract, samples, parameters, ordered_reads)
+            if unusable:
+                missing[ordered_reads[0]] = unusable
+
         for column in sorted(contract.required_without_default):
             if column in read_columns:
+                continue
+
+            if column in file_columns:
+                detail = _file_column_gap(contract, column, samples)
+                if detail:
+                    missing[column] = detail
                 continue
 
             offenders = [s for s in samples if not _cell(contract, column, s, parameters, {})]
@@ -441,6 +682,7 @@ class SampleSheetService:
             missing[column] = {
                 "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
                 "allowed_values": contract.enum_for(column),
+                "reason": "missing",
                 "samples": [{"id": s.id, "external_id": s.external_id} for s in offenders],
             }
 
@@ -463,20 +705,14 @@ class SampleSheetService:
         ``PipelineRunService``: this builds the best sheet it can and reports
         nothing, so that the blocking decision lives in one place.
         """
-        input_paths = parameters.get("input_paths", {})
         read_columns = _ordered_read_columns(contract)
 
         # Resolve each sample's rows once: the header depends on what the rows
         # turn out to contain, and re-deriving them per column would rescan
         # every sample's files for every column.
-        rows_by_sample: dict[int, list[dict[str, str]]] = {}
-        for sample in samples:
-            paths = input_paths.get(str(sample.id), [])
-            if paths:
-                pairs = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
-            else:
-                pairs = _extract_fastq_lane_pairs(sample)
-            rows_by_sample[sample.id] = [dict(zip(read_columns, pair)) for pair in pairs]
+        rows_by_sample: dict[int, list[dict[str, str]]] = {
+            sample.id: _read_rows(contract, sample, parameters, read_columns) for sample in samples
+        }
 
         columns = _emitted_columns(contract, samples, parameters, rows_by_sample)
 

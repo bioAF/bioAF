@@ -83,20 +83,41 @@ def test_a_fasta_pattern_is_not_mistaken_for_reads():
     assert "gff" not in c.read_columns
 
 
-def test_pipeline_requiring_fasta_is_not_sample_launchable():
-    """nf-core/funcscan takes assemblies, not reads. Launching it from bioAF
-    samples cannot work, so it must be refused rather than handed a FASTQ sheet."""
+def test_pipeline_requiring_fasta_is_sample_launchable():
+    """nf-core/funcscan takes assemblies, not reads. That used to mean "refuse",
+    on the assumption bioAF could only hold FASTQ. It holds arbitrary files per
+    sample, so a sample carrying an assembly can feed it.
+
+    Launchability is a property of the PIPELINE (does it want a per-sample file
+    at all); whether THESE samples satisfy it is decided per sample, so the user
+    is told which column and which samples rather than being turned away."""
     c = parse_contract(_fixture("funcscan"))
+
+    assert c.is_sample_launchable is True
+    assert "fasta" in c.required
+    assert "fasta" in c.file_columns
+
+
+def test_a_pipeline_wanting_no_per_sample_file_is_not_sample_launchable():
+    """The refusal is narrowed, not removed. A pipeline whose required input is a
+    bare identifier cannot be fed from samples however many files are attached,
+    and the message still has to say what it wants or the user cannot act."""
+    c = parse_contract(
+        {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["taxid"],
+                "properties": {
+                    "sample": {"type": "string", "pattern": r"^\S+$"},
+                    "taxid": {"type": "integer"},
+                },
+            },
+        }
+    )
 
     assert c.is_sample_launchable is False
-    assert "fasta" in c.required
-
-
-def test_non_launchable_names_the_input_it_actually_wants():
-    """The refusal has to say what the pipeline wants, or the user cannot act."""
-    c = parse_contract(_fixture("funcscan"))
-
-    assert c.required_non_fastq_inputs == ["fasta"]
+    assert c.required_non_fastq_inputs == ["taxid"]
 
 
 # -- Enum discipline --

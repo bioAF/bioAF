@@ -120,15 +120,18 @@ class TestPreflightReportsTheSameDecisionAsLaunch:
         assert r.json()["reason"] is None
 
     @pytest.mark.asyncio
-    async def test_a_non_read_pipeline_reports_why_not(self, client, base):
+    async def test_a_pipeline_missing_its_input_file_reports_the_column(self, client, base):
+        """funcscan wants an assembly, and bioAF holds arbitrary files per sample,
+        so it is no longer refused outright. This sample carries reads instead, so
+        the preflight names the column to attach."""
         token = await _token(client)
         r = await _preflight(client, token, "nf-core/funcscan", base["exp"].id, [base["sample"].id])
 
         assert r.status_code == 200
         body = r.json()
         assert body["can_launch"] is False
-        assert body["code"] == "pipeline_not_sample_launchable"
-        assert "fasta" in body["details"]["required_inputs"]
+        assert body["code"] == "samples_missing_required_fields"
+        assert "fasta" in body["details"]["missing_columns"]
 
     @pytest.mark.asyncio
     async def test_a_missing_required_column_reports_the_column(self, client, base):
