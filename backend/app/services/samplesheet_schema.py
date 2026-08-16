@@ -155,6 +155,17 @@ class SamplesheetContract:
     # read column; bioAF stores arbitrary files per sample, so such a pipeline is
     # launchable whenever the samples carry what it asks for.
     file_columns: set[str] = field(default_factory=set)
+    # What the pipeline says a column is FOR, in its own words. Most nf-core
+    # schemas describe nothing (0 of the 10 captured fixtures describe a column
+    # like mag's `group`), and an absent description stays absent: bioAF writing
+    # its own explanation would be the hand-written per-pipeline knowledge the
+    # schema-driven work removed, and it would go stale without anyone noticing.
+    descriptions: dict[str, str] = field(default_factory=dict)
+    # The schema's own ``errorMessage``, which is a FORMAT hint rather than a
+    # meaning ("Group needs to be string or integer with no spaces!"). Worth
+    # surfacing before a value is typed, since it is otherwise only seen as a
+    # Nextflow failure after the launch.
+    error_messages: dict[str, str] = field(default_factory=dict)
     # Each column's declared regex, used to decide which of a sample's files
     # belongs in it. Matching on the schema's own pattern is what nf-schema will
     # do, so it needs no extension list of bioAF's own to drift out of date.
@@ -280,12 +291,20 @@ def parse_contract(schema: object) -> SamplesheetContract:
     read_columns: set[str] = set()
     file_columns: set[str] = set()
     patterns: dict[str, str] = {}
+    descriptions: dict[str, str] = {}
+    error_messages: dict[str, str] = {}
     for name, spec in properties.items():
         if not isinstance(spec, dict):
             continue
         col = str(name)
         if "default" in spec:
             defaulted.add(col)
+        described = spec.get("description")
+        if isinstance(described, str) and described.strip():
+            descriptions[col] = described.strip()
+        hint = spec.get("errorMessage")
+        if isinstance(hint, str) and hint.strip():
+            error_messages[col] = hint.strip()
         allowed = spec.get("enum")
         if isinstance(allowed, list) and allowed:
             enums[col] = [v for v in allowed if isinstance(v, str)]
@@ -320,6 +339,8 @@ def parse_contract(schema: object) -> SamplesheetContract:
         enums=enums,
         read_columns=read_columns,
         file_columns=file_columns,
+        descriptions=descriptions,
+        error_messages=error_messages,
         patterns=patterns,
         column_order=tuple(declared + undeclared),
         branches=_parse_branches(items),

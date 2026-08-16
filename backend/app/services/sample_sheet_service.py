@@ -737,27 +737,20 @@ class SampleSheetService:
         return specs
 
     @staticmethod
-    def check_contract_satisfiable(contract, samples: list, parameters: dict, sample_values=None) -> None:
-        """Raise if this run cannot produce a valid samplesheet.
+    def column_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+        """Every column that stops this run producing a valid samplesheet.
 
-        Called before the run row exists, so a refusal costs the user nothing.
-        Silent when the contract is empty: no schema means "we do not know", and
-        refusing on ignorance would regress every pipeline that works today.
+        The single computation behind both a refusal and a form. ``launch_run``
+        renders it as a block, the entry grid renders it as the set of questions
+        to ask, and they cannot disagree about which columns are outstanding.
+        Two computations would drift, and a grid that omits a blocking column
+        strands the user on a Launch button that never enables.
 
-        ``sample_values`` carries what the scientist stated per sample, keyed by
-        sample id. It must be the same set generation will use, or this reports a
-        gap the sheet does not have and refuses a launch that would work.
+        Empty when nothing is outstanding. Empty too when the contract is empty,
+        because no schema means "we do not know", not "nothing is required".
         """
-        if contract.is_empty:
-            return
-
-        if not contract.is_sample_launchable:
-            wants = contract.required_non_fastq_inputs
-            raise PipelineNotSampleLaunchableError(
-                "This pipeline cannot be launched from samples, because it does not take a "
-                f"per-sample file. It expects {_join(wants)} instead.",
-                details={"required_inputs": wants},
-            )
+        if contract.is_empty or not contract.is_sample_launchable:
+            return {}
 
         ordered_reads = _ordered_read_columns(contract)
         read_columns = set(ordered_reads)
@@ -800,6 +793,86 @@ class SampleSheetService:
         # have to be answered before this sheet is valid.
         for column, gap in _dependency_gaps(contract, samples, parameters, sample_values).items():
             missing.setdefault(column, gap)
+
+        return missing
+
+    @staticmethod
+    def per_sample_inputs(contract, samples: list, parameters: dict, sample_values=None) -> list[dict]:
+        """The columns an entry grid must collect, and how to render each one.
+
+        Derived from ``column_gaps``, so the grid asks for exactly what the
+        launch check blocks on. Ordered as the samplesheet orders its columns,
+        because the grid and the review table are read one after the other.
+
+        Two rules from the design decide the rendering:
+
+        **A pipeline's enum constrains a pipeline PARAMETER and never a field
+        recorded on the sample.** rnastructurome's ``condition`` is an rf-norm
+        chemistry value, so its three legal values are the whole truth and belong
+        in a closed list. raredisease's ``sex`` is a PED code, which is what that
+        pipeline ingests and not a vocabulary for sex: XXY, X0, XYY, XXX and
+        mosaics are all real, so constraining the sample's own field to a
+        pipeline's enum would write a false biological model into the LIMS. The
+        allowed values still travel, as information rather than as a fence.
+
+        **bioAF explains a column only in the pipeline's own words.** An absent
+        description stays absent.
+        """
+        gaps = SampleSheetService.column_gaps(contract, samples, parameters, sample_values)
+        if not gaps:
+            return []
+
+        ordered = _ordered_columns(contract, _ordered_read_columns(contract))
+        ordered += [c for c in sorted(gaps) if c not in ordered]
+
+        specs: list[dict] = []
+        for column in ordered:
+            gap = gaps.get(column)
+            if gap is None:
+                continue
+            sample_field = _COLUMN_TO_SAMPLE_FIELD.get(column)
+            allowed = contract.enum_for(column)
+            specs.append(
+                {
+                    "name": column,
+                    "required": True,
+                    "is_file": column in contract.file_columns,
+                    "sample_field": sample_field,
+                    "allowed_values": allowed,
+                    "constrained": bool(allowed) and sample_field is None,
+                    "description": contract.descriptions.get(column),
+                    "format_hint": contract.error_messages.get(column),
+                    "required_by": gap.get("required_by"),
+                    "reason": gap.get("reason"),
+                    "samples": gap.get("samples", []),
+                }
+            )
+        return specs
+
+    @staticmethod
+    def check_contract_satisfiable(contract, samples: list, parameters: dict, sample_values=None) -> None:
+        """Raise if this run cannot produce a valid samplesheet.
+
+        Called before the run row exists, so a refusal costs the user nothing.
+        Silent when the contract is empty: no schema means "we do not know", and
+        refusing on ignorance would regress every pipeline that works today.
+
+        ``sample_values`` carries what the scientist stated per sample, keyed by
+        sample id. It must be the same set generation will use, or this reports a
+        gap the sheet does not have and refuses a launch that would work.
+        """
+        if contract.is_empty:
+            return
+
+        if not contract.is_sample_launchable:
+            wants = contract.required_non_fastq_inputs
+            raise PipelineNotSampleLaunchableError(
+                "This pipeline cannot be launched from samples, because it does not take a "
+                f"per-sample file. It expects {_join(wants)} instead.",
+                details={"required_inputs": wants},
+            )
+
+        missing = SampleSheetService.column_gaps(contract, samples, parameters, sample_values)
 
         if missing:
             raise SamplesMissingRequiredFieldsError(

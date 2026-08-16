@@ -20,6 +20,7 @@ assumption instead of testing it.
 | `mag.json` | 5.5.0 | 3073 | Class A2. `group` (`meta: [group]`) controls co-assembly: filling it from `treatment_condition` silently decides the assembly design. |
 | `rnastructurome.json` | dev | 5377 | Class A2, the sharpest case. `condition` is an enum of `treated/untreated/denatured`, an rf-norm chemistry concept, **not** a general treatment condition. |
 | `rnasplice.json` | 1.0.4 | 1891 | Class A2 plus an enum trap: `strandedness` accepts `forward/reverse/unstranded` and **not** bioAF's `"auto"` default. |
+| `raredisease.json` | 3.1.2 | 5486 | Class A2. Requires `case_id`, the headline column bioAF cannot source. Also the sharpest case for `Sample.sex`: its `sex` is a PED code (`0/1/2/other`) declared through `oneOf`, so the pipeline's vocabulary is not a description of sex at all. |
 | `demo.json` | 1.2.0 | 1374 | Control. Already valid today; locks the no-regression case. |
 
 `genomeqc` and `rnastructurome` resolve to `dev` because neither has cut a
