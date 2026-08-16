@@ -1,5 +1,11 @@
 import type { PipelineRunPreflight } from "@/lib/types";
 
+/** Reasons where a value is PRESENT and wrong, rather than absent. They render
+ *  their own explanation, so the "missing for:" wording below must not also run:
+ *  telling someone who just typed a value that it is missing sends them to look
+ *  for the wrong problem. */
+const VALUE_REASONS = new Set(["invalid_characters", "collision"]);
+
 /** Why this pipeline cannot run with the selected samples, shown while the user
  *  can still do something about it.
  *
@@ -22,29 +28,76 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
           {Object.entries(missing).map(([column, info]) => (
             <li key={column} className="text-xs text-gray-700">
               <span className="font-medium">{column.replace(/_/g, " ")}</span>
+              {/* Characters the pipeline will not take. bioAF does not rename
+                  anything: it says which value was refused and offers a spelling
+                  that would work, and the scientist decides whether to take it.
+                  Where nothing would work no suggestion is shown, because a
+                  mistyped accession cannot be repaired by punctuation. */}
+              {info.reason === "invalid_characters" && (
+                <>
+                  {" will not accept these values:"}
+                  <ul className="mt-0.5 ml-4 list-disc text-gray-600">
+                    {info.samples.map((s) => (
+                      <li key={s.id}>
+                        <span className="font-mono">{s.value ?? s.external_id}</span>
+                        {s.suggestion && (
+                          <>
+                            {" (suggested: "}
+                            <span className="font-mono font-medium text-gray-900">{s.suggestion}</span>
+                            {")"}
+                          </>
+                        )}
+                        {s.external_id && s.value !== s.external_id && <> on {s.external_id}</>}
+                      </li>
+                    ))}
+                  </ul>
+                  {info.pattern && (
+                    <div className="mt-0.5 text-gray-600">
+                      It accepts values matching <span className="font-mono">{info.pattern}</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Two different samples that would be written under one name. The
+                  sheet would merge their results, so this is never resolved by
+                  suggesting a name. */}
+              {info.reason === "collision" && (
+                <>
+                  {" would give two samples the same name, which would merge their results. Rename one of:"}
+                  <div className="mt-0.5 text-gray-600">
+                    {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+                  </div>
+                </>
+              )}
+
               {/* A column the pipeline requires only because another one is
                   filled. Naming the trigger is what makes it answerable: the
                   schema's own required list does not mention this column, so
                   "it is missing" sends the user looking for a rule that is not
                   there. */}
-              {info.required_by && (
+              {!VALUE_REASONS.has(info.reason ?? "") && (
                 <>
-                  {" is required because these samples carry "}
-                  <span className="font-medium">{info.required_by.replace(/_/g, " ")}</span>
-                  {":"}
+                  {info.required_by && (
+                    <>
+                      {" is required because these samples carry "}
+                      <span className="font-medium">{info.required_by.replace(/_/g, " ")}</span>
+                      {":"}
+                    </>
+                  )}
+                  {!info.required_by && info.sample_field && (
+                    <>
+                      {" comes from each sample's "}
+                      <span className="font-medium">{info.sample_field.replace(/_/g, " ")}</span>
+                      {", which is empty for:"}
+                    </>
+                  )}
+                  {!info.required_by && !info.sample_field && " is not something bioAF can derive. Missing for:"}
+                  <div className="mt-0.5 text-gray-600">
+                    {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+                  </div>
                 </>
               )}
-              {!info.required_by && info.sample_field && (
-                <>
-                  {" comes from each sample's "}
-                  <span className="font-medium">{info.sample_field.replace(/_/g, " ")}</span>
-                  {", which is empty for:"}
-                </>
-              )}
-              {!info.required_by && !info.sample_field && " is not something bioAF can derive. Missing for:"}
-              <div className="mt-0.5 text-gray-600">
-                {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
-              </div>
               {info.allowed_values.length > 0 && (
                 <div className="mt-0.5 text-gray-600">Allowed values: {info.allowed_values.join(", ")}</div>
               )}

@@ -95,6 +95,84 @@ it("says which column made an otherwise optional one required", () => {
   expect(screen.getByText(/GUT_A/)).toBeInTheDocument();
 });
 
+it("names the value a pipeline rejected and suggests one it would take", () => {
+  // SAMPLE-101 is a real name on the demo and ampliseq rejects the hyphen.
+  // bioAF does not rename the sample: it says what the problem is and offers a
+  // spelling that works, and the scientist decides.
+  const badCharacters: PipelineRunPreflight = {
+    can_launch: false,
+    code: "samples_missing_required_fields",
+    reason: "This pipeline requires 'sample', which is missing for some samples.",
+    details: {
+      missing_columns: {
+        sample: {
+          sample_field: "external_id",
+          allowed_values: [],
+          reason: "invalid_characters",
+          pattern: "^[a-zA-Z][a-zA-Z0-9_]+$",
+          samples: [{ id: 1, external_id: "SAMPLE-101", value: "SAMPLE-101", suggestion: "SAMPLE_101" }],
+        },
+      },
+    },
+  };
+  render(<LaunchBlockedNotice preflight={badCharacters} />);
+
+  expect(screen.getByText(/will not accept/i)).toBeInTheDocument();
+  expect(screen.getByText(/SAMPLE-101/)).toBeInTheDocument();
+  expect(screen.getByText(/SAMPLE_101/)).toBeInTheDocument();
+});
+
+it("says so plainly when no spelling would work", () => {
+  // A mistyped accession cannot be repaired by punctuation, so offering nothing
+  // is the honest answer and the copy must not imply a fix is available.
+  const noFix: PipelineRunPreflight = {
+    can_launch: false,
+    code: "samples_missing_required_fields",
+    reason: "This pipeline requires 'ncbi', which is missing for some samples.",
+    details: {
+      missing_columns: {
+        ncbi: {
+          sample_field: null,
+          allowed_values: [],
+          reason: "invalid_characters",
+          pattern: "^GC[AF]_[0-9]{9}\\.[0-9]+$",
+          samples: [{ id: 1, external_id: "S1", value: "not an accession", suggestion: null }],
+        },
+      },
+    },
+  };
+  render(<LaunchBlockedNotice preflight={noFix} />);
+
+  expect(screen.getByText(/not an accession/)).toBeInTheDocument();
+  expect(screen.queryByText(/suggested/i)).not.toBeInTheDocument();
+});
+
+it("warns when two samples would end up with the same name", () => {
+  const collision: PipelineRunPreflight = {
+    can_launch: false,
+    code: "samples_missing_required_fields",
+    reason: "This pipeline requires 'sample', which is missing for some samples.",
+    details: {
+      missing_columns: {
+        sample: {
+          sample_field: "external_id",
+          allowed_values: [],
+          reason: "collision",
+          pattern: "^[a-zA-Z][a-zA-Z0-9_]+$",
+          samples: [
+            { id: 1, external_id: "SAMPLE-1", suggestion: null },
+            { id: 2, external_id: "SAMPLE_1", suggestion: null },
+          ],
+        },
+      },
+    },
+  };
+  render(<LaunchBlockedNotice preflight={collision} />);
+
+  expect(screen.getByText(/same name/i)).toBeInTheDocument();
+  expect(screen.getByText(/SAMPLE-1, SAMPLE_1/)).toBeInTheDocument();
+});
+
 it("shows the allowed values when the column is constrained", () => {
   const enumBlocked: PipelineRunPreflight = {
     can_launch: false,

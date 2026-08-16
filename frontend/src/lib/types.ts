@@ -687,7 +687,23 @@ export interface PipelineRunPreflight {
       {
         sample_field: string | null;
         allowed_values: string[];
-        samples: { id: number; external_id: string | null }[];
+        samples: {
+          id: number;
+          external_id: string | null;
+          // The value the pipeline objected to, and a spelling it would accept.
+          // bioAF recommends rather than substitutes: the scientist decides what
+          // the field says, so the suggestion is offered, never applied.
+          value?: string | null;
+          suggestion?: string | null;
+        }[];
+        // Why this column is being reported: "missing", "required_by",
+        // "not_accepted", "invalid_characters" or "collision". Each needs
+        // different words, because "missing" sends someone who just typed a
+        // value to look for the wrong problem.
+        reason?: string | null;
+        // The schema's own regex, so a scientist who would rather choose their
+        // own spelling than take the suggestion can see the rule.
+        pattern?: string | null;
         // Set when the pipeline requires this column only because another one is
         // filled (mag: short reads oblige a platform). Without it the notice
         // reports a column the schema's own required list does not mention.
