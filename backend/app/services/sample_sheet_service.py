@@ -96,6 +96,37 @@ def _input_files(sample) -> list:
     return [f for f in files if getattr(f, "storage_uri", None)]
 
 
+def _supplied(sample_values, sample) -> dict[str, str]:
+    """The values a scientist stated for one sample, keyed by column.
+
+    **Matched on the sample's own ID, never on position.** A positional match
+    misaligned by one row (a header included in a paste, a sample filtered out of
+    the grid but not the spreadsheet, a different sort order) assigns every value
+    to the wrong sample, and the run then completes green with the wrong
+    co-assembly grouping or the wrong differential contrast. Keying on the id
+    makes that class of error unrepresentable rather than merely unlikely.
+
+    Values for samples this run does not include are simply absent from the
+    result: a mapping carried over from an earlier run names samples that may not
+    be selected now, and those values must not land on somebody else's row.
+
+    A blank value is dropped here, so it reads as an unanswered question rather
+    than as an instruction to emit nothing. The column then resolves as it would
+    have without the grid, and a required column with no other source blocks the
+    launch, which is what design section 5 asks for.
+    """
+    if not sample_values:
+        return {}
+    raw = sample_values.get(str(getattr(sample, "id", "")))
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(column).strip(): str(value).strip()
+        for column, value in raw.items()
+        if value is not None and str(value).strip()
+    }
+
+
 @lru_cache(maxsize=512)
 def _compiled(pattern: str):
     """A column's declared regex, or None when the schema's pattern is invalid.
@@ -201,7 +232,9 @@ def _read_rows(contract, sample, parameters: dict, read_columns: list[str]) -> l
     return [dict(zip(read_columns, pair)) for pair in pairs]
 
 
-def _unusable_reads_gap(contract, samples: list, parameters: dict, read_columns: list[str]) -> dict | None:
+def _unusable_reads_gap(
+    contract, samples: list, parameters: dict, read_columns: list[str], sample_values=None
+) -> dict | None:
     """Samples whose attached files cannot serve as this pipeline's reads.
 
     Deliberately narrow. It fires only when a sample HAS files, none of them
@@ -217,6 +250,11 @@ def _unusable_reads_gap(contract, samples: list, parameters: dict, read_columns:
     offenders = []
     for sample in samples:
         if parameters.get("input_paths", {}).get(str(sample.id)):
+            continue
+        # A read the scientist named is a read, whatever bioAF made of the files
+        # it found. This is how an ambiguous or unrecognised read column gets
+        # resolved from the review step.
+        if any(_supplied(sample_values, sample).get(c) for c in read_columns):
             continue
         accepted, rejected = _eligible_reads(contract, sample, read_columns)
         if accepted or not rejected:
@@ -343,7 +381,7 @@ def _ordered_columns(contract, read_columns: list[str]) -> list[str]:
     return leading + rest
 
 
-def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: dict) -> list[str]:
+def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: dict, sample_values=None) -> list[str]:
     """The columns this sheet will actually carry.
 
     Emits required columns, the chosen read columns, and any column bioAF fills
@@ -364,7 +402,7 @@ def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: 
             continue
         for sample in samples:
             reads = rows_by_sample.get(sample.id, [{}])[0]
-            if _cell(contract, column, sample, parameters, reads):
+            if _cell(contract, column, sample, parameters, reads, _supplied(sample_values, sample)):
                 filled.add(column)
                 break
 
@@ -431,7 +469,7 @@ def _ordered_read_columns(contract) -> list[str]:
     return sorted(c for c in singles if not _LONG_READ_MARKER.search(c))[:1]
 
 
-def _file_column_gap(contract, column: str, samples: list) -> dict | None:
+def _file_column_gap(contract, column: str, samples: list, sample_values=None) -> dict | None:
     """Why a required file column cannot be filled, or None when it can.
 
     Two distinct gaps, because they need opposite instructions. No matching file
@@ -447,6 +485,11 @@ def _file_column_gap(contract, column: str, samples: list) -> dict | None:
     ambiguous: list = []
     candidates: set[str] = set()
     for sample in samples:
+        # A file the scientist named settles both gaps at once: it is the answer
+        # to "attach one" and to "say which", which is exactly how design section
+        # 7 has them resolve an ambiguous column from the review step.
+        if _supplied(sample_values, sample).get(column):
+            continue
         matches = _files_for_column(contract, column, sample)
         if not matches:
             zero.append(sample)
@@ -472,46 +515,58 @@ def _file_column_gap(contract, column: str, samples: list) -> dict | None:
     return None
 
 
-def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]) -> str:
+def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str], supplied=None) -> str:
     """The value for one column of one row, or empty when bioAF cannot source it.
 
-    Order matters: reads first (the schema named them), then the explicit sample
-    mapping, then launch parameters. An enum-constrained column only accepts a
-    value the schema lists.
+    Order matters. A value the SCIENTIST stated wins over everything, because
+    correcting a wrongly-resolved cell in place is the only backstop bioAF has
+    against a file that matches a column's pattern without being the right file:
+    a reference genome satisfies funcscan's ``fasta`` pattern exactly as well as
+    an assembly does. After that come reads (the schema named them), then the
+    explicit sample mapping, then launch parameters.
+
+    An enum-constrained column only accepts a value the schema lists, and that
+    applies to a stated value too. Emitting one the pipeline rejects would
+    produce a sheet that passes bioAF's own checks and dies inside Nextflow,
+    which is the failure this path exists to remove. Dropping it instead leaves
+    the column empty, so ``check_contract_satisfiable`` blocks and names it.
     """
-    if column in reads:
-        return reads[column]
-
-    # A per-sample file column (funcscan's assembly, sarek's bam) is resolved
-    # from the sample's own files by the column's declared pattern. Exactly one
-    # match fills it; two is ambiguity and stays empty, so the satisfiability
-    # check reports it rather than this silently choosing.
-    if column in getattr(contract, "non_read_file_columns", frozenset()):
-        # Reads and their alternatives are exclusive per row: sarek takes FASTQs
-        # OR an alignment, never both, and its schema declares no `oneOf` that
-        # would catch the combination. So once reads resolved, an OPTIONAL file
-        # column is an alternative input and filling it produces a row the
-        # pipeline cannot act on. A REQUIRED file column is not an alternative
-        # (funcscan wants its assembly regardless) and is still filled.
-        if any(reads.values()) and column not in contract.required:
-            return ""
-        matches = _files_for_column(contract, column, sample)
-        return matches[0].storage_uri if len(matches) == 1 else ""
-
-    value = ""
-    field = _COLUMN_TO_SAMPLE_FIELD.get(column)
-    if field == "external_id":
-        value = _safe_sample_name(sample)
-    elif field:
-        value = getattr(sample, field, None) or ""
-    else:
-        parameter = _COLUMN_TO_PARAMETER.get(column)
-        if parameter:
-            raw = parameters.get(parameter)
-            value = "" if raw is None else str(raw)
+    value = (supplied or {}).get(column, "")
 
     if not value:
-        return ""
+        if column in reads:
+            return reads[column]
+
+        # A per-sample file column (funcscan's assembly, sarek's bam) is resolved
+        # from the sample's own files by the column's declared pattern. Exactly
+        # one match fills it; two is ambiguity and stays empty, so the
+        # satisfiability check reports it rather than this silently choosing.
+        if column in getattr(contract, "non_read_file_columns", frozenset()):
+            # Reads and their alternatives are exclusive per row: sarek takes
+            # FASTQs OR an alignment, never both, and its schema declares no
+            # `oneOf` that would catch the combination. So once reads resolved,
+            # an OPTIONAL file column is an alternative input and filling it
+            # produces a row the pipeline cannot act on. A REQUIRED file column
+            # is not an alternative (funcscan wants its assembly regardless) and
+            # is still filled.
+            if any(reads.values()) and column not in contract.required:
+                return ""
+            matches = _files_for_column(contract, column, sample)
+            return matches[0].storage_uri if len(matches) == 1 else ""
+
+        field = _COLUMN_TO_SAMPLE_FIELD.get(column)
+        if field == "external_id":
+            value = _safe_sample_name(sample)
+        elif field:
+            value = getattr(sample, field, None) or ""
+        else:
+            parameter = _COLUMN_TO_PARAMETER.get(column)
+            if parameter:
+                raw = parameters.get(parameter)
+                value = "" if raw is None else str(raw)
+
+        if not value:
+            return ""
 
     # A value outside the schema's enum would produce a sheet that passes bioAF's
     # own checks and dies in Nextflow. bioAF's "auto" strandedness default is
@@ -634,12 +689,16 @@ class SampleSheetService:
         return specs
 
     @staticmethod
-    def check_contract_satisfiable(contract, samples: list, parameters: dict) -> None:
+    def check_contract_satisfiable(contract, samples: list, parameters: dict, sample_values=None) -> None:
         """Raise if this run cannot produce a valid samplesheet.
 
         Called before the run row exists, so a refusal costs the user nothing.
         Silent when the contract is empty: no schema means "we do not know", and
         refusing on ignorance would regress every pipeline that works today.
+
+        ``sample_values`` carries what the scientist stated per sample, keyed by
+        sample id. It must be the same set generation will use, or this reports a
+        gap the sheet does not have and refuses a launch that would work.
         """
         if contract.is_empty:
             return
@@ -661,7 +720,7 @@ class SampleSheetService:
         # files exist but do not satisfy the read pattern is reported here
         # instead of silently producing an empty read column.
         if ordered_reads:
-            unusable = _unusable_reads_gap(contract, samples, parameters, ordered_reads)
+            unusable = _unusable_reads_gap(contract, samples, parameters, ordered_reads, sample_values)
             if unusable:
                 missing[ordered_reads[0]] = unusable
 
@@ -670,12 +729,14 @@ class SampleSheetService:
                 continue
 
             if column in file_columns:
-                detail = _file_column_gap(contract, column, samples)
+                detail = _file_column_gap(contract, column, samples, sample_values)
                 if detail:
                     missing[column] = detail
                 continue
 
-            offenders = [s for s in samples if not _cell(contract, column, s, parameters, {})]
+            offenders = [
+                s for s in samples if not _cell(contract, column, s, parameters, {}, _supplied(sample_values, s))
+            ]
             if not offenders:
                 continue
 
@@ -693,13 +754,19 @@ class SampleSheetService:
             )
 
     @staticmethod
-    def generate_from_contract(contract, samples: list, parameters: dict) -> str:
+    def generate_from_contract(contract, samples: list, parameters: dict, sample_values=None) -> str:
         """Build a samplesheet from a pipeline's own ``schema_input.json``.
 
         The header carries the required columns, the read columns, and whatever
         else bioAF can actually fill. Unfilled optional columns are dropped, and
         where a schema declares mutually exclusive input styles only the chosen
         one is emitted.
+
+        ``sample_values`` carries what the scientist stated per sample, keyed by
+        sample id. A column the pipeline never declared is ignored rather than
+        appended: a mapping carried over from another pipeline names columns this
+        one does not have, and an undeclared column fails nf-schema's validation
+        of the whole sheet.
 
         Whether the resulting sheet is actually launchable is decided upstream in
         ``PipelineRunService``: this builds the best sheet it can and reports
@@ -714,15 +781,16 @@ class SampleSheetService:
             sample.id: _read_rows(contract, sample, parameters, read_columns) for sample in samples
         }
 
-        columns = _emitted_columns(contract, samples, parameters, rows_by_sample)
+        columns = _emitted_columns(contract, samples, parameters, rows_by_sample, sample_values)
 
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(columns)
 
         for sample in samples:
+            supplied = _supplied(sample_values, sample)
             for reads in rows_by_sample[sample.id]:
-                writer.writerow([_cell(contract, column, sample, parameters, reads) for column in columns])
+                writer.writerow([_cell(contract, column, sample, parameters, reads, supplied) for column in columns])
 
         return output.getvalue()
 
