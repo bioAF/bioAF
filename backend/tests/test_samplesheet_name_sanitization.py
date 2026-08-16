@@ -287,6 +287,47 @@ def test_the_same_sample_across_several_lanes_is_not_a_collision():
     assert _names(_generate(_contract("ampliseq"), samples)) == ["GUT_A", "GUT_A"]
 
 
+# -- The headline sentence has to agree with the detail under it --
+
+
+def test_the_summary_does_not_call_a_present_value_missing():
+    """Found by driving the demo. The detail said "will not accept these values"
+    while the sentence above it said "which is missing for some samples", and the
+    sentence is what a scientist reads first. Nothing is missing here: the value
+    is present and the pipeline refuses it."""
+    samples = [_make_sample(1, "SAMPLE-101", files=_reads("SAMPLE-101"))]
+
+    with pytest.raises(SamplesMissingRequiredFieldsError) as exc:
+        _check(_contract("ampliseq"), samples)
+
+    assert "missing" not in str(exc.value)
+    assert "will not accept" in str(exc.value)
+
+
+def test_a_genuinely_missing_column_still_says_missing():
+    """The control. mag's `group` really is absent, and that wording was right."""
+    samples = [_make_sample(1, "GUT_A", files=_reads("GUT_A"))]
+
+    with pytest.raises(SamplesMissingRequiredFieldsError) as exc:
+        _check(_contract("mag"), samples)
+
+    assert "missing" in str(exc.value)
+
+
+def test_a_mix_of_both_avoids_claiming_either():
+    """A sample named "GUT A" launching mag: the name is present and refused
+    (mag's `^\\S+$` rejects the space) while `group` is genuinely absent. A
+    sentence asserting either one would be wrong about the other."""
+    samples = [_make_sample(1, "GUT A", files=_reads("GUT_A"))]
+
+    with pytest.raises(SamplesMissingRequiredFieldsError) as exc:
+        _check(_contract("mag"), samples)
+
+    message = str(exc.value)
+    assert "need attention" in message
+    assert "'group'" in message and "'sample'" in message
+
+
 # -- What was already true stays true --
 
 

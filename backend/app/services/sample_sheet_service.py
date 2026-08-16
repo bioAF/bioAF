@@ -740,6 +740,30 @@ def _supplied_value_gaps(contract, samples: list, parameters: dict, sample_value
     return gaps
 
 
+# Gaps where the value is PRESENT and the pipeline refuses it, as opposed to
+# absent. The distinction decides the wording, and it matters: the sentence is
+# what a scientist reads first, and telling someone their value is missing when
+# it is sitting right there sends them to look for the wrong problem.
+_VALUE_REASONS: frozenset[str] = frozenset({"invalid_characters", "collision", "not_accepted"})
+
+
+def _blocked_summary(missing: dict[str, dict]) -> str:
+    """One sentence saying why this run cannot start.
+
+    Three cases, because a sentence that asserts the wrong one is worse than a
+    vaguer one. Found by driving the demo: the detail read "will not accept these
+    values" while the sentence above it said "which is missing for some samples".
+    """
+    columns = _join(sorted(missing))
+    reasons = {gap.get("reason") for gap in missing.values()}
+
+    if reasons <= _VALUE_REASONS:
+        return f"This pipeline will not accept {columns} as set for some samples."
+    if not (reasons & _VALUE_REASONS):
+        return f"This pipeline requires {columns}, which is missing for some samples."
+    return f"This pipeline cannot start: {columns} need attention for some samples."
+
+
 def _identity_columns(contract) -> list[str]:
     """The columns carrying the sample's own name."""
     return [c for c in contract.column_order if _COLUMN_TO_SAMPLE_FIELD.get(c) == "external_id"]
@@ -1183,7 +1207,7 @@ class SampleSheetService:
 
         if missing:
             raise SamplesMissingRequiredFieldsError(
-                f"This pipeline requires {_join(sorted(missing))}, which is missing for some samples.",
+                _blocked_summary(missing),
                 details={"missing_columns": missing},
             )
 
