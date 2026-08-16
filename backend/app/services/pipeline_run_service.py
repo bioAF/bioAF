@@ -123,22 +123,51 @@ class PipelineRunService:
 
     @staticmethod
     async def _resolve_contract(session, pipeline):
-        """The pipeline's samplesheet contract, fetched once and cached on the entry.
+        """The pipeline's samplesheet contract, kept in step with the version installed.
 
         Entries installed before the contract existed carry NULL, so the first
         launch resolves and persists it. A fetch failure records nothing and
         returns an empty contract, which every caller treats as "we do not
         know" and falls back on.
+
+        The contract is also re-fetched when the pipeline's VERSION MOVES. Until
+        it was, a contract fetched at install stayed pinned to the tag current
+        then, so an upgraded pipeline was validated against its old rules: still
+        requiring a column that had been dropped, still blind to one that had
+        been added. Re-fetching per launch was rejected (a network call on the
+        launch path, and runs that fail when GitHub is unreachable), as were a
+        background schedule (drift found late) and a manual button (an upgraded
+        pipeline stays wrong until somebody remembers).
+
+        A version we have no record for is assumed current and simply stamped.
+        Treating it as a mismatch would re-fetch the whole catalog on its next
+        launch to correct a drift that may not exist.
         """
         from app.services.samplesheet_schema import is_absent_marker, parse_contract
 
         stored = getattr(pipeline, "input_schema_json", None)
-        if stored is None and (getattr(pipeline, "source_type", "") or "").lower() == "nf-core":
-            fetched = await PipelineCatalogService.fetch_input_schema(
-                getattr(pipeline, "source_url", None), getattr(pipeline, "version", None)
-            )
+        version = getattr(pipeline, "version", None)
+        fetched_for = getattr(pipeline, "input_schema_version", None)
+        is_nf_core = (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+        if stored is None and is_nf_core:
+            fetched = await PipelineCatalogService.fetch_input_schema(getattr(pipeline, "source_url", None), version)
             if fetched is not None:
                 pipeline.input_schema_json = fetched
+                pipeline.input_schema_version = version
+                await session.flush()
+                stored = fetched
+        elif stored is not None and fetched_for is None:
+            pipeline.input_schema_version = version
+            await session.flush()
+        elif stored is not None and is_nf_core and fetched_for != version:
+            fetched = await PipelineCatalogService.fetch_input_schema(getattr(pipeline, "source_url", None), version)
+            # A failed fetch leaves both the contract and the recorded version
+            # alone. Advancing the version here would record a refresh that did
+            # not happen, and the pipeline would stay wrong until it moved again.
+            if fetched is not None:
+                pipeline.input_schema_json = fetched
+                pipeline.input_schema_version = version
                 await session.flush()
                 stored = fetched
 

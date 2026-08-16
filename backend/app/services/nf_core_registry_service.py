@@ -255,6 +255,11 @@ class NfCoreRegistryService:
             version=version,
             schema_json=schema or None,
             input_schema_json=input_schema,
+            # Which release the contract belongs to, so an upgrade is noticed.
+            # Recorded only when the fetch succeeded: stamping a version against
+            # a contract that was never stored would make the launch path treat
+            # the entry as current and never resolve it.
+            input_schema_version=version if input_schema is not None else None,
             is_builtin=False,
             enabled=True,
             qc_template=qc_template,
