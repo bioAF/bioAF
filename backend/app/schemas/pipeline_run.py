@@ -56,6 +56,16 @@ class PipelineRunLaunchRequest(BaseModel):
     project_id: int | None = None
     sample_ids: list[int] | None = None
     parameters: dict = {}
+    # Samplesheet values the scientist stated, keyed by sample id then column:
+    # ``{"12": {"group": "gut"}}``. Columns describing experimental design have
+    # no source bioAF may read, and guessing one produces a run that completes
+    # green and is scientifically wrong.
+    #
+    # A FIRST-CLASS field rather than a key inside ``parameters``, because
+    # ``parameters`` is emitted verbatim onto the Nextflow command line (one
+    # ``--key value`` per entry), so this would arrive as a bogus
+    # ``--sample_values`` argument.
+    sample_values: dict[str, dict[str, str]] = {}
     resume_from_run_id: int | None = None
     reference_genome: str | None = None
     alignment_algorithm: str | None = None
@@ -148,3 +158,12 @@ class PipelineRunPreflightResponse(BaseModel):
     code: str | None = None
     reason: str | None = None
     details: dict = {}
+    # The sheet this run would submit: ``columns``, ``rows`` (each naming the
+    # sample it belongs to) and the exact ``csv``. Produced by the generator that
+    # feeds Nextflow rather than by a second code path, so the review step cannot
+    # show a sheet other than the one about to run.
+    samplesheet: dict = {}
+    # The columns an entry grid must collect, and how to render each. Derived
+    # from the same computation as the block above, so the questions asked and
+    # the refusal given cannot disagree.
+    per_sample_inputs: list[dict] = []

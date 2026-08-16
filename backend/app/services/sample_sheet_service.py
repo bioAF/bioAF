@@ -515,6 +515,83 @@ def _file_column_gap(contract, column: str, samples: list, sample_values=None) -
     return None
 
 
+def _to_csv(columns: list[str], rows: list[list[str]]) -> str:
+    """A samplesheet, written the one way bioAF writes them."""
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    for row in rows:
+        writer.writerow(row)
+    return output.getvalue()
+
+
+def _sheet_rows(contract, samples: list, parameters: dict, sample_values=None) -> tuple[list[str], list[dict]]:
+    """The columns and rows of a schema-driven sheet, each row naming its sample.
+
+    One pass produces both the CSV handed to Nextflow and the table the review
+    step renders, so the two cannot disagree about what is about to run.
+
+    A row carries its ``sample_id`` because a wrongly-resolved cell is corrected
+    in place from that table. A row identified only by position is the same
+    hazard as a positional paste: the correction lands on the wrong sample and
+    the run completes green.
+    """
+    read_columns = _ordered_read_columns(contract)
+
+    # Resolve each sample's rows once: the header depends on what the rows turn
+    # out to contain, and re-deriving them per column would rescan every
+    # sample's files for every column.
+    rows_by_sample: dict[int, list[dict[str, str]]] = {
+        sample.id: _read_rows(contract, sample, parameters, read_columns) for sample in samples
+    }
+    columns = _emitted_columns(contract, samples, parameters, rows_by_sample, sample_values)
+
+    rows: list[dict] = []
+    for sample in samples:
+        supplied = _supplied(sample_values, sample)
+        for reads in rows_by_sample[sample.id]:
+            rows.append(
+                {
+                    "sample_id": sample.id,
+                    "external_id": sample.external_id,
+                    "values": [_cell(contract, column, sample, parameters, reads, supplied) for column in columns],
+                }
+            )
+    return columns, rows
+
+
+def _parsed_rows(csv_text: str, samples: list) -> tuple[list[str], list[dict]]:
+    """A sheet a tailored generator produced, read back into columns and rows.
+
+    chipseq pairs each IP sample with a detected control and fetchngs emits an
+    accession list, so those sheets are built by hand rather than from a schema.
+    They still get reviewed, which means reading back what the generator wrote.
+
+    Rows are matched to samples on the name the generator itself emitted, which
+    is the same function that produced the value, so the join cannot drift. A row
+    naming something else keeps a null sample id rather than being guessed at.
+    """
+    parsed = list(csv.reader(io.StringIO(csv_text)))
+    if not parsed:
+        return [], []
+
+    columns, body = parsed[0], parsed[1:]
+    by_name = {_safe_sample_name(s): s for s in samples}
+    name_at = columns.index("sample") if "sample" in columns else None
+
+    rows: list[dict] = []
+    for values in body:
+        sample = by_name.get(values[name_at]) if name_at is not None and name_at < len(values) else None
+        rows.append(
+            {
+                "sample_id": getattr(sample, "id", None),
+                "external_id": getattr(sample, "external_id", None),
+                "values": values,
+            }
+        )
+    return columns, rows
+
+
 def _dependency_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
     """Columns a filled trigger column made required, and the samples missing them.
 
@@ -899,27 +976,41 @@ class SampleSheetService:
         ``PipelineRunService``: this builds the best sheet it can and reports
         nothing, so that the blocking decision lives in one place.
         """
-        read_columns = _ordered_read_columns(contract)
+        columns, rows = _sheet_rows(contract, samples, parameters, sample_values)
+        return _to_csv(columns, [row["values"] for row in rows])
 
-        # Resolve each sample's rows once: the header depends on what the rows
-        # turn out to contain, and re-deriving them per column would rescan
-        # every sample's files for every column.
-        rows_by_sample: dict[int, list[dict[str, str]]] = {
-            sample.id: _read_rows(contract, sample, parameters, read_columns) for sample in samples
-        }
+    @staticmethod
+    def preview(pipeline_key: str, samples: list, parameters: dict, contract=None, sample_values=None) -> dict:
+        """The sheet this launch would submit, produced without launching it.
 
-        columns = _emitted_columns(contract, samples, parameters, rows_by_sample, sample_values)
+        Returns the columns, the rows (each naming the sample it belongs to) and
+        the exact CSV, so the review step can render a table by default and show
+        the raw file behind a button. Both come from the generator that feeds
+        Nextflow rather than from a second code path, because a preview that can
+        differ from the submitted sheet is worse than no preview.
 
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(columns)
+        Shown on every launch, so it covers the pipelines a schema does not
+        describe as well: a tailored generator's sheet is read back into rows,
+        and fetchngs' accession list is carried as its own text, since rendering
+        that as a table would invent a structure it does not have.
+        """
+        if "fetchngs" in pipeline_key:
+            return {"columns": [], "rows": [], "csv": SampleSheetService.generate_fetchngs_ids(parameters)}
 
-        for sample in samples:
-            supplied = _supplied(sample_values, sample)
-            for reads in rows_by_sample[sample.id]:
-                writer.writerow([_cell(contract, column, sample, parameters, reads, supplied) for column in columns])
+        schema_driven = (
+            not SampleSheetService.has_handwritten_generator(pipeline_key)
+            and contract is not None
+            and not contract.is_empty
+        )
+        if schema_driven:
+            columns, rows = _sheet_rows(contract, samples, parameters, sample_values)
+            return {"columns": columns, "rows": rows, "csv": _to_csv(columns, [r["values"] for r in rows])}
 
-        return output.getvalue()
+        csv_text = SampleSheetService.generate_sheet(
+            pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
+        )
+        columns, rows = _parsed_rows(csv_text, samples)
+        return {"columns": columns, "rows": rows, "csv": csv_text}
 
     @staticmethod
     def generate_scrnaseq_sheet(samples: list, parameters: dict) -> str:
@@ -1093,7 +1184,7 @@ class SampleSheetService:
         return any(k in pipeline_key for k in _HANDWRITTEN_GENERATORS)
 
     @staticmethod
-    def generate_sheet(pipeline_key: str, samples: list, parameters: dict, contract=None) -> str:
+    def generate_sheet(pipeline_key: str, samples: list, parameters: dict, contract=None, sample_values=None) -> str:
         """Route to the correct sheet generator based on pipeline type.
 
         The four tailored generators and fetchngs keep priority. Everything else
@@ -1111,6 +1202,6 @@ class SampleSheetService:
         elif "fetchngs" in pipeline_key:
             return SampleSheetService.generate_fetchngs_ids(parameters)
         elif contract is not None and not contract.is_empty:
-            return SampleSheetService.generate_from_contract(contract, samples, parameters)
+            return SampleSheetService.generate_from_contract(contract, samples, parameters, sample_values)
         else:
             return SampleSheetService.generate_generic_sheet(samples, parameters)

@@ -67,12 +67,18 @@ class PipelineRunService:
 
     @staticmethod
     async def preflight(session, org_id: int, data) -> dict:
-        """Whether this launch would succeed, without creating anything.
+        """Whether this launch would succeed, and what it would submit.
 
         Runs the same checks ``launch_run`` runs, so the dialog can say what is
         wrong while the user can still fix it. Returns the failure instead of
         raising, because a pipeline that cannot run is an answer here, not an
         error: the caller asked a question.
+
+        Also answers the two questions the launch flow's later steps need: the
+        sheet this run would hand to Nextflow, and the columns an entry grid must
+        collect. Both come from the same computation as the verdict, so the
+        review step cannot confirm a sheet other than the one about to run, and
+        the grid cannot ask for something different from what the block reports.
         """
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
@@ -88,19 +94,31 @@ class PipelineRunService:
             sample._input_files = PipelineRunService._input_eligible_files(sample.files, False)
 
         contract = await PipelineRunService._resolve_contract(session, pipeline)
-        if SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
-            return {"can_launch": True, "code": None, "reason": None, "details": {}}
+        parameters = data.parameters or {}
+        sample_values = getattr(data, "sample_values", None) or {}
 
-        try:
-            SampleSheetService.check_contract_satisfiable(contract, samples, data.parameters or {})
-        except DomainError as exc:
-            return {
-                "can_launch": False,
-                "code": exc.code,
-                "reason": str(exc),
-                "details": exc.details,
-            }
-        return {"can_launch": True, "code": None, "reason": None, "details": {}}
+        # Built for every pipeline, including the ones a schema does not
+        # describe: design section 6 puts the review step on EVERY launch, and a
+        # tailored generator's sheet needs reviewing as much as a derived one.
+        preview = SampleSheetService.preview(
+            pipeline.pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
+        )
+
+        verdict: dict = {"can_launch": True, "code": None, "reason": None, "details": {}}
+        inputs: list[dict] = []
+        if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            inputs = SampleSheetService.per_sample_inputs(contract, samples, parameters, sample_values)
+            try:
+                SampleSheetService.check_contract_satisfiable(contract, samples, parameters, sample_values)
+            except DomainError as exc:
+                verdict = {
+                    "can_launch": False,
+                    "code": exc.code,
+                    "reason": str(exc),
+                    "details": exc.details,
+                }
+
+        return {**verdict, "samplesheet": preview, "per_sample_inputs": inputs}
 
     @staticmethod
     async def _resolve_contract(session, pipeline):
@@ -267,8 +285,13 @@ class PipelineRunService:
         # schema error the user did not write. Pipelines with a hand-written
         # generator are exempt, because those build a sheet the schema alone
         # cannot describe (chipseq's control detection, fetchngs' accession list).
+        # The values the scientist stated, which are what the preview showed them
+        # and therefore what they approved. Checked and emitted from the same
+        # set, or the run submits a sheet other than the one confirmed.
+        sample_values = data.sample_values or {}
+
         if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
-            SampleSheetService.check_contract_satisfiable(contract, samples, merged_params)
+            SampleSheetService.check_contract_satisfiable(contract, samples, merged_params, sample_values)
 
         # 7. Create pipeline_runs record
         run = PipelineRun(
@@ -318,6 +341,7 @@ class PipelineRunService:
             samples,
             merged_params,
             contract=contract,
+            sample_values=sample_values,
         )
 
         # 9. Submit job via the compute adapter (BAL)
