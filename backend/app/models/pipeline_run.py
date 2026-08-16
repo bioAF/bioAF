@@ -25,6 +25,15 @@ class PipelineRun(Base):
     progress_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # The EXACT samplesheet handed to Nextflow, and the design that produced it.
+    # Both are snapshots, not references: a mapping edited next week must not
+    # rewrite the history of a run that already used it, and re-deriving the
+    # sheet later would read today's samples, files and mapping rather than the
+    # ones this run received. The design snapshot keeps its authorship stamps, so
+    # "who set this value" stays answerable after the run has finished, which is
+    # what an audited quality system asks for.
+    samplesheet_csv: Mapped[str | None] = mapped_column(Text, nullable=True)
+    samplesheet_mapping_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     work_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)

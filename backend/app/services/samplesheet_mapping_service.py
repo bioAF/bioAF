@@ -77,6 +77,41 @@ class SamplesheetMappingService:
         }
 
     @staticmethod
+    def snapshot(
+        values: dict[str, dict[str, str]] | None,
+        bindings: dict[str, str] | None,
+        user_id: int | None,
+    ) -> dict:
+        """The design a run used, stamped and frozen onto that run.
+
+        Taken at launch and never updated, because a mapping edited afterwards
+        must not rewrite the history of a run that already used it. A run that
+        stated nothing records empty rather than null: "nothing was stated" is a
+        fact worth keeping, and a null could equally mean the record was not
+        being written yet.
+        """
+        stamped_values: dict[str, dict] = {}
+        for sample_id, columns in (values or {}).items():
+            if not isinstance(columns, dict):
+                continue
+            per_column = {
+                str(column): _stamp(str(value).strip(), user_id, None)
+                for column, value in columns.items()
+                if value is not None and str(value).strip()
+            }
+            if per_column:
+                stamped_values[str(sample_id)] = per_column
+
+        return {
+            "values": stamped_values,
+            "bindings": {
+                str(column): _stamp(str(value).strip(), user_id, None)
+                for column, value in (bindings or {}).items()
+                if value is not None and str(value).strip()
+            },
+        }
+
+    @staticmethod
     async def resolve(session: AsyncSession, org_id: int, pipeline_key: str, experiment_id: int | None):
         """The mapping to prefill this launch from, and the scope it came from.
 

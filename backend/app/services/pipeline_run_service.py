@@ -23,6 +23,7 @@ from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_mapping_service import SamplesheetMappingService
 from app.adapters.registry import get_compute_adapter
 from app.services.vocabulary_validator import VocabularyValidator
 
@@ -343,6 +344,15 @@ class PipelineRunService:
             contract=contract,
             sample_values=sample_values,
         )
+
+        # 8b. Keep what this run was actually given. Re-deriving the sheet later
+        # reads today's samples, today's files and today's mapping, none of which
+        # are what the run received, so defending a result means holding the
+        # sheet itself. The design is snapshotted alongside it, with the stamps
+        # that say who set each value, because whoever fills the design grid is
+        # often not whoever launches.
+        run.samplesheet_csv = sample_sheet_csv
+        run.samplesheet_mapping_json = SamplesheetMappingService.snapshot(sample_values, None, user_id)
 
         # 9. Submit job via the compute adapter (BAL)
         try:
