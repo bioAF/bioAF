@@ -68,6 +68,33 @@ it("lists only the samples actually missing the value", () => {
   expect(screen.getByText(/SAMPLE-103/)).toBeInTheDocument();
 });
 
+it("says which column made an otherwise optional one required", () => {
+  // mag's schema lists only sample and group as required, then adds
+  // "a row with short_reads_1 must also carry short_reads_platform". Reporting
+  // the platform as simply missing sends the user looking for a rule that is
+  // not in the required list.
+  const dependent: PipelineRunPreflight = {
+    can_launch: false,
+    code: "samples_missing_required_fields",
+    reason: "This pipeline requires 'short_reads_platform', which is missing for some samples.",
+    details: {
+      missing_columns: {
+        short_reads_platform: {
+          sample_field: null,
+          allowed_values: ["ILLUMINA", "BGISEQ"],
+          required_by: "short_reads_1",
+          samples: [{ id: 1, external_id: "GUT_A" }],
+        },
+      },
+    },
+  };
+  render(<LaunchBlockedNotice preflight={dependent} />);
+
+  expect(screen.getByText(/is required because these samples carry/i)).toBeInTheDocument();
+  expect(screen.getAllByText("short reads 1").length).toBeGreaterThan(0);
+  expect(screen.getByText(/GUT_A/)).toBeInTheDocument();
+});
+
 it("shows the allowed values when the column is constrained", () => {
   const enumBlocked: PipelineRunPreflight = {
     can_launch: false,

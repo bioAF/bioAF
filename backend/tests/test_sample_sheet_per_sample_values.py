@@ -113,13 +113,28 @@ def test_a_supplied_value_fills_a_design_column_bioaf_refuses_to_guess():
 
 def test_a_supplied_value_unblocks_a_launch_that_is_otherwise_refused():
     """The satisfiability check must see the same value generation will use.
-    If it does not, a run that can now produce a valid sheet is still refused."""
+    If it does not, a run that can now produce a valid sheet is still refused.
+
+    Asserted on `group` specifically rather than on the launch as a whole: mag
+    also owes `short_reads_platform` under its own dependentRequired rule, and
+    that is a separate question with its own tests. What this pins is that a
+    stated value closes the gap it was stated for."""
     samples = [_make_sample(1, "GUT_A", files=_reads("GUT_A"))]
 
-    with pytest.raises(SamplesMissingRequiredFieldsError):
+    with pytest.raises(SamplesMissingRequiredFieldsError) as before:
         _check(_contract("mag"), samples)
+    assert "group" in before.value.details["missing_columns"]
 
-    _check(_contract("mag"), samples, sample_values={"1": {"group": "gut"}})
+    with pytest.raises(SamplesMissingRequiredFieldsError) as after:
+        _check(_contract("mag"), samples, sample_values={"1": {"group": "gut"}})
+    assert "group" not in after.value.details["missing_columns"]
+
+    # And with every gap answered, nothing blocks at all.
+    _check(
+        _contract("mag"),
+        samples,
+        sample_values={"1": {"group": "gut", "short_reads_platform": "ILLUMINA"}},
+    )
 
 
 def test_a_value_for_only_some_samples_still_blocks_and_names_the_rest():

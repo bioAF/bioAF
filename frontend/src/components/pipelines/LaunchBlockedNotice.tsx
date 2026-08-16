@@ -22,14 +22,26 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
           {Object.entries(missing).map(([column, info]) => (
             <li key={column} className="text-xs text-gray-700">
               <span className="font-medium">{column.replace(/_/g, " ")}</span>
-              {info.sample_field && (
+              {/* A column the pipeline requires only because another one is
+                  filled. Naming the trigger is what makes it answerable: the
+                  schema's own required list does not mention this column, so
+                  "it is missing" sends the user looking for a rule that is not
+                  there. */}
+              {info.required_by && (
+                <>
+                  {" is required because these samples carry "}
+                  <span className="font-medium">{info.required_by.replace(/_/g, " ")}</span>
+                  {":"}
+                </>
+              )}
+              {!info.required_by && info.sample_field && (
                 <>
                   {" comes from each sample's "}
                   <span className="font-medium">{info.sample_field.replace(/_/g, " ")}</span>
                   {", which is empty for:"}
                 </>
               )}
-              {!info.sample_field && " is not something bioAF can derive. Missing for:"}
+              {!info.required_by && !info.sample_field && " is not something bioAF can derive. Missing for:"}
               <div className="mt-0.5 text-gray-600">
                 {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
               </div>

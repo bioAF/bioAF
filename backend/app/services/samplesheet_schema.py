@@ -168,6 +168,15 @@ class SamplesheetContract:
     column_order: tuple[str, ...] = ()
     # Mutually exclusive input styles, when the schema declares any.
     branches: tuple[ExclusiveBranch, ...] = ()
+    # Columns a row must carry ONCE ANOTHER COLUMN IS FILLED, keyed on the column
+    # that triggers the requirement. mag declares
+    # ``{"short_reads_1": ["short_reads_platform"]}``: a row with short reads must
+    # say which platform produced them. These columns are absent from
+    # ``required``, so nothing else in this module sees them, and a sheet missing
+    # one is rejected by nf-schema after the launch rather than by bioAF before
+    # it. The rule is per ROW: a sample whose trigger column is empty owes
+    # nothing.
+    dependent_required: dict[str, tuple[str, ...]] = field(default_factory=dict)
     is_empty: bool = False
 
     def select_branch(self, sourceable: set[str]) -> ExclusiveBranch | None:
@@ -288,6 +297,16 @@ def parse_contract(schema: object) -> SamplesheetContract:
         if _declares_file(spec):
             file_columns.add(col)
 
+    dependent_required: dict[str, tuple[str, ...]] = {}
+    raw_dependent = items.get("dependentRequired")
+    if isinstance(raw_dependent, dict):
+        for trigger, dependents in raw_dependent.items():
+            if not isinstance(dependents, list):
+                continue
+            names = tuple(str(d) for d in dependents if isinstance(d, str))
+            if names:
+                dependent_required[str(trigger)] = names
+
     declared = [str(c) for c in properties]
     columns = set(declared)
     # A schema that requires a column it never defines is self-inconsistent, but
@@ -304,6 +323,7 @@ def parse_contract(schema: object) -> SamplesheetContract:
         patterns=patterns,
         column_order=tuple(declared + undeclared),
         branches=_parse_branches(items),
+        dependent_required=dependent_required,
         is_empty=False,
     )
 

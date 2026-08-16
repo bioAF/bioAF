@@ -515,6 +515,54 @@ def _file_column_gap(contract, column: str, samples: list, sample_values=None) -
     return None
 
 
+def _dependency_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    """Columns a filled trigger column made required, and the samples missing them.
+
+    ``dependentRequired`` is the pipeline saying "if a row carries this, it must
+    also carry that": mag's ``short_reads_1 -> short_reads_platform``, funcscan's
+    ``protein -> gbk``. Nothing else in this module reads the keyword, and these
+    columns are absent from ``required``, so bioAF emitted mag sheets with reads
+    and no platform column and let nf-schema reject them after the launch.
+
+    Evaluated per SAMPLE, because the requirement is a property of the row: a
+    single-end sample leaves ``short_reads_2`` empty and owes nothing for it.
+
+    The detail names the trigger, because the dependent column is optional in the
+    schema's own ``required`` list and "short_reads_platform is missing" is
+    unanswerable without knowing what made it necessary.
+    """
+    if not contract.dependent_required:
+        return {}
+
+    read_columns = _ordered_read_columns(contract)
+    gaps: dict[str, dict] = {}
+    for sample in samples:
+        supplied = _supplied(sample_values, sample)
+        reads = _read_rows(contract, sample, parameters, read_columns)[0]
+
+        def filled(column: str, sample=sample, supplied=supplied, reads=reads) -> bool:
+            return bool(_cell(contract, column, sample, parameters, reads, supplied))
+
+        for trigger, dependents in contract.dependent_required.items():
+            if trigger not in contract.columns or not filled(trigger):
+                continue
+            for dependent in dependents:
+                if filled(dependent):
+                    continue
+                gap = gaps.setdefault(
+                    dependent,
+                    {
+                        "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(dependent),
+                        "allowed_values": contract.enum_for(dependent),
+                        "reason": "required_by",
+                        "required_by": trigger,
+                        "samples": [],
+                    },
+                )
+                gap["samples"].append({"id": sample.id, "external_id": sample.external_id})
+    return gaps
+
+
 def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str], supplied=None) -> str:
     """The value for one column of one row, or empty when bioAF cannot source it.
 
@@ -746,6 +794,12 @@ class SampleSheetService:
                 "reason": "missing",
                 "samples": [{"id": s.id, "external_id": s.external_id} for s in offenders],
             }
+
+        # A column the schema requires only once another is filled. Reported
+        # alongside the outright-missing ones rather than instead of them: both
+        # have to be answered before this sheet is valid.
+        for column, gap in _dependency_gaps(contract, samples, parameters, sample_values).items():
+            missing.setdefault(column, gap)
 
         if missing:
             raise SamplesMissingRequiredFieldsError(

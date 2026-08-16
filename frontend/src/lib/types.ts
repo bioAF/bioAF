@@ -688,6 +688,10 @@ export interface PipelineRunPreflight {
         sample_field: string | null;
         allowed_values: string[];
         samples: { id: number; external_id: string | null }[];
+        // Set when the pipeline requires this column only because another one is
+        // filled (mag: short reads oblige a platform). Without it the notice
+        // reports a column the schema's own required list does not mention.
+        required_by?: string | null;
       }
     >;
   };
