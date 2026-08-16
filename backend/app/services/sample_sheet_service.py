@@ -96,6 +96,66 @@ def _input_files(sample) -> list:
     return [f for f in files if getattr(f, "storage_uri", None)]
 
 
+def _candidates(value: str) -> list[str]:
+    """Progressively less literal spellings of one value, most faithful first.
+
+    Scientists name samples the way their lab names samples, and a pipeline's
+    schema often will not take that name: ampliseq requires
+    ``^[a-zA-Z][a-zA-Z0-9_]+$``, so ``SAMPLE-101`` is rejected on the hyphen.
+
+    These are only CANDIDATES for something to SUGGEST. Every one is checked
+    against the column's own regex by ``_recommendation`` before it can be
+    offered, so this list never has to be correct about which pipelines accept
+    what, and nothing here is ever substituted for the scientist's own value.
+
+    Ordered so the smallest change that works wins, and deterministic, so the
+    same sample yields the same suggestion on every run.
+    """
+    trimmed = value.strip()
+    spaced = re.sub(r"\s+", "_", trimmed)
+    tidied = re.sub(r"[^A-Za-z0-9_]", "_", spaced)
+    collapsed = re.sub(r"_+", "_", tidied).strip("_")
+    return [trimmed, spaced, tidied, collapsed, f"s_{collapsed}"]
+
+
+def _compiled_matches(pattern: str, value: str) -> bool:
+    """Whether a value satisfies a column's declared regex.
+
+    An unparseable pattern in a published schema is treated as no constraint,
+    the same way it is everywhere else here: a pipeline's broken regex must not
+    take down a launch bioAF could otherwise make.
+    """
+    regex = _compiled(pattern)
+    return True if regex is None else bool(regex.match(value))
+
+
+def _recommendation(value: str, pattern: str | None) -> str | None:
+    """A spelling of ``value`` this column would accept, or None if there is none.
+
+    Only ever a RECOMMENDATION. bioAF does not decide what a field says, so this
+    is offered to the scientist rather than substituted for them.
+
+    The verification is what makes it safe to offer. A transform that merely
+    looks tidier is not evidence a pipeline will take it, so each candidate is
+    matched against the schema's declared pattern and the first that actually
+    satisfies it is the one shown.
+
+    None when nothing works, which is the honest answer for a constraint that
+    punctuation cannot repair: no rearrangement turns a mistyped
+    ``^GC[AF]_[0-9]{9}\\.[0-9]+$`` accession into a correct one, and suggesting
+    something that merely looks like an accession would name the wrong assembly.
+    """
+    if not value or not pattern:
+        return None
+    regex = _compiled(pattern)
+    if regex is None:
+        return None
+    for candidate in _candidates(value):
+        if candidate and candidate != value and regex.match(candidate):
+            return candidate
+    return None
+
+
 def _supplied(sample_values, sample) -> dict[str, str]:
     """The values a scientist stated for one sample, keyed by column.
 
@@ -640,6 +700,149 @@ def _dependency_gaps(contract, samples: list, parameters: dict, sample_values=No
     return gaps
 
 
+def _supplied_value_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    """Values a scientist stated that the pipeline will not take.
+
+    A value bioAF SOURCED and cannot use may be dropped quietly when the column
+    is optional: nobody asked for it. A value a scientist TYPED is different.
+    They believe they set it, and silently discarding it means the run proceeds
+    on a design other than the one they specified, which is the failure this
+    project exists to remove. So it is reported whether or not the column is
+    required.
+
+    Reported with the offending value and the constraint that rejected it,
+    because "ncbi is missing" is not a usable answer to "I entered an ncbi
+    accession and it has a typo in it".
+    """
+    gaps: dict[str, dict] = {}
+    read_columns = set(_ordered_read_columns(contract))
+    for sample in samples:
+        supplied = _supplied(sample_values, sample)
+        if not supplied:
+            continue
+        reads = _read_rows(contract, sample, parameters, _ordered_read_columns(contract))[0]
+        for column, stated in supplied.items():
+            if column not in contract.columns or column in read_columns:
+                continue
+            if _cell(contract, column, sample, parameters, reads, supplied):
+                continue
+            gap = gaps.setdefault(
+                column,
+                {
+                    "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+                    "allowed_values": contract.enum_for(column),
+                    "pattern": getattr(contract, "patterns", {}).get(column),
+                    "reason": "not_accepted",
+                    "samples": [],
+                },
+            )
+            gap["samples"].append({"id": sample.id, "external_id": sample.external_id, "value": stated})
+    return gaps
+
+
+def _identity_columns(contract) -> list[str]:
+    """The columns carrying the sample's own name."""
+    return [c for c in contract.column_order if _COLUMN_TO_SAMPLE_FIELD.get(c) == "external_id"]
+
+
+def _pattern_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    """Values the pipeline's own regex will not accept, each with a way forward.
+
+    Every file column declares a pattern, and so do many metadata columns:
+    ampliseq's ``sample`` is ``^[a-zA-Z][a-zA-Z0-9_]+$``, so the real demo name
+    ``SAMPLE-101`` is rejected on the hyphen. bioAF never checked, so the sheet
+    was emitted and Nextflow rejected it minutes later on a rule the scientist
+    could not see.
+
+    Reported rather than repaired. bioAF does not decide what a field says, so
+    the block names the offending value, states the constraint, and offers a
+    spelling that would satisfy it. Accepting that is the ordinary step 2 path,
+    since a stated value overrides everything.
+
+    A FILE column is checked but never given a recommendation: a tidier-looking
+    path names a different file, and one that does not exist.
+    """
+    patterns = getattr(contract, "patterns", {})
+    if not patterns:
+        return {}
+
+    read_columns = _ordered_read_columns(contract)
+    gaps: dict[str, dict] = {}
+    for sample in samples:
+        supplied = _supplied(sample_values, sample)
+        reads = _read_rows(contract, sample, parameters, read_columns)[0]
+        for column, pattern in patterns.items():
+            if column not in contract.columns:
+                continue
+            value = _cell(contract, column, sample, parameters, reads, supplied)
+            if not value or _compiled_matches(pattern, value):
+                continue
+            gap = gaps.setdefault(
+                column,
+                {
+                    "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+                    "allowed_values": contract.enum_for(column),
+                    "pattern": pattern,
+                    "reason": "invalid_characters",
+                    "samples": [],
+                },
+            )
+            gap["samples"].append(
+                {
+                    "id": sample.id,
+                    "external_id": sample.external_id,
+                    "value": value,
+                    "suggestion": None if column in contract.file_columns else _recommendation(value, pattern),
+                }
+            )
+    return gaps
+
+
+def _collision_gaps(
+    contract, samples: list, parameters: dict, pattern_gaps: dict, sample_values=None
+) -> dict[str, dict]:
+    """Distinct samples that would end up sharing one name.
+
+    Two routes to the same hazard. A recommendation can map two different samples
+    onto one spelling (``SAMPLE-1`` and ``SAMPLE_1`` both want ``SAMPLE_1``), and
+    a scientist can type the same clash by hand. Either way a sheet carrying that
+    name twice merges two samples' results, and every downstream artifact keyed
+    on the name inherits the merge.
+
+    So the recommendation is withheld and the clash reported instead. Grouped by
+    SAMPLE ID rather than by row, because a multi-lane sample legitimately
+    repeats its own name across rows and owes nothing for it.
+    """
+    gaps: dict[str, dict] = {}
+    for column in _identity_columns(contract):
+        offered = {
+            entry["id"]: entry["suggestion"]
+            for entry in (pattern_gaps.get(column, {}).get("samples") or [])
+            if entry.get("suggestion")
+        }
+
+        by_name: dict[str, dict[int, object]] = {}
+        for sample in samples:
+            emitted = offered.get(sample.id) or _cell(
+                contract, column, sample, parameters, {}, _supplied(sample_values, sample)
+            )
+            if emitted:
+                by_name.setdefault(emitted, {})[sample.id] = sample
+
+        clashing = [held for held in by_name.values() if len(held) > 1]
+        if not clashing:
+            continue
+        offenders = [s for held in clashing for s in held.values()]
+        gaps[column] = {
+            "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+            "allowed_values": [],
+            "pattern": getattr(contract, "patterns", {}).get(column),
+            "reason": "collision",
+            "samples": [{"id": s.id, "external_id": s.external_id, "suggestion": None} for s in offenders],
+        }
+    return gaps
+
+
 def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str], supplied=None) -> str:
     """The value for one column of one row, or empty when bioAF cannot source it.
 
@@ -706,6 +909,13 @@ def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]
         )
         return ""
 
+    # A value that violates the column's declared pattern is NOT rewritten here.
+    # bioAF does not decide what a field says: the user does, and a value quietly
+    # respelled is one the scientist did not choose, leaving the sheet and the
+    # LIMS disagreeing about what the sample is called. The violation is reported
+    # by ``_pattern_gaps`` with a recommendation instead, and the launch blocks
+    # until the scientist settles it. Emitting the value unchanged is what lets
+    # the preview show them exactly what the pipeline objects to.
     return value
 
 
@@ -870,6 +1080,26 @@ class SampleSheetService:
         # have to be answered before this sheet is valid.
         for column, gap in _dependency_gaps(contract, samples, parameters, sample_values).items():
             missing.setdefault(column, gap)
+
+        # A value the scientist stated that the pipeline will not take. This
+        # REPLACES any "missing" entry for the same column: the column is indeed
+        # empty, but telling someone who just typed a value that it is missing
+        # sends them to look for the wrong problem.
+        for column, gap in _supplied_value_gaps(contract, samples, parameters, sample_values).items():
+            missing[column] = gap
+
+        # Characters the pipeline's own regex will not accept. Reported even
+        # though the column is filled, because the value is present and wrong
+        # rather than absent, and each entry carries a spelling that would work.
+        pattern_gaps = _pattern_gaps(contract, samples, parameters, sample_values)
+        for column, gap in pattern_gaps.items():
+            missing[column] = gap
+
+        # Two different samples that would end up sharing one name. Overrides the
+        # pattern gap above, because recommending a spelling that merges two
+        # samples' results would be worse than the problem it solves.
+        for column, gap in _collision_gaps(contract, samples, parameters, pattern_gaps, sample_values).items():
+            missing[column] = gap
 
         return missing
 
