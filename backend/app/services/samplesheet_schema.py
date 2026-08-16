@@ -74,6 +74,58 @@ def _declares_fastq(spec: object) -> bool:
     return bool(_FASTQ_EXTENSION.search(_REGEX_META.sub("", pattern).lower()))
 
 
+def _enum_text(value: object) -> str | None:
+    """One legal value, in the form a samplesheet row will carry it.
+
+    A CSV cell is text, and every value bioAF compares against an enum is already
+    a string, so a schema's ``0`` has to become ``"0"`` or it can never match.
+    Filtering to strings instead is what made raredisease's ``phenotype``
+    (``[0, 1, 2]``) and sarek's ``status`` (``[0, 1]``) look unconstrained.
+
+    ``null`` has no cell representation and is dropped; booleans take the JSON
+    spelling rather than Python's, since that is what a pipeline reads back.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return str(value)
+    return None
+
+
+def _enum_values(spec: dict) -> list[str]:
+    """Every value a column accepts, including vocabularies split across branches.
+
+    A column may declare its values directly, or as one ``oneOf``/``anyOf`` branch
+    per type: raredisease's ``sex`` is integer ``0/1/2`` OR string ``other``, and
+    reading only the top level saw no constraint at all.
+
+    A branch that names no values means anything goes for that branch, so the
+    whole column is unconstrained. Building a fence out of the branches that
+    happen to list values would reject inputs the pipeline accepts, and an empty
+    enum has always meant "anything goes" here rather than "nothing is allowed".
+    """
+    declared = spec.get("enum")
+    if isinstance(declared, list) and declared:
+        return [text for text in (_enum_text(v) for v in declared) if text is not None]
+
+    for keyword in ("oneOf", "anyOf"):
+        branches = spec.get(keyword)
+        if not isinstance(branches, list) or not branches:
+            continue
+        collected: list[str] = []
+        for branch in branches:
+            values = branch.get("enum") if isinstance(branch, dict) else None
+            if not isinstance(values, list) or not values:
+                collected = []
+                break
+            collected.extend(text for text in (_enum_text(v) for v in values) if text is not None)
+        if collected:
+            return collected
+    return []
+
+
 def _declares_file(spec: object) -> bool:
     """Whether a column holds a per-sample FILE of any kind, not just a read.
 
@@ -305,9 +357,9 @@ def parse_contract(schema: object) -> SamplesheetContract:
         hint = spec.get("errorMessage")
         if isinstance(hint, str) and hint.strip():
             error_messages[col] = hint.strip()
-        allowed = spec.get("enum")
-        if isinstance(allowed, list) and allowed:
-            enums[col] = [v for v in allowed if isinstance(v, str)]
+        allowed = _enum_values(spec)
+        if allowed:
+            enums[col] = allowed
         pattern = spec.get("pattern")
         if isinstance(pattern, str) and pattern:
             patterns[col] = pattern
