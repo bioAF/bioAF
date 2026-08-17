@@ -673,6 +673,63 @@ export interface SamplesheetInputSpec {
   allowed_values: string[];
 }
 
+/** One column the entry grid must collect PER SAMPLE, from the preflight.
+ *  Derived from the same computation as the launch block, so the questions
+ *  asked and the refusal given cannot disagree. */
+export interface PerSampleInputSpec {
+  name: string;
+  required: boolean;
+  is_file: boolean;
+  /** The Sample field this column corresponds to, when it is one. Set means the
+   *  value is a fact about the sample rather than a pipeline parameter, which is
+   *  what decides whether the pipeline's vocabulary may constrain it. */
+  sample_field: string | null;
+  allowed_values: string[];
+  /** True only for a pipeline PARAMETER with an enum. A field recorded on the
+   *  sample is never fenced by a pipeline's list: XX/XY/NA is sarek's input
+   *  constraint, not a vocabulary for sex. */
+  constrained: boolean;
+  description: string | null;
+  format_hint: string | null;
+  required_by: string | null;
+  reason: string | null;
+  samples: { id: number; external_id: string | null }[];
+}
+
+/** A saved design offered to this launch, and what it does not cover.
+ *  Never applied on bioAF's own initiative: a grouping that was right for six
+ *  samples may be wrong for twelve, and a prefilled value looks plausible
+ *  precisely because it was correct last time. */
+export interface SamplesheetPrefill {
+  /** Which rung it came from, or null when nothing applies. Naming it is what
+   *  keeps an inherited organisation-wide binding from looking identical to one
+   *  somebody set for this experiment. */
+  scope: "experiment" | "project" | "organization" | null;
+  values: Record<string, Record<string, string>>;
+  bindings: Record<string, string>;
+  samples_without_values: number[];
+}
+
+/** The sheet a launch would submit, and what it leaves out. */
+export interface SamplesheetPreview {
+  columns: string[];
+  /** Each row names the sample it belongs to, so a wrongly-resolved cell is
+   *  corrected against a sample rather than against a position. */
+  rows: { sample_id: number | null; external_id: string | null; values: string[] }[];
+  csv: string;
+  /** Values the pipeline's own vocabulary could not express, dropped from the
+   *  sheet. Invisible otherwise: the column is simply absent, which reads as
+   *  "this pipeline does not ask for it". */
+  omissions: {
+    column: string;
+    sample_id: number | null;
+    external_id: string | null;
+    value: string;
+    reason: string;
+    allowed_values: string[];
+  }[];
+}
+
 /** Whether a launch would succeed, asked before anything is created. Mirrors
  *  the domain error the launch itself would raise, so the dialog shows the same
  *  explanation while the user can still act on it. */
@@ -711,6 +768,12 @@ export interface PipelineRunPreflight {
       }
     >;
   };
+  /** The sheet this run would submit, rendered as a table by the review step. */
+  samplesheet?: SamplesheetPreview;
+  /** The columns an entry grid must collect. */
+  per_sample_inputs?: PerSampleInputSpec[];
+  /** What a saved design would contribute, offered rather than applied. */
+  prefill?: SamplesheetPrefill;
 }
 
 export interface PipelineCatalogListResponse {
@@ -821,6 +884,11 @@ export interface PipelineRunDetail extends PipelineRun {
     external_id: string | null;
     organism: string | null;
   }>;
+  /** The exact sheet handed to Nextflow. Null for runs launched before the
+   *  snapshot existed; nothing is reconstructed in its place. */
+  samplesheet_csv?: string | null;
+  /** The stated design that produced it, stamped with who set each value. */
+  samplesheet_design?: RunSamplesheetDesign | null;
 }
 
 export interface PipelineRunListResponse {
@@ -835,6 +903,10 @@ export interface PipelineRunLaunchRequest {
   experiment_id: number;
   sample_ids?: number[] | null;
   parameters: Record<string, unknown>;
+  /** What the scientist stated per sample, keyed by sample id then column. A
+   *  first-class field rather than a key inside `parameters`, which is emitted
+   *  verbatim onto the Nextflow command line. */
+  sample_values?: Record<string, Record<string, string>>;
   resume_from_run_id?: number | null;
   reference_genome?: string | null;
   alignment_algorithm?: string | null;
@@ -2074,4 +2146,20 @@ export interface AssistantConversationTranscript {
   title: string | null;
   messages: AssistantTranscriptMessage[];
   plans: AssistantTranscriptPlan[];
+}
+
+/** One value a scientist stated, with the authorship the run keeps. A value
+ *  that did not change keeps its original author, so re-saving a design does
+ *  not quietly reassign who said what. */
+export interface StatedValue {
+  value: string;
+  set_by: string | null;
+  set_at: string | null;
+}
+
+/** The design a run used, snapshotted at launch. A mapping edited afterwards
+ *  must not rewrite the history of a run that already used it. */
+export interface RunSamplesheetDesign {
+  values: Record<string, Record<string, StatedValue>>;
+  bindings: Record<string, StatedValue>;
 }

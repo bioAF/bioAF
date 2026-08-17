@@ -14,6 +14,8 @@ import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
 import { ParameterForm } from "@/components/pipelines/ParameterForm";
 import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
 import { LaunchBlockedNotice } from "@/components/pipelines/LaunchBlockedNotice";
+import { PerSampleValueGrid, type PerSampleValues } from "@/components/pipelines/PerSampleValueGrid";
+import { SamplesheetReview } from "@/components/pipelines/SamplesheetReview";
 import type {
   PipelineCatalog,
   Experiment,
@@ -24,7 +26,25 @@ import type {
   PipelineRunPreflight,
 } from "@/lib/types";
 
-type Step = 1 | 2 | 3 | 4;
+/** The wizard's steps, named rather than numbered. "Values" appears only when
+ *  the pipeline declares columns bioAF may not fill, so the position of every
+ *  later step depends on the pipeline: a number would mean two different things
+ *  on two different launches. */
+type StepKey = "experiment" | "samples" | "values" | "parameters" | "review";
+
+const STEP_LABELS: Record<StepKey, string> = {
+  experiment: "Experiment",
+  samples: "Samples",
+  values: "Values",
+  parameters: "Parameters",
+  review: "Review",
+};
+
+const SAVE_SCOPES: { value: string; label: string }[] = [
+  { value: "experiment", label: "this experiment" },
+  { value: "project", label: "this project" },
+  { value: "organization", label: "the whole organisation" },
+];
 
 export default function PipelineLauncherPage() {
   const router = useRouter();
@@ -42,12 +62,18 @@ export default function PipelineLauncherPage() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState(false);
 
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<StepKey>("experiment");
   const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(
     preselectedExperimentId ? Number(preselectedExperimentId) : null,
   );
   const [selectedSampleIds, setSelectedSampleIds] = useState<number[]>([]);
   const [userParams, setUserParams] = useState<Record<string, unknown>>({});
+  // What the scientist stated per sample, keyed by sample id. Sent to the
+  // preflight as well as the launch, so the block clears as they answer rather
+  // than at the end.
+  const [sampleValues, setSampleValues] = useState<PerSampleValues>({});
+  const [saveScope, setSaveScope] = useState("experiment");
+  const [savingDesign, setSavingDesign] = useState(false);
 
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PipelineRunPreflight | null>(null);
@@ -74,6 +100,7 @@ export default function PipelineLauncherPage() {
           experiment_id: selectedExperimentId,
           sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
           parameters: userParams,
+          sample_values: sampleValues,
         });
         if (!cancelled) setPreflight(result);
       } catch (e) {
@@ -84,7 +111,7 @@ export default function PipelineLauncherPage() {
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams]);
+  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues]);
 
   async function loadData() {
     try {
@@ -141,6 +168,7 @@ export default function PipelineLauncherPage() {
         experiment_id: selectedExperimentId,
         sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
         parameters: userParams,
+        sample_values: sampleValues,
         drop_samples_without_files: dropSamplesWithoutFiles,
       };
       const run = await api.post<PipelineRun>("/api/pipeline-runs", request);
@@ -191,6 +219,47 @@ export default function PipelineLauncherPage() {
     );
   }
 
+  /** A cell corrected on the review step. It becomes a stated value for this
+   *  run, which is what the preview then regenerates from, so the table always
+   *  shows the sheet that would actually be submitted. */
+  function correctCell(sampleId: number, column: string, value: string) {
+    setSampleValues((prev) => {
+      const row = { ...(prev[String(sampleId)] ?? {}) };
+      if (value) row[column] = value;
+      else delete row[column];
+      const next = { ...prev, [String(sampleId)]: row };
+      if (Object.keys(row).length === 0) delete next[String(sampleId)];
+      return next;
+    });
+  }
+
+  /** Saving the design is deliberate at every rung (design section 4). Nothing
+   *  is promoted by launching, so a one-off accommodation never becomes what the
+   *  next person inherits. */
+  async function saveDesign() {
+    if (!selectedExperimentId) return;
+    setSavingDesign(true);
+    try {
+      await api.post("/api/samplesheet-mappings", {
+        pipeline_key: pipelineKey,
+        scope: saveScope,
+        experiment_id: selectedExperimentId,
+        project_id: experiments.find((e) => e.id === selectedExperimentId)?.project?.id ?? null,
+        values: sampleValues,
+      });
+      toast.success("Saved for next time");
+    } catch (e) {
+      logError("saving these values for next time", e);
+      toast.error(
+        e instanceof ApiError && e.status === 403
+          ? "Saving for the whole organisation needs an administrator."
+          : "Could not save these values. The launch is unaffected.",
+      );
+    } finally {
+      setSavingDesign(false);
+    }
+  }
+
   if (!loading && !pipeline && loadError) {
     return (
       <main className="flex-1 flex items-center justify-center">
@@ -210,6 +279,23 @@ export default function PipelineLauncherPage() {
 
   const selectedExperiment = experiments.find((e) => e.id === selectedExperimentId);
 
+  // The Values step exists only when this pipeline declares columns bioAF may
+  // not fill. Asking for nothing would be a step that always says "nothing to
+  // do here", and hiding it when it IS needed strands the user on a Launch
+  // button that never enables.
+  const perSampleInputs = preflight?.per_sample_inputs ?? [];
+  const steps: StepKey[] = [
+    "experiment",
+    "samples",
+    ...(perSampleInputs.length > 0 ? (["values"] as StepKey[]) : []),
+    "parameters",
+    "review",
+  ];
+  const stepIndex = Math.max(0, steps.indexOf(step));
+  const goNext = () => setStep(steps[Math.min(stepIndex + 1, steps.length - 1)]);
+  const goBack = () => setStep(steps[Math.max(stepIndex - 1, 0)]);
+  const selectedSamples = samples.filter((s) => selectedSampleIds.includes(s.id));
+
   return (
     <main className="flex-1 overflow-y-auto p-6">
       {loading ? (
@@ -223,21 +309,19 @@ export default function PipelineLauncherPage() {
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-8">
-        {[1, 2, 3, 4].map((s) => (
-          <div key={s} className="flex items-center gap-2">
+        {steps.map((key, index) => (
+          <div key={key} className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              s === step ? "bg-bioaf-600 text-white" : s < step ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
-            }`}>{s}</div>
-            <span className="text-sm text-gray-500">
-              {s === 1 ? "Experiment" : s === 2 ? "Samples" : s === 3 ? "Parameters" : "Review"}
-            </span>
-            {s < 4 && <div className="w-8 h-px bg-gray-300" />}
+              index === stepIndex ? "bg-bioaf-600 text-white" : index < stepIndex ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
+            }`}>{index + 1}</div>
+            <span className="text-sm text-gray-500">{STEP_LABELS[key]}</span>
+            {index < steps.length - 1 && <div className="w-8 h-px bg-gray-300" />}
           </div>
         ))}
       </div>
 
       {/* Step 1: Select Experiment */}
-      {step === 1 && (
+      {step === "experiment" && (
         <Card className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
           <select
@@ -253,7 +337,7 @@ export default function PipelineLauncherPage() {
           </select>
           <div className="mt-4 flex justify-end">
             <button
-              onClick={() => setStep(2)}
+              onClick={goNext}
               disabled={!selectedExperimentId}
               className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >Next</button>
@@ -262,7 +346,7 @@ export default function PipelineLauncherPage() {
       )}
 
       {/* Step 2: Select Samples */}
-      {step === 2 && (
+      {step === "samples" && (
         <Card>
           <h2 className="text-lg font-semibold mb-4">Select Samples</h2>
           <div className="mb-3 flex items-center gap-4">
@@ -307,14 +391,56 @@ export default function PipelineLauncherPage() {
             </tbody>
           </table>
           <div className="mt-4 flex justify-between">
-            <button onClick={() => setStep(1)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => setStep(3)} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goNext} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step: the values this pipeline needs per sample, which bioAF may not
+          guess. A dedicated step after sample selection keeps "which samples"
+          separate from "what values", and it appears only when there is
+          something to ask. */}
+      {step === "values" && (
+        <Card>
+          <h2 className="text-lg font-semibold mb-4">Values for each sample</h2>
+          <PerSampleValueGrid
+            specs={perSampleInputs}
+            samples={selectedSamples}
+            values={sampleValues}
+            onChange={setSampleValues}
+            prefill={preflight?.prefill ?? null}
+          />
+          <LaunchBlockedNotice preflight={preflight} />
+          <div className="flex items-center gap-2 mb-4 text-sm">
+            <span className="text-gray-500">Save these values for</span>
+            <select
+              aria-label="Save these values for"
+              value={saveScope}
+              onChange={(e) => setSaveScope(e.target.value)}
+              className="border rounded-md px-2 py-1 text-sm"
+            >
+              {SAVE_SCOPES.map((scope) => (
+                <option key={scope.value} value={scope.value}>{scope.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={saveDesign}
+              disabled={savingDesign || Object.keys(sampleValues).length === 0}
+              className="border px-3 py-1 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50"
+            >
+              {savingDesign ? "Saving..." : "Save for next time"}
+            </button>
+          </div>
+          <div className="flex justify-between">
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goNext} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
           </div>
         </Card>
       )}
 
       {/* Step 3: Configure Parameters */}
-      {step === 3 && (
+      {step === "parameters" && (
         <Card>
           <h2 className="text-lg font-semibold mb-4">Configure Parameters</h2>
           {detectedProtocol && (
@@ -341,15 +467,15 @@ export default function PipelineLauncherPage() {
             onChange={setUserParams}
           />
           <div className="mt-4 flex justify-between">
-            <button onClick={() => setStep(2)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => setStep(4)} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goNext} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
           </div>
         </Card>
       )}
 
       {/* Step 4: Review & Launch */}
-      {step === 4 && (
-        <Card className="max-w-2xl">
+      {step === "review" && (
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Review & Launch</h2>
           <dl className="space-y-3 mb-6">
             <div><dt className="text-sm text-gray-500">Pipeline</dt><dd className="text-sm font-medium">{pipeline.name} v{pipeline.version}</dd></div>
@@ -374,9 +500,14 @@ export default function PipelineLauncherPage() {
               </dd>
             </div>
           </dl>
+          {/* The sheet itself, not a summary of it. bioAF resolves a file column
+              by matching the schema's own pattern, and a regex match is not
+              proof of the right file, so this is the last place a wrong
+              resolution can be caught. */}
+          <SamplesheetReview preview={preflight?.samplesheet ?? null} onCorrect={correctCell} />
           <LaunchBlockedNotice preflight={preflight} />
           <div className="flex justify-between">
-            <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
             <button
               onClick={() => handleLaunch()}
               disabled={launching || preflight?.can_launch === false}
