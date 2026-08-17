@@ -13,6 +13,7 @@ import { Modal } from "@/components/shared/Modal";
 import { ReviewPanel } from "@/components/experiments/ReviewPanel";
 import { PipelineRunResultsTab } from "@/components/pipelines/PipelineRunResultsTab";
 import { AgentReviewTab } from "@/components/agent-reviews/AgentReviewTab";
+import { RunSamplesheetProvenance } from "@/components/pipelines/RunSamplesheetProvenance";
 import { AgentReviewButtons } from "@/components/agent-reviews/AgentReviewButtons";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -719,6 +720,15 @@ export default function PipelineRunDetailPage() {
                 <h2 className="text-lg font-semibold">Provenance</h2>
                 <ProvenanceExportMenu entityType="pipeline-runs" entityId={Number(runId)} />
               </div>
+
+              {/* The sheet this run was handed, and who stated each value in it.
+                  Re-deriving it would read today's samples, files and mapping,
+                  none of which are what the run received. */}
+              <RunSamplesheetProvenance
+                csv={run.samplesheet_csv ?? null}
+                design={run.samplesheet_design ?? null}
+                samples={run.samples ?? []}
+              />
 
               {/* Input files as readable records (project / experiment / sample
                   / filename) instead of bare file IDs. */}
