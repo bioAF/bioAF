@@ -585,7 +585,9 @@ def _to_csv(columns: list[str], rows: list[list[str]]) -> str:
     return output.getvalue()
 
 
-def _sheet_rows(contract, samples: list, parameters: dict, sample_values=None) -> tuple[list[str], list[dict]]:
+def _sheet_rows(
+    contract, samples: list, parameters: dict, sample_values=None
+) -> tuple[list[str], list[dict], list[dict]]:
     """The columns and rows of a schema-driven sheet, each row naming its sample.
 
     One pass produces both the CSV handed to Nextflow and the table the review
@@ -595,6 +597,12 @@ def _sheet_rows(contract, samples: list, parameters: dict, sample_values=None) -
     in place from that table. A row identified only by position is the same
     hazard as a positional paste: the correction lands on the wrong sample and
     the run completes green.
+
+    Also returns what the sheet LEAVES OUT: a value the pipeline's own
+    vocabulary cannot express is dropped, and a dropped value is invisible in
+    the result. Collected here, in the pass that builds the rows, rather than
+    while choosing the header, because the header pass probes each column until
+    one sample fills it and would report a drop the final sheet did not make.
     """
     read_columns = _ordered_read_columns(contract)
 
@@ -617,7 +625,20 @@ def _sheet_rows(contract, samples: list, parameters: dict, sample_values=None) -
                     "values": [_cell(contract, column, sample, parameters, reads, supplied) for column in columns],
                 }
             )
-    return columns, rows
+
+    # Probed separately from the rows, over every column the schema constrains
+    # with a vocabulary, INCLUDING the ones the header left out. A column left
+    # out is precisely the case worth reporting: nothing could fill it, and one
+    # reason nothing could is that the only value a sample had was a value this
+    # pipeline cannot express.
+    omissions: dict = {}
+    for sample in samples:
+        supplied = _supplied(sample_values, sample)
+        sample_rows = rows_by_sample.get(sample.id) or [{}]
+        for column in getattr(contract, "enums", {}):
+            _cell(contract, column, sample, parameters, sample_rows[0], supplied, omissions)
+
+    return columns, rows, list(omissions.values())
 
 
 def _parsed_rows(csv_text: str, samples: list) -> tuple[list[str], list[dict]]:
@@ -867,7 +888,15 @@ def _collision_gaps(
     return gaps
 
 
-def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str], supplied=None) -> str:
+def _cell(
+    contract,
+    column: str,
+    sample,
+    parameters: dict,
+    reads: dict[str, str],
+    supplied=None,
+    omissions: dict | None = None,
+) -> str:
     """The value for one column of one row, or empty when bioAF cannot source it.
 
     Order matters. A value the SCIENTIST stated wins over everything, because
@@ -931,6 +960,23 @@ def _cell(contract, column: str, sample, parameters: dict, reads: dict[str, str]
             value,
             allowed,
         )
+        # Recorded, not just logged. A dropped value is invisible in the sheet
+        # itself: the column is simply absent, which reads as "this pipeline does
+        # not ask for sex" rather than "your sample's sex could not be
+        # expressed". One entry per sample and column, however many rows a
+        # sample has, because it is one fact about the sample.
+        if omissions is not None:
+            omissions.setdefault(
+                (column, getattr(sample, "id", None)),
+                {
+                    "column": column,
+                    "sample_id": getattr(sample, "id", None),
+                    "external_id": getattr(sample, "external_id", None),
+                    "value": value,
+                    "reason": "not_in_enum",
+                    "allowed_values": list(allowed),
+                },
+            )
         return ""
 
     # A value that violates the column's declared pattern is NOT rewritten here.
@@ -1046,6 +1092,46 @@ class SampleSheetService:
                 }
             )
         return specs
+
+    @staticmethod
+    def sample_field_updates(contract, samples: list, sample_values=None) -> dict[int, dict[str, str]]:
+        """Which stated values are facts about the sample, keyed by sample id.
+
+        Design section 1 writes back only where a column already maps to a
+        ``Sample`` field, so ``_COLUMN_TO_SAMPLE_FIELD`` is the allowlist rather
+        than a second list that could drift from it. Three refusals qualify it,
+        and each exists because the alternative degrades the record:
+
+        - **A column the pipeline constrains never writes back** (section 9).
+          Choosing from XX/XY/NA is answering sarek, not describing the sample,
+          and letting it through would have the narrowest vocabulary in the
+          catalog overwrite real biology one run at a time.
+        - **A field that already holds a value is never overwritten.** The run
+          gets what it needs; the record keeps what is true.
+        - **The identity column never writes back.** It maps to ``external_id``
+          so bioAF can FILL it. Writing it back would let a samplesheet rename
+          the sample it came from, and every output already produced under the
+          old name would stop matching it.
+
+        Only values the SCIENTIST stated are considered. Everything else was
+        read off the sample to begin with.
+        """
+        updates: dict[int, dict[str, str]] = {}
+        for sample in samples:
+            stated = _supplied(sample_values, sample)
+            if not stated:
+                continue
+            for column, raw in stated.items():
+                field = _COLUMN_TO_SAMPLE_FIELD.get(column)
+                if not field or field == "external_id":
+                    continue
+                if contract is not None and contract.enum_for(column):
+                    continue
+                value = str(raw or "").strip()
+                if not value or getattr(sample, field, None):
+                    continue
+                updates.setdefault(sample.id, {})[field] = value
+        return updates
 
     @staticmethod
     def column_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
@@ -1230,7 +1316,7 @@ class SampleSheetService:
         ``PipelineRunService``: this builds the best sheet it can and reports
         nothing, so that the blocking decision lives in one place.
         """
-        columns, rows = _sheet_rows(contract, samples, parameters, sample_values)
+        columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
         return _to_csv(columns, [row["values"] for row in rows])
 
     @staticmethod
@@ -1249,7 +1335,12 @@ class SampleSheetService:
         that as a table would invent a structure it does not have.
         """
         if "fetchngs" in pipeline_key:
-            return {"columns": [], "rows": [], "csv": SampleSheetService.generate_fetchngs_ids(parameters)}
+            return {
+                "columns": [],
+                "rows": [],
+                "csv": SampleSheetService.generate_fetchngs_ids(parameters),
+                "omissions": [],
+            }
 
         schema_driven = (
             not SampleSheetService.has_handwritten_generator(pipeline_key)
@@ -1257,14 +1348,22 @@ class SampleSheetService:
             and not contract.is_empty
         )
         if schema_driven:
-            columns, rows = _sheet_rows(contract, samples, parameters, sample_values)
-            return {"columns": columns, "rows": rows, "csv": _to_csv(columns, [r["values"] for r in rows])}
+            columns, rows, omissions = _sheet_rows(contract, samples, parameters, sample_values)
+            return {
+                "columns": columns,
+                "rows": rows,
+                "csv": _to_csv(columns, [r["values"] for r in rows]),
+                "omissions": omissions,
+            }
 
         csv_text = SampleSheetService.generate_sheet(
             pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
         )
         columns, rows = _parsed_rows(csv_text, samples)
-        return {"columns": columns, "rows": rows, "csv": csv_text}
+        # Nothing is claimed about a sheet bioAF did not build from a contract:
+        # a tailored generator decides its own columns and bioAF cannot say what
+        # it chose to leave out.
+        return {"columns": columns, "rows": rows, "csv": csv_text, "omissions": []}
 
     @staticmethod
     def generate_scrnaseq_sheet(samples: list, parameters: dict) -> str:

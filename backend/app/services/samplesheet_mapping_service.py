@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.experiment import Experiment
 from app.models.samplesheet_mapping import MAPPING_SCOPES, SamplesheetMapping
+from app.models.user import User
 
 
 def _stamp(value: str, user_id: int | None, previous: dict | None) -> dict:
@@ -108,6 +109,50 @@ class SamplesheetMappingService:
                 str(column): _stamp(str(value).strip(), user_id, None)
                 for column, value in (bindings or {}).items()
                 if value is not None and str(value).strip()
+            },
+        }
+
+    @staticmethod
+    async def describe(session: AsyncSession, snapshot: dict | None) -> dict | None:
+        """A run's stored design with its authors named rather than numbered.
+
+        The stamps hold a user id, which is the right key and the wrong thing to
+        read: "who set this value" is a question about a person. A stamp whose
+        user is gone keeps its value and loses only the name, because losing the
+        record because somebody left the lab would be the worse failure.
+        """
+        if not snapshot:
+            return None
+
+        stamps: list[dict] = []
+        for columns in (snapshot.get("values") or {}).values():
+            if isinstance(columns, dict):
+                stamps.extend(entry for entry in columns.values() if isinstance(entry, dict))
+        stamps.extend(entry for entry in (snapshot.get("bindings") or {}).values() if isinstance(entry, dict))
+
+        user_ids = {entry.get("set_by_user_id") for entry in stamps if entry.get("set_by_user_id")}
+        names: dict[int, str] = {}
+        if user_ids:
+            rows = await session.execute(select(User.id, User.name, User.email).where(User.id.in_(user_ids)))
+            names = {uid: (name or email) for uid, name, email in rows.all()}
+
+        def _described(entry: dict) -> dict:
+            return {
+                "value": str(entry.get("value", "")),
+                "set_by": names.get(entry.get("set_by_user_id")),
+                "set_at": entry.get("set_at"),
+            }
+
+        return {
+            "values": {
+                str(sample_id): {str(column): _described(entry) for column, entry in columns.items() if isinstance(entry, dict)}
+                for sample_id, columns in (snapshot.get("values") or {}).items()
+                if isinstance(columns, dict)
+            },
+            "bindings": {
+                str(column): _described(entry)
+                for column, entry in (snapshot.get("bindings") or {}).items()
+                if isinstance(entry, dict)
             },
         }
 

@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.samplesheet_mapping import SamplesheetPrefill
+
 
 class ExperimentSummary(BaseModel):
     id: int
@@ -127,9 +129,31 @@ class PipelineRunListResponse(BaseModel):
     page_size: int
 
 
+class StatedValue(BaseModel):
+    """One value a scientist stated, and who stated it.
+
+    Whoever fills the design grid is often not whoever launches, so a launcher
+    stamp alone names the wrong person for the value that turned out wrong.
+    """
+
+    value: str
+    set_by: str | None = None
+    set_at: str | None = None
+
+
+class RunSamplesheetDesign(BaseModel):
+    values: dict[str, dict[str, StatedValue]] = {}
+    bindings: dict[str, StatedValue] = {}
+
+
 class PipelineRunDetailResponse(PipelineRunResponse):
     processes: list[PipelineProcessResponse] = []
     samples: list[SampleSummary] = []
+    # The exact sheet this run was handed, kept rather than re-derived: today's
+    # samples, files and mapping are not what the run received. Null for runs
+    # launched before the snapshot existed, and nothing is reconstructed.
+    samplesheet_csv: str | None = None
+    samplesheet_design: RunSamplesheetDesign | None = None
 
 
 class PipelineRunCompareRequest(BaseModel):
@@ -167,3 +191,8 @@ class PipelineRunPreflightResponse(BaseModel):
     # from the same computation as the block above, so the questions asked and
     # the refusal given cannot disagree.
     per_sample_inputs: list[dict] = []
+    # What a saved design would contribute, the rung it came from, and the
+    # selected samples it does not name. An offer to fill the grid with, never
+    # applied to the sheet above: that is what keeps a design from carrying
+    # silently onto a sample set it was not set for.
+    prefill: SamplesheetPrefill = SamplesheetPrefill()

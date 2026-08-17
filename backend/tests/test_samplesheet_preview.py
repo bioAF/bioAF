@@ -190,3 +190,73 @@ def test_a_sheet_that_is_not_a_samplesheet_is_previewed_as_its_own_text():
     assert preview["columns"] == []
     assert preview["rows"] == []
     assert preview["csv"] == "SRR123\nSRR456\n"
+
+
+# -- What the sheet leaves out, and why (design section 9) --
+
+
+def test_a_value_the_pipelines_vocabulary_cannot_express_is_reported():
+    """sarek accepts XX, XY or NA. A sample recorded 47,XXY is real biology the
+    pipeline cannot ingest, so the value is dropped and nf-schema fills its own
+    default. Dropping it is right; dropping it silently is not, because the
+    scientist then reads a sheet that simply does not mention their sample's sex.
+    """
+    sample = _make_sample(1, "SAMPLE-1", files=_reads("SAMPLE-1"), donor_source="P1", sex="47,XXY")
+
+    preview = _preview("nf-core/sarek", [sample], contract=_contract("sarek"))
+
+    omission = next(o for o in preview["omissions"] if o["column"] == "sex")
+    assert omission["sample_id"] == 1
+    assert omission["external_id"] == "SAMPLE-1"
+    assert omission["value"] == "47,XXY"
+    assert omission["reason"] == "not_in_enum"
+    assert omission["allowed_values"] == ["XX", "XY", "NA"]
+
+
+def test_a_value_the_vocabulary_does_express_is_not_reported():
+    sample = _make_sample(1, "SAMPLE-1", files=_reads("SAMPLE-1"), donor_source="P1", sex="XX")
+
+    preview = _preview("nf-core/sarek", [sample], contract=_contract("sarek"))
+
+    assert [o for o in preview["omissions"] if o["column"] == "sex"] == []
+
+
+def test_a_stated_value_the_pipeline_rejects_is_reported_too():
+    """The grid lets a scientist type a value, and a typed value obeys the enum
+    like any other. Being told it was dropped is the whole point of typing it."""
+    sample = _make_sample(1, "SAMPLE-1", files=_reads("SAMPLE-1"), donor_source="P1")
+
+    preview = _preview(
+        "nf-core/sarek",
+        [sample],
+        contract=_contract("sarek"),
+        sample_values={"1": {"sex": "intersex"}},
+    )
+
+    omission = next(o for o in preview["omissions"] if o["column"] == "sex")
+    assert omission["value"] == "intersex"
+
+
+def test_one_sample_is_reported_once_however_many_rows_it_has():
+    """A sample sequenced over two lanes produces two rows. The sex it cannot
+    express is one fact about the sample, not one per row."""
+    sample = _make_sample(
+        1,
+        "SAMPLE-1",
+        files=_reads("SAMPLE-1", "001") + _reads("SAMPLE-1", "002"),
+        donor_source="P1",
+        sex="47,XXY",
+    )
+
+    preview = _preview("nf-core/sarek", [sample], contract=_contract("sarek"))
+
+    assert len([o for o in preview["omissions"] if o["column"] == "sex"]) == 1
+
+
+def test_a_sheet_from_a_hand_written_generator_reports_no_omissions():
+    """Nothing is claimed about a sheet bioAF did not build from a contract."""
+    samples = [_make_sample(1, "A", files=_reads("A"))]
+
+    preview = _preview("nf-core/rnaseq", samples, parameters={"strandedness": "auto"})
+
+    assert preview["omissions"] == []

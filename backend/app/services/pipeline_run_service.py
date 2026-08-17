@@ -75,11 +75,17 @@ class PipelineRunService:
         raising, because a pipeline that cannot run is an answer here, not an
         error: the caller asked a question.
 
-        Also answers the two questions the launch flow's later steps need: the
-        sheet this run would hand to Nextflow, and the columns an entry grid must
-        collect. Both come from the same computation as the verdict, so the
-        review step cannot confirm a sheet other than the one about to run, and
-        the grid cannot ask for something different from what the block reports.
+        Also answers the questions the launch flow's later steps need: the sheet
+        this run would hand to Nextflow, the columns an entry grid must collect,
+        and what a saved design would contribute. The first two come from the
+        same computation as the verdict, so the review step cannot confirm a
+        sheet other than the one about to run, and the grid cannot ask for
+        something different from what the block reports.
+
+        The third is reported ALONGSIDE the sheet and never folded into it. A
+        saved design is an offer: it fills the grid, the scientist confirms it,
+        and it reaches the sheet because they sent it back. Applying it here
+        would carry a design that fitted six samples silently onto twelve.
         """
         pipeline = await PipelineCatalogService.get_pipeline(session, org_id, data.pipeline_key)
         if not pipeline:
@@ -119,7 +125,22 @@ class PipelineRunService:
                     "details": exc.details,
                 }
 
-        return {**verdict, "samplesheet": preview, "per_sample_inputs": inputs}
+        mapping, scope = await SamplesheetMappingService.resolve(
+            session, org_id, pipeline.pipeline_key, getattr(data, "experiment_id", None)
+        )
+        carried = SamplesheetMappingService.flatten(mapping)
+        prefill = {
+            "scope": scope,
+            "values": carried,
+            "bindings": SamplesheetMappingService.flatten_bindings(mapping),
+            # Selected samples the saved design does not name. Adding samples and
+            # re-running is normal, and a grouping that was right for six may be
+            # wrong for twelve, so these are reported rather than left to look
+            # answered.
+            "samples_without_values": [s.id for s in samples if str(s.id) not in carried],
+        }
+
+        return {**verdict, "samplesheet": preview, "per_sample_inputs": inputs, "prefill": prefill}
 
     @staticmethod
     async def _resolve_contract(session, pipeline):
@@ -382,6 +403,16 @@ class PipelineRunService:
         # often not whoever launches.
         run.samplesheet_csv = sample_sheet_csv
         run.samplesheet_mapping_json = SamplesheetMappingService.snapshot(sample_values, None, user_id)
+
+        # 8c. A value the scientist stated about the SAMPLE belongs on the
+        # sample. Which ones those are is decided by the sheet service, which
+        # owns the column-to-field map: a column the pipeline constrains is an
+        # accommodation and stays on the run, and a field that already holds a
+        # value is never overwritten.
+        field_updates = SampleSheetService.sample_field_updates(contract, samples, sample_values)
+        for sample in samples:
+            for field, value in field_updates.get(sample.id, {}).items():
+                setattr(sample, field, value)
 
         # 9. Submit job via the compute adapter (BAL)
         try:

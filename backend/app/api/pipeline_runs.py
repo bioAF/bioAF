@@ -26,6 +26,7 @@ from app.schemas.pipeline_run import (
 from app.services import role_service
 from app.services.pipeline_monitor_service import PipelineMonitorService
 from app.services.pipeline_run_service import PipelineRunService
+from app.services.samplesheet_mapping_service import SamplesheetMappingService
 
 router = APIRouter(prefix="/api/pipeline-runs", tags=["pipeline-runs"])
 
@@ -74,7 +75,7 @@ def _run_response(run) -> PipelineRunResponse:
     )
 
 
-def _detail_response(run) -> PipelineRunDetailResponse:
+def _detail_response(run, design: dict | None = None) -> PipelineRunDetailResponse:
     base = _run_response(run)
     processes = [
         PipelineProcessResponse(
@@ -96,6 +97,8 @@ def _detail_response(run) -> PipelineRunDetailResponse:
         **base.model_dump(),
         processes=processes,
         samples=samples,
+        samplesheet_csv=run.samplesheet_csv,
+        samplesheet_design=design,
     )
 
 
@@ -202,7 +205,9 @@ async def get_run(
     run = await PipelineRunService.get_run(session, run_id, org_id)
     if not run:
         raise HTTPException(404, "Run not found")
-    return _detail_response(run)
+    # The design is stored with user ids and read with names.
+    design = await SamplesheetMappingService.describe(session, run.samplesheet_mapping_json)
+    return _detail_response(run, design)
 
 
 @router.post("/{run_id}/cancel", response_model=PipelineRunResponse)

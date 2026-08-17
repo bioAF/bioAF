@@ -14,6 +14,7 @@ from app.api.audit import router as audit_router
 from app.api.notebooks import router as notebooks_router
 from app.api.pipelines import router as pipelines_router
 from app.api.pipeline_runs import router as pipeline_runs_router
+from app.api.samplesheet_mappings import router as samplesheet_mappings_router
 from app.api.files import router as files_router
 from app.api.datasets import router as datasets_router
 from app.api.documents import router as documents_router
@@ -92,6 +93,7 @@ api_router.include_router(audit_router)
 api_router.include_router(notebooks_router)
 api_router.include_router(pipelines_router)
 api_router.include_router(pipeline_runs_router)
+api_router.include_router(samplesheet_mappings_router)
 api_router.include_router(files_router)
 api_router.include_router(datasets_router)
 api_router.include_router(documents_router)
