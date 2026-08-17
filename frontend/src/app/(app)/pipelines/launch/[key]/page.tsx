@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
 import { ParameterForm } from "@/components/pipelines/ParameterForm";
 import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
@@ -434,7 +435,7 @@ export default function PipelineLauncherPage() {
           </div>
           <div className="flex justify-between">
             <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={goNext} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
+            <Button onClick={goNext}>Next</Button>
           </div>
         </Card>
       )}
