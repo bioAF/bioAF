@@ -1,10 +1,10 @@
 """Pipeline outputs must be discoverable from the experiment they ran on.
 
-Outputs are persisted by PipelineOutputService.register_outputs which
-attaches them to the run's experiment_id and creates sample_files links
-for every sample in the run. Combined with FileService.list_files
-inheritance, a search at the experiment OR sample level should surface
-those outputs.
+Outputs are persisted by PipelineOutputService.register_outputs, which attaches
+them to the run's experiment_id and links each one to the sample it actually
+names. An output naming no sample belongs to the run, so it surfaces at the
+experiment level and is claimed by no sample: the experiment view is what makes
+an unattributed output findable.
 """
 
 import pytest
@@ -63,6 +63,8 @@ async def test_pipeline_outputs_appear_under_experiment_and_sample(session, admi
     assert {"Output1.txt", "Output2.html", "Output3.h5ad"}.issubset(names)
     assert total >= 3
 
+    # None of these outputs names a sample, so none is attributed to one. The
+    # old fallback put all three on every sample in the run.
     files, _ = await FileService.list_files(session, org_id, sample_id=samples[0].id)
     names = {f.filename for f in files}
-    assert {"Output1.txt", "Output2.html", "Output3.h5ad"}.issubset(names)
+    assert names.isdisjoint({"Output1.txt", "Output2.html", "Output3.h5ad"})

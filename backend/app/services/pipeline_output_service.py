@@ -21,8 +21,10 @@ class PipelineOutputService:
 
         Matches when the external_id is a full path segment of the GCS URI (e.g.
         ``.../star/SAMPLE-101/...``) or the filename starts with ``<extid>_``/
-        ``<extid>.``. Returns [] for aggregate outputs (e.g. multiqc) that match
-        no single sample, so the caller can fall back to all run samples.
+        ``<extid>.``. Returns [] for an output naming no sample, whether that is
+        an aggregate report (e.g. multiqc) or a per-sample file bioAF failed to
+        parse. Those two cannot be told apart from a name, so neither is guessed
+        at: the caller attaches the file to the run and to no sample.
         """
         segments = set((gcs_uri or "").split("/"))
         matched: list[int] = []
@@ -64,8 +66,8 @@ class PipelineOutputService:
 
         # Map each run sample's external_id -> id so each output can be linked to
         # the sample it actually belongs to (nf-core writes per-sample outputs
-        # under paths/filenames carrying the sample's external_id). Aggregate
-        # outputs that match no single sample fall back to all run samples.
+        # under paths/filenames carrying the sample's external_id). An output
+        # naming no sample is attached to the run alone.
         sample_ids: list[int] = []
         sample_extids: list[tuple[str, int]] = []
         if not is_project_scoped:
@@ -87,6 +89,7 @@ class PipelineOutputService:
         existing_uris: set[str] = {row[0] for row in existing.all()}
 
         created: list[File] = []
+        unattributed: list[str] = []
 
         for file_dict in collected_files:
             gcs_uri = file_dict["gcs_uri"]
@@ -114,15 +117,30 @@ class PipelineOutputService:
                 artifact_type=artifact_type,
             )
 
-            # Associate the output with the sample(s) it belongs to. Match the
-            # sample external_id as a path segment or filename prefix; only fall
-            # back to all run samples for aggregate outputs that match none.
+            # Associate the output with the sample(s) it belongs to, matching the
+            # sample external_id as a path segment or filename prefix. An output
+            # matching none is attached to the run alone: it used to be linked to
+            # every sample in the run, which put one sample's alignment on all of
+            # them. Fewer links, all of them true.
             matched = PipelineOutputService._match_samples(filename, gcs_uri, sample_extids)
-            targets = matched if matched else sample_ids
-            for sample_id in targets:
+            if not matched and sample_ids:
+                unattributed.append(filename)
+            for sample_id in matched:
                 await FileService.link_file_to_sample(session, file_record.id, sample_id)
 
             created.append(file_record)
+
+        if unattributed:
+            shown = ", ".join(unattributed[:20])
+            if len(unattributed) > 20:
+                shown += f", and {len(unattributed) - 20} more"
+            logger.warning(
+                "Pipeline run %d: %d output file(s) name no sample in the run and are "
+                "attached to the run alone: %s",
+                run.id,
+                len(unattributed),
+                shown,
+            )
 
         logger.info(
             "Registered %d output files for pipeline run %d (skipped %d duplicates)",

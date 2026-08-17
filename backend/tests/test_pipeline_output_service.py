@@ -1,5 +1,8 @@
 """Tests for PipelineOutputService - registers pipeline outputs as File records."""
 
+import logging
+
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -126,28 +129,111 @@ async def test_register_outputs_creates_file_records(session, pipeline_run, expe
 
 
 @pytest.mark.asyncio
-async def test_register_outputs_links_files_to_samples(session, pipeline_run, experiment, samples):
-    """Each output file is linked to all samples from the pipeline run."""
+async def test_register_outputs_does_not_distribute_unmatched_outputs(session, pipeline_run, experiment, samples):
+    """An output naming no sample attaches to the run, never to every sample.
+
+    These filenames carry no sample's external_id. Attaching them to all of them
+    put one sample's alignment on every sample in the run, which is a wrong
+    mapping standing in for a missing one. The file keeps its run and experiment
+    attachment, so it stays discoverable; it simply claims no sample.
+    """
     collected = _make_collected(pipeline_run.id, experiment.id)
 
     files = await PipelineOutputService.register_outputs(session, pipeline_run, collected)
     await session.commit()
-
-    sample_ids = {s.id for s in samples}
 
     for f in files:
         rows = await session.execute(
             text("SELECT sample_id FROM sample_files WHERE file_id = :fid"),
             {"fid": f.id},
         )
-        linked_ids = {row[0] for row in rows.all()}
-        assert linked_ids == sample_ids, f"File {f.filename} not linked to all samples"
+        assert rows.all() == [], f"File {f.filename} was attached to a sample it does not name"
+        assert f.source_pipeline_run_id == pipeline_run.id
+        assert f.experiment_id == experiment.id
+
+
+@contextmanager
+def _captured_warnings(logger_name: str):
+    """Records a logger emits, captured from the logger itself.
+
+    Deliberately not caplog: caplog handles the ROOT logger and relies on
+    propagation surviving whatever the rest of the suite did to logging. This
+    test passed alone and failed in the full run for exactly that reason.
+    """
+    records: list[logging.LogRecord] = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    logger = logging.getLogger(logger_name)
+    handler = _Collect(level=logging.WARNING)
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        yield records
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+
+@pytest.mark.asyncio
+async def test_register_outputs_logs_unattributed_outputs(session, pipeline_run, experiment, samples):
+    """An output matching no sample is surfaced as unattributed, not silently dropped."""
+    collected = _make_collected(pipeline_run.id, experiment.id)
+
+    with _captured_warnings("bioaf.pipeline_output_service") as records:
+        await PipelineOutputService.register_outputs(session, pipeline_run, collected)
+        await session.commit()
+
+    warnings = "\n".join(r.getMessage() for r in records)
+    assert "aligned.bam" in warnings
+    assert str(pipeline_run.id) in warnings
+
+
+@pytest.mark.asyncio
+async def test_register_outputs_links_no_samples_when_none_carry_an_external_id(session, admin_user, experiment):
+    """Samples with no external_id can match nothing, so nothing is attached to them.
+
+    Sample.external_id is nullable. Matching is by that identifier, so a run whose
+    samples have none produces no sample links at all. Fewer links, all of them
+    true: the outputs remain listed under the experiment and the run.
+    """
+    unnamed = [Sample(external_id=None, experiment_id=experiment.id) for _ in range(2)]
+    session.add_all(unnamed)
+    await session.flush()
+
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        experiment_id=experiment.id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/rnaseq",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    for s in unnamed:
+        session.add(PipelineRunSample(pipeline_run_id=run.id, sample_id=s.id))
+    await session.flush()
+    await session.commit()
+
+    files = await PipelineOutputService.register_outputs(session, run, _make_collected(run.id, experiment.id))
+    await session.commit()
+
+    assert len(files) == 3
+    for f in files:
+        rows = await session.execute(
+            text("SELECT sample_id FROM sample_files WHERE file_id = :fid"),
+            {"fid": f.id},
+        )
+        assert rows.all() == []
 
 
 @pytest.mark.asyncio
 async def test_register_outputs_links_each_output_to_its_own_sample(session, pipeline_run, experiment, samples):
     """Per-sample outputs link only to the sample whose external_id they carry;
-    aggregate outputs (matching no sample) fall back to all run samples."""
+    an output matching no sample attaches to the run alone."""
     s1, s2 = samples  # external_ids Sample-001, Sample-002
     base = f"gs://bioaf-results-testorg/experiments/{experiment.id}/pipeline-runs/{pipeline_run.id}"
     collected = [
@@ -159,7 +245,7 @@ async def test_register_outputs_links_each_output_to_its_own_sample(session, pip
             "gcs_uri": f"{base}/fq/Sample-002_trimmed.fastq.gz",
             "md5_hash": "b",
         },
-        # aggregate report -> no sample match -> all samples
+        # aggregate report -> no sample match -> no sample link
         {"filename": "multiqc_report.html", "gcs_uri": f"{base}/multiqc/multiqc_report.html", "md5_hash": "c"},
     ]
 
@@ -173,7 +259,7 @@ async def test_register_outputs_links_each_output_to_its_own_sample(session, pip
     by_name = {f.filename: f for f in files}
     assert await _linked(by_name["Sample-001.bam"].id) == {s1.id}
     assert await _linked(by_name["Sample-002_trimmed.fastq.gz"].id) == {s2.id}
-    assert await _linked(by_name["multiqc_report.html"].id) == {s1.id, s2.id}
+    assert await _linked(by_name["multiqc_report.html"].id) == set()
 
 
 @pytest.mark.asyncio
