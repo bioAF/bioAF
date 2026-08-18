@@ -156,9 +156,17 @@ async def test_register_outputs_does_not_distribute_unmatched_outputs(session, p
 def _captured_warnings(logger_name: str):
     """Records a logger emits, captured from the logger itself.
 
-    Deliberately not caplog: caplog handles the ROOT logger and relies on
-    propagation surviving whatever the rest of the suite did to logging. This
-    test passed alone and failed in the full run for exactly that reason.
+    Deliberately not caplog, and deliberately re-enabling the logger. Two things
+    in a full run defeat the obvious version of this:
+
+    caplog handles the ROOT logger, so it only sees what propagates, and
+
+    ``test_migrations_apply.py`` runs alembic's ``env.py``, which calls
+    ``logging.config.fileConfig``. That defaults to
+    ``disable_existing_loggers=True``, so every ``bioaf.*`` logger created before
+    it is left DISABLED for the rest of the session. Production never hits this
+    (``./bioaf migrate`` runs alembic in its own process), but any test asserting
+    on a log line after that file has run will see nothing and blame itself.
     """
     records: list[logging.LogRecord] = []
 
@@ -168,14 +176,16 @@ def _captured_warnings(logger_name: str):
 
     logger = logging.getLogger(logger_name)
     handler = _Collect(level=logging.WARNING)
-    previous_level = logger.level
+    previous_level, previously_disabled = logger.level, logger.disabled
     logger.addHandler(handler)
     logger.setLevel(logging.WARNING)
+    logger.disabled = False
     try:
         yield records
     finally:
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
+        logger.disabled = previously_disabled
 
 
 @pytest.mark.asyncio
