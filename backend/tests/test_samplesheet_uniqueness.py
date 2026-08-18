@@ -145,3 +145,72 @@ class TestTheEmptyStringIdiomIsNotALengthLimit:
         sheet = SampleSheetService.generate_from_contract(contract, [sample], {}, {"1": {"GenomeSize": "5.4m"}})
 
         assert "GUT_A_L001_R2_001.fastq.gz" in sheet
+
+
+class TestTheSheetLevelSpellingIsReadToo:
+    """``uniqueEntries`` is how most of the catalog states this, and it is
+    declared in three different places. Reading only one spelling would enforce
+    the rule for mag and silently ignore it for ampliseq, sarek and taxprofiler,
+    which is worse than not reading it at all: it would look implemented."""
+
+    def test_a_root_level_group_is_read(self):
+        assert ("sample", "run") in _contract("mag").unique_entries
+
+    def test_a_group_inside_a_root_allOf_is_read(self):
+        entries = _contract("ampliseq").unique_entries
+        assert ("sample",) in entries and ("sampleID",) in entries
+
+    def test_several_groups_inside_one_allOf_are_all_read(self):
+        entries = _contract("taxprofiler").unique_entries
+        assert ("sample", "run_accession") in entries
+        assert ("fastq_1",) in entries
+
+    def test_a_group_on_items_is_read(self):
+        assert ("lane", "patient", "sample") in _contract("sarek").unique_entries
+
+    def test_whole_row_uniqueness_is_read(self):
+        assert _contract("funcscan").unique_rows is True
+
+    def test_a_schema_declaring_none_carries_none(self):
+        assert _contract("demo").unique_entries == ()
+        assert _contract("demo").unique_rows is False
+
+
+class TestAPipelineThatWantsOneRowPerSample:
+    def test_two_lanes_block_for_ampliseq_which_names_only_the_sample(self):
+        """ampliseq declares uniqueEntries ["sample"], so a sample sequenced over
+        two lanes would appear twice and be rejected. It is installed on the demo,
+        which is how this spelling was found: the in-repo fixtures alone would
+        have missed it."""
+        contract = _contract("ampliseq")
+        sample = _make_sample(1, "SAMPLEA", files=_lanes("SAMPLEA", "001", "002"))
+
+        with pytest.raises(DomainError) as raised:
+            SampleSheetService.check_contract_satisfiable(contract, [sample], {}, {})
+
+        gap = raised.value.details["missing_columns"]
+        assert any(detail.get("reason") == "not_unique" for detail in gap.values())
+
+    def test_one_lane_per_sample_launches_ampliseq_unchanged(self):
+        contract = _contract("ampliseq")
+        samples = [
+            _make_sample(1, "SAMPLEA", files=_lanes("SAMPLEA", "001")),
+            _make_sample(2, "SAMPLEB", files=_lanes("SAMPLEB", "001")),
+        ]
+
+        SampleSheetService.check_contract_satisfiable(contract, samples, {}, {})
+
+    def test_it_names_the_column_that_can_break_the_tie(self):
+        """sarek is told apart by ("lane", "patient", "sample"). `patient` is
+        already filled from the sample's donor and cannot break a tie between two
+        lanes of one sample; `lane` is what the scientist would state. Naming the
+        wrong one sends them to change a value that is already correct."""
+        contract = _contract("sarek")
+        sample = _make_sample(1, "GUT_A", files=_lanes("GUT_A", "001", "002"), donor_source="DONOR_1", sex="XX")
+
+        with pytest.raises(DomainError) as raised:
+            SampleSheetService.check_contract_satisfiable(contract, [sample], {}, {})
+
+        gaps = raised.value.details["missing_columns"]
+        assert gaps.get("lane", {}).get("reason") == "not_unique"
+        assert gaps.get("patient", {}).get("reason") != "not_unique"

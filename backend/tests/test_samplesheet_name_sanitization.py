@@ -271,20 +271,47 @@ def test_distinct_names_that_sanitize_distinctly_are_fine():
     assert [s["suggestion"] for s in detail["samples"]] == ["SAMPLE_1", "SAMPLE_2"]
 
 
+def _two_lanes(name: str) -> list:
+    return [
+        _make_file(f"{name}_L001_R1_001.fastq.gz"),
+        _make_file(f"{name}_L001_R2_001.fastq.gz"),
+        _make_file(f"{name}_L002_R1_001.fastq.gz"),
+        _make_file(f"{name}_L002_R2_001.fastq.gz"),
+    ]
+
+
 def test_the_same_sample_across_several_lanes_is_not_a_collision():
     """A multi-lane sample legitimately repeats its own name across rows. Only
-    two DIFFERENT samples sharing one name is a collision."""
-    files = [
-        _make_file("GUT_A_L001_R1_001.fastq.gz"),
-        _make_file("GUT_A_L001_R2_001.fastq.gz"),
-        _make_file("GUT_A_L002_R1_001.fastq.gz"),
-        _make_file("GUT_A_L002_R2_001.fastq.gz"),
-    ]
-    samples = [_make_sample(1, "GUT_A", files=files)]
+    two DIFFERENT samples sharing one name is a collision.
 
-    _check(_contract("ampliseq"), samples)
+    Asserted against demo, which declares no uniqueness rule, so this proves what
+    it is about: the COLLISION guard. It used to be asserted against ampliseq,
+    whose schema says ``uniqueEntries: ["sample"]`` and therefore rejects a
+    repeated name outright. That made the sheet below invalid for the very
+    pipeline it was generated for, which the test could not see because bioAF did
+    not read the rule. Changed with the owner's permission when that rule was
+    implemented; the ampliseq half now lives in the test below.
+    """
+    samples = [_make_sample(1, "GUT_A", files=_two_lanes("GUT_A"))]
 
-    assert _names(_generate(_contract("ampliseq"), samples)) == ["GUT_A", "GUT_A"]
+    _check(_contract("demo"), samples)
+
+    assert _names(_generate(_contract("demo"), samples)) == ["GUT_A", "GUT_A"]
+
+
+def test_a_pipeline_that_forbids_a_repeated_name_blocks_the_multi_lane_sample():
+    """ampliseq declares ``uniqueEntries: ["sample"]``, so a sample sequenced over
+    two lanes cannot be written into its sheet at all: both rows would carry the
+    same name. Emitting it anyway produced a sheet nf-schema rejects after the
+    node has scaled up, on a rule the scientist never saw."""
+    samples = [_make_sample(1, "GUT_A", files=_two_lanes("GUT_A"))]
+
+    with pytest.raises(SamplesMissingRequiredFieldsError) as raised:
+        _check(_contract("ampliseq"), samples)
+
+    detail = raised.value.details["missing_columns"]["sample"]
+    assert detail["reason"] == "not_unique"
+    assert [s["external_id"] for s in detail["samples"]] == ["GUT_A"]
 
 
 # -- The headline sentence has to agree with the detail under it --

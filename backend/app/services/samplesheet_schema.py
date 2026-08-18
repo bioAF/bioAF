@@ -250,6 +250,17 @@ class SamplesheetContract:
     # produces two rows that are identical in exactly these columns, and
     # nf-schema rejects that sheet after the node has scaled up.
     unique_with: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The same rule stated from the SHEET's side, which is how most of the
+    # catalog spells it: each inner tuple is a set of columns whose combination
+    # may not repeat across rows. Declared in three different places by
+    # different pipelines, all of which mean the same thing: at the root (mag:
+    # ``["sample", "run"]``), inside a root ``allOf`` (ampliseq: ``["sample"]``
+    # then ``["sampleID"]``; taxprofiler: four of them), and on ``items``
+    # (sarek: ``["lane", "patient", "sample"]``).
+    unique_entries: tuple[tuple[str, ...], ...] = ()
+    # ``uniqueItems`` on the array, which funcscan declares: whole rows must be
+    # distinct rather than any named subset of them.
+    unique_rows: bool = False
     is_empty: bool = False
 
     def select_branch(self, sourceable: set[str]) -> ExclusiveBranch | None:
@@ -325,6 +336,35 @@ class SamplesheetContract:
 
 
 _EMPTY = SamplesheetContract(is_empty=True)
+
+
+def _parse_unique_entries(schema: dict, items: dict) -> tuple[tuple[str, ...], ...]:
+    """Every ``uniqueEntries`` group the schema declares, wherever it states it.
+
+    Three spellings across the catalog and one meaning: the listed columns may
+    not repeat as a combination. mag puts it at the root, ampliseq and
+    taxprofiler put several inside a root ``allOf``, sarek puts it on ``items``.
+    Reading only one of the three would enforce the rule for some pipelines and
+    silently ignore it for the rest.
+    """
+    found: list[tuple[str, ...]] = []
+
+    def _take(node: object) -> None:
+        if not isinstance(node, dict):
+            return
+        declared = node.get("uniqueEntries")
+        if isinstance(declared, list):
+            names = tuple(str(c) for c in declared if isinstance(c, str))
+            if names and names not in found:
+                found.append(names)
+
+    _take(schema)
+    _take(items)
+    for branch in schema.get("allOf") or []:
+        _take(branch)
+    for branch in items.get("allOf") or []:
+        _take(branch)
+    return tuple(found)
 
 
 def parse_contract(schema: object) -> SamplesheetContract:
@@ -417,6 +457,8 @@ def parse_contract(schema: object) -> SamplesheetContract:
         branches=_parse_branches(items),
         dependent_required=dependent_required,
         unique_with=unique_with,
+        unique_entries=_parse_unique_entries(schema, items),
+        unique_rows=schema.get("uniqueItems") is True or items.get("uniqueItems") is True,
         is_empty=False,
     )
 

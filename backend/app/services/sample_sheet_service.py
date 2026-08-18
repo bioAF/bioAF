@@ -913,8 +913,32 @@ def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=No
     The block names the column the pipeline uses to tell the rows apart, and the
     scientist states it.
     """
-    declared = getattr(contract, "unique_with", {})
-    if not declared:
+    declared = dict(getattr(contract, "unique_with", {}))
+
+    # The same rule stated from the sheet's side, which is how most of the
+    # catalog spells it. Keyed on the column the scientist can actually act on:
+    # for mag's ("sample", "run") that is `run`, because a row's sample name is
+    # not something they may change to break a tie. Where every column in the
+    # group is the sample's own name, as in ampliseq's ("sample",), the report
+    # lands there, since the repetition itself is what has to be answered.
+    for group in getattr(contract, "unique_entries", ()) or ():
+        # Report against the column the scientist can actually answer with, which
+        # is the one bioAF has no source for: sarek's ("lane", "patient",
+        # "sample") is told apart by the LANE, and reporting `patient` would name
+        # a column that is already filled and cannot break the tie. Where every
+        # column is one bioAF fills, the group's own first column is named, since
+        # the repetition itself is then what has to be answered.
+        unsourceable = [
+            c
+            for c in group
+            if c not in _COLUMN_TO_SAMPLE_FIELD
+            and c not in _COLUMN_TO_PARAMETER
+            and c not in getattr(contract, "file_columns", frozenset())
+        ]
+        anchor = unsourceable[0] if unsourceable else group[0]
+        declared.setdefault(anchor, tuple(c for c in group if c != anchor))
+
+    if not declared and not getattr(contract, "unique_rows", False):
         return {}
 
     columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
@@ -925,9 +949,21 @@ def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=No
     index = {column: position for position, column in enumerate(columns)}
     gaps: dict[str, dict] = {}
 
+    # ``uniqueItems`` on the array: whole rows must differ, with no column named.
+    if getattr(contract, "unique_rows", False) and columns:
+        declared.setdefault(columns[0], tuple(columns[1:]))
+
     for column, companions in declared.items():
-        # A column absent from the header is empty for every row, which is
-        # exactly how two lanes of one sample collide, so it is still checked.
+        # A group whose columns are ALL absent from this sheet is not a rule
+        # about it. ampliseq declares uniqueEntries for both of its mutually
+        # exclusive input styles, so the style bioAF did not emit contributes an
+        # empty value to every row, and reading that as a repetition would block
+        # every ampliseq launch. At least one column present makes the check
+        # meaningful: mag's ("sample", "run") is still checked with `run` absent,
+        # because that absence is exactly how two lanes of one sample collide.
+        if column not in index and not any(name in index for name in companions):
+            continue
+
         keyed: dict[tuple, list[int]] = {}
         for row in rows:
             values = row["values"]
