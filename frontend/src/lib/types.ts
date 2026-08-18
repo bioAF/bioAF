@@ -765,6 +765,9 @@ export interface PipelineRunPreflight {
         // filled (mag: short reads oblige a platform). Without it the notice
         // reports a column the schema's own required list does not mention.
         required_by?: string | null;
+        // The other columns this one must be unique WITHIN, when the schema
+        // declares a uniqueness rule. mag pairs `run` with `sample`.
+        unique_with?: string[] | null;
       }
     >;
   };

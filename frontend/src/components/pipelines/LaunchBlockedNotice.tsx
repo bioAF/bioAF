@@ -4,7 +4,7 @@ import type { PipelineRunPreflight } from "@/lib/types";
  *  their own explanation, so the "missing for:" wording below must not also run:
  *  telling someone who just typed a value that it is missing sends them to look
  *  for the wrong problem. */
-const VALUE_REASONS = new Set(["invalid_characters", "collision"]);
+const VALUE_REASONS = new Set(["invalid_characters", "collision", "not_unique"]);
 
 /** Why this pipeline cannot run with the selected samples, shown while the user
  *  can still do something about it.
@@ -65,6 +65,28 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
               {info.reason === "collision" && (
                 <>
                   {" would give two samples the same name, which would merge their results. Rename one of:"}
+                  <div className="mt-0.5 text-gray-600">
+                    {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+                  </div>
+                </>
+              )}
+
+              {/* A column the pipeline uses to tell two rows apart, which would
+                  repeat. "Missing" is wrong here and sends the scientist to
+                  supply one value for every sample, when what is needed is a
+                  value that DIFFERS between the repeated rows. A sample
+                  sequenced over two lanes is the ordinary way to arrive here. */}
+              {info.reason === "not_unique" && (
+                <>
+                  {info.unique_with && info.unique_with.length > 0 ? (
+                    <>
+                      {" has to differ between rows that share the same "}
+                      <span className="font-medium">{info.unique_with.join(" and ").replace(/_/g, " ")}</span>
+                      {", and more than one row would carry the same pair for:"}
+                    </>
+                  ) : (
+                    " has to be different in every row, and more than one row would repeat it for:"
+                  )}
                   <div className="mt-0.5 text-gray-600">
                     {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
                   </div>

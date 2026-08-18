@@ -778,6 +778,13 @@ def _blocked_summary(missing: dict[str, dict]) -> str:
     columns = _join(sorted(missing))
     reasons = {gap.get("reason") for gap in missing.values()}
 
+    # Nothing is missing and nothing was refused: the sheet carries rows the
+    # pipeline cannot distinguish. Saying "missing" would send the scientist
+    # looking for a value to supply for every sample, when what is needed is one
+    # that differs between the repeated rows.
+    if reasons == {"not_unique"}:
+        return f"This pipeline needs {columns} to tell some rows apart, and they would repeat."
+
     if reasons <= _VALUE_REASONS:
         return f"This pipeline will not accept {columns} as set for some samples."
     if not (reasons & _VALUE_REASONS):
@@ -884,6 +891,79 @@ def _collision_gaps(
             "pattern": getattr(contract, "patterns", {}).get(column),
             "reason": "collision",
             "samples": [{"id": s.id, "external_id": s.external_id, "suggestion": None} for s in offenders],
+        }
+    return gaps
+
+
+def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    """Rows the pipeline would not be able to tell apart.
+
+    A schema can declare that a column, on its own or paired with others, may not
+    repeat. mag writes ``run: {unique: ["sample"]}``: two sequencing runs of one
+    sample are distinguished by the run, so the run and sample pair is what must
+    not repeat.
+
+    bioAF emits one row per read pair, so a sample sequenced over two lanes
+    produces two rows identical in exactly those columns. nf-schema rejects that
+    sheet, and it does so after the node has scaled up and the containers have
+    pulled, which is the cost this check exists to avoid.
+
+    **bioAF does not fill the distinguishing value in.** A lane is not a
+    sequencing run; writing one in would be a guess carrying a scientific claim.
+    The block names the column the pipeline uses to tell the rows apart, and the
+    scientist states it.
+    """
+    declared = getattr(contract, "unique_with", {})
+    if not declared:
+        return {}
+
+    columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
+    if len(rows) < 2:
+        return {}
+
+    by_sample = {s.id: s for s in samples}
+    index = {column: position for position, column in enumerate(columns)}
+    gaps: dict[str, dict] = {}
+
+    for column, companions in declared.items():
+        # A column absent from the header is empty for every row, which is
+        # exactly how two lanes of one sample collide, so it is still checked.
+        keyed: dict[tuple, list[int]] = {}
+        for row in rows:
+            values = row["values"]
+
+            def _at(name: str) -> str:
+                position = index.get(name)
+                return values[position] if position is not None and position < len(values) else ""
+
+            key = (_at(column), *(_at(name) for name in companions))
+            keyed.setdefault(key, []).append(row["sample_id"])
+
+        offenders: list[int] = []
+        for sample_ids in keyed.values():
+            if len(sample_ids) > 1:
+                offenders.extend(sid for sid in sample_ids if sid is not None)
+        if not offenders:
+            continue
+
+        seen: list[int] = []
+        for sid in offenders:
+            if sid not in seen:
+                seen.append(sid)
+        gaps[column] = {
+            "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+            "allowed_values": contract.enum_for(column),
+            "pattern": getattr(contract, "patterns", {}).get(column),
+            "reason": "not_unique",
+            "unique_with": list(companions),
+            "samples": [
+                {
+                    "id": sid,
+                    "external_id": getattr(by_sample.get(sid), "external_id", None),
+                    "suggestion": None,
+                }
+                for sid in seen
+            ],
         }
     return gaps
 
@@ -1210,6 +1290,12 @@ class SampleSheetService:
         # samples' results would be worse than the problem it solves.
         for column, gap in _collision_gaps(contract, samples, parameters, pattern_gaps, sample_values).items():
             missing[column] = gap
+
+        # Rows the pipeline could not tell apart, under a uniqueness rule the
+        # schema declares. Added rather than substituted: the column is usually
+        # absent from the sheet entirely, so nothing else reports it.
+        for column, gap in _uniqueness_gaps(contract, samples, parameters, sample_values).items():
+            missing.setdefault(column, gap)
 
         return missing
 

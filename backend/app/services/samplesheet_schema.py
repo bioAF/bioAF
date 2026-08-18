@@ -240,6 +240,16 @@ class SamplesheetContract:
     # it. The rule is per ROW: a sample whose trigger column is empty owes
     # nothing.
     dependent_required: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Columns whose value must be unique, keyed on the column, holding the OTHER
+    # columns it is unique WITHIN. mag declares ``run: {unique: ["sample"]}``: two
+    # sequencing runs of one sample are told apart by the run, so the run and
+    # sample pair may not repeat. An empty tuple means the column alone must be
+    # unique across the sheet.
+    #
+    # bioAF emits one row per read pair, so a sample sequenced over two lanes
+    # produces two rows that are identical in exactly these columns, and
+    # nf-schema rejects that sheet after the node has scaled up.
+    unique_with: dict[str, tuple[str, ...]] = field(default_factory=dict)
     is_empty: bool = False
 
     def select_branch(self, sourceable: set[str]) -> ExclusiveBranch | None:
@@ -345,6 +355,7 @@ def parse_contract(schema: object) -> SamplesheetContract:
     patterns: dict[str, str] = {}
     descriptions: dict[str, str] = {}
     error_messages: dict[str, str] = {}
+    unique_with: dict[str, tuple[str, ...]] = {}
     for name, spec in properties.items():
         if not isinstance(spec, dict):
             continue
@@ -363,6 +374,14 @@ def parse_contract(schema: object) -> SamplesheetContract:
         pattern = spec.get("pattern")
         if isinstance(pattern, str) and pattern:
             patterns[col] = pattern
+        # ``unique: false`` states that a column is NOT constrained, which bacass
+        # writes on its ID. Reading it as a constraint would block every bacass
+        # launch, so only ``true`` and a list of companion columns count.
+        declared_unique = spec.get("unique")
+        if declared_unique is True:
+            unique_with[col] = ()
+        elif isinstance(declared_unique, list):
+            unique_with[col] = tuple(str(u) for u in declared_unique if isinstance(u, str))
         if _declares_fastq(spec) or col in FASTQ_COLUMNS:
             read_columns.add(col)
         if _declares_file(spec):
@@ -397,6 +416,7 @@ def parse_contract(schema: object) -> SamplesheetContract:
         column_order=tuple(declared + undeclared),
         branches=_parse_branches(items),
         dependent_required=dependent_required,
+        unique_with=unique_with,
         is_empty=False,
     )
 

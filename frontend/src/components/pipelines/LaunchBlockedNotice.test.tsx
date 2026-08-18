@@ -192,3 +192,44 @@ it("shows the allowed values when the column is constrained", () => {
 
   expect(screen.getByText(/ILLUMINA/)).toBeInTheDocument();
 });
+
+/**
+ * A column the pipeline uses to tell two rows apart, which would repeat. Neither
+ * "missing" nor "will not accept" is true of it: the value is absent for every
+ * sample, and supplying the same value everywhere would not help. mag declares
+ * `run: {unique: ["sample"]}` and a two-lane sample produces two rows it cannot
+ * distinguish.
+ */
+const notUnique: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_required_fields",
+  reason: "This pipeline needs 'run' to tell some rows apart, and they would repeat.",
+  details: {
+    missing_columns: {
+      run: {
+        sample_field: null,
+        allowed_values: [],
+        reason: "not_unique",
+        unique_with: ["sample"],
+        samples: [{ id: 5, external_id: "GUT_A" }],
+      },
+    },
+  },
+};
+
+it("says the rows would repeat rather than that the column is missing", () => {
+  render(<LaunchBlockedNotice preflight={notUnique} />);
+
+  expect(screen.getByRole("alert")).toHaveTextContent(/more than one row/i);
+  expect(screen.queryByText(/is not something bioAF can derive/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Missing for:/i)).not.toBeInTheDocument();
+});
+
+it("names the column the pipeline pairs it with, and the samples that repeat", () => {
+  render(<LaunchBlockedNotice preflight={notUnique} />);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent("run");
+  expect(alert).toHaveTextContent("sample");
+  expect(alert).toHaveTextContent("GUT_A");
+});
