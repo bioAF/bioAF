@@ -98,7 +98,14 @@ class PipelineRunService:
             sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
         samples = list((await session.execute(sample_query)).scalars().all())
         for sample in samples:
-            sample._input_files = PipelineRunService._input_eligible_files(sample.files, False)
+            # Resolved with the SAME opt-in the launch will use. Hardcoding this
+            # off previewed a sheet with empty read columns and then submitted
+            # populated ones, so the scientist approved a sheet that was not the
+            # one that ran, which is the single property the review step exists
+            # to provide.
+            sample._input_files = PipelineRunService._input_eligible_files(
+                sample.files, getattr(data, "include_derived_inputs", False)
+            )
 
         contract = await PipelineRunService._resolve_contract(session, pipeline)
         parameters = data.parameters or {}

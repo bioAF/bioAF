@@ -179,3 +179,76 @@ class TestPreflightIsFree:
         )
 
         assert r.status_code in (401, 403)
+
+
+class TestThePreflightAsksTheQuestionTheLaunchWillAnswer:
+    """A preview that can differ from the submitted sheet is worse than none.
+
+    Prior pipeline outputs are excluded from a run's inputs by default, because
+    feeding them back compounded the dataset every run. ``include_derived_inputs``
+    opts in, and the preflight ignored it: it resolved every sample's files with
+    the flag hardcoded off. So a launch that opted in was previewed with empty
+    read columns and then submitted populated ones, and the scientist approved a
+    sheet that was not the one that ran.
+
+    Found on the demo, where every FASTQ arrived via fetchngs and is therefore a
+    pipeline output.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_derived_input_is_absent_from_the_sheet_by_default(self, client, base, session):
+        derived = File(
+            organization_id=base["org"].id,
+            experiment_id=base["exp"].id,
+            gcs_uri="gs://b/DERIVED-1_R1_001.fastq.gz",
+            filename="DERIVED-1_R1_001.fastq.gz",
+            file_type="fastq",
+            source_type="pipeline_output",
+        )
+        session.add(derived)
+        await session.flush()
+        sample = Sample(experiment_id=base["exp"].id, external_id="DERIVED-1", organism="Homo sapiens")
+        session.add(sample)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=derived.id))
+        await session.commit()
+
+        token = await _token(client)
+        r = await _preflight(client, token, "nf-core/demo", base["exp"].id, [sample.id])
+
+        row = r.json()["samplesheet"]["rows"][0]["values"]
+        assert "DERIVED-1_R1_001.fastq.gz" not in ",".join(row)
+
+    @pytest.mark.asyncio
+    async def test_opting_in_previews_the_sheet_that_would_be_submitted(self, client, base, session):
+        derived = File(
+            organization_id=base["org"].id,
+            experiment_id=base["exp"].id,
+            gcs_uri="gs://b/DERIVED-2_R1_001.fastq.gz",
+            filename="DERIVED-2_R1_001.fastq.gz",
+            file_type="fastq",
+            source_type="pipeline_output",
+        )
+        session.add(derived)
+        await session.flush()
+        sample = Sample(experiment_id=base["exp"].id, external_id="DERIVED-2", organism="Homo sapiens")
+        session.add(sample)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=derived.id))
+        await session.commit()
+
+        token = await _token(client)
+        r = await client.post(
+            "/api/pipeline-runs/preflight",
+            json={
+                "pipeline_key": "nf-core/demo",
+                "experiment_id": base["exp"].id,
+                "sample_ids": [sample.id],
+                "parameters": {},
+                "include_derived_inputs": True,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        row = r.json()["samplesheet"]["rows"][0]["values"]
+        assert "DERIVED-2_R1_001.fastq.gz" in ",".join(row)
