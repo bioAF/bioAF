@@ -1,7 +1,8 @@
+import uuid as uuid_pkg
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -12,6 +13,25 @@ class File(Base):
     __tablename__ = "files"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # The asset's catalogue identity, in the owner's framing an ISBN: bioAF did
+    # not write the book but catalogues it for later recall. Assigned on ingest
+    # whatever the provenance (uploaded, produced by a pipeline, pulled from a
+    # public archive) and never reissued.
+    #
+    # It exists because a path cannot be an identity. Reassigning a file between
+    # experiments physically moves the object and rewrites the row, so this id
+    # and the integer one survive while `storage_uri` does not.
+    #
+    # Added ALONGSIDE the integer key, never replacing it, which is the same
+    # split projects, experiments and samples have carried since migration 080:
+    # the integer is a storage detail that never leaves the system, and the UUID
+    # is the contract with the outside world and is never used for joins. v4
+    # today; v7 from the PostgreSQL 18 upgrade onward, which needs no migration
+    # because nothing distinguishes them in the schema. Never treat their
+    # ordering as creation order: use created_at.
+    uuid: Mapped[uuid_pkg.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, server_default=text("gen_random_uuid()"), unique=True
+    )
     organization_id: Mapped[int] = mapped_column(Integer, ForeignKey("organizations.id"), nullable=False)
     # Opaque object-store URI. storage_uri is the AUTHORITATIVE backend-neutral
     # column (app code reads/writes it); gcs_uri is a RETAINED legacy mirror kept
