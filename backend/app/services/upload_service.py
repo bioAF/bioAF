@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +8,7 @@ from app.exceptions import ValidationError
 from app.models.file import File
 from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
+from app.services import sequencing_identity
 from app.services.file_service import FileService
 
 logger = logging.getLogger("bioaf.upload_service")
@@ -16,30 +16,17 @@ logger = logging.getLogger("bioaf.upload_service")
 # In-memory pending uploads (in production, use Redis or DB table)
 _pending_uploads: dict[str, dict] = {}
 
-# The read codes that exist. A file's read_type column holds one of these or
-# nothing; anything else is a parse artifact, not a read.
-READ_TYPES = ("R1", "R2", "I1", "I2")
-
-# Illumina filename pattern: SampleName_S1_L001_R1_001.fastq.gz
-ILLUMINA_PATTERN = re.compile(
-    r"^(?P<sample_name>.+?)_S(?P<sample_number>\d+)_L(?P<lane>\d{3})_(?P<read>R[12I])_(?P<set_number>\d{3})\.fastq\.gz$"
-)
+# One reading of the Illumina convention, shared with the sample-sheet builder.
+# These names are re-exported because callers already import them from here.
+ILLUMINA_PATTERN = sequencing_identity.ILLUMINA_PATTERN
+READ_TYPES = sequencing_identity.READ_TYPES
 
 
 class UploadService:
     @staticmethod
     def parse_illumina_filename(filename: str) -> dict | None:
         """Extract sample name, lane, read number, set number from Illumina filename."""
-        match = ILLUMINA_PATTERN.match(filename)
-        if not match:
-            return None
-        return {
-            "sample_name": match.group("sample_name"),
-            "sample_number": int(match.group("sample_number")),
-            "lane": int(match.group("lane")),
-            "read": match.group("read"),
-            "set_number": int(match.group("set_number")),
-        }
+        return sequencing_identity.parse_illumina_filename(filename)
 
     @staticmethod
     def validate_fastq_filename(filename: str) -> bool:
