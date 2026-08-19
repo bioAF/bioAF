@@ -946,8 +946,9 @@ def _incomplete_row_gaps(contract, samples: list, parameters: dict, sample_value
     """Rows bioAF would emit with a required column left empty.
 
     Required-column checking is otherwise per SAMPLE, and the sheet is per ROW.
-    A sample carrying only an R2 emits ``A,,gs://...R2`` with ``fastq_1`` empty
-    and ``fastq_1`` required, and nothing caught it: ``column_gaps`` skips
+    A sample carrying only an R2 emits a row whose ``fastq_1`` is empty and whose
+    ``fastq_2`` holds the only path it has, with ``fastq_1`` required, and
+    nothing caught it: ``column_gaps`` skips
     required read columns, ``_unusable_reads_gap`` fires only when NO attached
     file qualifies as a read (this one does), and the launch path's own gate
     fires only when a sample has no files at all. The row fell between all three
