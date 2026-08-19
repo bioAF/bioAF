@@ -283,7 +283,13 @@ async def test_fetchngs_sibling_runs_still_emit_separate_rows(session, admin_use
     """The behavior the fabricated lane was there to produce must survive the
     move: two sibling runs under one sample are two mergeable rows, each with
     both of its mates. Now it comes from the accession rather than a fiction."""
-    from tests.test_fetchngs_ingest import _FakeStorage, _experiment, _fetchngs_run, _files_for_sample, _sample_by_external
+    from tests.test_fetchngs_ingest import (
+        _FakeStorage,
+        _experiment,
+        _fetchngs_run,
+        _files_for_sample,
+        _sample_by_external,
+    )
 
     exp = await _experiment(session, admin_user)
     run = await _fetchngs_run(session, admin_user, exp)

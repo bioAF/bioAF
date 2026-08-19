@@ -33,6 +33,25 @@ const missingFields: PipelineRunPreflight = {
   },
 };
 
+/** A sample sequenced over two lanes emits two rows, and one of them lost a
+ *  mate. The sample HAS reads, so "bioAF cannot derive this" would send the
+ *  scientist to fill in a field when what is missing is a file. */
+const incompleteRow: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_required_fields",
+  reason: "This pipeline requires 'fastq_1', which is missing for some samples.",
+  details: {
+    missing_columns: {
+      fastq_1: {
+        sample_field: null,
+        allowed_values: [],
+        reason: "empty_in_row",
+        samples: [{ id: 7, external_id: "SAMPLE-101" }],
+      },
+    },
+  },
+};
+
 it("renders nothing when the launch is fine", () => {
   const { container } = render(
     <LaunchBlockedNotice preflight={{ can_launch: true, code: null, reason: null, details: {} }} />,
@@ -232,4 +251,14 @@ it("names the column the pipeline pairs it with, and the samples that repeat", (
   expect(alert).toHaveTextContent("run");
   expect(alert).toHaveTextContent("sample");
   expect(alert).toHaveTextContent("GUT_A");
+});
+
+it("says a row is incomplete rather than that the field cannot be derived", () => {
+  render(<LaunchBlockedNotice preflight={incompleteRow} />);
+
+  // The remedy is a FILE for one row, not a value for the sample, so the
+  // fallback wording must not run here.
+  expect(screen.queryByText(/not something bioAF can derive/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/would be empty/i)).toBeInTheDocument();
+  expect(screen.getByText(/SAMPLE-101/)).toBeInTheDocument();
 });

@@ -4,7 +4,7 @@ import type { PipelineRunPreflight } from "@/lib/types";
  *  their own explanation, so the "missing for:" wording below must not also run:
  *  telling someone who just typed a value that it is missing sends them to look
  *  for the wrong problem. */
-const VALUE_REASONS = new Set(["invalid_characters", "collision", "not_unique"]);
+const VALUE_REASONS = new Set(["invalid_characters", "collision", "not_unique", "empty_in_row"]);
 
 /** Why this pipeline cannot run with the selected samples, shown while the user
  *  can still do something about it.
@@ -87,6 +87,20 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
                   ) : (
                     " has to be different in every row, and more than one row would repeat it for:"
                   )}
+                  <div className="mt-0.5 text-gray-600">
+                    {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+                  </div>
+                </>
+              )}
+
+              {/* A row about to be emitted with this column empty. The sample
+                  HAS reads, so "bioAF cannot derive this" would send the
+                  scientist to fill in a field when what is absent is a FILE for
+                  one of its rows. A sample sequenced over two lanes, where one
+                  lane lost a mate, is the ordinary way to arrive here. */}
+              {info.reason === "empty_in_row" && (
+                <>
+                  {" would be empty in a row this sheet is about to write, which the pipeline requires. Check the files attached to:"}
                   <div className="mt-0.5 text-gray-600">
                     {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
                   </div>

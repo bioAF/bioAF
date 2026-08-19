@@ -754,9 +754,12 @@ export interface PipelineRunPreflight {
           suggestion?: string | null;
         }[];
         // Why this column is being reported: "missing", "required_by",
-        // "not_accepted", "invalid_characters" or "collision". Each needs
-        // different words, because "missing" sends someone who just typed a
-        // value to look for the wrong problem.
+        // "not_accepted", "invalid_characters", "collision", "not_unique",
+        // "no_matching_file" or "empty_in_row". Each needs different words,
+        // because "missing" sends someone who just typed a value to look for the
+        // wrong problem, and "empty_in_row" sends them to look for a field when
+        // what is absent is a FILE: the sample has reads, and one of the rows
+        // about to be emitted for it does not.
         reason?: string | null;
         // The schema's own regex, so a scientist who would rather choose their
         // own spelling than take the suggestion can see the rule.

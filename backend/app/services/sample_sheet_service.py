@@ -4,6 +4,7 @@ import logging
 import re
 from functools import lru_cache
 
+from app.services import sequencing_identity
 from app.exceptions import (
     PipelineNotSampleLaunchableError,
     SamplesMissingRequiredFieldsError,
@@ -21,8 +22,6 @@ def _join(items) -> str:
         return f"'{items[0]}'"
     return ", ".join(f"'{i}'" for i in items[:-1]) + f" and '{items[-1]}'"
 
-
-_ILLUMINA_READ_RE = re.compile(r"_(R[12]|I[12])_")
 
 # ChIP-seq control/input detection (lit_validation Phase 4). A fetched sample carries its ENA/GEO
 # title + library_strategy in prep_notes (captured by FetchngsIngestService); we read that plus the
@@ -85,12 +84,7 @@ def _get_read_type(f) -> str | None:
     for tag in tags:
         if isinstance(tag, str) and tag.startswith("read:"):
             return tag.split(":", 1)[1]
-    # Fallback to filename pattern
-    filename = getattr(f, "filename", "") or ""
-    m = _ILLUMINA_READ_RE.search(filename)
-    if m:
-        return m.group(1)
-    return None
+    return sequencing_identity.read_type_from_filename(getattr(f, "filename", "") or "")
 
 
 def _get_lane(f) -> int | None:
@@ -113,11 +107,7 @@ def _get_lane(f) -> int | None:
             # pairing.
             digits = tag.split(":", 1)[1].strip()
             return int(digits) if digits.isdigit() and int(digits) > 0 else None
-    filename = getattr(f, "filename", "") or ""
-    m = re.search(r"_L(\d{3})_", filename)
-    if m:
-        return int(m.group(1)) or None
-    return None
+    return sequencing_identity.lane_from_filename(getattr(f, "filename", "") or "")
 
 
 def _sequencing_unit(f) -> tuple:
@@ -952,6 +942,80 @@ def _collision_gaps(
     return gaps
 
 
+def _incomplete_row_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
+    """Rows bioAF would emit with a required column left empty.
+
+    Required-column checking is otherwise per SAMPLE, and the sheet is per ROW.
+    A sample carrying only an R2 emits ``A,,gs://...R2`` with ``fastq_1`` empty
+    and ``fastq_1`` required, and nothing caught it: ``column_gaps`` skips
+    required read columns, ``_unusable_reads_gap`` fires only when NO attached
+    file qualifies as a read (this one does), and the launch path's own gate
+    fires only when a sample has no files at all. The row fell between all three
+    and nf-schema rejected it after the node had scaled up.
+
+    Checked against the rows the generator actually produces rather than against
+    the sample, so a sample sequenced over two lanes is judged one lane at a
+    time: the pair that resolved is not evidence for the pair that did not.
+
+    Deliberately narrow, and it cannot refuse a launch that works today. Only
+    columns the schema requires AND does not default are considered, because
+    nf-schema fills a defaulted column itself when the cell is empty; and only
+    columns this sheet actually emits, because a column absent from the header is
+    already somebody else's report. Single-end input stays legal, since
+    ``fastq_2`` is not required.
+
+    A sample with NO input files at all is skipped, on the same principle
+    ``_unusable_reads_gap`` states: that is a different situation, owned by the
+    launch path's own gate, which can also be told to drop those samples and
+    proceed. Duplicating it here would refuse launches that work today and would
+    report the same problem twice under a reason that does not fit it.
+    """
+    required = getattr(contract, "required_without_default", set()) or set()
+    if not required:
+        return {}
+
+    columns, rows, _omissions = _sheet_rows(contract, samples, parameters, sample_values)
+    index = {column: position for position, column in enumerate(columns)}
+    checkable = sorted(required & set(index))
+    if not checkable:
+        return {}
+
+    by_sample = {s.id: s for s in samples}
+    fileless = {s.id for s in samples if not _input_files(s)}
+    gaps: dict[str, dict] = {}
+    for row in rows:
+        if row["sample_id"] in fileless:
+            continue
+        values = row["values"]
+        for column in checkable:
+            position = index[column]
+            if position < len(values) and values[position]:
+                continue
+            gap = gaps.setdefault(
+                column,
+                {
+                    "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
+                    "allowed_values": contract.enum_for(column),
+                    "pattern": getattr(contract, "patterns", {}).get(column),
+                    "reason": "empty_in_row",
+                    "samples": [],
+                },
+            )
+            # By sample rather than by row: a sample with two incomplete lanes
+            # owes one answer, and naming it twice reads as two problems.
+            if any(entry["id"] == row["sample_id"] for entry in gap["samples"]):
+                continue
+            sample = by_sample.get(row["sample_id"])
+            gap["samples"].append(
+                {
+                    "id": row["sample_id"],
+                    "external_id": getattr(sample, "external_id", None) or row.get("external_id"),
+                    "suggestion": None,
+                }
+            )
+    return gaps
+
+
 def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
     """Rows the pipeline would not be able to tell apart.
 
@@ -1388,6 +1452,17 @@ class SampleSheetService:
         # schema declares. Added rather than substituted: the column is usually
         # absent from the sheet entirely, so nothing else reports it.
         for column, gap in _uniqueness_gaps(contract, samples, parameters, sample_values).items():
+            missing.setdefault(column, gap)
+
+        # A row about to be emitted with a required column empty. Last, and by
+        # setdefault, because every check above says something more specific
+        # about the same column: this one knows only that the cell came out
+        # blank. Where a narrower gap already claimed the column, the samples
+        # this one would have named are reported on the next attempt, once the
+        # narrower problem is answered. The launch is blocked either way, and a
+        # report that named samples under someone else's reason would be wrong
+        # about all of them.
+        for column, gap in _incomplete_row_gaps(contract, samples, parameters, sample_values).items():
             missing.setdefault(column, gap)
 
         return missing
