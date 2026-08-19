@@ -16,6 +16,10 @@ logger = logging.getLogger("bioaf.upload_service")
 # In-memory pending uploads (in production, use Redis or DB table)
 _pending_uploads: dict[str, dict] = {}
 
+# The read codes that exist. A file's read_type column holds one of these or
+# nothing; anything else is a parse artifact, not a read.
+READ_TYPES = ("R1", "R2", "I1", "I2")
+
 # Illumina filename pattern: SampleName_S1_L001_R1_001.fastq.gz
 ILLUMINA_PATTERN = re.compile(
     r"^(?P<sample_name>.+?)_S(?P<sample_number>\d+)_L(?P<lane>\d{3})_(?P<read>R[12I])_(?P<set_number>\d{3})\.fastq\.gz$"
@@ -201,6 +205,20 @@ class UploadService:
             experiment_id=pending["experiment_id"],
             is_global=pending.get("is_global", False),
         )
+
+        # Sequencing identity as typed columns. The tags above are kept for one
+        # release so anything still reading them keeps working, but these are
+        # what the sample sheet pairs mates on: a lane held as a string is why
+        # `lane:1` here and `lane:001` from another ingest path used to describe
+        # one physical lane as two units. A name outside the convention leaves
+        # them NULL, never a fabricated value.
+        # A lane is 1-based, and `R[12I]` also matches `RI`, which is not a read
+        # code that exists. Both are filtered here rather than written and
+        # explained later: a typed column that holds a fiction is worse than one
+        # holding NULL.
+        if illumina_info:
+            file.lane = illumina_info["lane"] or None
+            file.read_type = illumina_info["read"] if illumina_info["read"] in READ_TYPES else None
 
         # Link to samples
         for sample_id in pending["sample_ids"]:

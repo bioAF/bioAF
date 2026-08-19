@@ -55,8 +55,32 @@ def _safe_sample_name(sample) -> str:
     return name
 
 
+_READ_TYPES = ("R1", "R2", "I1", "I2")
+
+
+def _typed(f, column: str, kind: type):
+    """A typed sequencing-identity column, or None when it says nothing.
+
+    The isinstance check is load-bearing rather than defensive. Much of this
+    suite builds files out of MagicMock, which auto-vivifies any attribute into a
+    truthy object; reading one of those as a lane would scatter a sample's files
+    across as many units as it has files. The same guard covers a real row whose
+    column is NULL.
+    """
+    value = getattr(f, column, None)
+    return value if isinstance(value, kind) and not isinstance(value, bool) else None
+
+
 def _get_read_type(f) -> str | None:
-    """Return read type (R1, R2, I1, I2) from tags_json or filename pattern."""
+    """Return read type (R1, R2, I1, I2).
+
+    The typed column first, then the legacy ``read:`` tag, then the filename.
+    The tag reader stays for one release so files written before the sequencing
+    identity migration keep pairing exactly as they do today.
+    """
+    typed = _typed(f, "read_type", str)
+    if typed in _READ_TYPES:
+        return typed
     tags = getattr(f, "tags_json", None) or []
     for tag in tags:
         if isinstance(tag, str) and tag.startswith("read:"):
@@ -69,17 +93,49 @@ def _get_read_type(f) -> str | None:
     return None
 
 
-def _get_lane(f) -> str:
-    """Return lane identifier from tags_json or filename, default '000'."""
+def _get_lane(f) -> int | None:
+    """Return the physical lane number, or None when it is not known.
+
+    None rather than a sentinel. ``"000"`` used to stand in for "I do not know",
+    and it is a fabricated value that would be emitted as a real lane the moment
+    a pipeline's own ``lane`` column gets filled. A lane is 1-based, so a parsed
+    zero is not a lane either.
+    """
+    typed = _typed(f, "lane", int)
+    if typed is not None:
+        return typed if typed > 0 else None
     tags = getattr(f, "tags_json", None) or []
     for tag in tags:
         if isinstance(tag, str) and tag.startswith("lane:"):
-            return tag.split(":", 1)[1]
+            # Both spellings the two legacy writers produced ("1" and "001") are
+            # one lane. Read as strings they were two dict keys, which is how one
+            # physical lane became two units and a sample's mates stopped
+            # pairing.
+            digits = tag.split(":", 1)[1].strip()
+            return int(digits) if digits.isdigit() and int(digits) > 0 else None
     filename = getattr(f, "filename", "") or ""
     m = re.search(r"_L(\d{3})_", filename)
     if m:
-        return m.group(1)
-    return "000"
+        return int(m.group(1)) or None
+    return None
+
+
+def _sequencing_unit(f) -> tuple:
+    """What tells two sequencing units of one sample apart, as a sort key.
+
+    The read-group axis is (flow cell, lane): ``L001`` on two flow cells is two
+    different lanes, so a lane number alone collides. A fetched FASTQ has neither
+    and carries its archive run accession instead, which distinguishes sibling
+    runs of one sample without pretending to be a lane.
+
+    Everything unknown collapses to one implicit unit, which is the case that
+    must stay untouched: a CRO's pre-merged FASTQs have no lane at all.
+    """
+    return (
+        _typed(f, "flowcell_id", str) or "",
+        _get_lane(f) or 0,
+        _typed(f, "source_run_accession", str) or "",
+    )
 
 
 def _input_files(sample) -> list:
@@ -340,11 +396,12 @@ def _unusable_reads_gap(
 
 
 def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[str, str]]:
-    """Extract (fastq_1, fastq_2) pairs grouped by lane.
+    """Extract (fastq_1, fastq_2) pairs grouped by sequencing unit.
 
-    Excludes index reads (I1, I2). Uses tags_json read type when available,
-    falls back to Illumina filename convention (_R1_/_R2_).
-    Returns one tuple per lane, sorted by lane number.
+    Excludes index reads (I1, I2). Uses the file's typed read type when
+    available, falling back to its legacy tag and then to the Illumina filename
+    convention (_R1_/_R2_). Returns one tuple per sequencing unit, in a
+    deterministic order; see ``_sequencing_unit`` for what separates two of them.
 
     ``files`` lets the schema-driven path pass only the files that satisfy the
     read column's own pattern. Without it the unclassified fallback below will
@@ -356,24 +413,24 @@ def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[s
         return [("", "")]
 
     # Classify each file by read type
-    lanes: dict[str, dict[str, str]] = {}
+    units: dict[tuple, dict[str, str]] = {}
     unclassified = []
     for f in fastq_files:
         read_type = _get_read_type(f)
         if read_type and read_type.startswith("I"):
             continue  # Skip index reads
         if read_type in ("R1", "R2"):
-            lane = _get_lane(f)
-            lanes.setdefault(lane, {})
-            lanes[lane][read_type] = f.storage_uri
+            unit = _sequencing_unit(f)
+            units.setdefault(unit, {})
+            units[unit][read_type] = f.storage_uri
         else:
             unclassified.append(f)
 
-    if lanes:
+    if units:
         result = []
-        for lane_key in sorted(lanes):
-            r1 = lanes[lane_key].get("R1", "")
-            r2 = lanes[lane_key].get("R2", "")
+        for unit_key in sorted(units):
+            r1 = units[unit_key].get("R1", "")
+            r2 = units[unit_key].get("R2", "")
             result.append((r1, r2))
         return result
 

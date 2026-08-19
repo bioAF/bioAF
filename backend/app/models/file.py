@@ -41,6 +41,32 @@ class File(Base):
     sha256_checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
     artifact_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     sequencing_batch_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("sequencing_batches.id"), nullable=True)
+    # Sequencing identity: which unit of sequencing this file came from. bioAF's
+    # model is sample -> files with nothing in between, so a sample sequenced
+    # over several lanes, or re-sequenced in a top-up, had nowhere to record it
+    # and three services improvised `lane:`/`read:` strings in tags_json instead.
+    # Untyped strings are why two spellings of one lane could coexist ("1" from
+    # one writer, "001" from another), which split one physical lane into two
+    # units and left a sample's mates unpaired.
+    #
+    # Every column is nullable and NULL means "not known", never a sentinel: a
+    # lab receiving pre-merged FASTQs from a CRO has no lane at all and must be
+    # wholly unaffected. Lane is the physical lane number (1-based, so 0 is not a
+    # lane); read_type is R1/R2/I1/I2.
+    lane: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    read_type: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    # A lane number alone collides across flow cells (L001 on two flow cells is
+    # two different lanes), so the read-group axis is (flowcell_id, lane). Both
+    # of these live in the FASTQ header rather than the filename, and whether
+    # bioAF reads that header is an open decision; nothing populates them yet.
+    flowcell_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    index_sequence: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # The archive run a fetched FASTQ came from (ENA/SRA, e.g. SRR390728). Its
+    # own field because it is NOT a lane: fetchngs used to fabricate lane numbers
+    # so a sample's sibling runs stayed on separate sheet rows, which promoted a
+    # fiction into the lane axis. It tells sequencing units apart the same way a
+    # lane does, without claiming to be one.
+    source_run_accession: Mapped[str | None] = mapped_column(String(64), nullable=True)
     storage_deleted: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     is_global: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
