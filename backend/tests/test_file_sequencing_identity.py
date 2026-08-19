@@ -344,24 +344,103 @@ async def _run_backfill(session):
 
 
 @pytest.mark.asyncio
-async def test_backfill_reads_both_spellings_of_a_legacy_lane_tag(session, admin_user):
-    """The two writers disagreed, so the backfill has to accept both and land on
-    one integer. This is where the existing rows stop being two units."""
-    padded = await _seed(
+async def test_backfill_reads_the_legacy_read_tag(session, admin_user):
+    """Both writers spelled the read tag the same way, so it is trustworthy."""
+    r1 = await _seed(
         session, admin_user, filename="a.fastq.gz", storage_uri="gs://b/a.fastq.gz", tags_json=["read:R1", "lane:001"]
     )
-    bare = await _seed(
+    r2 = await _seed(
         session, admin_user, filename="b.fastq.gz", storage_uri="gs://b/b.fastq.gz", tags_json=["read:R2", "lane:1"]
     )
 
     await _run_backfill(session)
-    await session.refresh(padded)
-    await session.refresh(bare)
+    await session.refresh(r1)
+    await session.refresh(r2)
 
-    assert padded.lane == 1
-    assert bare.lane == 1
-    assert padded.read_type == "R1"
-    assert bare.read_type == "R2"
+    assert r1.read_type == "R1"
+    assert r2.read_type == "R2"
+
+
+@pytest.mark.asyncio
+async def test_backfill_never_takes_a_lane_from_a_tag(session, admin_user):
+    """Two writers produced lane tags and only one meant a lane.
+
+    Measured on the demo before this was written: 41 files carry a lane tag, 37
+    of them fetchngs fabrications whose names carry no lane at all, and ZERO
+    files carry a real lane tag without ``_LNNN_`` in the name. So a lane comes
+    from the filename, which is the only evidence that distinguishes the two, and
+    a tagged file whose name says nothing keeps a NULL lane rather than
+    inheriting a number it was never sequenced in.
+    """
+    fetched = await _seed(
+        session,
+        admin_user,
+        filename="SRX25642458_SRR30176122_1.fastq.gz",
+        storage_uri="gs://b/SRX25642458_SRR30176122_1.fastq.gz",
+        tags_json=["read:R1", "lane:001"],
+    )
+
+    await _run_backfill(session)
+    await session.refresh(fetched)
+
+    assert fetched.lane is None
+    assert fetched.read_type == "R1"
+
+
+@pytest.mark.asyncio
+async def test_backfill_recovers_the_accession_the_fabricated_lane_stood_in_for(session, admin_user):
+    """Dropping the fabricated lane without recovering this would be a silent
+    loss, not a fix: two sibling runs under one sample would collapse into one
+    implicit unit, emit one row instead of two, and drop a file with no error."""
+    a = await _seed(
+        session,
+        admin_user,
+        filename="SRX25642458_SRR30176122_1.fastq.gz",
+        storage_uri="gs://b/SRX25642458_SRR30176122_1.fastq.gz",
+        tags_json=["read:R1", "lane:001"],
+    )
+    b = await _seed(
+        session,
+        admin_user,
+        filename="SRX25642461_SRR30176116_1.fastq.gz",
+        storage_uri="gs://b/SRX25642461_SRR30176116_1.fastq.gz",
+        tags_json=["read:R1", "lane:002"],
+    )
+
+    await _run_backfill(session)
+    await session.refresh(a)
+    await session.refresh(b)
+
+    assert a.source_run_accession == "SRR30176122"
+    assert b.source_run_accession == "SRR30176116"
+
+
+@pytest.mark.asyncio
+async def test_backfill_reads_a_real_lane_from_the_filename(session, admin_user):
+    """The owner's own upload: a genuine two-lane sample, whose tags spell the
+    lane bare (``lane:1``) and whose names carry ``_L001_``/``_L002_``."""
+    one = await _seed(
+        session,
+        admin_user,
+        filename="pbmc_1k_v3_S1_L001_R1_001.fastq.gz",
+        storage_uri="gs://b/pbmc_1k_v3_S1_L001_R1_001.fastq.gz",
+        tags_json=["lane:1", "read:R1", "sample:pbmc_1k_v3"],
+    )
+    two = await _seed(
+        session,
+        admin_user,
+        filename="pbmc_1k_v3_S1_L002_R2_001.fastq.gz",
+        storage_uri="gs://b/pbmc_1k_v3_S1_L002_R2_001.fastq.gz",
+        tags_json=["lane:2", "read:R2", "sample:pbmc_1k_v3"],
+    )
+
+    await _run_backfill(session)
+    await session.refresh(one)
+    await session.refresh(two)
+
+    assert one.lane == 1
+    assert two.lane == 2
+    assert one.source_run_accession is None
 
 
 @pytest.mark.asyncio
@@ -468,7 +547,13 @@ async def test_backfill_never_overwrites_a_value_already_typed(session, admin_us
 async def test_typed_columns_are_queryable(session, admin_user):
     """The point of a column over a JSONB string: the database can group on it,
     which is what the read-group axis needs in phase C."""
-    await _seed(session, admin_user, filename="e.fastq.gz", storage_uri="gs://b/e.fastq.gz", tags_json=["lane:3"])
+    await _seed(
+        session,
+        admin_user,
+        filename="e_S1_L003_R1_001.fastq.gz",
+        storage_uri="gs://b/e_S1_L003_R1_001.fastq.gz",
+        tags_json=[],
+    )
     await _run_backfill(session)
 
     found = (await session.execute(select(File).where(File.lane == 3))).scalars().all()

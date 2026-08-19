@@ -33,9 +33,15 @@ different lanes, so the column has to exist for that grouping to be sound. Both
 values live in the FASTQ header rather than in the filename, and whether bioAF
 reads that header is an open decision for the owner.
 
-The backfill reads the existing tags first, then falls back to the filename for
-FASTQs that carry the Illumina convention. It fills holes only: a value a writer
-has already stated is never overwritten, so re-running it is a no-op.
+The backfill reads the existing tags for the read type and the FILENAME for the
+lane, and the asymmetry is deliberate. Both writers spelled the read tag the same
+way, so it is trustworthy; only one of them ever meant a lane. See statement 2:
+the rule was measured against the demo's own rows rather than reasoned about, and
+reading the lane tag would have written a lane number onto 37 files that were
+never sequenced in one.
+
+It fills holes only: a value a writer has already stated is never overwritten, so
+re-running it is a no-op.
 """
 
 import sqlalchemy as sa
@@ -52,12 +58,13 @@ depends_on = None
 # never runs the chain, so a backfill asserted anywhere else would be a claim
 # about SQL nobody had executed.
 BACKFILL_STATEMENTS: tuple[str, ...] = (
-    # 1. Read type from the legacy `read:` tag.
+    # 1. Read type from the legacy `read:` tag. Both writers spelled this one the
+    #    same way, so the tag is trustworthy.
     #
-    # The CASE guard matters: tags_json is JSONB with an array default but
-    # nothing constrains it to one, and jsonb_array_elements_text raises on an
-    # object. A migration that dies on one odd row takes the whole deploy with
-    # it.
+    #    The CASE guard matters: tags_json is JSONB with an array default but
+    #    nothing constrains it to one, and jsonb_array_elements_text raises on an
+    #    object. A migration that dies on one odd row takes the whole deploy with
+    #    it.
     """
     UPDATE files
     SET read_type = tagged.read_type
@@ -74,36 +81,57 @@ BACKFILL_STATEMENTS: tuple[str, ...] = (
       AND tagged.read_type IS NOT NULL
       AND files.read_type IS NULL
     """,
-    # 2. Lane from the legacy `lane:` tag, accepting BOTH spellings the two
-    #    writers produced and landing on one integer. `0*[1-9][0-9]*` is what
-    #    makes "1" and "001" the same lane while refusing "000": that was
-    #    _get_lane's "I do not know" default, and read as a number it becomes
-    #    lane 0, a lane no sequencer has.
+    # 2. Lane from the FILENAME, and deliberately never from the `lane:` tag.
+    #
+    #    Two writers produced lane tags and only one of them meant a lane.
+    #    upload_service tagged a real lane, and only ever when the Illumina
+    #    filename matched, so a genuine lane tag ALWAYS co-occurs with `_LNNN_`
+    #    in the name. fetchngs fabricated a per-source-run ordinal and wrote it
+    #    under the same key, on files whose names carry no lane at all.
+    #
+    #    Measured on the demo before writing this: 41 files carry a lane tag, 37
+    #    of them fetchngs fabrications with no `_LNNN_` filename, and ZERO files
+    #    have a real lane tag without one. So reading the filename alone loses
+    #    nothing real and admits no fiction, which reading the tag would: it
+    #    would have written lane = 1..21 onto 37 files that were never sequenced
+    #    in those lanes.
     """
     UPDATE files
-    SET lane = tagged.lane
-    FROM (
-        SELECT f.id,
-               ((regexp_match(tag, '^lane:0*([1-9][0-9]*)$'))[1])::int AS lane
-        FROM files f
-        CROSS JOIN LATERAL jsonb_array_elements_text(
-            CASE WHEN jsonb_typeof(f.tags_json) = 'array' THEN f.tags_json ELSE '[]'::jsonb END
-        ) AS tag
-        WHERE tag LIKE 'lane:%'
-    ) AS tagged
-    WHERE files.id = tagged.id
-      AND tagged.lane IS NOT NULL
-      AND files.lane IS NULL
+    SET lane = ((regexp_match(filename, '_L0*([1-9][0-9]*)_'))[1])::int
+    WHERE lane IS NULL
+      AND filename ~ '_L0*[1-9][0-9]*_'
+      AND (
+        filename LIKE '%.fastq.gz' OR filename LIKE '%.fq.gz'
+        OR filename LIKE '%.fastq' OR filename LIKE '%.fq'
+      )
     """,
-    # 3. Whatever the tags did not answer, from the filename, for FASTQs only:
-    #    the Illumina convention is a FASTQ convention, and a name is a hint
-    #    rather than a source of truth, so a name that does not carry the
-    #    convention leaves the columns NULL.
+    # 3. Read type from the filename for anything the tags did not answer. The
+    #    Illumina convention is a FASTQ convention, and a name is a hint rather
+    #    than a source of truth, so a name that does not carry it leaves the
+    #    column NULL.
     """
     UPDATE files
-    SET read_type = COALESCE(read_type, (regexp_match(filename, '_(R[12]|I[12])_'))[1]),
-        lane = COALESCE(lane, ((regexp_match(filename, '_L0*([1-9][0-9]*)_'))[1])::int)
-    WHERE (read_type IS NULL OR lane IS NULL)
+    SET read_type = (regexp_match(filename, '_(R[12]|I[12])_'))[1]
+    WHERE read_type IS NULL
+      AND filename ~ '_(R[12]|I[12])_'
+      AND (
+        filename LIKE '%.fastq.gz' OR filename LIKE '%.fq.gz'
+        OR filename LIKE '%.fastq' OR filename LIKE '%.fq'
+      )
+    """,
+    # 4. The source run accession, recovered from the name of a fetched FASTQ.
+    #
+    #    This is what those 37 files were really distinguished by, and it is the
+    #    value the fabricated lane stood in for. Without it they would all
+    #    collapse into one implicit sequencing unit, and a sample holding two
+    #    sibling runs would emit one row instead of two, dropping a file with no
+    #    error. Every one of the 37 carries a parseable accession
+    #    (SRX25642458_SRR30176122_1.fastq.gz -> SRR30176122), so none is lost.
+    """
+    UPDATE files
+    SET source_run_accession = (regexp_match(filename, '(?:^|_)([SED]RR[0-9]+)'))[1]
+    WHERE source_run_accession IS NULL
+      AND filename ~ '(^|_)[SED]RR[0-9]+'
       AND (
         filename LIKE '%.fastq.gz' OR filename LIKE '%.fq.gz'
         OR filename LIKE '%.fastq' OR filename LIKE '%.fq'
