@@ -128,11 +128,14 @@ export default function PipelineLauncherPage() {
       }
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   // `declaredColumns` is here so that editing a column re-previews the sheet.
   // Without it the Values step could change the declaration and the Review step
   // would still show the sheet from before the edit. It cannot loop: the adopt
-  // below returns the held array unchanged once it is non-null.
+  // above returns the held array unchanged once it is non-null.
+  //
+  // The disable must stay on the line immediately before the array, or it
+  // stops applying to it and unsuppresses the `pipelineKey` warning.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues, declaredColumns]);
 
   async function loadData() {
