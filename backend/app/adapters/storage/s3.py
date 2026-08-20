@@ -770,9 +770,7 @@ class S3StorageProvider(StorageProvider):
         try:
             # The HTTP range is inclusive at both ends, and S3 serves what it
             # has when the object is shorter.
-            resp = self._get_s3_client(creds).get_object(
-                Bucket=bucket, Key=key, Range=f"bytes=0-{max(length - 1, 0)}"
-            )
+            resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key, Range=f"bytes=0-{max(length - 1, 0)}")
         except ClientError as e:
             if _is_not_found(e):
                 raise StorageObjectNotFound(uri) from e

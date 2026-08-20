@@ -281,9 +281,7 @@ class TestThroughTheRealRegistrationPath:
         run, sample = world["run"], world["sample"]
         run.samplesheet_csv = "sample,fastq_1\r\nSAMPLE_101,gs://b/a.fastq.gz\r\n"
         run.samplesheet_mapping_json = {"values": {}, "bindings": {}}
-        run.samplesheet_emitted_json = [
-            {"name": "SAMPLE_101", "uuid": str(sample.uuid), "sample_id": sample.id}
-        ]
+        run.samplesheet_emitted_json = [{"name": "SAMPLE_101", "uuid": str(sample.uuid), "sample_id": sample.id}]
         await session.flush()
 
         created = await PipelineOutputService.register_outputs(

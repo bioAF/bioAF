@@ -141,9 +141,7 @@ class TestSarekLaneIsReported:
         does for every other column."""
         sample = _make_sample(1, "GUT_A", files=_pair("GUT_A_S1_L001", lane=1), **SAREK_FIELDS)
 
-        csv_text = SampleSheetService.generate_from_contract(
-            _contract("sarek"), [sample], {}, {"1": {"lane": "5"}}
-        )
+        csv_text = SampleSheetService.generate_from_contract(_contract("sarek"), [sample], {}, {"1": {"lane": "5"}})
 
         assert _column(csv_text, "lane") == ["5"]
 
@@ -204,10 +202,7 @@ class TestTaxprofilerRunAccession:
         sample = _make_sample(
             1,
             "SAMPLE_A",
-            files=(
-                _pair("SRR111", source_run_accession="SRR111")
-                + _pair("SRR222", source_run_accession="SRR222")
-            ),
+            files=(_pair("SRR111", source_run_accession="SRR111") + _pair("SRR222", source_run_accession="SRR222")),
         )
 
         csv_text = SampleSheetService.generate_from_contract(
@@ -220,10 +215,7 @@ class TestTaxprofilerRunAccession:
         sample = _make_sample(
             1,
             "SAMPLE_A",
-            files=(
-                _pair("SRR111", source_run_accession="SRR111")
-                + _pair("SRR222", source_run_accession="SRR222")
-            ),
+            files=(_pair("SRR111", source_run_accession="SRR111") + _pair("SRR222", source_run_accession="SRR222")),
         )
 
         SampleSheetService.check_contract_satisfiable(

@@ -40,9 +40,7 @@ async def _owned_experiment(session: AsyncSession, org_id: int, experiment_id: i
 
 
 async def _owned_project(session: AsyncSession, org_id: int, project_id: int) -> Project:
-    project = await session.scalar(
-        select(Project).where(Project.id == project_id, Project.organization_id == org_id)
-    )
+    project = await session.scalar(select(Project).where(Project.id == project_id, Project.organization_id == org_id))
     if project is None:
         raise HTTPException(404, "Project not found")
     return project

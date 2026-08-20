@@ -549,9 +549,7 @@ class SampleService:
         carry hundreds of files, and loading them for every detail view would be
         a cost paid by everyone for the benefit of one page.
         """
-        result = await session.execute(
-            select(Sample).options(selectinload(Sample.files)).where(Sample.id == sample_id)
-        )
+        result = await session.execute(select(Sample).options(selectinload(Sample.files)).where(Sample.id == sample_id))
         return result.scalar_one_or_none()
 
     @staticmethod

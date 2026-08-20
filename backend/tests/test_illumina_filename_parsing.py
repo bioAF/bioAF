@@ -39,7 +39,10 @@ def test_an_index_read_is_parsed():
 
 
 def test_i2_is_parsed():
-    assert parse_illumina_filename("PBMC_S1_L001_I2_001.fastq.gz")["read"] == "I2"
+    parsed = parse_illumina_filename("PBMC_S1_L001_I2_001.fastq.gz")
+
+    assert parsed is not None
+    assert parsed["read"] == "I2"
 
 
 def test_ri_is_not_a_read_code():
@@ -94,6 +97,7 @@ def test_the_partial_readers_agree_with_the_whole_parser():
         "PBMC_S1_L003_R1_001.fq.gz",
     ):
         parsed = parse_illumina_filename(name)
+        assert parsed is not None
         assert parsed["read"] == read_type_from_filename(name)
         assert parsed["lane"] == lane_from_filename(name)
 

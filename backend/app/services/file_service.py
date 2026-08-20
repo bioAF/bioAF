@@ -61,7 +61,9 @@ class FileService:
         return file
 
     @staticmethod
-    async def get_file(session: AsyncSession, file_id: int, org_id: int, *, include_deleted: bool = False) -> File | None:
+    async def get_file(
+        session: AsyncSession, file_id: int, org_id: int, *, include_deleted: bool = False
+    ) -> File | None:
         """One file, or None when it is gone.
 
         A deleted file reads as absent, which is what every caller already
@@ -70,8 +72,8 @@ class FileService:
         or a launch. ``include_deleted`` is for the paths whose subject IS the
         record (provenance, audit), not for working views.
         """
-        query = select(File).options(selectinload(File.uploader)).where(
-            File.id == file_id, File.organization_id == org_id
+        query = (
+            select(File).options(selectinload(File.uploader)).where(File.id == file_id, File.organization_id == org_id)
         )
         if not include_deleted:
             query = query.where(File.deleted_at.is_(None))
@@ -104,9 +106,7 @@ class FileService:
             .options(selectinload(File.uploader))
             .where(File.organization_id == org_id, File.deleted_at.is_(None))
         )
-        count_query = select(func.count(File.id)).where(
-            File.organization_id == org_id, File.deleted_at.is_(None)
-        )
+        count_query = select(func.count(File.id)).where(File.organization_id == org_id, File.deleted_at.is_(None))
 
         if search:
             pattern = f"%{search}%"

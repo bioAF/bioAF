@@ -177,7 +177,9 @@ class SamplesheetMappingService:
 
         return {
             "values": {
-                str(sample_id): {str(column): _described(entry) for column, entry in columns.items() if isinstance(entry, dict)}
+                str(sample_id): {
+                    str(column): _described(entry) for column, entry in columns.items() if isinstance(entry, dict)
+                }
                 for sample_id, columns in (snapshot.get("values") or {}).items()
                 if isinstance(columns, dict)
             },
@@ -313,9 +315,7 @@ class SamplesheetMappingService:
                 for field in ((mapping.columns_json or {}).get("fields") or [])
                 if isinstance(field, dict)
             }
-            mapping.columns_json = {
-                "fields": [_stamped_field(field, user_id, previous_columns) for field in columns]
-            }
+            mapping.columns_json = {"fields": [_stamped_field(field, user_id, previous_columns) for field in columns]}
 
         mapping.updated_by_user_id = user_id
         await session.flush()

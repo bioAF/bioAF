@@ -127,9 +127,7 @@ class TestRowsAPipelineCannotTellApart:
             _make_sample(2, "GUT_B", files=_lanes("GUT_B", "001")),
         ]
 
-        SampleSheetService.check_contract_satisfiable(
-            contract, samples, {}, {"1": MAG_VALUES, "2": MAG_VALUES}
-        )
+        SampleSheetService.check_contract_satisfiable(contract, samples, {}, {"1": MAG_VALUES, "2": MAG_VALUES})
 
     def test_stating_the_distinguishing_value_unblocks_it(self):
         """The entry grid is where this gets answered. bioAF does not answer it
@@ -140,9 +138,7 @@ class TestRowsAPipelineCannotTellApart:
         # One value per sample cannot distinguish two rows OF that sample, so
         # this still blocks. Recorded as a known limit of the current grid.
         with pytest.raises(DomainError):
-            SampleSheetService.check_contract_satisfiable(
-                contract, [sample], {}, {"1": {**MAG_VALUES, "run": "1"}}
-            )
+            SampleSheetService.check_contract_satisfiable(contract, [sample], {}, {"1": {**MAG_VALUES, "run": "1"}})
 
     def test_a_pipeline_with_no_uniqueness_rule_takes_multi_lane_rows(self):
         """rnaseq and friends merge lanes by design. Nothing changes for them."""

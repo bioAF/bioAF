@@ -82,9 +82,7 @@ async def world(session):
 
 
 async def _delete(client, world):
-    return await client.delete(
-        f"/api/files/{world['doomed'].id}", headers=_headers(world["admin"], "admin")
-    )
+    return await client.delete(f"/api/files/{world['doomed'].id}", headers=_headers(world["admin"], "admin"))
 
 
 class TestTheRecordSurvives:
@@ -137,10 +135,10 @@ class TestTheRecordSurvives:
         await _delete(client, world)
 
         surviving = (
-            await session.execute(
-                select(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id)
-            )
-        ).scalars().all()
+            (await session.execute(select(PipelineRunInputFile).where(PipelineRunInputFile.pipeline_run_id == run.id)))
+            .scalars()
+            .all()
+        )
         assert [r.file_id for r in surviving] == [world["doomed"].id]
 
     @pytest.mark.asyncio

@@ -100,9 +100,7 @@ class TestTheDeclarationIsTheSheet:
         )
         sample = _make_sample(1, "SAMPLE_A", files=_reads("SAMPLE_A"))
 
-        csv_text = SampleSheetService.generate_from_contract(
-            contract, [sample], {}, {"1": {"condition": "treated"}}
-        )
+        csv_text = SampleSheetService.generate_from_contract(contract, [sample], {}, {"1": {"condition": "treated"}})
 
         assert _rows(csv_text)[0] == ["id", "R1", "R2", "condition"]
 
@@ -178,9 +176,7 @@ class TestABindingNeverGuesses:
         """The project's governing rule, at the one place a declared sheet could
         break it: choosing the wrong BAM is a wrong mapping, and a wrong mapping
         is worse than a missing one."""
-        contract = parse_declaration(
-            _declaration(_field("alignment", "file_type", "bam", required=True, type_="file"))
-        )
+        contract = parse_declaration(_declaration(_field("alignment", "file_type", "bam", required=True, type_="file")))
         sample = _make_sample(
             1,
             "A",
