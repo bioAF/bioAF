@@ -108,6 +108,12 @@ export default function PipelineLauncherPage() {
           sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
           parameters: userParams,
           sample_values: sampleValues,
+          // Only once the editor holds something. Null is "we have not been told
+          // yet", which is the state of the very first preflight, and it must
+          // reach the server as SILENCE so the saved design stands. Sending []
+          // there would preview a generic sheet for an experiment that has a
+          // declaration saved, and the editor would then adopt that emptiness.
+          ...(declaredColumns !== null ? { columns: declaredColumns } : {}),
         });
         if (cancelled) return;
         setPreflight(result);
@@ -123,7 +129,11 @@ export default function PipelineLauncherPage() {
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues]);
+  // `declaredColumns` is here so that editing a column re-previews the sheet.
+  // Without it the Values step could change the declaration and the Review step
+  // would still show the sheet from before the edit. It cannot loop: the adopt
+  // below returns the held array unchanged once it is non-null.
+  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues, declaredColumns]);
 
   async function loadData() {
     try {
@@ -182,6 +192,10 @@ export default function PipelineLauncherPage() {
         parameters: userParams,
         sample_values: sampleValues,
         drop_samples_without_files: dropSamplesWithoutFiles,
+        // What the review step just showed. Saving is a separate, deliberate
+        // act (design 02 section 4) and this does not perform it: the columns
+        // bind THIS run only, and the next one reads whatever is saved.
+        ...(declaredColumns !== null ? { columns: declaredColumns } : {}),
       };
       const run = await api.post<PipelineRun>("/api/pipeline-runs", request);
       router.push(`/pipelines/runs/${run.id}`);

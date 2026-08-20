@@ -111,7 +111,7 @@ class PipelineRunService:
             )
 
         contract, mapping, scope = await PipelineRunService._effective_contract(
-            session, pipeline, org_id, getattr(data, "experiment_id", None)
+            session, pipeline, org_id, getattr(data, "experiment_id", None), getattr(data, "columns", None)
         )
         # Whether a declaration is what defines this sheet at all. True only for
         # a pipeline that publishes no contract AND has no tailored generator:
@@ -200,24 +200,32 @@ class PipelineRunService:
         return published.is_empty
 
     @staticmethod
-    async def _effective_contract(session, pipeline, org_id: int, experiment_id: int | None):
+    async def _effective_contract(
+        session, pipeline, org_id: int, experiment_id: int | None, declared: list[dict] | None = None
+    ):
         """The contract this launch is judged against, and the design it carries.
 
         A pipeline's own ``schema_input.json`` when it publishes one. When it
-        does not, the columns a scientist DECLARED for this experiment, which is
-        the only statement about the sheet that exists for the seventeen
-        pipelines that publish nothing.
+        does not, the columns a scientist DECLARED, which is the only statement
+        about the sheet that exists for the seventeen pipelines that publish
+        nothing.
 
         Resolved once and used for the preflight and the launch alike. Two
         resolutions would let the review step confirm a sheet other than the one
         that runs, which is the single property that step exists to provide.
+
+        ``declared`` is the declaration ON SCREEN, and it outranks what is saved
+        for exactly that reason: a scientist editing a saved sheet and launching
+        without re-saving would otherwise review one sheet and run another. It is
+        NOT saved by being used, so nothing is promoted by launching. ``None``
+        means the caller said nothing about columns and the saved design stands;
+        an empty list means the editor was cleared, which is a statement and
+        means the generic sheet.
         """
         contract = await PipelineRunService._resolve_contract(session, pipeline)
-        mapping, scope = await SamplesheetMappingService.resolve(
-            session, org_id, pipeline.pipeline_key, experiment_id
-        )
+        mapping, scope = await SamplesheetMappingService.resolve(session, org_id, pipeline.pipeline_key, experiment_id)
         if contract.is_empty and not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
-            declared = SamplesheetMappingService.declared_columns(mapping)
+            declared = SamplesheetMappingService.declared_columns(mapping) if declared is None else declared
             if declared:
                 # Refused at save time, so this cannot normally raise. If a
                 # stored declaration is somehow unparseable, fall back to
@@ -226,9 +234,7 @@ class PipelineRunService:
                 try:
                     contract = parse_declaration({"fields": declared})
                 except ValueError:
-                    logger.warning(
-                        "Ignoring an unparseable samplesheet declaration for %s", pipeline.pipeline_key
-                    )
+                    logger.warning("Ignoring an unparseable samplesheet declaration for %s", pipeline.pipeline_key)
         return contract, mapping, scope
 
     @staticmethod
@@ -353,8 +359,8 @@ class PipelineRunService:
         else:
             sample_result = await session.execute(
                 select(Sample)
-            .where(Sample.experiment_id == data.experiment_id)
-            .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
+                .where(Sample.experiment_id == data.experiment_id)
+                .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
             )
             samples = list(sample_result.scalars().all())
 
@@ -375,7 +381,7 @@ class PipelineRunService:
         # The pipeline's own when it publishes one, and the columns a scientist
         # declared for this experiment when it does not.
         contract, _mapping, _scope = await PipelineRunService._effective_contract(
-            session, pipeline, org_id, data.experiment_id
+            session, pipeline, org_id, data.experiment_id, getattr(data, "columns", None)
         )
 
         if PipelineRunService._requires_per_sample_fastq(pipeline, contract):

@@ -967,6 +967,12 @@ export interface PipelineRunLaunchRequest {
   reference_genome?: string | null;
   alignment_algorithm?: string | null;
   drop_samples_without_files?: boolean;
+  /** The samplesheet columns declared on screen, for a pipeline that publishes
+   *  no contract. Omitted entirely when the editor has not been read yet, which
+   *  is not the same as an empty list: absent means "whatever is saved", `[]`
+   *  means the scientist cleared it and wants the generic sheet. Sending it does
+   *  NOT save it; that is the separate "Save for next time" button. */
+  columns?: DeclaredColumn[];
 }
 
 export interface PipelineRunCompareResponse {

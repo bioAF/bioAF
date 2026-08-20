@@ -79,6 +79,22 @@ class PipelineRunLaunchRequest(BaseModel):
     # in as inputs (they would compound the dataset every run). Set this to opt
     # in to using derived files as inputs.
     include_derived_inputs: bool = False
+    # The samplesheet columns declared ON SCREEN, for a pipeline that publishes
+    # no contract. Three distinct states, and the middle one is the one a
+    # refactor will get wrong:
+    #
+    #   absent  -> whatever is saved for this experiment. The caller has nothing
+    #              to say about columns, which is every client that predates this
+    #              field, so silence must never read as "declares nothing"
+    #   []      -> nothing in force. The scientist cleared the editor, and that
+    #              is a statement: today's generic sheet
+    #   [...]   -> this declaration, for this run, whether or not it was saved
+    #
+    # Saving stays deliberate (design 02 section 4) and nothing here promotes
+    # anything. This only stops saving being the ONLY route, so the review step
+    # can confirm the sheet that will actually run rather than the last one
+    # somebody saved.
+    columns: list[dict] | None = None
 
 
 class PipelineRunResponse(BaseModel):
