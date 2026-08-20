@@ -253,6 +253,87 @@ it("names the column the pipeline pairs it with, and the samples that repeat", (
   expect(alert).toHaveTextContent("GUT_A");
 });
 
+/**
+ * The same repetition, where bioAF DOES know the rows came off one sequencing
+ * run. Two lanes of one flow cell are the same run, so no value of `run` could
+ * separate them: any that did would be a lane wearing a run's name. Offering the
+ * field here is a wrong answer wearing the shape of a fix.
+ */
+const cameOffOneRun: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_required_fields",
+  reason:
+    "Some rows came off one sequencing run, so no value of 'run' could tell them apart. " +
+    "Merge those reads, or choose a pipeline that reads a lane.",
+  details: {
+    missing_columns: {
+      run: {
+        sample_field: null,
+        allowed_values: [],
+        reason: "not_unique",
+        unique_with: ["sample"],
+        remedy: "merge_reads",
+        repeated: [{ run: "HLK3VDSX7", source: "flowcell", lanes: ["1", "2"] }],
+        samples: [{ id: 5, external_id: "GUT_A" }],
+      },
+    },
+  },
+};
+
+/** ampliseq. Its rule is on the sample's own name ALONE, so the only field on
+ *  offer is the one that must not change. */
+const oneRowPerSample: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_required_fields",
+  reason:
+    "This pipeline takes one row per sample, and some samples have more than one set of reads. " +
+    "Merge those reads, or launch them as separate samples.",
+  details: {
+    missing_columns: {
+      sample: {
+        sample_field: "external_id",
+        allowed_values: [],
+        reason: "not_unique",
+        unique_with: [],
+        remedy: "one_row_per_sample",
+        repeated: [],
+        samples: [{ id: 5, external_id: "SAMPLEA" }],
+      },
+    },
+  },
+};
+
+it("names the flow cell and the lanes that came off one sequencing run", () => {
+  render(<LaunchBlockedNotice preflight={cameOffOneRun} />);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent(/one sequencing run/i);
+  expect(alert).toHaveTextContent("HLK3VDSX7");
+  expect(alert).toHaveTextContent(/lanes 1 and 2/i);
+});
+
+it("offers the remedy rather than a value, where no value would separate the rows", () => {
+  render(<LaunchBlockedNotice preflight={cameOffOneRun} />);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent(/merge those reads/i);
+  expect(alert).toHaveTextContent(/pipeline that reads a lane/i);
+  // The wording this item removes. It sends the scientist to supply a value for
+  // a column bioAF filled itself, and nothing they type unblocks the launch.
+  expect(alert).not.toHaveTextContent(/has to differ between rows/i);
+});
+
+it("does not lead the one-row-per-sample block with the sample's own name", () => {
+  render(<LaunchBlockedNotice preflight={oneRowPerSample} />);
+
+  const alert = screen.getByRole("alert");
+  expect(alert).toHaveTextContent(/takes one row per sample/i);
+  expect(alert).toHaveTextContent("SAMPLEA");
+  // Naming the column first is what sent scientists to rename their sample,
+  // which corrupts the LIMS record and still does not launch.
+  expect(alert).not.toHaveTextContent(/has to be different in every row/i);
+});
+
 it("says a row is incomplete rather than that the field cannot be derived", () => {
   render(<LaunchBlockedNotice preflight={incompleteRow} />);
 

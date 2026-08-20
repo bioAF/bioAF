@@ -137,19 +137,34 @@ _UNIT_FIELDS = ("flowcell_id", "lane", "source_run_accession")
 _UNKNOWN_UNIT = ("", 0, "")
 
 # Samplesheet columns bioAF fills from the sequencing unit the row came from,
-# keyed on the column name the pipeline's own schema uses.
+# keyed on the column name the pipeline's own schema uses. Each names the facts
+# that answer it, most faithful first.
 #
 # The discipline is the one ``_COLUMN_TO_SAMPLE_FIELD`` states: exact, explicit
 # matching, and only where the column's MEANING is the fact bioAF holds. A lane
-# is a lane, so sarek's `lane` is reporting a measurement. mag's and ampliseq's
-# `run` is a sequencing RUN, which a lane is NOT, and taxprofiler's
-# `run_accession` names a real archive run rather than anything derived from a
-# filename. Those keep asking, because a wrong mapping is worse than a missing
-# one and this is the exact spot where a plausible-looking guess would enter the
-# sheet as a scientific claim.
-_COLUMN_TO_SEQUENCING_FACT: dict[str, str] = {
-    "lane": "lane",
-    "run_accession": "source_run_accession",
+# is a lane, so sarek's `lane` reports a measurement. A `run` is a sequencing
+# RUN, and a flow cell IS one in Illumina terms
+# (``instrument:runNumber:flowcellID:lane``), so a row off a known flow cell can
+# report its run. The accession comes first where a row has both: it names a run
+# the archive published, where the flow cell is bioAF's own reading of a header.
+#
+# A LANE is still never written into a run, which is the half of decision 7 that
+# stands. Two lanes of one flow cell are the same sequencing run, and what
+# happens to them is decided in ``_uniqueness_gaps``, not here: the fill reports
+# what bioAF measured, and where the measurement cannot separate two rows the
+# block says so rather than inventing a difference.
+_COLUMN_TO_SEQUENCING_FACT: dict[str, tuple[str, ...]] = {
+    "lane": ("lane",),
+    "run_accession": ("source_run_accession",),
+    "run": ("source_run_accession", "flowcell_id"),
+}
+
+# How a filled `run` was sourced, for a block that has to name it. "flow cell
+# HLK3VDSX7" and "run SRR111" are different claims and only one of them is true
+# of any given row.
+_FACT_SOURCE: dict[str, str] = {
+    "flowcell_id": "flowcell",
+    "source_run_accession": "accession",
 }
 
 
@@ -162,10 +177,10 @@ def _unit_facts(contract, unit: tuple) -> dict[str, str]:
     """
     known = dict(zip(_UNIT_FIELDS, unit))
     facts: dict[str, str] = {}
-    for column, field in _COLUMN_TO_SEQUENCING_FACT.items():
+    for column, fields in _COLUMN_TO_SEQUENCING_FACT.items():
         if column not in getattr(contract, "columns", ()):
             continue
-        value = known.get(field)
+        value = next((known[f] for f in fields if known.get(f)), None)
         if value:
             facts[column] = str(value)
     return facts
@@ -704,11 +719,7 @@ def _ordered_read_columns(contract) -> list[str]:
     """
     if getattr(contract, "is_declared", False):
         bindings = getattr(contract, "bindings", None) or {}
-        mates = {
-            binding.get("key"): column
-            for column, binding in bindings.items()
-            if binding.get("source") == "read"
-        }
+        mates = {binding.get("key"): column for column, binding in bindings.items() if binding.get("source") == "read"}
         return [mates[key] for key in ("1", "2") if key in mates]
 
     columns = contract.read_columns
@@ -995,6 +1006,22 @@ def _blocked_summary(missing: dict[str, dict]) -> str:
     # looking for a value to supply for every sample, when what is needed is one
     # that differs between the repeated rows.
     if reasons == {"not_unique"}:
+        # Some repetitions cannot be answered by typing anything at all, and a
+        # sentence asking for a value is then a wrong answer wearing the shape of
+        # a fix. Each of these names what would actually let the run through.
+        remedies = {gap.get("remedy") for gap in missing.values()}
+        if remedies == {"one_row_per_sample"}:
+            return (
+                "This pipeline takes one row per sample, and some samples have more than one set "
+                "of reads. Merge those reads, or launch them as separate samples."
+            )
+        if remedies == {"merge_reads"}:
+            return (
+                f"Some rows came off one sequencing run, so no value of {columns} could tell them "
+                "apart. Merge those reads, or choose a pipeline that reads a lane."
+            )
+        if None not in remedies:
+            return f"Some rows cannot be told apart by {columns}, and no value would separate them."
         return f"This pipeline needs {columns} to tell some rows apart, and they would repeat."
 
     if reasons <= _VALUE_REASONS:
@@ -1182,6 +1209,88 @@ def _incomplete_row_gaps(contract, samples: list, parameters: dict, sample_value
     return gaps
 
 
+def _is_sample_identity(column: str) -> bool:
+    """Whether a column carries the sample's own name and nothing else.
+
+    ``run_accession`` maps to ``external_id`` too, but only as a FALLBACK for a
+    sample bioAF fetched nothing for. It names a sequencing run, so it is not
+    the sample's identity and a rule mentioning it is not a rule about one row
+    per sample.
+    """
+    return _COLUMN_TO_SAMPLE_FIELD.get(column) == "external_id" and column not in _COLUMN_TO_SEQUENCING_FACT
+
+
+def _repeated_runs(contract, column: str, samples: list) -> list[dict]:
+    """Sequencing runs that would contribute more than one row to one sample.
+
+    The evidence behind "these came off one run": a KNOWN run value carrying two
+    or more of a sample's sequencing units, with the lanes that make them
+    separate units. Reported per run rather than per row, because the remedy is
+    about the run.
+
+    Empty where the run is unknown, and that emptiness is load-bearing. Two
+    lanes with no flow cell read may well be two different runs; bioAF never
+    read one, so it must not claim they are the same. There the column is
+    genuinely unanswered and the scientist is still asked.
+
+    Grouped per sample first. Two different samples sharing a flow cell is the
+    ordinary case and collides with nothing, so counting their units together
+    would manufacture a repeat that the sheet does not have.
+    """
+    fields = _COLUMN_TO_SEQUENCING_FACT.get(column)
+    read_columns = _ordered_read_columns(contract)
+    if not fields or not read_columns:
+        return []
+
+    lanes_by_run: dict[tuple[str, str], list[str]] = {}
+    for sample in samples:
+        accepted, _rejected = _eligible_reads(contract, sample, read_columns)
+        per_run: dict[tuple[str, str], list[str]] = {}
+        for unit, _reads in _fastq_units(sample, files=accepted):
+            known = dict(zip(_UNIT_FIELDS, unit))
+            source = next((f for f in fields if known.get(f)), None)
+            if source is None:
+                continue
+            lane = known.get("lane")
+            per_run.setdefault((str(known[source]), _FACT_SOURCE.get(source, source)), []).append(
+                str(lane) if lane else ""
+            )
+        for key, lanes in per_run.items():
+            if len(lanes) > 1:
+                lanes_by_run.setdefault(key, []).extend(lanes)
+
+    return [
+        {"run": value, "source": source, "lanes": sorted({lane for lane in lanes if lane})}
+        for (value, source), lanes in lanes_by_run.items()
+    ]
+
+
+def _uniqueness_remedy(column: str, companions: tuple, repeated: list[dict]) -> str | None:
+    """What would actually let these rows through, where a value would not.
+
+    ``None`` means the ordinary case: bioAF has no value for this column and the
+    scientist may well have one, so it is asked for. The two named remedies are
+    the cases where asking is a misdirection, and each one is a wrong answer
+    wearing the shape of a fix if it is left as a question.
+
+    ``one_row_per_sample``: every column in the rule is the sample's own name,
+    as in ampliseq's ``uniqueEntries: ["sample"]``. No value of any other column
+    can separate two rows of one sample, and the only field on offer is the
+    sample's own name, so complying corrupts the LIMS record and still does not
+    launch.
+
+    ``merge_reads``: the rows came off ONE sequencing run and differ only by
+    lane. Any value that separates them is a lane wearing a run's name, which is
+    the fiction bioAF refused to write itself and must not outsource.
+    """
+    group = (column, *companions)
+    if group and all(_is_sample_identity(c) for c in group):
+        return "one_row_per_sample"
+    if repeated:
+        return "merge_reads"
+    return None
+
+
 def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=None) -> dict[str, dict]:
     """Rows the pipeline would not be able to tell apart.
 
@@ -1195,10 +1304,16 @@ def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=No
     sheet, and it does so after the node has scaled up and the containers have
     pulled, which is the cost this check exists to avoid.
 
-    **bioAF does not fill the distinguishing value in.** A lane is not a
-    sequencing run; writing one in would be a guess carrying a scientific claim.
-    The block names the column the pipeline uses to tell the rows apart, and the
-    scientist states it.
+    **bioAF fills the distinguishing value only where it MEASURED it**, in
+    ``_unit_facts``. Two flow cells are two sequencing runs and the rows say so,
+    which is why most of this population now launches instead of arriving here.
+
+    What arrives here is what a measurement could not separate, and the block
+    has to be honest about which kind it is. Two lanes of ONE flow cell are the
+    same sequencing run, so no value would separate them: naming a column there
+    sends the scientist to invent a difference bioAF refused to invent itself.
+    ``_uniqueness_remedy`` decides that, and where it answers, the column is left
+    out of the entry grid and the block names the remedy instead.
     """
     declared = dict(getattr(contract, "unique_with", {}))
 
@@ -1273,12 +1388,24 @@ def _uniqueness_gaps(contract, samples: list, parameters: dict, sample_values=No
         for sid in offenders:
             if sid not in seen:
                 seen.append(sid)
+        # What would actually clear this, which is not always a value. Computed
+        # from the offending samples only: a run carried by a sample that is not
+        # in the block is not evidence about the block.
+        offending = [by_sample[sid] for sid in seen if sid in by_sample]
+        repeated = _repeated_runs(contract, column, offending)
+        remedy = _uniqueness_remedy(column, companions, repeated)
+
         gaps[column] = {
             "sample_field": _COLUMN_TO_SAMPLE_FIELD.get(column),
             "allowed_values": contract.enum_for(column),
             "pattern": getattr(contract, "patterns", {}).get(column),
             "reason": "not_unique",
             "unique_with": list(companions),
+            "remedy": remedy,
+            # Only the remedy that names them. An empty list elsewhere keeps the
+            # payload one shape, so a client never has to ask whether the key is
+            # there before asking what is in it.
+            "repeated": repeated if remedy == "merge_reads" else [],
             "samples": [
                 {
                     "id": sid,
@@ -1696,6 +1823,15 @@ class SampleSheetService:
         for column in ordered:
             gap = gaps.get(column)
             if gap is None:
+                continue
+            # A column no value could clear is not a question, and asking it is
+            # the misdirection this grid exists to avoid: two lanes of one flow
+            # cell stay blocked whatever is typed, and ampliseq's only field on
+            # offer is the sample's own name. The launch stays blocked either
+            # way; the block names the remedy instead. This is the one place the
+            # grid deliberately omits a blocking column, and it is why the omitted
+            # ones carry a ``remedy`` rather than being silently dropped.
+            if gap.get("remedy"):
                 continue
             sample_field = _COLUMN_TO_SAMPLE_FIELD.get(column)
             allowed = contract.enum_for(column)

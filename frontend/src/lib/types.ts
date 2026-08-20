@@ -791,6 +791,22 @@ export interface PipelineRunPreflight {
         // The other columns this one must be unique WITHIN, when the schema
         // declares a uniqueness rule. mag pairs `run` with `sample`.
         unique_with?: string[] | null;
+        // What would actually let the run through, where typing a value would
+        // not. Absent for the ordinary case, where bioAF has no value and the
+        // scientist may well have one, so the entry grid asks.
+        //
+        // "merge_reads": the rows came off ONE sequencing run and differ only by
+        // lane, so any value separating them is a lane wearing a run's name.
+        // "one_row_per_sample": the rule is on the sample's own name alone
+        // (ampliseq), so the only field on offer is the one they must not
+        // change. A column carrying either is left OUT of the entry grid, and
+        // this is what says why.
+        remedy?: "merge_reads" | "one_row_per_sample" | null;
+        // The sequencing runs that contribute more than one row, for a block
+        // that has to name them. Only populated for "merge_reads". `source`
+        // separates "flow cell HLK3VDSX7" from "run SRR111", which are different
+        // claims and only one is true of any given row.
+        repeated?: { run: string; source: "flowcell" | "accession"; lanes: string[] }[] | null;
       }
     >;
   };

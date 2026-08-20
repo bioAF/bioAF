@@ -6,6 +6,13 @@ import type { PipelineRunPreflight } from "@/lib/types";
  *  for the wrong problem. */
 const VALUE_REASONS = new Set(["invalid_characters", "collision", "not_unique", "empty_in_row"]);
 
+/** "1", "1 and 2", "1, 2 and 3". A scientist reads these as a sentence, and
+ *  "lanes 1,2" reads as a value they are supposed to type somewhere. */
+function listOf(items: string[]): string {
+  if (items.length < 2) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 /** Why this pipeline cannot run with the selected samples, shown while the user
  *  can still do something about it.
  *
@@ -27,7 +34,13 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
         <ul className="space-y-2">
           {Object.entries(missing).map(([column, info]) => (
             <li key={column} className="text-xs text-gray-700">
-              <span className="font-medium">{column.replace(/_/g, " ")}</span>
+              {/* The column leads every other sentence here. It must NOT lead
+                  this one: the column is the sample's own name, and naming it
+                  first is exactly what sent scientists to rename their sample,
+                  which corrupts the LIMS record and still does not launch. */}
+              {info.remedy !== "one_row_per_sample" && (
+                <span className="font-medium">{column.replace(/_/g, " ")}</span>
+              )}
               {/* Characters the pipeline will not take. bioAF does not rename
                   anything: it says which value was refused and offers a spelling
                   that would work, and the scientist decides whether to take it.
@@ -76,7 +89,51 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
                   supply one value for every sample, when what is needed is a
                   value that DIFFERS between the repeated rows. A sample
                   sequenced over two lanes is the ordinary way to arrive here. */}
-              {info.reason === "not_unique" && (
+              {/* These rows came off ONE sequencing run and differ only by
+                  lane, so no value could separate them: any that did would be a
+                  lane wearing a run's name. bioAF refused to write that itself,
+                  and must not ask the scientist to write it either. The remedy
+                  is the reads, or a different pipeline. */}
+              {info.reason === "not_unique" && info.remedy === "merge_reads" && (
+                <>
+                  {" cannot tell these rows apart, because they came off one sequencing run:"}
+                  <ul className="mt-0.5 ml-4 list-disc text-gray-600">
+                    {(info.repeated ?? []).map((entry) => (
+                      <li key={`${entry.source}:${entry.run}`}>
+                        {entry.source === "flowcell" ? "flow cell " : "run "}
+                        <span className="font-mono">{entry.run}</span>
+                        {entry.lanes.length > 0 && (
+                          <>
+                            {entry.lanes.length > 1 ? ", lanes " : ", lane "}
+                            {listOf(entry.lanes)}
+                          </>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-0.5 text-gray-600">
+                    Merge those reads into one pair per sample, or choose a pipeline that reads a lane.
+                  </div>
+                </>
+              )}
+
+              {/* ampliseq's rule is on the sample's own name ALONE, so no value
+                  of any other column can ever separate two of its rows. */}
+              {info.reason === "not_unique" && info.remedy === "one_row_per_sample" && (
+                <>
+                  {"This pipeline takes one row per sample, and these have more than one set of reads:"}
+                  <div className="mt-0.5 text-gray-600">
+                    {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+                  </div>
+                  <div className="mt-0.5 text-gray-600">
+                    Merge those reads, or launch them as separate samples.
+                  </div>
+                </>
+              )}
+
+              {/* The ordinary case: bioAF has no value for this column and the
+                  scientist may well have one, so it is still asked for. */}
+              {info.reason === "not_unique" && !info.remedy && (
                 <>
                   {info.unique_with && info.unique_with.length > 0 ? (
                     <>
