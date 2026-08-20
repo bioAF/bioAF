@@ -1,6 +1,7 @@
 """Register pipeline output files as File records in the database."""
 
 import logging
+import uuid as uuid_pkg
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.file import File
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample
+from app.services import asset_identity
 from app.services.file_service import FileService
 from app.services.file_type_utils import classify_artifact_type, detect_file_type
 
@@ -16,16 +18,54 @@ logger = logging.getLogger("bioaf.pipeline_output_service")
 
 class PipelineOutputService:
     @staticmethod
-    def _match_samples(filename: str, gcs_uri: str, sample_extids: list[tuple[str, int]]) -> list[int]:
-        """Return ids of samples this output file belongs to, matched by external_id.
+    def _match_samples(
+        filename: str,
+        gcs_uri: str,
+        sample_extids: list[tuple[str, int]],
+        sample_uids: list[tuple[uuid_pkg.UUID, int]] | None = None,
+    ) -> list[int]:
+        """Return ids of samples this output file belongs to.
 
-        Matches when the external_id is a full path segment of the GCS URI (e.g.
-        ``.../star/SAMPLE-101/...``) or the filename starts with ``<extid>_``/
-        ``<extid>.``. Returns [] for an output naming no sample, whether that is
-        an aggregate report (e.g. multiqc) or a per-sample file bioAF failed to
-        parse. Those two cannot be told apart from a name, so neither is guessed
-        at: the caller attaches the file to the run and to no sample.
+        Two routes, tried in that order.
+
+        **By identity**, when the path names a sample's own UID. That is exact:
+        the identifier bioAF put in the samplesheet is the one the pipeline named
+        the file after, so no spelling can drift between the two. A UID is found
+        wherever a pipeline puts it, because the position VARIES: nf-core/demo
+        writes it as a directory segment AND a filename prefix, nf-core/bamtofastq
+        writes it in the filename only, and a rule for one silently fails the
+        other.
+
+        **By name**, which is the live path until sheets emit identities, and
+        stays as the fallback afterwards. Matches when the external_id is a full
+        path segment (``.../star/SAMPLE-101/...``) or the filename starts with
+        ``<extid>_`` / ``<extid>.``.
+
+        The identity route is taken only when a UID in the path belongs to a
+        sample in THIS run, which keeps the change monotonic: it can add an exact
+        match, never remove one that works today. The spelling is ``s`` plus 32
+        lowercase hex and an md5 is also 32 hex, so a path like ``s<md5>.tmp``
+        parses as an identity belonging to nothing; letting that suppress name
+        matching would turn a correctly matched file into an unattributed one.
+
+        Returns [] for an output naming no sample, whether that is an aggregate
+        report (e.g. multiqc) or a per-sample file bioAF failed to parse. Those
+        two cannot be told apart from a name, so neither is guessed at: the caller
+        attaches the file to the run and to no sample. Once every sheet carries a
+        UID that ambiguity disappears, because a per-sample artifact always
+        carries one.
         """
+        if sample_uids:
+            named = asset_identity.uids_in(f"{gcs_uri or ''}/{filename or ''}")
+            if named:
+                by_identity = [sid for uid, sid in sample_uids if uid in named]
+                if by_identity:
+                    deduped: list[int] = []
+                    for sid in by_identity:
+                        if sid not in deduped:
+                            deduped.append(sid)
+                    return deduped
+
         segments = set((gcs_uri or "").split("/"))
         matched: list[int] = []
         for extid, sid in sample_extids:
@@ -70,17 +110,26 @@ class PipelineOutputService:
         # naming no sample is attached to the run alone.
         sample_ids: list[int] = []
         sample_extids: list[tuple[str, int]] = []
+        # The same samples by identity. Carried alongside the names rather than
+        # instead of them: no sheet emits a UID yet, so the names are still the
+        # live route, and an identity match is taken only when the path actually
+        # names one of these samples.
+        sample_uids: list[tuple[uuid_pkg.UUID, int]] = []
         if not is_project_scoped:
             result = await session.execute(
-                select(Sample.id, Sample.external_id)
+                select(Sample.id, Sample.external_id, Sample.uuid)
                 .join(PipelineRunSample, PipelineRunSample.sample_id == Sample.id)
                 .where(PipelineRunSample.pipeline_run_id == run.id)
             )
-            for sid, extid in result.all():
+            for sid, extid, suid in result.all():
                 sample_ids.append(sid)
                 if extid:
                     sample_extids.append((extid, sid))
+                if suid:
+                    sample_uids.append((suid, sid))
             # Longest external_id first so e.g. "SAMPLE-10" can't shadow "SAMPLE-101".
+            # UIDs need no such guard: they are fixed-length and bounded on both
+            # sides, so one can never be a prefix of another.
             sample_extids.sort(key=lambda t: len(t[0]), reverse=True)
 
         # Collect existing gcs_uris to skip duplicates
@@ -117,12 +166,13 @@ class PipelineOutputService:
                 artifact_type=artifact_type,
             )
 
-            # Associate the output with the sample(s) it belongs to, matching the
-            # sample external_id as a path segment or filename prefix. An output
-            # matching none is attached to the run alone: it used to be linked to
-            # every sample in the run, which put one sample's alignment on all of
-            # them. Fewer links, all of them true.
-            matched = PipelineOutputService._match_samples(filename, gcs_uri, sample_extids)
+            # Associate the output with the sample(s) it belongs to: by the
+            # sample's own identity where the path carries one, otherwise by its
+            # external_id as a path segment or filename prefix. An output matching
+            # none is attached to the run alone: it used to be linked to every
+            # sample in the run, which put one sample's alignment on all of them.
+            # Fewer links, all of them true.
+            matched = PipelineOutputService._match_samples(filename, gcs_uri, sample_extids, sample_uids)
             if not matched and sample_ids:
                 unattributed.append(filename)
             for sample_id in matched:
@@ -135,8 +185,7 @@ class PipelineOutputService:
             if len(unattributed) > 20:
                 shown += f", and {len(unattributed) - 20} more"
             logger.warning(
-                "Pipeline run %d: %d output file(s) name no sample in the run and are "
-                "attached to the run alone: %s",
+                "Pipeline run %d: %d output file(s) name no sample in the run and are attached to the run alone: %s",
                 run.id,
                 len(unattributed),
                 shown,
