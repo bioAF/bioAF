@@ -90,7 +90,27 @@ def parse(data: object) -> dict:
     if not line.startswith("@"):
         return {}
 
-    fields = line[1:].split(" ", 1)[0].split(":")
+    # EVERY whitespace-delimited token, not just the first. Measured on the
+    # demo rather than assumed: `fastq-dump` writes its own accession first and
+    # keeps the instrument's read name AFTER it, so reading only the first token
+    # threw away a flow cell and lane that were right there, on exactly the
+    # population that has no filename convention to fall back on.
+    #
+    #     @SRR30176122.1 A00609:829:HLK3VDSX7:1:1101:20202:1000 length=150
+    #
+    # This stays exact rather than becoming a guess: a token qualifies only by
+    # having seven colon-separated fields with a numeric lane, which neither
+    # `SRR30176122.1` nor `length=150` can satisfy.
+    for token in line[1:].split():
+        read = _read_name(token)
+        if read:
+            return read
+    return {}
+
+
+def _read_name(token: str) -> dict:
+    """What one whitespace-delimited token says, if it is an Illumina read name."""
+    fields = token.split(":")
     if len(fields) != _MODERN_FIELDS:
         return {}
 

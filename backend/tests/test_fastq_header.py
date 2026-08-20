@@ -62,6 +62,30 @@ class TestWhatItReads:
         assert fastq_header.parse(prefix[:200])["lane"] == 1
 
 
+class TestAnArchiveKeepsTheOriginalNameBesideItsOwn:
+    """Measured on the demo, not assumed. `fastq-dump` writes its accession
+    first and keeps the instrument's own read name AFTER it:
+
+        @SRR30176122.1 A00609:829:HLK3VDSX7:1:1101:20202:1000 length=150
+
+    Reading only the first token threw away a flow cell and lane that were right
+    there, on exactly the population (fetched data) that has no filename
+    convention to fall back on."""
+
+    SRA = "@SRR30176122.1 A00609:829:HLK3VDSX7:1:1101:20202:1000 length=150"
+
+    def test_it_reads_the_original_read_name(self):
+        assert fastq_header.parse(_gzipped(*_record(self.SRA))) == {
+            "flowcell_id": "HLK3VDSX7",
+            "lane": 1,
+        }
+
+    def test_the_accession_token_is_not_mistaken_for_one(self):
+        """`SRR30176122.1` carries no colons, so it cannot parse as a read name.
+        Scanning tokens stays exact rather than becoming a guess."""
+        assert fastq_header.parse(_gzipped(*_record("@SRR30176122.1 length=150"))) == {}
+
+
 class TestWhatItRefusesToGuess:
     def test_a_header_that_is_not_the_convention_yields_nothing(self):
         """An archive-downloaded FASTQ carries `@SRR000001.1 1 length=36`, which
