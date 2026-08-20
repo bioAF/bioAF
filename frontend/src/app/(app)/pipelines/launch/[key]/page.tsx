@@ -16,6 +16,7 @@ import { ParameterForm } from "@/components/pipelines/ParameterForm";
 import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
 import { LaunchBlockedNotice } from "@/components/pipelines/LaunchBlockedNotice";
 import { PerSampleValueGrid, type PerSampleValues } from "@/components/pipelines/PerSampleValueGrid";
+import { SamplesheetColumnEditor } from "@/components/pipelines/SamplesheetColumnEditor";
 import { SamplesheetReview } from "@/components/pipelines/SamplesheetReview";
 import type {
   PipelineCatalog,
@@ -25,6 +26,7 @@ import type {
   PipelineRunLaunchRequest,
   PipelineRun,
   PipelineRunPreflight,
+  DeclaredColumn,
 } from "@/lib/types";
 
 /** The wizard's steps, named rather than numbered. "Values" appears only when
@@ -75,6 +77,10 @@ export default function PipelineLauncherPage() {
   const [sampleValues, setSampleValues] = useState<PerSampleValues>({});
   const [saveScope, setSaveScope] = useState("experiment");
   const [savingDesign, setSavingDesign] = useState(false);
+  // The columns declared for a pipeline that publishes no contract. Null until
+  // the preflight has said what is in force, so an empty editor is never
+  // mistaken for a declaration of no columns.
+  const [declaredColumns, setDeclaredColumns] = useState<DeclaredColumn[] | null>(null);
 
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PipelineRunPreflight | null>(null);
@@ -103,7 +109,12 @@ export default function PipelineLauncherPage() {
           parameters: userParams,
           sample_values: sampleValues,
         });
-        if (!cancelled) setPreflight(result);
+        if (cancelled) return;
+        setPreflight(result);
+        // Adopted once, and never again while the scientist is editing: a
+        // later preflight must not overwrite the column they are part way
+        // through changing.
+        setDeclaredColumns((held) => held ?? result.prefill?.columns ?? []);
       } catch (e) {
         // A preflight that cannot run must not block a launch that would work.
         logError("checking whether this pipeline can run", e);
@@ -247,6 +258,7 @@ export default function PipelineLauncherPage() {
         experiment_id: selectedExperimentId,
         project_id: experiments.find((e) => e.id === selectedExperimentId)?.project?.id ?? null,
         values: sampleValues,
+        ...(preflight?.declaration?.declarable ? { columns: declaredColumns ?? [] } : {}),
       });
       toast.success("Saved for next time");
     } catch (e) {
@@ -285,10 +297,14 @@ export default function PipelineLauncherPage() {
   // do here", and hiding it when it IS needed strands the user on a Launch
   // button that never enables.
   const perSampleInputs = preflight?.per_sample_inputs ?? [];
+  // A pipeline that publishes no contract has a Values step whatever it asks
+  // for, because declaring the columns is the only way its sheet becomes
+  // anything other than bioAF's standard three.
+  const declarable = preflight?.declaration?.declarable ?? false;
   const steps: StepKey[] = [
     "experiment",
     "samples",
-    ...(perSampleInputs.length > 0 ? (["values"] as StepKey[]) : []),
+    ...(perSampleInputs.length > 0 || declarable ? (["values"] as StepKey[]) : []),
     "parameters",
     "review",
   ];
@@ -405,6 +421,14 @@ export default function PipelineLauncherPage() {
       {step === "values" && (
         <Card>
           <h2 className="text-lg font-semibold mb-4">Values for each sample</h2>
+          {declarable && (
+            <SamplesheetColumnEditor
+              columns={declaredColumns ?? []}
+              fileTypes={preflight?.declaration?.file_types ?? []}
+              customFields={preflight?.declaration?.custom_fields ?? []}
+              onChange={setDeclaredColumns}
+            />
+          )}
           <PerSampleValueGrid
             specs={perSampleInputs}
             samples={selectedSamples}
@@ -427,7 +451,10 @@ export default function PipelineLauncherPage() {
             </select>
             <button
               onClick={saveDesign}
-              disabled={savingDesign || Object.keys(sampleValues).length === 0}
+              disabled={
+                savingDesign ||
+                (Object.keys(sampleValues).length === 0 && (declaredColumns ?? []).length === 0)
+              }
               className="border px-3 py-1 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50"
             >
               {savingDesign ? "Saving..." : "Save for next time"}

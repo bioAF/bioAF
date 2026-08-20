@@ -97,6 +97,7 @@ async def resolve_mapping(
         project_id=mapping.project_id,
         values=SamplesheetMappingService.flatten(mapping),
         bindings=SamplesheetMappingService.flatten_bindings(mapping),
+        columns=SamplesheetMappingService.declared_columns(mapping),
         updated_at=mapping.updated_at,
     )
 
@@ -115,17 +116,24 @@ async def save_mapping(
     user_id = int(current_user["sub"])
     await _authorize_scope(session, current_user, data, org_id)
 
-    mapping = await SamplesheetMappingService.save(
-        session,
-        org_id,
-        user_id,
-        data.pipeline_key,
-        data.scope,
-        experiment_id=data.experiment_id,
-        project_id=data.project_id,
-        values=data.values,
-        bindings=data.bindings,
-    )
+    try:
+        mapping = await SamplesheetMappingService.save(
+            session,
+            org_id,
+            user_id,
+            data.pipeline_key,
+            data.scope,
+            experiment_id=data.experiment_id,
+            project_id=data.project_id,
+            values=data.values,
+            bindings=data.bindings,
+            columns=data.columns,
+        )
+    except ValueError as exc:
+        # A declaration bioAF cannot honour is refused HERE, while the scientist
+        # is still looking at the editor. Stored, it would leave a column that
+        # can never resolve and would surface at launch time instead.
+        raise HTTPException(422, str(exc)) from exc
     await session.commit()
     # ``updated_at`` carries an onupdate, so the flush expires it and reading it
     # while building the response would try to load it outside the async
@@ -140,5 +148,6 @@ async def save_mapping(
         project_id=mapping.project_id,
         values=SamplesheetMappingService.flatten(mapping),
         bindings=SamplesheetMappingService.flatten_bindings(mapping),
+        columns=SamplesheetMappingService.declared_columns(mapping),
         updated_at=mapping.updated_at,
     )

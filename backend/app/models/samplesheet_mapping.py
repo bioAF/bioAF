@@ -59,6 +59,12 @@ class SamplesheetMapping(Base):
     # Keyed by sample id, never by row position, so they simply do not apply in
     # an experiment whose samples they do not name.
     values_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # THE COLUMNS THEMSELVES, for a pipeline that publishes no contract:
+    # {"fields": [{name, type, required, binding}]}, the same shape the
+    # experiment field editor already uses, each column carrying a binding that
+    # says where its value comes from. NULL means nothing was declared, which
+    # every reader answers with today's generic sheet.
+    columns_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     created_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     updated_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)

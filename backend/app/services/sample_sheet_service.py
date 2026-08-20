@@ -307,6 +307,48 @@ def _file_matches(pattern: str, f) -> bool:
     return False
 
 
+def _bound_files(binding: dict, sample) -> list:
+    """The sample's files a ``file_type`` binding selects.
+
+    Matched on ``File.file_type``, which is what the scientist chose from, and
+    never on the filename: a declared sheet has no pattern to match against,
+    because the pipeline published nothing to declare one.
+    """
+    wanted = (binding.get("key") or "").strip().lower()
+    return [f for f in _input_files(sample) if (getattr(f, "file_type", "") or "").strip().lower() == wanted]
+
+
+def _custom_field(sample, name: str) -> str:
+    """One of the sample's custom fields, by the name the intake editor gave it."""
+    for field in getattr(sample, "custom_fields", None) or []:
+        if (getattr(field, "field_name", "") or "").strip() == name:
+            return str(getattr(field, "field_value", "") or "")
+    return ""
+
+
+def _bound_value(contract, column: str, sample) -> str:
+    """What a declared column's binding resolves to, or empty when it cannot.
+
+    Empty is a real answer and never a guess: a binding that resolves to nothing
+    leaves the column blank, and a REQUIRED column left blank is reported by
+    ``column_gaps`` naming the column and the samples. File columns are resolved
+    by ``_files_for_column``, which blocks on ambiguity rather than picking.
+    """
+    binding = (getattr(contract, "bindings", None) or {}).get(column)
+    if not binding:
+        return ""
+    source = binding.get("source")
+    if source == "literal":
+        return str(binding.get("key") or "")
+    if source == "sample_field":
+        return str(getattr(sample, binding.get("key") or "", None) or "")
+    if source == "custom_field":
+        return _custom_field(sample, binding.get("key") or "")
+    # `read` is resolved per row and `file_type` per file column, both before
+    # this is reached.
+    return ""
+
+
 def _files_for_column(contract, column: str, sample) -> list:
     """The sample's files eligible for one file column.
 
@@ -325,6 +367,10 @@ def _files_for_column(contract, column: str, sample) -> list:
     file would both take it. No catalog schema does this, and blocking on a case
     nothing exhibits would be untested complexity.
     """
+    binding = (getattr(contract, "bindings", None) or {}).get(column)
+    if binding and binding.get("source") == "file_type":
+        return _bound_files(binding, sample)
+
     patterns = getattr(contract, "patterns", {})
     pattern = patterns.get(column)
     if not pattern:
@@ -547,6 +593,12 @@ def _ordered_columns(contract, read_columns: list[str]) -> list[str]:
     correctness. What matters is that it is the same wherever the schema came
     from, which an explicit order gives and an inherited one does not.
     """
+    # A declared sheet is emitted in the order it was declared. There is no
+    # published schema to fall back on, so the scientist's own order is the only
+    # statement about this sheet's shape that exists.
+    if getattr(contract, "is_declared", False):
+        return list(contract.column_order)
+
     identity = [c for c in contract.column_order if _COLUMN_TO_SAMPLE_FIELD.get(c) == "external_id"]
     leading = identity + [c for c in read_columns if c not in identity]
     rest = sorted(c for c in contract.column_order if c not in leading)
@@ -566,6 +618,14 @@ def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: 
     standardized columns), the branch bioAF can satisfy is chosen and the other
     style's columns are excluded, because that schema forbids mixing them.
     """
+    # Every declared column is emitted, filled or not. Dropping an empty
+    # optional column is right for a published schema, where nf-schema treats an
+    # absent optional as absent; here bioAF knows nothing about the pipeline, so
+    # removing a header the scientist wrote would be bioAF deciding the shape of
+    # a sheet it does not understand.
+    if getattr(contract, "is_declared", False):
+        return list(contract.column_order)
+
     read_columns = set(_ordered_read_columns(contract))
 
     filled: set[str] = set()
@@ -614,7 +674,20 @@ def _ordered_read_columns(contract) -> list[str]:
     `short_reads_2`, and sorting puts `long_reads` first, which would place R1
     into the long-read column. Columns are paired on their trailing `_1`/`_2`
     instead, and a complete short-read pair wins over anything else.
+
+    A DECLARED sheet needs none of that guesswork: its binding says which mate
+    each column holds, so a pipeline whose columns are called `R1` and `R2`, or
+    anything else, is read correctly instead of by a name heuristic.
     """
+    if getattr(contract, "is_declared", False):
+        bindings = getattr(contract, "bindings", None) or {}
+        mates = {
+            binding.get("key"): column
+            for column, binding in bindings.items()
+            if binding.get("source") == "read"
+        }
+        return [mates[key] for key in ("1", "2") if key in mates]
+
     columns = contract.read_columns
     if not columns:
         return []
@@ -1241,21 +1314,41 @@ def _cell(
             # Read columns only: a row's own distinguishing value (sarek's
             # `lane`) is not a read, and reading one as a resolved read would
             # empty a BAM column that has no reads to be an alternative to.
-            if any(row.get(c) for c in getattr(contract, "read_columns", ())) and column not in contract.required:
+            # It is an inference about a PUBLISHED schema, so a declared sheet
+            # is exempt: a scientist who declared a read column and a file
+            # column asked for both, and emptying one would overrule them.
+            if (
+                not getattr(contract, "is_declared", False)
+                and any(row.get(c) for c in getattr(contract, "read_columns", ()))
+                and column not in contract.required
+            ):
                 return ""
             matches = _files_for_column(contract, column, sample)
             return matches[0].storage_uri if len(matches) == 1 else ""
 
-        field = _COLUMN_TO_SAMPLE_FIELD.get(column)
-        if field == "external_id":
-            value = _safe_sample_name(sample)
-        elif field:
-            value = getattr(sample, field, None) or ""
+        # A DECLARED sheet resolves only through its own bindings. bioAF's
+        # automatic maps describe what a published schema's column names mean,
+        # and a scientist naming a column `sample` in a sheet bioAF knows
+        # nothing about has not thereby said it holds the sample's name. An
+        # unbound column is a question for the grid, and silently answering it
+        # here is what would make it look answered.
+        if getattr(contract, "is_declared", False):
+            binding = (getattr(contract, "bindings", None) or {}).get(column) or {}
+            if binding.get("source") == "sample_field" and binding.get("key") == "external_id":
+                value = _safe_sample_name(sample)
+            else:
+                value = _bound_value(contract, column, sample)
         else:
-            parameter = _COLUMN_TO_PARAMETER.get(column)
-            if parameter:
-                raw = parameters.get(parameter)
-                value = "" if raw is None else str(raw)
+            field = _COLUMN_TO_SAMPLE_FIELD.get(column)
+            if field == "external_id":
+                value = _safe_sample_name(sample)
+            elif field:
+                value = getattr(sample, field, None) or ""
+            else:
+                parameter = _COLUMN_TO_PARAMETER.get(column)
+                if parameter:
+                    raw = parameters.get(parameter)
+                    value = "" if raw is None else str(raw)
 
         if not value:
             return ""
@@ -1457,7 +1550,13 @@ class SampleSheetService:
         Empty when nothing is outstanding. Empty too when the contract is empty,
         because no schema means "we do not know", not "nothing is required".
         """
-        if contract.is_empty or not contract.is_sample_launchable:
+        # A DECLARED contract is launchable by construction: the scientist said
+        # what the sheet is, and bioAF has no schema with which to contradict
+        # them. ``is_sample_launchable`` answers a question about a PUBLISHED
+        # schema (does this pipeline take a per-sample file at all), and asking
+        # it here would refuse a sheet of pure metadata that the pipeline may
+        # well want.
+        if contract.is_empty or not (contract.is_sample_launchable or getattr(contract, "is_declared", False)):
             return {}
 
         ordered_reads = _ordered_read_columns(contract)
@@ -1609,7 +1708,7 @@ class SampleSheetService:
         if contract.is_empty:
             return
 
-        if not contract.is_sample_launchable:
+        if not contract.is_sample_launchable and not getattr(contract, "is_declared", False):
             wants = contract.required_non_fastq_inputs
             raise PipelineNotSampleLaunchableError(
                 "This pipeline cannot be launched from samples, because it does not take a "

@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.experiment import Experiment
 from app.models.samplesheet_mapping import MAPPING_SCOPES, SamplesheetMapping
 from app.models.user import User
+from app.services.samplesheet_declaration import parse_declaration
 
 
 def _stamp(value: str, user_id: int | None, previous: dict | None) -> dict:
@@ -44,7 +45,38 @@ def _stamp(value: str, user_id: int | None, previous: dict | None) -> dict:
     }
 
 
+def _stamped_field(field: dict, user_id: int | None, previous: dict) -> dict:
+    """One declared column, carrying who declared it.
+
+    A column is a binding by another name, so it takes the same attribution
+    design section 10 puts on every binding. An unchanged column keeps its
+    original stamp: re-saving a declaration to add one column must not reassign
+    authorship of the rest, or the record answers "who last pressed save".
+    """
+    name = str(field.get("name") or "").strip()
+    held = previous.get(name)
+    kept = {k: v for k, v in field.items() if k not in ("set_by_user_id", "set_at")}
+    if held and {k: v for k, v in held.items() if k not in ("set_by_user_id", "set_at")} == kept:
+        return held
+    return {**kept, "set_by_user_id": user_id, "set_at": datetime.now(timezone.utc).isoformat()}
+
+
 class SamplesheetMappingService:
+    @staticmethod
+    def declared_columns(mapping) -> list[dict]:
+        """A mapping's declared columns, stripped of authorship the same way
+        ``flatten`` strips it from values. Empty when nothing was declared,
+        which every reader answers with today's generic sheet."""
+        stored = (getattr(mapping, "columns_json", None) or {}) if mapping is not None else {}
+        fields = stored.get("fields") if isinstance(stored, dict) else None
+        if not isinstance(fields, list):
+            return []
+        return [
+            {k: v for k, v in field.items() if k not in ("set_by_user_id", "set_at")}
+            for field in fields
+            if isinstance(field, dict) and field.get("name")
+        ]
+
     @staticmethod
     def flatten(mapping) -> dict[str, dict[str, str]]:
         """A mapping's per-sample values in the shape generation consumes.
@@ -204,6 +236,7 @@ class SamplesheetMappingService:
         project_id: int | None = None,
         values: dict[str, dict[str, str]] | None = None,
         bindings: dict[str, str] | None = None,
+        columns: list[dict] | None = None,
     ) -> SamplesheetMapping:
         """Create or update THE mapping for this pipeline at this scope.
 
@@ -244,13 +277,17 @@ class SamplesheetMappingService:
         if values is not None:
             previous = mapping.values_json or {}
             stamped: dict[str, dict] = {}
-            for sample_id, columns in values.items():
-                if not isinstance(columns, dict):
+            # Named for what it is, and NOT `columns`: that is this method's own
+            # parameter, and rebinding it here left every caller that stated a
+            # per-sample value also declaring a sheet made of that value's
+            # column names.
+            for sample_id, stated in values.items():
+                if not isinstance(stated, dict):
                     continue
                 held = previous.get(str(sample_id)) or {}
                 per_column = {
                     str(column): _stamp(str(value).strip(), user_id, held.get(str(column)))
-                    for column, value in columns.items()
+                    for column, value in stated.items()
                     if value is not None and str(value).strip()
                 }
                 if per_column:
@@ -263,6 +300,21 @@ class SamplesheetMappingService:
                 str(column): _stamp(str(value).strip(), user_id, previous_bindings.get(str(column)))
                 for column, value in bindings.items()
                 if value is not None and str(value).strip()
+            }
+
+        if columns is not None:
+            # Parsed before it is stored, and the parse RAISES on a binding
+            # bioAF cannot resolve. Storing an unresolvable declaration would
+            # leave a column permanently unanswerable and surface it at launch
+            # time, which is the late failure this whole project removes.
+            parse_declaration({"fields": columns})
+            previous_columns = {
+                str(field.get("name")): field
+                for field in ((mapping.columns_json or {}).get("fields") or [])
+                if isinstance(field, dict)
+            }
+            mapping.columns_json = {
+                "fields": [_stamped_field(field, user_id, previous_columns) for field in columns]
             }
 
         mapping.updated_by_user_id = user_id

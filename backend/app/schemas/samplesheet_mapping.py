@@ -28,6 +28,11 @@ class SamplesheetMappingSaveRequest(BaseModel):
     # strandedness. These travel to any scope; per-sample values only apply
     # where the samples they name exist.
     bindings: dict[str, str] = Field(default_factory=dict)
+    # The COLUMNS themselves, for a pipeline that publishes no contract. Same
+    # {name, type, required} shape the experiment field editor uses, each
+    # carrying a binding that says where its value comes from. An empty list
+    # means nothing was declared, which keeps today's generic sheet.
+    columns: list[dict] = Field(default_factory=list)
 
 
 class SamplesheetMappingResponse(BaseModel):
@@ -40,6 +45,11 @@ class SamplesheetMappingResponse(BaseModel):
     project_id: int | None = None
     values: dict[str, dict[str, str]] = Field(default_factory=dict)
     bindings: dict[str, str] = Field(default_factory=dict)
+    # The COLUMNS themselves, for a pipeline that publishes no contract. Same
+    # {name, type, required} shape the experiment field editor uses, each
+    # carrying a binding that says where its value comes from. An empty list
+    # means nothing was declared, which keeps today's generic sheet.
+    columns: list[dict] = Field(default_factory=list)
     updated_at: datetime | None = None
 
 
@@ -54,6 +64,11 @@ class SamplesheetPrefill(BaseModel):
     scope: str | None = None
     values: dict[str, dict[str, str]] = Field(default_factory=dict)
     bindings: dict[str, str] = Field(default_factory=dict)
+    # The COLUMNS themselves, for a pipeline that publishes no contract. Same
+    # {name, type, required} shape the experiment field editor uses, each
+    # carrying a binding that says where its value comes from. An empty list
+    # means nothing was declared, which keeps today's generic sheet.
+    columns: list[dict] = Field(default_factory=list)
     # Selected samples this design does not name. They arrive blank in the grid
     # and the step says so, rather than presenting a design that looks complete.
     samples_without_values: list[int] = Field(default_factory=list)

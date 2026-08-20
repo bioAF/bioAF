@@ -196,3 +196,9 @@ class PipelineRunPreflightResponse(BaseModel):
     # applied to the sheet above: that is what keeps a design from carrying
     # silently onto a sample set it was not set for.
     prefill: SamplesheetPrefill = SamplesheetPrefill()
+    # Whether this pipeline's sheet is one a scientist DECLARES (it publishes no
+    # contract and no tailored generator owns it), and the vocabulary its columns
+    # may be bound against: the file types and custom fields these samples
+    # actually carry, so a binding is chosen from what exists rather than typed
+    # from memory.
+    declaration: dict = {}

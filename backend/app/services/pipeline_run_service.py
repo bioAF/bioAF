@@ -23,6 +23,7 @@ from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
+from app.services.samplesheet_declaration import parse_declaration
 from app.services.samplesheet_mapping_service import SamplesheetMappingService
 from app.adapters.registry import get_compute_adapter
 from app.services.vocabulary_validator import VocabularyValidator
@@ -92,7 +93,9 @@ class PipelineRunService:
             raise NotFoundError(f"Pipeline {data.pipeline_key} not found")
 
         sample_query = (
-            select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
+            select(Sample)
+            .where(Sample.experiment_id == data.experiment_id)
+            .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
         )
         if data.sample_ids:
             sample_query = sample_query.where(Sample.id.in_(data.sample_ids))
@@ -107,7 +110,15 @@ class PipelineRunService:
                 sample.files, getattr(data, "include_derived_inputs", False)
             )
 
-        contract = await PipelineRunService._resolve_contract(session, pipeline)
+        contract, mapping, scope = await PipelineRunService._effective_contract(
+            session, pipeline, org_id, getattr(data, "experiment_id", None)
+        )
+        # Whether a declaration is what defines this sheet at all. True only for
+        # a pipeline that publishes no contract AND has no tailored generator:
+        # declaring columns for chipseq would be collecting an answer that is
+        # then ignored, because its generator builds a sheet a schema cannot
+        # describe.
+        declarable = await PipelineRunService._is_declarable(session, pipeline)
         parameters = data.parameters or {}
         sample_values = getattr(data, "sample_values", None) or {}
 
@@ -132,14 +143,14 @@ class PipelineRunService:
                     "details": exc.details,
                 }
 
-        mapping, scope = await SamplesheetMappingService.resolve(
-            session, org_id, pipeline.pipeline_key, getattr(data, "experiment_id", None)
-        )
         carried = SamplesheetMappingService.flatten(mapping)
         prefill = {
             "scope": scope,
             "values": carried,
             "bindings": SamplesheetMappingService.flatten_bindings(mapping),
+            # The declared columns travel with the design, so the editor opens
+            # on what is in force rather than on an empty sheet.
+            "columns": SamplesheetMappingService.declared_columns(mapping),
             # Selected samples the saved design does not name. Adding samples and
             # re-running is normal, and a grouping that was right for six may be
             # wrong for twelve, so these are reported rather than left to look
@@ -147,7 +158,78 @@ class PipelineRunService:
             "samples_without_values": [s.id for s in samples if str(s.id) not in carried],
         }
 
-        return {**verdict, "samplesheet": preview, "per_sample_inputs": inputs, "prefill": prefill}
+        return {
+            **verdict,
+            "samplesheet": preview,
+            "per_sample_inputs": inputs,
+            "prefill": prefill,
+            # What the column editor needs: whether this pipeline is one whose
+            # sheet a scientist declares, and the vocabulary to bind against.
+            # Offered from what these samples actually carry, because a file
+            # type typed from memory binds to nothing and the column then blocks
+            # the launch with no hint as to why.
+            "declaration": {
+                "declarable": declarable,
+                "file_types": sorted(
+                    {(f.file_type or "").strip() for s in samples for f in (s._input_files or []) if f.file_type}
+                ),
+                "custom_fields": sorted(
+                    {
+                        (field.field_name or "").strip()
+                        for s in samples
+                        for field in (getattr(s, "custom_fields", None) or [])
+                        if field.field_name
+                    }
+                ),
+            },
+        }
+
+    @staticmethod
+    async def _is_declarable(session, pipeline) -> bool:
+        """Whether this pipeline's samplesheet is one a scientist declares.
+
+        Only when it publishes no contract of its own and no tailored generator
+        owns it. Both halves matter: a published contract already says what the
+        columns are, and a tailored generator builds a sheet the schema cannot
+        describe, so a declaration for either would be an answer bioAF collects
+        and then ignores.
+        """
+        if SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            return False
+        published = await PipelineRunService._resolve_contract(session, pipeline)
+        return published.is_empty
+
+    @staticmethod
+    async def _effective_contract(session, pipeline, org_id: int, experiment_id: int | None):
+        """The contract this launch is judged against, and the design it carries.
+
+        A pipeline's own ``schema_input.json`` when it publishes one. When it
+        does not, the columns a scientist DECLARED for this experiment, which is
+        the only statement about the sheet that exists for the seventeen
+        pipelines that publish nothing.
+
+        Resolved once and used for the preflight and the launch alike. Two
+        resolutions would let the review step confirm a sheet other than the one
+        that runs, which is the single property that step exists to provide.
+        """
+        contract = await PipelineRunService._resolve_contract(session, pipeline)
+        mapping, scope = await SamplesheetMappingService.resolve(
+            session, org_id, pipeline.pipeline_key, experiment_id
+        )
+        if contract.is_empty and not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            declared = SamplesheetMappingService.declared_columns(mapping)
+            if declared:
+                # Refused at save time, so this cannot normally raise. If a
+                # stored declaration is somehow unparseable, fall back to
+                # today's generic sheet rather than failing the launch: an
+                # unlaunchable pipeline is worse than an un-customised one.
+                try:
+                    contract = parse_declaration({"fields": declared})
+                except ValueError:
+                    logger.warning(
+                        "Ignoring an unparseable samplesheet declaration for %s", pipeline.pipeline_key
+                    )
+        return contract, mapping, scope
 
     @staticmethod
     async def _resolve_contract(session, pipeline):
@@ -259,14 +341,16 @@ class PipelineRunService:
                     Sample.id.in_(data.sample_ids),
                     Sample.experiment_id == data.experiment_id,
                 )
-                .options(selectinload(Sample.files))
+                .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
             )
             samples = list(sample_result.scalars().all())
             if len(samples) != len(data.sample_ids):
                 raise ValidationError("Some sample IDs do not belong to this experiment")
         else:
             sample_result = await session.execute(
-                select(Sample).where(Sample.experiment_id == data.experiment_id).options(selectinload(Sample.files))
+                select(Sample)
+            .where(Sample.experiment_id == data.experiment_id)
+            .options(selectinload(Sample.files), selectinload(Sample.custom_fields))
             )
             samples = list(sample_result.scalars().all())
 
@@ -282,9 +366,13 @@ class PipelineRunService:
         # own input files. Reject (or, if asked, drop) samples with none. The old
         # behaviour back-filled file-less samples with the WHOLE experiment's
         # files, which cross-contaminated one sample's run with another's reads.
-        # 3c. The pipeline's own samplesheet contract, which decides both whether
-        # it reads FASTQ at all and whether bioAF can fill every required column.
-        contract = await PipelineRunService._resolve_contract(session, pipeline)
+        # 3c. The samplesheet contract, which decides both whether this pipeline
+        # reads FASTQ at all and whether bioAF can fill every required column.
+        # The pipeline's own when it publishes one, and the columns a scientist
+        # declared for this experiment when it does not.
+        contract, _mapping, _scope = await PipelineRunService._effective_contract(
+            session, pipeline, org_id, data.experiment_id
+        )
 
         if PipelineRunService._requires_per_sample_fastq(pipeline, contract):
             missing = [s for s in samples if not s._input_files]

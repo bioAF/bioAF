@@ -707,7 +707,27 @@ export interface SamplesheetPrefill {
   scope: "experiment" | "project" | "organization" | null;
   values: Record<string, Record<string, string>>;
   bindings: Record<string, string>;
+  /** The columns declared for a pipeline that publishes no contract of its own.
+   *  Absent or empty means nothing was declared, which keeps today's standard
+   *  sheet. Optional because a client must not require a field a backend
+   *  deployed before this existed does not send. */
+  columns?: DeclaredColumn[];
   samples_without_values: number[];
+}
+
+/** Where a declared column's value comes from. A column with no binding at all
+ *  is asked per sample in the entry grid: a co-assembly grouping or a
+ *  differential contrast is a design decision no binding can derive. */
+export type BindingSource = "read" | "sample_field" | "file_type" | "custom_field" | "literal";
+
+/** One column of a samplesheet a SCIENTIST declared, for a pipeline that
+ *  publishes none. Same {name, type, required} shape the experiment field
+ *  editor uses, plus the binding an intake field does not have. */
+export interface DeclaredColumn {
+  name: string;
+  type: string;
+  required: boolean;
+  binding?: { source: BindingSource; key: string };
 }
 
 /** The sheet a launch would submit, and what it leaves out. */
@@ -780,6 +800,17 @@ export interface PipelineRunPreflight {
   per_sample_inputs?: PerSampleInputSpec[];
   /** What a saved design would contribute, offered rather than applied. */
   prefill?: SamplesheetPrefill;
+  /** Whether this pipeline's sheet is one a scientist declares, and the
+   *  vocabulary to bind its columns against. */
+  declaration?: {
+    /** True only when the pipeline publishes no contract AND no tailored
+     *  generator owns it. Declaring columns for either would collect an answer
+     *  bioAF then ignores. */
+    declarable: boolean;
+    /** The file types these samples actually carry. */
+    file_types: string[];
+    custom_fields: string[];
+  };
 }
 
 export interface PipelineCatalogListResponse {

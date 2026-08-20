@@ -262,6 +262,18 @@ class SamplesheetContract:
     # distinct rather than any named subset of them.
     unique_rows: bool = False
     is_empty: bool = False
+    # Where each column's value comes from, when a SCIENTIST declared the sheet
+    # rather than a pipeline publishing one. Empty for every parsed schema: a
+    # published contract says what the columns ARE and bioAF resolves them from
+    # its own explicit maps, while a declared one says where each column comes
+    # FROM, because there is no schema to read it out of. See
+    # ``samplesheet_declaration``.
+    bindings: dict[str, dict] = field(default_factory=dict)
+    # Whether this contract was declared rather than published. It changes two
+    # things and nothing else: the sheet is exactly the declared columns in the
+    # declared order, and no column resolves through bioAF's automatic maps,
+    # because the declaration is the only statement of intent there is.
+    is_declared: bool = False
 
     def select_branch(self, sourceable: set[str]) -> ExclusiveBranch | None:
         """The exclusive input style bioAF should commit to, if any.
