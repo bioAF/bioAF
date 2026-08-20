@@ -94,3 +94,37 @@ it("collapses when there is a lot of sheet to scroll past", () => {
 
   expect(screen.queryByRole("table")).not.toBeInTheDocument();
 });
+
+describe("checking which asset each row stood for", () => {
+  const snapshotCsv =
+    "sample,fastq_1,bioaf_sample_uid\nSAMPLE_101,gs://b/a.fastq.gz,3f2a9c1b-4d5e-4a7b-8c9d-0e1f2a3b4c5d\n";
+
+  it("offers the identifiers only when the run recorded them", () => {
+    render(<RunSamplesheetProvenance csv={csv} design={null} samples={samples} snapshotCsv={null} />);
+
+    expect(screen.queryByRole("button", { name: /show identifiers/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the submitted sheet by default, identifiers and all absent", () => {
+    render(<RunSamplesheetProvenance csv={csv} design={null} samples={samples} snapshotCsv={snapshotCsv} />);
+
+    expect(screen.queryByText(/bioaf sample uid/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the identifier beside each row on request", () => {
+    render(<RunSamplesheetProvenance csv={csv} design={null} samples={samples} snapshotCsv={snapshotCsv} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /show identifiers/i }));
+
+    expect(screen.getByText(/bioaf sample uid/i)).toBeInTheDocument();
+    expect(screen.getByText("3f2a9c1b-4d5e-4a7b-8c9d-0e1f2a3b4c5d")).toBeInTheDocument();
+  });
+
+  it("says the identifier was never submitted, because that is the whole point", () => {
+    render(<RunSamplesheetProvenance csv={csv} design={null} samples={samples} snapshotCsv={snapshotCsv} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /show identifiers/i }));
+
+    expect(screen.getByText(/never submitted to the pipeline/i)).toBeInTheDocument();
+  });
+});

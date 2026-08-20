@@ -924,6 +924,9 @@ export interface PipelineRunDetail extends PipelineRun {
   /** The exact sheet handed to Nextflow. Null for runs launched before the
    *  snapshot existed; nothing is reconstructed in its place. */
   samplesheet_csv?: string | null;
+  /** The same sheet with a bioaf_sample_uid column beside it, for checking by
+   *  eye which asset each row stood for. Never what was submitted. */
+  samplesheet_snapshot_csv?: string | null;
   /** The stated design that produced it, stamped with who set each value. */
   samplesheet_design?: RunSamplesheetDesign | null;
 }

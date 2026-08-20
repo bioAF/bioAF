@@ -481,14 +481,19 @@ class PipelineRunService:
             run.input_files_json = sorted(seen_file_ids)
             await session.flush()
 
-        # 8. Generate sample sheet
-        sample_sheet_csv = SampleSheetService.generate_sheet(
+        # 8. Generate the sample sheet, through the same call the review step
+        # used. One computation produces the CSV, the rows (each naming the
+        # sample it belongs to) and the column holding the name, so the sheet
+        # that runs and the record of what it emitted cannot disagree about
+        # either.
+        sheet = SampleSheetService.preview(
             pipeline.pipeline_key,
             samples,
             merged_params,
             contract=contract,
             sample_values=sample_values,
         )
+        sample_sheet_csv = sheet["csv"]
 
         # 8b. Keep what this run was actually given. Re-deriving the sheet later
         # reads today's samples, today's files and today's mapping, none of which
@@ -497,6 +502,16 @@ class PipelineRunService:
         # that say who set each value, because whoever fills the design grid is
         # often not whoever launches.
         run.samplesheet_csv = sample_sheet_csv
+        # What this run put in the identity column, and which asset each of those
+        # names stood for. This is what lets a later output be matched against
+        # the name THIS RUN EMITTED rather than the name its sample happens to
+        # carry by then, which is the divergence that used to attribute a file to
+        # nobody. The annotated CSV is the same fact for a person to read; the
+        # UID column is in that copy alone and never in the sheet submitted,
+        # because an undeclared column fails nf-schema for the whole sheet.
+        identity = SampleSheetService.identity_snapshot(sheet, samples)
+        run.samplesheet_snapshot_csv = identity["csv"]
+        run.samplesheet_emitted_json = identity["emitted"]
         run.samplesheet_mapping_json = SamplesheetMappingService.snapshot(sample_values, None, user_id)
 
         # 8c. A value the scientist stated about the SAMPLE belongs on the

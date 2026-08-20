@@ -728,6 +728,7 @@ export default function PipelineRunDetailPage() {
                 csv={run.samplesheet_csv ?? null}
                 design={run.samplesheet_design ?? null}
                 samples={run.samples ?? []}
+                snapshotCsv={run.samplesheet_snapshot_csv ?? null}
               />
 
               {/* Input files as readable records (project / experiment / sample

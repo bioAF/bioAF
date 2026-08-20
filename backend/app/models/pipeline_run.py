@@ -34,6 +34,18 @@ class PipelineRun(Base):
     # what an audited quality system asks for.
     samplesheet_csv: Mapped[str | None] = mapped_column(Text, nullable=True)
     samplesheet_mapping_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The same sheet with a `bioaf_sample_uid` column beside it, so a person can
+    # check by eye which asset each row stood for. Kept SEPARATE from the sheet
+    # above and never submitted: nf-schema validates the whole sheet against the
+    # pipeline's declared properties, so one undeclared column fails all of it.
+    samplesheet_snapshot_csv: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What each name this run EMITTED stood for: [{name, uuid, sample_id}]. A
+    # pipeline names its outputs after the samplesheet's value, and that value is
+    # not always the name the sample carries today, so matching against this is
+    # what keeps an output attributed to the sample it came from. Separate from
+    # the design above, which answers who STATED each value rather than what was
+    # put in the sheet.
+    samplesheet_emitted_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     work_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)

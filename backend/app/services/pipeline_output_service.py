@@ -23,10 +23,20 @@ class PipelineOutputService:
         gcs_uri: str,
         sample_extids: list[tuple[str, int]],
         sample_uids: list[tuple[uuid_pkg.UUID, int]] | None = None,
+        emitted: list[dict] | None = None,
     ) -> list[int]:
         """Return ids of samples this output file belongs to.
 
-        Two routes, tried in that order.
+        Three routes, tried in that order.
+
+        **By the name THIS RUN EMITTED**, which is the middle route and the one
+        that removes a live class of failure. A pipeline names its outputs after
+        the samplesheet's value, and that value is not always the name the sample
+        carries today: a scientist accepts a recommended spelling, the sheet says
+        ``SAMPLE_101`` and the database says ``SAMPLE-101``, and matching the
+        database name finds nothing. The run's own record says what it emitted,
+        so the two can no longer drift apart. It resolves to a UID, which is what
+        bioAF processes on; the name is a human-interface layer only.
 
         **By identity**, when the path names a sample's own UID. That is exact:
         the identifier bioAF put in the samplesheet is the one the pipeline named
@@ -41,9 +51,12 @@ class PipelineOutputService:
         path segment (``.../star/SAMPLE-101/...``) or the filename starts with
         ``<extid>_`` / ``<extid>.``.
 
-        The identity route is taken only when a UID in the path belongs to a
-        sample in THIS run, which keeps the change monotonic: it can add an exact
-        match, never remove one that works today. The spelling is ``s`` plus 32
+        The identity and emitted-name routes are taken only when they match a
+        sample in THIS run, which keeps the change monotonic: each can add an
+        exact match, never remove one that works today. A run with no record of
+        what it emitted (every run launched before that record existed) falls
+        straight through to the database name, and nothing is reconstructed for
+        it. The spelling is ``s`` plus 32
         lowercase hex and an md5 is also 32 hex, so a path like ``s<md5>.tmp``
         parses as an identity belonging to nothing; letting that suppress name
         matching would turn a correctly matched file into an unattributed one.
@@ -66,9 +79,37 @@ class PipelineOutputService:
                             deduped.append(sid)
                     return deduped
 
+        # Longest first, so `SAMPLE-10` cannot claim `SAMPLE-101`'s outputs.
+        # Same guard the database names below carry, for the same reason.
+        by_emitted = sorted(
+            (
+                (str(entry.get("name") or ""), entry.get("sample_id"))
+                for entry in (emitted or [])
+                if entry.get("name") and entry.get("sample_id") is not None
+            ),
+            key=lambda pair: len(pair[0]),
+            reverse=True,
+        )
+        if by_emitted:
+            found = PipelineOutputService._match_by_name(filename, gcs_uri, by_emitted)
+            if found:
+                return found
+
+        return PipelineOutputService._match_by_name(filename, gcs_uri, sample_extids)
+
+    @staticmethod
+    def _match_by_name(filename: str, gcs_uri: str, names: list[tuple[str, int]]) -> list[int]:
+        """Samples whose NAME appears in this output's path or filename.
+
+        A full path segment (``.../star/SAMPLE-101/...``) or a filename that
+        starts with ``<name>_`` or ``<name>.``. Both forms are load-bearing and
+        neither alone covers the catalog: nf-core/demo writes the value as a
+        directory segment AND a filename prefix, nf-core/bamtofastq writes it in
+        the filename only.
+        """
         segments = set((gcs_uri or "").split("/"))
         matched: list[int] = []
-        for extid, sid in sample_extids:
+        for extid, sid in names:
             if (
                 extid in segments
                 or filename == extid
@@ -132,6 +173,16 @@ class PipelineOutputService:
             # sides, so one can never be a prefix of another.
             sample_extids.sort(key=lambda t: len(t[0]), reverse=True)
 
+        # What this run actually put in its samplesheet's identity column,
+        # recorded at launch. A pipeline names its outputs after that value, and
+        # it is not always the name the sample carries today. Absent for every
+        # run launched before the record existed, in which case the names below
+        # remain the only route and behave exactly as they did.
+        emitted = run.samplesheet_emitted_json or None
+        if emitted and not is_project_scoped:
+            in_this_run = set(sample_ids)
+            emitted = [entry for entry in emitted if entry.get("sample_id") in in_this_run]
+
         # Collect existing gcs_uris to skip duplicates
         uris = [f["gcs_uri"] for f in collected_files]
         existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
@@ -167,12 +218,15 @@ class PipelineOutputService:
             )
 
             # Associate the output with the sample(s) it belongs to: by the
-            # sample's own identity where the path carries one, otherwise by its
-            # external_id as a path segment or filename prefix. An output matching
-            # none is attached to the run alone: it used to be linked to every
-            # sample in the run, which put one sample's alignment on all of them.
-            # Fewer links, all of them true.
-            matched = PipelineOutputService._match_samples(filename, gcs_uri, sample_extids, sample_uids)
+            # sample's own identity where the path carries one, then by the name
+            # THIS RUN EMITTED, then by its external_id as a path segment or
+            # filename prefix. An output matching none is attached to the run
+            # alone: it used to be linked to every sample in the run, which put
+            # one sample's alignment on all of them. Fewer links, all of them
+            # true.
+            matched = PipelineOutputService._match_samples(
+                filename, gcs_uri, sample_extids, sample_uids, emitted=emitted
+            )
             if not matched and sample_ids:
                 unattributed.append(filename)
             for sample_id in matched:

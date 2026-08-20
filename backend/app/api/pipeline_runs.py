@@ -99,6 +99,7 @@ def _detail_response(run, design: dict | None = None) -> PipelineRunDetailRespon
         samples=samples,
         samplesheet_csv=run.samplesheet_csv,
         samplesheet_design=design,
+        samplesheet_snapshot_csv=run.samplesheet_snapshot_csv,
     )
 
 

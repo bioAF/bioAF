@@ -605,6 +605,29 @@ def _ordered_columns(contract, read_columns: list[str]) -> list[str]:
     return leading + rest
 
 
+def _identity_column(contract, columns: list[str]) -> str | None:
+    """The column carrying the sample's own name, or None when there is none.
+
+    One place decides it, because two places would eventually disagree about
+    which cell holds the name a pipeline will name its outputs after, and the
+    run's record of what it emitted would then point at the wrong column.
+
+    None is a real answer: fetchngs' input is an accession list with no header,
+    and reading its first column as a name would invent a mapping.
+    """
+    if getattr(contract, "is_declared", False):
+        bindings = getattr(contract, "bindings", None) or {}
+        for column in columns:
+            binding = bindings.get(column) or {}
+            if binding.get("source") == "sample_field" and binding.get("key") == "external_id":
+                return column
+        return None
+    for column in columns:
+        if _COLUMN_TO_SAMPLE_FIELD.get(column) == "external_id":
+            return column
+    return None
+
+
 def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: dict, sample_values=None) -> list[str]:
     """The columns this sheet will actually carry.
 
@@ -1767,6 +1790,9 @@ class SampleSheetService:
                 "rows": [],
                 "csv": SampleSheetService.generate_fetchngs_ids(parameters),
                 "omissions": [],
+                # An accession list has no header and no name column. Reading its
+                # first field as a sample name would invent a mapping.
+                "identity_column": None,
             }
 
         schema_driven = (
@@ -1781,6 +1807,7 @@ class SampleSheetService:
                 "rows": rows,
                 "csv": _to_csv(columns, [r["values"] for r in rows]),
                 "omissions": omissions,
+                "identity_column": _identity_column(contract, columns),
             }
 
         csv_text = SampleSheetService.generate_sheet(
@@ -1790,7 +1817,75 @@ class SampleSheetService:
         # Nothing is claimed about a sheet bioAF did not build from a contract:
         # a tailored generator decides its own columns and bioAF cannot say what
         # it chose to leave out.
-        return {"columns": columns, "rows": rows, "csv": csv_text, "omissions": []}
+        return {
+            "columns": columns,
+            "rows": rows,
+            "csv": csv_text,
+            "omissions": [],
+            # Every tailored generator writes the name into a `sample` column,
+            # which is also the column `_parsed_rows` joined the rows back on.
+            "identity_column": "sample" if "sample" in columns else None,
+        }
+
+    # The column holding a sample's identity in the run's own record. It is
+    # bioAF's, not the pipeline's, and it MUST NOT reach the CSV submitted to
+    # Nextflow: nf-schema validates the whole sheet against the pipeline's
+    # declared properties, and one undeclared column fails all of it.
+    IDENTITY_COLUMN = "bioaf_sample_uid"
+
+    @staticmethod
+    def identity_snapshot(preview: dict, samples: list) -> dict:
+        """The run's own record of what it emitted, and what each name stood for.
+
+        Decision 3 of 2026-08-19, in the owner's words: "The sheet as it is right
+        now, but also add a column with the UIDs. This will mainly just be
+        metadata, but does allow for manual verification that files aren't
+        misattributed if someone is REALLY anal about it."
+
+        Two representations of one computation, so they cannot disagree:
+
+        - ``csv``: the submitted sheet with a ``bioaf_sample_uid`` column added,
+          for a human to read.
+        - ``emitted``: what each emitted NAME stood for, which is what the output
+          matcher reads. This is what makes decision 2 possible: matching against
+          the name this run actually emitted rather than the name the sample
+          happens to carry today.
+
+        Built from the preview's ROWS, which each name the sample they belong to,
+        rather than by re-reading the CSV. A row identified by position is the
+        same hazard as a positional paste, and a row identified by name is the
+        very drift this exists to remove.
+
+        A row bioAF cannot attribute carries an EMPTY uid rather than a borrowed
+        one, and contributes nothing to ``emitted``.
+        """
+        columns = list(preview.get("columns") or [])
+        rows = list(preview.get("rows") or [])
+        identity_column = preview.get("identity_column")
+        if not columns or not rows:
+            return {"csv": preview.get("csv") or "", "emitted": []}
+
+        uuid_by_sample = {
+            getattr(s, "id", None): str(getattr(s, "uuid", "") or "") for s in samples if getattr(s, "uuid", None)
+        }
+        at = columns.index(identity_column) if identity_column in columns else None
+
+        body: list[list[str]] = []
+        emitted: list[dict] = []
+        seen: set[tuple] = set()
+        for row in rows:
+            values = list(row.get("values") or [])
+            uid = uuid_by_sample.get(row.get("sample_id"), "")
+            body.append(values + [uid])
+            if at is None or not uid or at >= len(values):
+                continue
+            name = values[at]
+            key = (name, row.get("sample_id"))
+            if name and key not in seen:
+                seen.add(key)
+                emitted.append({"name": name, "uuid": uid, "sample_id": row.get("sample_id")})
+
+        return {"csv": _to_csv(columns + [SampleSheetService.IDENTITY_COLUMN], body), "emitted": emitted}
 
     @staticmethod
     def generate_scrnaseq_sheet(samples: list, parameters: dict) -> str:

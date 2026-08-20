@@ -10,6 +10,11 @@ interface Props {
   csv: string | null;
   /** The stated design behind it, stamped with who set each value. */
   design: RunSamplesheetDesign | null;
+  /** The same sheet with a bioaf_sample_uid column beside it, so a reader can
+   *  check by eye which asset each row stood for. Never what was submitted: an
+   *  undeclared column fails the pipeline's own validation of the whole sheet.
+   *  Null for runs launched before the record existed. */
+  snapshotCsv?: string | null;
   samples: { id: number; external_id: string | null }[];
 }
 
@@ -48,12 +53,17 @@ function splitCsvLine(line: string): string[] {
  * the history of a run that already used it, so this reads the run's own
  * snapshot and never the current mapping.
  */
-export function RunSamplesheetProvenance({ csv, design, samples }: Props) {
+export function RunSamplesheetProvenance({ csv, design, samples, snapshotCsv }: Props) {
   const [shown, setShown] = useState(true);
+  // Off by default. The identifiers are bioAF's interior, and a scientist reads
+  // the sheet they submitted; this is here for the person checking that nothing
+  // was misattributed, which is what it was asked for.
+  const [withIdentities, setWithIdentities] = useState(false);
 
   if (!csv) return null;
 
-  const lines = csv.split("\n").filter((line) => line.trim() !== "");
+  const shownCsv = withIdentities && snapshotCsv ? snapshotCsv : csv;
+  const lines = shownCsv.split("\n").filter((line) => line.trim() !== "");
   const columns = lines.length > 0 ? splitCsvLine(lines[0]) : [];
   const rows = lines.slice(1).map(splitCsvLine);
 
@@ -66,10 +76,21 @@ export function RunSamplesheetProvenance({ csv, design, samples }: Props) {
         <div>
           <h3 className="text-sm font-medium text-gray-900">The samplesheet this run was given</h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Kept as submitted. It is a record of what ran, not a sheet rebuilt from today&apos;s data.
+            {withIdentities
+              ? "The same sheet with each row's asset identifier beside it. The identifier was never submitted to the pipeline."
+              : "Kept as submitted. It is a record of what ran, not a sheet rebuilt from today's data."}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {snapshotCsv && (
+            <button
+              type="button"
+              onClick={() => setWithIdentities((on) => !on)}
+              className="border px-3 py-1 rounded text-xs hover:bg-gray-100"
+            >
+              {withIdentities ? "Hide identifiers" : "Show identifiers"}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShown((open) => !open)}
@@ -78,7 +99,7 @@ export function RunSamplesheetProvenance({ csv, design, samples }: Props) {
             {shown ? "Hide samplesheet" : "Show samplesheet"}
           </button>
           <a
-            href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`}
+            href={`data:text/csv;charset=utf-8,${encodeURIComponent(shownCsv)}`}
             download="samplesheet.csv"
             className="border px-3 py-1 rounded text-xs hover:bg-gray-100"
           >

@@ -154,6 +154,11 @@ class PipelineRunDetailResponse(PipelineRunResponse):
     # launched before the snapshot existed, and nothing is reconstructed.
     samplesheet_csv: str | None = None
     samplesheet_design: RunSamplesheetDesign | None = None
+    # The same sheet with a `bioaf_sample_uid` column beside it. Its whole point
+    # is manual verification: a person can check by eye which asset each row
+    # stood for. Never what was submitted, and null for runs launched before the
+    # record existed.
+    samplesheet_snapshot_csv: str | None = None
 
 
 class PipelineRunCompareRequest(BaseModel):
