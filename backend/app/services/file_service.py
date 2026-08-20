@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,10 +61,21 @@ class FileService:
         return file
 
     @staticmethod
-    async def get_file(session: AsyncSession, file_id: int, org_id: int) -> File | None:
-        result = await session.execute(
-            select(File).options(selectinload(File.uploader)).where(File.id == file_id, File.organization_id == org_id)
+    async def get_file(session: AsyncSession, file_id: int, org_id: int, *, include_deleted: bool = False) -> File | None:
+        """One file, or None when it is gone.
+
+        A deleted file reads as absent, which is what every caller already
+        handles: deletion is SOFT, so the row and its identity survive, but a
+        file somebody deleted must not come back through a listing, a download
+        or a launch. ``include_deleted`` is for the paths whose subject IS the
+        record (provenance, audit), not for working views.
+        """
+        query = select(File).options(selectinload(File.uploader)).where(
+            File.id == file_id, File.organization_id == org_id
         )
+        if not include_deleted:
+            query = query.where(File.deleted_at.is_(None))
+        result = await session.execute(query)
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -84,8 +96,17 @@ class FileService:
         from app.models.experiment import Experiment
         from app.models.sample import Sample, sample_files
 
-        query = select(File).options(selectinload(File.uploader)).where(File.organization_id == org_id)
-        count_query = select(func.count(File.id)).where(File.organization_id == org_id)
+        # Deleted files are absent from every listing. The row survives so its
+        # identity keeps resolving and no provenance record dangles; that is a
+        # different question from what a scientist should be offered here.
+        query = (
+            select(File)
+            .options(selectinload(File.uploader))
+            .where(File.organization_id == org_id, File.deleted_at.is_(None))
+        )
+        count_query = select(func.count(File.id)).where(
+            File.organization_id == org_id, File.deleted_at.is_(None)
+        )
 
         if search:
             pattern = f"%{search}%"
@@ -424,6 +445,16 @@ class FileService:
             text("UPDATE manifest_entries SET file_id = NULL WHERE file_id = :fid").bindparams(fid=file_id)
         )
 
-        await session.delete(file)
+        # SOFT. The row and its `uuid` are never removed: a catalogue number
+        # that stops resolving the moment somebody tidies up is not a catalogue
+        # number, and a run that consumed this file must go on being able to say
+        # so. `storage_deleted` above is a different fact and is left alone;
+        # freeing the bytes and retiring the record are separate acts.
+        #
+        # The working rows above ARE still cleaned up. What survives is the
+        # catalogue entry and the provenance that references it, which is what
+        # the decision asked for.
+        file.deleted_at = datetime.now(timezone.utc)
+        file.deleted_by_user_id = user_id
         await session.flush()
         return True

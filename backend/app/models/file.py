@@ -88,13 +88,26 @@ class File(Base):
     # lane does, without claiming to be one.
     source_run_accession: Mapped[str | None] = mapped_column(String(64), nullable=True)
     storage_deleted: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
+    # When this file was deleted from view, and by whom. NULL means it is live.
+    #
+    # Deletion is SOFT (decision of 2026-08-19): the row and its `uuid` are never
+    # removed, because a catalogue number that stops resolving the moment
+    # somebody tidies up is not a catalogue number, and a published provenance
+    # record must never dangle. Distinct from `storage_deleted` above, which says
+    # the BYTES are gone: freeing storage and retiring the record are two
+    # different acts and either can happen without the other.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     is_global: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_files_experiment_id", "experiment_id"),)
 
     organization = relationship("Organization")
-    uploader = relationship("User")
+    # Both of these point at `users`, so each names its own column: SQLAlchemy
+    # cannot choose between two paths to the same table.
+    uploader = relationship("User", foreign_keys=[uploader_user_id])
+    deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
     project = relationship("Project")
     experiment = relationship("Experiment")
     source_pipeline_run = relationship("PipelineRun", foreign_keys=[source_pipeline_run_id])

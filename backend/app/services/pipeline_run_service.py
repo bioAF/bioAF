@@ -298,7 +298,11 @@ class PipelineRunService:
         notebook run's outputs) are excluded unless the caller opts in via
         ``include_derived_inputs`` on the launch request.
         """
-        files = files or []
+        # A deleted file is never an input, whatever else it qualifies as. The
+        # row survives so its identity keeps resolving and no provenance record
+        # dangles, but feeding a run a file its scientist believes is gone is a
+        # scientific error rather than a tidiness one.
+        files = [f for f in (files or []) if getattr(f, "deleted_at", None) is None]
         if include_derived:
             return list(files)
         return [
