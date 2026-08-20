@@ -9,6 +9,7 @@ from app.models.file import File
 from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
 from app.services import sequencing_identity
+from app.services.sequencing_enrichment import enrich_from_header
 from app.services.file_service import FileService
 
 logger = logging.getLogger("bioaf.upload_service")
@@ -206,6 +207,14 @@ class UploadService:
         if illumina_info:
             file.lane = illumina_info["lane"] or None
             file.read_type = illumina_info["read"] if illumina_info["read"] in READ_TYPES else None
+
+        # Then the file's own header, which carries the flow cell and lane
+        # whatever the name says, and which is the only source for a lab that
+        # follows no naming convention at all. The header WINS over the name
+        # above: a name is a hint, and a file renamed after ingest loses it.
+        # Optional throughout, so a file bioAF cannot read leaves the columns as
+        # they are and the sheet treats everything unknown as one unit.
+        await enrich_from_header(file)
 
         # Link to samples
         for sample_id in pending["sample_ids"]:

@@ -542,6 +542,19 @@ class SampleService:
         return list(result.scalars().all())
 
     @staticmethod
+    async def get_sample_with_files(session: AsyncSession, sample_id: int) -> Sample | None:
+        """A sample with its files loaded, for the callers that need them.
+
+        Separate from ``get_sample`` because most callers do not: a sample can
+        carry hundreds of files, and loading them for every detail view would be
+        a cost paid by everyone for the benefit of one page.
+        """
+        result = await session.execute(
+            select(Sample).options(selectinload(Sample.files)).where(Sample.id == sample_id)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_sample(session: AsyncSession, sample_id: int) -> Sample | None:
         result = await session.execute(
             select(Sample)

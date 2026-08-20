@@ -60,6 +60,11 @@ def _read_file_bytes(path: str) -> bytes:
         return f.read()
 
 
+def _read_file_prefix(path: str, length: int) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(length)
+
+
 def _write_file_bytes(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as f:
@@ -333,6 +338,15 @@ class GcsStorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._gcs_read_bytes, uri, creds)
 
+    async def read_prefix(self, uri: str, length: int) -> bytes:
+        if self.is_local:
+            path = self._local_path(uri)
+            if not os.path.exists(path):
+                raise StorageObjectNotFound(uri)
+            return await asyncio.to_thread(_read_file_prefix, path, length)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._gcs_read_prefix, uri, length, creds)
+
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
 
@@ -510,6 +524,18 @@ class GcsStorageProvider(StorageProvider):
         blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
         try:
             return blob.download_as_bytes()
+        except NotFound as e:
+            raise StorageObjectNotFound(uri) from e
+
+    def _gcs_read_prefix(self, uri: str, length: int, creds) -> bytes:
+        from google.api_core.exceptions import NotFound
+
+        bucket, key = self._parse_uri(uri)
+        blob = self._get_gcs_client(creds).bucket(bucket).blob(key)
+        try:
+            # `end` is inclusive, and an object shorter than the range simply
+            # returns what it has.
+            return blob.download_as_bytes(start=0, end=max(length - 1, 0))
         except NotFound as e:
             raise StorageObjectNotFound(uri) from e
 

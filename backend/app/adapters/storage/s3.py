@@ -55,6 +55,11 @@ def _read_file_bytes(path: str) -> bytes:
         return f.read()
 
 
+def _read_file_prefix(path: str, length: int) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(length)
+
+
 def _write_file_bytes(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as f:
@@ -428,6 +433,15 @@ class S3StorageProvider(StorageProvider):
         creds = await self._get_credentials()
         return await asyncio.to_thread(self._s3_read_bytes, uri, creds)
 
+    async def read_prefix(self, uri: str, length: int) -> bytes:
+        if self.is_local:
+            path = self._local_path(uri)
+            if not os.path.exists(path):
+                raise StorageObjectNotFound(uri)
+            return await asyncio.to_thread(_read_file_prefix, path, length)
+        creds = await self._get_credentials()
+        return await asyncio.to_thread(self._s3_read_prefix, uri, length, creds)
+
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)
 
@@ -743,6 +757,22 @@ class S3StorageProvider(StorageProvider):
         bucket, key = self._parse_uri(uri)
         try:
             resp = self._get_s3_client(creds).get_object(Bucket=bucket, Key=key)
+        except ClientError as e:
+            if _is_not_found(e):
+                raise StorageObjectNotFound(uri) from e
+            raise
+        return resp["Body"].read()
+
+    def _s3_read_prefix(self, uri: str, length: int, creds) -> bytes:
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._parse_uri(uri)
+        try:
+            # The HTTP range is inclusive at both ends, and S3 serves what it
+            # has when the object is shorter.
+            resp = self._get_s3_client(creds).get_object(
+                Bucket=bucket, Key=key, Range=f"bytes=0-{max(length - 1, 0)}"
+            )
         except ClientError as e:
             if _is_not_found(e):
                 raise StorageObjectNotFound(uri) from e
