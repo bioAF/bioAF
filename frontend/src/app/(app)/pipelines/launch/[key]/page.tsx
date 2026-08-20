@@ -321,13 +321,29 @@ export default function PipelineLauncherPage() {
   const steps: StepKey[] = [
     "experiment",
     "samples",
-    ...(perSampleInputs.length > 0 || declarable ? (["values"] as StepKey[]) : []),
+    // ...and a step the user is STANDING ON stays, whether or not it still has
+    // anything to collect. The grid drops a gap that carries a remedy, so
+    // answering the last answerable question empties it; without this clause
+    // the step vanished mid-flow, the indicator silently renumbered from five
+    // to four, and Next resolved to Select Samples. The block explaining the
+    // remedy renders here, so this is also where the explanation lives.
+    ...(perSampleInputs.length > 0 || declarable || step === "values" ? (["values"] as StepKey[]) : []),
     "parameters",
     "review",
   ];
-  const stepIndex = Math.max(0, steps.indexOf(step));
-  const goNext = () => setStep(steps[Math.min(stepIndex + 1, steps.length - 1)]);
-  const goBack = () => setStep(steps[Math.max(stepIndex - 1, 0)]);
+  // Kept apart from the clamped index below on purpose: -1 means "the step on
+  // screen is not in the list", and moving relative to a silent 0 is what
+  // turned a missing step into a backwards jump. Navigation refuses instead.
+  const currentIndex = steps.indexOf(step);
+  const stepIndex = Math.max(0, currentIndex);
+  const goNext = () => {
+    if (currentIndex < 0) return;
+    setStep(steps[Math.min(currentIndex + 1, steps.length - 1)]);
+  };
+  const goBack = () => {
+    if (currentIndex < 0) return;
+    setStep(steps[Math.max(currentIndex - 1, 0)]);
+  };
   const selectedSamples = samples.filter((s) => selectedSampleIds.includes(s.id));
 
   return (

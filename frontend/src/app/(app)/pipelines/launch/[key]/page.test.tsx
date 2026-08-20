@@ -190,3 +190,138 @@ describe("what the wizard tells the server about the sheet", () => {
     expect(mockPost.mock.calls.some(([url]) => url === "/api/samplesheet-mappings")).toBe(false);
   });
 });
+
+/**
+ * A step the wizard is standing on must not be deleted underneath the user.
+ *
+ * `71d3f644` made the entry grid skip any gap that carries a remedy, which is
+ * right on its own terms: a column no typed value can clear must not be offered
+ * as a field. But the page decided whether the Values step EXISTS from the
+ * length of that same list, so answering the question emptied the grid, dropped
+ * "values" out of `steps` while `step` was still "values", and
+ * `steps.indexOf("values")` returned -1. The clamp to 0 then turned Next into a
+ * jump back to Select Samples.
+ *
+ * Measured in a browser on the deployed demo driving nf-core/ampliseq: the
+ * panel still said "Values for each sample" while the indicator had silently
+ * renumbered from five steps to four and highlighted Experiment. Every unit
+ * test and `tsc` passed with it present, which is why these exist.
+ */
+describe("a Values step the user is standing on", () => {
+  /** The gap a value CAN clear, so the grid offers it and the step exists. */
+  const ASKABLE = {
+    name: "condition",
+    required: true,
+    is_file: false,
+    sample_field: null,
+    allowed_values: [],
+    constrained: false,
+    description: null,
+    format_hint: null,
+    required_by: null,
+    reason: null,
+    samples: [{ id: 3, external_id: "SLIDE-1" }],
+  };
+
+  function askingForAValue() {
+    return preflight({
+      can_launch: false,
+      reason: "condition is not something bioAF can derive.",
+      declaration: { declarable: false, file_types: [], custom_fields: [] },
+      per_sample_inputs: [ASKABLE],
+      details: {
+        missing_columns: {
+          condition: { sample_field: null, allowed_values: [], samples: [{ id: 3, external_id: "SLIDE-1" }], reason: "missing" },
+        },
+      },
+    });
+  }
+
+  /** ampliseq's shape once the first gap is answered: the rule is on the
+   *  sample's own name ALONE, both rows carry it, and no typed value can
+   *  separate them. The gap carries a remedy, so the grid is right to drop it
+   *  and `per_sample_inputs` comes back empty. */
+  function blockedOnARemedy() {
+    return preflight({
+      can_launch: false,
+      reason:
+        "This pipeline takes one row per sample, and some samples have more than one set of reads. Merge those reads, or launch them as separate samples.",
+      declaration: { declarable: false, file_types: [], custom_fields: [] },
+      per_sample_inputs: [],
+      details: {
+        missing_columns: {
+          sample: {
+            sample_field: null,
+            allowed_values: [],
+            samples: [{ id: 3, external_id: "SLIDE-1" }],
+            reason: "not_unique",
+            remedy: "one_row_per_sample",
+          },
+        },
+      },
+    });
+  }
+
+  /** The indicator's labels, in order. Each is EXACTLY the step's name, which
+   *  is what tells them apart from the panel heading that repeats one. */
+  function indicatorSteps(): string[] {
+    return screen
+      .getAllByText(/^(Experiment|Samples|Values|Parameters|Review)$/)
+      .map((node) => node.textContent ?? "");
+  }
+
+  /** To Values on a pipeline that asks for one value, then answers it, which is
+   *  the transition that used to delete the step. */
+  async function answerTheOnlyQuestion() {
+    mockPost.mockImplementation((url: string, body: { sample_values?: Record<string, unknown> }) => {
+      if (url === "/api/pipeline-runs/preflight") {
+        return Promise.resolve(
+          Object.keys(body?.sample_values ?? {}).length > 0 ? blockedOnARemedy() : askingForAValue(),
+        );
+      }
+      if (url === "/api/pipeline-runs") return Promise.resolve({ id: 99 });
+      return Promise.resolve({});
+    });
+
+    render(<LaunchPage />);
+    await waitFor(() => expect(screen.getByRole("combobox")).toBeInTheDocument());
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "7" } });
+    await waitFor(() => expect(preflightBodies().length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("SLIDE-1")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Values for each sample")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("condition for SLIDE-1"), { target: { value: "treated" } });
+    // The grid empties on the preflight that answer triggers.
+    await waitFor(() => expect(screen.queryByLabelText("condition for SLIDE-1")).not.toBeInTheDocument());
+  }
+
+  it("keeps Values in the indicator when the only gap left carries a remedy", async () => {
+    await answerTheOnlyQuestion();
+
+    expect(screen.getByText("Values for each sample")).toBeInTheDocument();
+    expect(indicatorSteps()).toEqual(["Experiment", "Samples", "Values", "Parameters", "Review"]);
+  });
+
+  it("does not walk backwards out of a Values step whose grid emptied", async () => {
+    await answerTheOnlyQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(screen.getByText("Configure Parameters")).toBeInTheDocument());
+    expect(screen.queryByText("Select Samples")).not.toBeInTheDocument();
+  });
+
+  it("still refuses the launch, so the step surviving is not the run unblocking", async () => {
+    await answerTheOnlyQuestion();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Configure Parameters")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Launch Pipeline" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Launch Pipeline" })).toBeDisabled();
+  });
+});
