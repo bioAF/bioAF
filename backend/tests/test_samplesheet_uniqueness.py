@@ -64,6 +64,24 @@ def _lanes(name: str, *lanes: str):
     return files
 
 
+def _flowcells(name: str, *flowcells: str):
+    """Sequencing units bioAF genuinely cannot tell apart.
+
+    Two flow cells, and no lane on either: the names carry no ``_LNNN_`` and the
+    typed column is NULL, so nothing bioAF holds separates these rows. That is
+    what makes this the case where the block still has to fire, now that a KNOWN
+    lane fills sarek's own ``lane`` column and answers the question itself.
+    """
+    files = []
+    for flowcell in flowcells:
+        for read in ("R1", "R2"):
+            f = _make_file(f"{name}_{flowcell}_{read}_001.fastq.gz")
+            f.flowcell_id = flowcell
+            f.lane = None
+            files.append(f)
+    return files
+
+
 MAG_VALUES = {"group": "gut", "short_reads_platform": "ILLUMINA"}
 
 
@@ -203,10 +221,18 @@ class TestAPipelineThatWantsOneRowPerSample:
     def test_it_names_the_column_that_can_break_the_tie(self):
         """sarek is told apart by ("lane", "patient", "sample"). `patient` is
         already filled from the sample's donor and cannot break a tie between two
-        lanes of one sample; `lane` is what the scientist would state. Naming the
-        wrong one sends them to change a value that is already correct."""
+        rows of one sample; `lane` is what the scientist would state. Naming the
+        wrong one sends them to change a value that is already correct.
+
+        The sample is two FLOW CELLS with no lane on either, because a known lane
+        now fills sarek's ``lane`` column itself and there is no tie left to
+        break; see ``test_samplesheet_sequencing_facts``. Two rows bioAF cannot
+        separate is the case this block still exists for.
+        """
         contract = _contract("sarek")
-        sample = _make_sample(1, "GUT_A", files=_lanes("GUT_A", "001", "002"), donor_source="DONOR_1", sex="XX")
+        sample = _make_sample(
+            1, "GUT_A", files=_flowcells("GUT_A", "HFWFVDMXX", "HJKLMDMXX"), donor_source="DONOR_1", sex="XX"
+        )
 
         with pytest.raises(DomainError) as raised:
             SampleSheetService.check_contract_satisfiable(contract, [sample], {}, {})

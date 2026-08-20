@@ -128,6 +128,49 @@ def _sequencing_unit(f) -> tuple:
     )
 
 
+# The facts ``_sequencing_unit`` packs into its key, in that order, so a unit can
+# be read back as the facts it is made of rather than by tuple position.
+_UNIT_FIELDS = ("flowcell_id", "lane", "source_run_accession")
+
+# A unit about which nothing is known: a pre-merged FASTQ from a CRO, or a path
+# the caller named directly. Every fact is absent, so no column is filled from it.
+_UNKNOWN_UNIT = ("", 0, "")
+
+# Samplesheet columns bioAF fills from the sequencing unit the row came from,
+# keyed on the column name the pipeline's own schema uses.
+#
+# The discipline is the one ``_COLUMN_TO_SAMPLE_FIELD`` states: exact, explicit
+# matching, and only where the column's MEANING is the fact bioAF holds. A lane
+# is a lane, so sarek's `lane` is reporting a measurement. mag's and ampliseq's
+# `run` is a sequencing RUN, which a lane is NOT, and taxprofiler's
+# `run_accession` names a real archive run rather than anything derived from a
+# filename. Those keep asking, because a wrong mapping is worse than a missing
+# one and this is the exact spot where a plausible-looking guess would enter the
+# sheet as a scientific claim.
+_COLUMN_TO_SEQUENCING_FACT: dict[str, str] = {
+    "lane": "lane",
+    "run_accession": "source_run_accession",
+}
+
+
+def _unit_facts(contract, unit: tuple) -> dict[str, str]:
+    """What this sequencing unit answers about itself, keyed by column.
+
+    Only columns the pipeline actually declares, and only facts the unit really
+    carries: an absent key leaves the column to resolve as it did before, so a
+    file with no accession still falls back to the sample's own name.
+    """
+    known = dict(zip(_UNIT_FIELDS, unit))
+    facts: dict[str, str] = {}
+    for column, field in _COLUMN_TO_SEQUENCING_FACT.items():
+        if column not in getattr(contract, "columns", ()):
+            continue
+        value = known.get(field)
+        if value:
+            facts[column] = str(value)
+    return facts
+
+
 def _input_files(sample) -> list:
     """The sample's input-eligible files.
 
@@ -322,20 +365,28 @@ def _eligible_reads(contract, sample, read_columns: list[str]) -> tuple[list, li
 
 
 def _read_rows(contract, sample, parameters: dict, read_columns: list[str]) -> list[dict[str, str]]:
-    """One dict of read values per lane for a sample.
+    """One dict per sequencing unit of a sample: its reads, and what tells it apart.
 
     Shared by generation and the satisfiability check so the check reports what
     generation will actually produce, rather than assuming reads resolve.
+
+    A row carries more than its reads. Two rows of one sample exist BECAUSE the
+    sample was sequenced twice, and the fact that separates them is a property of
+    the row rather than of the sample, so it can only be resolved here, where the
+    unit is still known. See ``_unit_facts``.
+
+    Paths named explicitly by the caller carry no unit, and get none: bioAF was
+    handed a URI, not a file it holds facts about.
     """
     if not read_columns:
         return [{}]
     paths = parameters.get("input_paths", {}).get(str(sample.id), [])
     if paths:
-        pairs = [(paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else "")]
+        units = [(_UNKNOWN_UNIT, (paths[0] if len(paths) > 0 else "", paths[1] if len(paths) > 1 else ""))]
     else:
         accepted, _ = _eligible_reads(contract, sample, read_columns)
-        pairs = _extract_fastq_lane_pairs(sample, files=accepted)
-    return [dict(zip(read_columns, pair)) for pair in pairs]
+        units = _fastq_units(sample, files=accepted)
+    return [{**dict(zip(read_columns, pair)), **_unit_facts(contract, unit)} for unit, pair in units]
 
 
 def _unusable_reads_gap(
@@ -388,10 +439,22 @@ def _unusable_reads_gap(
 def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[str, str]]:
     """Extract (fastq_1, fastq_2) pairs grouped by sequencing unit.
 
+    The pairs of ``_fastq_units``, for the callers that need only the reads.
+    """
+    return [pair for _unit, pair in _fastq_units(sample, files=files)]
+
+
+def _fastq_units(sample, files: list | None = None) -> list[tuple[tuple, tuple[str, str]]]:
+    """Each sequencing unit of a sample, with its (fastq_1, fastq_2).
+
     Excludes index reads (I1, I2). Uses the file's typed read type when
     available, falling back to its legacy tag and then to the Illumina filename
-    convention (_R1_/_R2_). Returns one tuple per sequencing unit, in a
+    convention (_R1_/_R2_). Returns one entry per sequencing unit, in a
     deterministic order; see ``_sequencing_unit`` for what separates two of them.
+
+    The unit is returned alongside the reads rather than discarded, because it
+    holds the only answer to what tells two rows of one sample apart. Discarding
+    it here is why that question used to be unanswerable further up.
 
     ``files`` lets the schema-driven path pass only the files that satisfy the
     read column's own pattern. Without it the unclassified fallback below will
@@ -400,7 +463,7 @@ def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[s
     """
     fastq_files = _input_files(sample) if files is None else [f for f in files if getattr(f, "storage_uri", None)]
     if not fastq_files:
-        return [("", "")]
+        return [(_UNKNOWN_UNIT, ("", ""))]
 
     # Classify each file by read type
     units: dict[tuple, dict[str, str]] = {}
@@ -421,14 +484,16 @@ def _extract_fastq_lane_pairs(sample, files: list | None = None) -> list[tuple[s
         for unit_key in sorted(units):
             r1 = units[unit_key].get("R1", "")
             r2 = units[unit_key].get("R2", "")
-            result.append((r1, r2))
+            result.append((unit_key, (r1, r2)))
         return result
 
-    # Fallback for files without read type info: sort by filename
+    # Fallback for files without read type info: sort by filename. Nothing is
+    # known about the unit here, by definition: the files could not even be told
+    # apart as mates, so their sequencing identity is not something to report.
     unclassified.sort(key=lambda f: getattr(f, "filename", "") or getattr(f, "storage_uri", ""))
     fastq_1 = unclassified[0].storage_uri if len(unclassified) > 0 else ""
     fastq_2 = unclassified[1].storage_uri if len(unclassified) > 1 else ""
-    return [(fastq_1, fastq_2)]
+    return [(_UNKNOWN_UNIT, (fastq_1, fastq_2))]
 
 
 def _extract_fastq_paths(sample) -> tuple[str, str]:
@@ -520,7 +585,11 @@ def _emitted_columns(contract, samples: list, parameters: dict, rows_by_sample: 
     # ALTERNATIVE input: a BAM-only sarek row has no reads by design, and
     # carrying `fastq_1,fastq_2` as empty columns states something false about
     # it. A required read column stays regardless, since it is in `required`.
-    reads_used = any(value for rows in rows_by_sample.values() for row in rows for value in row.values())
+    # Read columns only. A row also carries what tells it apart from its sibling
+    # (sarek's `lane`), and reading a filled lane as a resolved read would keep
+    # `fastq_1,fastq_2` on a BAM-only row, which is the false statement the
+    # exception below exists to avoid.
+    reads_used = any(row.get(column) for rows in rows_by_sample.values() for row in rows for column in read_columns)
     if reads_used or not (filled & contract.non_read_file_columns):
         keep |= read_columns
 
@@ -1131,7 +1200,7 @@ def _cell(
     column: str,
     sample,
     parameters: dict,
-    reads: dict[str, str],
+    row: dict[str, str],
     supplied=None,
     omissions: dict | None = None,
 ) -> str:
@@ -1141,8 +1210,9 @@ def _cell(
     correcting a wrongly-resolved cell in place is the only backstop bioAF has
     against a file that matches a column's pattern without being the right file:
     a reference genome satisfies funcscan's ``fasta`` pattern exactly as well as
-    an assembly does. After that come reads (the schema named them), then the
-    explicit sample mapping, then launch parameters.
+    an assembly does. After that comes what the ROW already resolved, which is
+    its reads (the schema named them) and the facts of the sequencing unit it
+    came from, then the explicit sample mapping, then launch parameters.
 
     An enum-constrained column only accepts a value the schema lists, and that
     applies to a stated value too. Emitting one the pipeline rejects would
@@ -1153,8 +1223,8 @@ def _cell(
     value = (supplied or {}).get(column, "")
 
     if not value:
-        if column in reads:
-            return reads[column]
+        if column in row:
+            return row[column]
 
         # A per-sample file column (funcscan's assembly, sarek's bam) is resolved
         # from the sample's own files by the column's declared pattern. Exactly
@@ -1168,7 +1238,10 @@ def _cell(
             # produces a row the pipeline cannot act on. A REQUIRED file column
             # is not an alternative (funcscan wants its assembly regardless) and
             # is still filled.
-            if any(reads.values()) and column not in contract.required:
+            # Read columns only: a row's own distinguishing value (sarek's
+            # `lane`) is not a read, and reading one as a resolved read would
+            # empty a BAM column that has no reads to be an alternative to.
+            if any(row.get(c) for c in getattr(contract, "read_columns", ())) and column not in contract.required:
                 return ""
             matches = _files_for_column(contract, column, sample)
             return matches[0].storage_uri if len(matches) == 1 else ""
