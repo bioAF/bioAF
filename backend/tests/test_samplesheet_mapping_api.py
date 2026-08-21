@@ -24,11 +24,12 @@ import pytest
 import pytest_asyncio
 
 from app.models.experiment import Experiment
+from app.models.file import File
 from app.models.organization import Organization
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.project import Project
 from app.models.role import Role, RolePermission
-from app.models.sample import Sample
+from app.models.sample import Sample, sample_files
 from app.models.user import User
 from app.services.auth_service import AuthService
 from app.services.bootstrap_roles import seed_builtin_roles
@@ -117,6 +118,23 @@ async def world(session):
     second = Sample(experiment_id=exp.id, external_id="SAMPLE-2", organism="Homo sapiens")
     session.add_all([first, second])
     await session.flush()
+
+    # Reads on both, so these samples block on the DESIGN and nothing else. A
+    # sample with no files at all is refused before the contract is consulted
+    # (it cannot fill a required read column), and this fixture exists to ask
+    # what a saved design does, not what an empty sample does.
+    for sample in (first, second):
+        f = File(
+            organization_id=org.id,
+            experiment_id=exp.id,
+            gcs_uri=f"gs://b/{sample.external_id}_R1_001.fastq.gz",
+            filename=f"{sample.external_id}_R1_001.fastq.gz",
+            file_type="fastq",
+            source_type="upload",
+        )
+        session.add(f)
+        await session.flush()
+        await session.execute(sample_files.insert().values(sample_id=sample.id, file_id=f.id))
     await session.commit()
 
     return {

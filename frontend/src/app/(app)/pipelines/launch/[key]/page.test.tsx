@@ -325,3 +325,97 @@ describe("a Values step the user is standing on", () => {
     expect(screen.getByRole("button", { name: "Launch Pipeline" })).toBeDisabled();
   });
 });
+
+/**
+ * Issue #85: dropping the samples that have no input files.
+ *
+ * The preflight now refuses a selection containing one, which is what the launch
+ * always did. That disables the Launch button, and the button was the only route
+ * to the confirm dialog that offered to drop those samples and run with the rest.
+ * So the offer moves to the block, and taking it re-asks the preflight with the
+ * flag set: the review step then shows the sheet WITHOUT those rows, which is the
+ * one property that step exists to provide.
+ */
+describe("a selection holding a sample with no input files", () => {
+  function blockedOnFiles() {
+    return preflight({
+      can_launch: false,
+      code: "samples_missing_files",
+      reason: "Some selected samples have no linked input files",
+      details: { samples_without_files: [{ id: 4, external_id: "SLIDE-2" }] },
+    });
+  }
+
+  /** With the flag set the server drops them, so the run is launchable again. */
+  function respondByFlag() {
+    mockPost.mockImplementation((url: string, body: Record<string, unknown>) => {
+      if (url === "/api/pipeline-runs/preflight") {
+        return Promise.resolve(body.drop_samples_without_files ? preflight() : blockedOnFiles());
+      }
+      if (url === "/api/pipeline-runs") return Promise.resolve({ id: 99 });
+      return Promise.resolve({});
+    });
+  }
+
+  function lastPreflightBody() {
+    const bodies = preflightBodies();
+    return bodies[bodies.length - 1];
+  }
+
+  /** As far as the first step that renders the block. */
+  async function toTheBlock() {
+    respondByFlag();
+    await toValuesStep();
+    await waitFor(() => expect(screen.getByText(/no linked input files/i)).toBeInTheDocument());
+  }
+
+  async function takeTheDrop() {
+    fireEvent.click(screen.getByRole("button", { name: /drop/i }));
+    await waitFor(() => expect(screen.queryByText(/no linked input files/i)).not.toBeInTheDocument());
+  }
+
+  it("names the samples it would leave out", async () => {
+    await toTheBlock();
+
+    expect(screen.getByText(/SLIDE-2/)).toBeInTheDocument();
+  });
+
+  it("asks the preflight again with the samples dropped", async () => {
+    await toTheBlock();
+
+    await takeTheDrop();
+
+    await waitFor(() => expect(lastPreflightBody().drop_samples_without_files).toBe(true));
+  });
+
+  it("launches under the same flag the sheet was reviewed with", async () => {
+    await toTheBlock();
+    await takeTheDrop();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await waitFor(() => expect(screen.getByText("Parameters")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const launch = await screen.findByRole("button", { name: /Launch Pipeline/i });
+    await waitFor(() => expect(launch).toBeEnabled());
+    fireEvent.click(launch);
+
+    await waitFor(() => {
+      const body = mockPost.mock.calls.find(([url]) => url === "/api/pipeline-runs")?.[1];
+      expect(body.drop_samples_without_files).toBe(true);
+    });
+  });
+
+  it("asks again when the selection changes, rather than carrying the decision over", async () => {
+    await toTheBlock();
+    await takeTheDrop();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(screen.getByText("SLIDE-1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox", { name: /Select sample SLIDE-1/i }));
+
+    // A drop that was right for one selection is not a standing answer for the
+    // next: a sample added later must not be dropped by a decision taken before
+    // it existed. The block returns and has to be taken again.
+    await waitFor(() => expect(lastPreflightBody().drop_samples_without_files).toBe(false));
+  });
+});

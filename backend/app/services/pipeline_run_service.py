@@ -68,6 +68,44 @@ class PipelineRunService:
         return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
 
     @staticmethod
+    def _samples_with_inputs(pipeline, contract, samples: list, drop: bool) -> list:
+        """The samples this run may keep, or the refusal that stops it.
+
+        A pipeline that consumes a per-sample file cannot be fed a sample that
+        has none: the row bioAF emits for it carries an empty required column,
+        and nf-schema rejects the whole sheet after the node has scaled up. The
+        old behaviour was worse still, back-filling a file-less sample with the
+        WHOLE experiment's files, which cross-contaminated one sample's run with
+        another's reads.
+
+        ``drop`` is the caller saying to leave those samples out and run with the
+        rest, which is the remedy the refusal offers.
+
+        Shared by the launch and the preflight rather than written twice, because
+        the preflight's whole promise is that it runs the checks the launch runs.
+        It did not run this one, so the wizard reviewed a sheet whose required
+        read column was empty, reported the launch as fine, and produced the
+        refusal only on the button press (issue #85).
+        """
+        if not PipelineRunService._requires_per_sample_fastq(pipeline, contract):
+            return samples
+
+        missing = [s for s in samples if not s._input_files]
+        if not missing:
+            return samples
+
+        if not drop:
+            raise SamplesMissingFilesError(
+                "Some selected samples have no linked input files",
+                details={"samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]},
+            )
+
+        kept = [s for s in samples if s._input_files]
+        if not kept:
+            raise ValidationError("All selected samples lack input files; nothing to run")
+        return kept
+
+    @staticmethod
     async def preflight(session, org_id: int, data) -> dict:
         """Whether this launch would succeed, and what it would submit.
 
@@ -122,6 +160,26 @@ class PipelineRunService:
         parameters = data.parameters or {}
         sample_values = getattr(data, "sample_values", None) or {}
 
+        verdict: dict = {"can_launch": True, "code": None, "reason": None, "details": {}}
+
+        # The launch's FIRST gate, run here in the same position it holds there.
+        # A sample with no input files is not a gap a scientist can type their
+        # way out of, so it is decided before the contract is consulted and it
+        # wins over anything the contract would have reported: that is the order
+        # the launch resolves them in, and a preflight that names a different
+        # blocker than the one about to fire is a preflight nobody can act on.
+        try:
+            samples = PipelineRunService._samples_with_inputs(
+                pipeline, contract, samples, getattr(data, "drop_samples_without_files", False)
+            )
+        except DomainError as exc:
+            verdict = {
+                "can_launch": False,
+                "code": exc.code,
+                "reason": str(exc),
+                "details": exc.details,
+            }
+
         # Built for every pipeline, including the ones a schema does not
         # describe: design section 6 puts the review step on EVERY launch, and a
         # tailored generator's sheet needs reviewing as much as a derived one.
@@ -129,19 +187,22 @@ class PipelineRunService:
             pipeline.pipeline_key, samples, parameters, contract=contract, sample_values=sample_values
         )
 
-        verdict: dict = {"can_launch": True, "code": None, "reason": None, "details": {}}
         inputs: list[dict] = []
         if not SampleSheetService.has_handwritten_generator(pipeline.pipeline_key):
+            # Still derived when a sample has no files, because the grid asks
+            # about the columns a scientist fills and those questions stand
+            # whatever else blocks the run.
             inputs = SampleSheetService.per_sample_inputs(contract, samples, parameters, sample_values)
-            try:
-                SampleSheetService.check_contract_satisfiable(contract, samples, parameters, sample_values)
-            except DomainError as exc:
-                verdict = {
-                    "can_launch": False,
-                    "code": exc.code,
-                    "reason": str(exc),
-                    "details": exc.details,
-                }
+            if verdict["can_launch"]:
+                try:
+                    SampleSheetService.check_contract_satisfiable(contract, samples, parameters, sample_values)
+                except DomainError as exc:
+                    verdict = {
+                        "can_launch": False,
+                        "code": exc.code,
+                        "reason": str(exc),
+                        "details": exc.details,
+                    }
 
         carried = SamplesheetMappingService.flatten(mapping)
         prefill = {
@@ -372,11 +433,7 @@ class PipelineRunService:
         for s in samples:
             s._input_files = PipelineRunService._input_eligible_files(s.files, data.include_derived_inputs)
 
-        # 3b. A FASTQ-consuming pipeline needs every selected sample to have its
-        # own input files. Reject (or, if asked, drop) samples with none. The old
-        # behaviour back-filled file-less samples with the WHOLE experiment's
-        # files, which cross-contaminated one sample's run with another's reads.
-        # 3c. The samplesheet contract, which decides both whether this pipeline
+        # 3b. The samplesheet contract, which decides both whether this pipeline
         # reads FASTQ at all and whether bioAF can fill every required column.
         # The pipeline's own when it publishes one, and the columns a scientist
         # declared for this experiment when it does not.
@@ -384,19 +441,10 @@ class PipelineRunService:
             session, pipeline, org_id, data.experiment_id, getattr(data, "columns", None)
         )
 
-        if PipelineRunService._requires_per_sample_fastq(pipeline, contract):
-            missing = [s for s in samples if not s._input_files]
-            if missing:
-                if not data.drop_samples_without_files:
-                    raise SamplesMissingFilesError(
-                        "Some selected samples have no linked input files",
-                        details={
-                            "samples_without_files": [{"id": s.id, "external_id": s.external_id} for s in missing]
-                        },
-                    )
-                samples = [s for s in samples if s._input_files]
-                if not samples:
-                    raise ValidationError("All selected samples lack input files; nothing to run")
+        # 3c. Every selected sample needs its own input files, or is dropped on
+        # request. The preflight runs this same call, so the block the wizard
+        # showed is the one that fires here.
+        samples = PipelineRunService._samples_with_inputs(pipeline, contract, samples, data.drop_samples_without_files)
 
         # 4. Check quota
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)

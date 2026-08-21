@@ -38,10 +38,20 @@ function summaryNamesTheRemedy(missing: Record<string, { remedy?: string | null 
  *  it renders the one the API already gave. Before it existed, five of the
  *  twenty most popular pipelines failed only after the user had clicked through
  *  the whole wizard and pressed Launch. */
-export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPreflight | null }) {
+export function LaunchBlockedNotice({
+  preflight,
+  onDropSamplesWithoutFiles,
+}: {
+  preflight: PipelineRunPreflight | null;
+  /** Take the remedy this block offers: leave the file-less samples out and ask
+   *  again. Optional, because a caller with nowhere to put the answer must not
+   *  be shown a button that does nothing. */
+  onDropSamplesWithoutFiles?: () => void;
+}) {
   if (!preflight || preflight.can_launch) return null;
 
   const missing = preflight.details?.missing_columns;
+  const withoutFiles = preflight.details?.samples_without_files ?? [];
   // Only what the summary cannot say belongs in the detail below it. The
   // summary has to be on screen for that to hold, so an absent one keeps the
   // detail whole rather than trusting it to have spoken.
@@ -51,6 +61,33 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
     <div className="mb-6 p-3 border border-red-200 bg-red-50 rounded" role="alert">
       <h3 className="font-medium text-sm text-red-800 mb-1">This run cannot start</h3>
       <p className="text-xs text-gray-700 mb-2">{preflight.reason}</p>
+
+      {/* Samples carrying no input file at all. Not a missing COLUMN: there is
+          no value to type, so this names them and offers the only thing that
+          moves the run forward, which is leaving them out. The launch has always
+          offered exactly this, from a dialog reached by pressing Launch. The
+          preflight now blocks first (issue #85), which disables that button, so
+          the offer has to stand here or it stands nowhere. */}
+      {withoutFiles.length > 0 && (
+        <div className="text-xs text-gray-700">
+          <p>This pipeline reads a file per sample, and these have none attached:</p>
+          <div className="mt-0.5 text-gray-600">
+            {withoutFiles.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
+          </div>
+          {/* No count in the label. The wizard sends a null sample list when the
+              whole experiment is selected, so "continue with 11" would be a
+              number bioAF is guessing at. */}
+          {onDropSamplesWithoutFiles && (
+            <button
+              type="button"
+              onClick={onDropSamplesWithoutFiles}
+              className="mt-2 border border-red-200 bg-white text-red-800 font-medium px-3 py-1.5 rounded text-xs hover:bg-red-100"
+            >
+              Drop them and continue
+            </button>
+          )}
+        </div>
+      )}
 
       {missing && (
         <ul className="space-y-2">
