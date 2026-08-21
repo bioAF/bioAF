@@ -58,7 +58,7 @@ test("a run that really has no reviews still offers to submit one", async () => 
   mockGet.mockImplementation((url: string) =>
     url.endsWith("/reviews")
       ? Promise.resolve({ reviews: [] })
-      : Promise.reject(new Error("no active review")),
+      : Promise.resolve(null),
   );
   render(<ReviewPanel {...asAdmin} />);
 
@@ -66,4 +66,23 @@ test("a run that really has no reviews still offers to submit one", async () => 
     expect(screen.getByRole("button", { name: /submit review/i })).toBeEnabled(),
   );
   expect(screen.queryByTestId("reviews-load-failed")).not.toBeInTheDocument();
+});
+
+/**
+ * Absence of a review is now reported as a 200 with a null body (issue #87), so
+ * a rejection from the active-review read is a genuine failure and must not be
+ * swallowed into the same blank panel as "nobody has reviewed this yet".
+ */
+test("an active-review read that fails says so instead of looking unreviewed", async () => {
+  mockGet.mockImplementation((url: string) =>
+    url.endsWith("/reviews")
+      ? Promise.resolve({ reviews: [] })
+      : Promise.reject(new Error("boom")),
+  );
+  render(<ReviewPanel {...asAdmin} />);
+
+  await waitFor(() =>
+    expect(screen.getByTestId("reviews-load-failed")).toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: /submit review/i })).toBeDisabled();
 });

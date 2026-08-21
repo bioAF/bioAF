@@ -37,7 +37,7 @@ describe("ReviewPanel", () => {
     // Default: no reviews
     mockApiGet.mockImplementation((url: string) => {
       if (url.includes("/reviews")) return Promise.resolve({ reviews: [], total: 0 });
-      if (url.includes("/review")) return Promise.reject(new Error("Not found"));
+      if (url.includes("/review")) return Promise.resolve(null);
       return Promise.resolve({});
     });
   });
