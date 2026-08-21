@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
 from app.services.qc.multiqc_registry import EMPTY_METRICS as _REGISTRY_EMPTY
-from app.services.qc.multiqc_registry import parse_multiqc_metrics, roster_from_emitted
+from app.services.qc.multiqc_registry import parse_multiqc_metrics
+from app.services.qc.roster import roster_for_run
 
 logger = logging.getLogger("bioaf.qc.generic")
 
@@ -202,11 +203,11 @@ async def extract(
             logger.info("No multiqc_data.json found under multiqc/ for run %d", run.id)
             return dict(EMPTY_METRICS)
 
-        # The samples bioAF wrote into the sheet it submitted. A pipeline that
-        # runs no aligner publishes no per-sample section, and this is the only
-        # thing that knows a repeated FastQC name is one sample over two lanes
-        # rather than two samples.
-        emitted = roster_from_emitted(run.samplesheet_emitted_json)
+        # What bioAF holds for this run. A pipeline that runs no aligner
+        # publishes no per-sample section, and this is the only thing that knows
+        # a repeated FastQC name is one sample over two lanes rather than two
+        # samples.
+        roster = await roster_for_run(session, run)
 
         parsed: list[tuple[str, dict]] = []
         for uri in report_uris:
@@ -215,7 +216,7 @@ async def extract(
             except (ValueError, StorageObjectNotFound) as exc:
                 logger.warning("Could not read MultiQC report %s for run %d: %s", uri, run.id, exc)
                 continue
-            parsed.append((uri, parse_multiqc_metrics(data, emitted_roster=emitted)))
+            parsed.append((uri, parse_multiqc_metrics(data, run_roster=roster)))
 
         if not parsed:
             return dict(EMPTY_METRICS)

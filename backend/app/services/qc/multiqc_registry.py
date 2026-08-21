@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger("bioaf.qc.multiqc_registry")
 
@@ -305,6 +305,18 @@ def sample_roster(raw: dict) -> list[str]:
     return []
 
 
+class Roster(NamedTuple):
+    """Sample names bioAF holds for a run, and which record they came from.
+
+    Carried together so a number on a dashboard can always be traced: the two
+    sources are the sheet the run submitted and the run's own sample links, and
+    they are not equally precise.
+    """
+
+    names: list[str]
+    source: str
+
+
 def roster_from_emitted(emitted: object) -> list[str]:
     """The sample names bioAF itself wrote into the sheet it submitted.
 
@@ -345,7 +357,7 @@ def _attribute(entry_name: str, roster: list[str]) -> str | None:
 
 
 def read_depth_and_samples(
-    data: dict, *, emitted_roster: list[str] | None = None
+    data: dict, *, run_roster: Roster | None = None
 ) -> tuple[int | None, int | None, dict[str, str]]:
     """Per-sample raw read depth (mean across samples) and the sample count.
 
@@ -359,12 +371,11 @@ def read_depth_and_samples(
     exactly equal read counts are indistinguishable from a mate pair and collapse;
     that is preferred over trusting FastQC's per-pipeline name suffixes.
 
-    ``emitted_roster`` is the sample names bioAF wrote into the sheet it
-    submitted, used only when the report carries no aligner section of its own.
-    The aligner stays authoritative where it exists, because it is written after
-    lanes are merged and mates paired; the sheet is what makes a no-aligner
-    pipeline answerable at all, and without either the answer is that we do not
-    know.
+    ``run_roster`` is what bioAF holds for the run itself, used only when the
+    report carries no aligner section of its own. The aligner stays authoritative
+    where it exists, because it is written after lanes are merged and mates
+    paired; bioAF's own record is what makes a no-aligner pipeline answerable at
+    all, and without either the answer is that we do not know.
     """
     raw = (data or {}).get("report_saved_raw_data")
     if not isinstance(raw, dict):
@@ -392,14 +403,14 @@ def read_depth_and_samples(
             sources["total_samples"] = roster_source or "aligner"
         return None, total_samples, sources
 
-    if not roster and emitted_roster:
+    if not roster and run_roster and run_roster.names:
         # A pipeline that runs no aligner publishes no per-sample section at all,
-        # so the roster comes from the sheet bioAF submitted. Taken only if it
-        # actually accounts for reads in THIS report: a sheet whose names match
+        # so the roster comes from what bioAF itself holds for the run. Taken
+        # only if it actually accounts for reads in THIS report: names matching
         # no entry would otherwise count samples with no data behind them.
-        if any(_attribute(name, emitted_roster) is not None for name in entries):
-            roster = list(emitted_roster)
-            roster_source = "samplesheet"
+        if any(_attribute(name, run_roster.names) is not None for name in entries):
+            roster = list(run_roster.names)
+            roster_source = run_roster.source
 
     if not roster:
         # Nothing to group by. FastQC has one entry per FILE, and mates, lanes
@@ -502,15 +513,15 @@ def harvest_extras(raw: dict, exclude: frozenset[tuple[str, str]] = frozenset())
 # --------------------------------------------------------------------------
 
 
-def parse_multiqc_metrics(data: dict, *, emitted_roster: list[str] | None = None) -> dict[str, Any]:
+def parse_multiqc_metrics(data: dict, *, run_roster: Roster | None = None) -> dict[str, Any]:
     """Map one parsed ``multiqc_data.json`` onto the controlled QC vocabulary.
 
     Returns the controlled keys (None where nothing supplied them) plus
     ``metric_sources`` (which module supplied each) and ``additional_metrics``
     (everything numeric that has no controlled key).
 
-    ``emitted_roster`` is passed through to the depth derivation, which is the
-    only thing that needs to know which samples the run actually covered.
+    ``run_roster`` is passed through to the depth derivation, which is the only
+    thing that needs to know which samples the run actually covered.
     """
     metrics: dict[str, Any] = dict(EMPTY_METRICS)
     metrics["metric_sources"] = {}
@@ -556,7 +567,7 @@ def parse_multiqc_metrics(data: dict, *, emitted_roster: list[str] | None = None
     # Depth and sample count are derived per SAMPLE, not per FastQC file entry,
     # so mates and lanes cannot distort them. This overrides the registry's
     # file-level `total_sequences` above.
-    depth, total_samples, depth_sources = read_depth_and_samples(data, emitted_roster=emitted_roster)
+    depth, total_samples, depth_sources = read_depth_and_samples(data, run_roster=run_roster)
     if depth is not None:
         metrics["total_sequences"] = depth
     elif total_samples is None:
@@ -582,6 +593,7 @@ __all__ = [
     "normalize_section_id",
     "parse_multiqc_metrics",
     "read_depth_and_samples",
+    "Roster",
     "roster_from_emitted",
     "read_general_stats",
     "sample_roster",

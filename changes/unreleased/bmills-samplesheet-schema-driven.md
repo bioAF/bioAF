@@ -61,9 +61,11 @@
   four samples, and its "reads per sample" was a per-file mean: half the real
   depth. bioAF now takes the roster from the samplesheet the run itself
   submitted.
-- Where bioAF has no record of that sheet, report neither the sample count nor
-  the read depth, and say so, rather than showing a file count under the word
-  "Samples". Existing dashboards keep their values until they are regenerated.
+- Fall back to the run's own samples where no sheet was recorded, so a run
+  that predates that record still reports its real sample count instead of
+  nothing. Where neither exists, report neither the sample count nor the read
+  depth, and say so, rather than showing a file count under the word "Samples".
+  Existing dashboards keep their values until they are regenerated.
 - Say "1 sample" rather than "1 samples".
 
 ### Fixes

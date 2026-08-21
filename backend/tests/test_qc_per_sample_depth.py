@@ -25,6 +25,7 @@ import json
 from pathlib import Path
 
 from app.services.qc.multiqc_registry import (
+    Roster,
     roster_from_emitted,
     parse_multiqc_metrics,
     read_depth_and_samples,
@@ -254,7 +255,9 @@ def test_a_no_aligner_report_has_no_roster_of_its_own():
 def test_the_emitted_samplesheet_supplies_the_roster_a_no_aligner_run_lacks():
     """The whole point. Four files, one sample, and bioAF knows it because it
     wrote the sheet."""
-    depth, samples, sources = read_depth_and_samples(_fixture("generic_run34.json"), emitted_roster=["SAMPLE-101"])
+    depth, samples, sources = read_depth_and_samples(
+        _fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "samplesheet")
+    )
 
     assert samples == 1
     assert depth == 66_601_887
@@ -278,7 +281,9 @@ def test_an_aligner_section_still_outranks_the_emitted_sheet():
     """The aligner's roster is written after lanes are merged and mates paired,
     so it stays authoritative where it exists. A sheet naming something else
     must not move a number that #84 already got right."""
-    depth, samples, sources = read_depth_and_samples(_fixture("scrnaseq_run11.json"), emitted_roster=["SOMETHING-ELSE"])
+    depth, samples, sources = read_depth_and_samples(
+        _fixture("scrnaseq_run11.json"), run_roster=Roster(["SOMETHING-ELSE"], "samplesheet")
+    )
 
     assert depth == 66_601_887
     assert samples == 1
@@ -289,7 +294,7 @@ def test_an_emitted_roster_naming_nobody_in_the_report_is_not_a_roster():
     """A sheet whose names match no FastQC entry groups nothing. Reporting the
     sheet's length would be a sample count with no reads behind it."""
     depth, samples, _sources = read_depth_and_samples(
-        _fixture("generic_run34.json"), emitted_roster=["UNRELATED-SAMPLE"]
+        _fixture("generic_run34.json"), run_roster=Roster(["UNRELATED-SAMPLE"], "samplesheet")
     )
 
     assert samples is None
@@ -319,7 +324,7 @@ def test_one_name_per_sample_however_many_rows_it_took():
 
 
 def test_the_generic_engine_carries_the_emitted_roster_through():
-    metrics = parse_multiqc_metrics(_fixture("generic_run34.json"), emitted_roster=["SAMPLE-101"])
+    metrics = parse_multiqc_metrics(_fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "samplesheet"))
 
     assert metrics["total_samples"] == 1
     assert metrics["total_sequences"] == 66_601_887
@@ -345,3 +350,13 @@ def test_a_report_with_no_roster_reports_no_depth_either():
     # else in the report is per-file by nature and stays.
     assert metrics["percent_gc"] == 46.0
     assert metrics["avg_sequence_length"] == 59.5
+
+
+def test_the_roster_source_is_whatever_record_answered():
+    """A run's samples are a weaker record than the sheet it submitted, so the
+    two are not interchangeable and the dashboard says which one it used."""
+    _depth, _samples, sources = read_depth_and_samples(
+        _fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "run_samples")
+    )
+
+    assert sources["total_samples"] == "run_samples"
