@@ -252,3 +252,96 @@ class TestThePreflightAsksTheQuestionTheLaunchWillAnswer:
 
         row = r.json()["samplesheet"]["rows"][0]["values"]
         assert "DERIVED-2_R1_001.fastq.gz" in ",".join(row)
+
+
+class TestASampleWithNoFilesIsBlockedBeforeTheLaunch:
+    """Issue #85: the preflight passed a sample it had nothing to fill the sheet with.
+
+    ``launch_run`` refuses a per-sample-file pipeline whose selection contains a
+    sample with no input files, but the preflight never ran that gate. So the
+    wizard reviewed a sheet whose required read column was empty for that row,
+    said the launch was fine, and the refusal arrived only on the button press.
+    """
+
+    @pytest.mark.asyncio
+    async def test_it_cannot_launch(self, client, base, session):
+        empty = Sample(experiment_id=base["exp"].id, external_id="SAMPLE-NOFILES", organism="Homo sapiens")
+        session.add(empty)
+        await session.commit()
+
+        token = await _token(client)
+        r = await _preflight(client, token, "nf-core/demo", base["exp"].id, [empty.id])
+
+        assert r.status_code == 200
+        assert r.json()["can_launch"] is False
+
+    @pytest.mark.asyncio
+    async def test_it_names_the_sample_and_the_remedy_the_launch_offers(self, client, base, session):
+        empty = Sample(experiment_id=base["exp"].id, external_id="SAMPLE-NOFILES", organism="Homo sapiens")
+        session.add(empty)
+        await session.commit()
+
+        token = await _token(client)
+        r = await _preflight(client, token, "nf-core/demo", base["exp"].id, [base["sample"].id, empty.id])
+
+        body = r.json()
+        assert body["code"] == "samples_missing_files"
+        assert [s["external_id"] for s in body["details"]["samples_without_files"]] == ["SAMPLE-NOFILES"]
+
+    @pytest.mark.asyncio
+    async def test_a_sample_carrying_files_still_launches(self, client, base):
+        token = await _token(client)
+        r = await _preflight(client, token, "nf-core/demo", base["exp"].id, [base["sample"].id])
+
+        assert r.json()["can_launch"] is True
+
+    @pytest.mark.asyncio
+    async def test_dropping_them_clears_the_block_and_the_row(self, client, base, session):
+        """The remedy the block offers, asked here rather than at the launch.
+
+        The scientist takes it from the notice, so the sheet they then review is
+        the one that runs: the dropped sample contributes no row, and the verdict
+        is the same one the launch will reach with the same flag.
+        """
+        empty = Sample(experiment_id=base["exp"].id, external_id="SAMPLE-NOFILES", organism="Homo sapiens")
+        session.add(empty)
+        await session.commit()
+
+        token = await _token(client)
+        r = await client.post(
+            "/api/pipeline-runs/preflight",
+            json={
+                "pipeline_key": "nf-core/demo",
+                "experiment_id": base["exp"].id,
+                "sample_ids": [base["sample"].id, empty.id],
+                "parameters": {},
+                "drop_samples_without_files": True,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        body = r.json()
+        assert body["can_launch"] is True
+        assert [row["external_id"] for row in body["samplesheet"]["rows"]] == ["SAMPLE-1"]
+
+    @pytest.mark.asyncio
+    async def test_dropping_every_sample_leaves_nothing_to_run(self, client, base, session):
+        empty = Sample(experiment_id=base["exp"].id, external_id="SAMPLE-NOFILES", organism="Homo sapiens")
+        session.add(empty)
+        await session.commit()
+
+        token = await _token(client)
+        r = await client.post(
+            "/api/pipeline-runs/preflight",
+            json={
+                "pipeline_key": "nf-core/demo",
+                "experiment_id": base["exp"].id,
+                "sample_ids": [empty.id],
+                "parameters": {},
+                "drop_samples_without_files": True,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert r.json()["can_launch"] is False
+        assert "nothing to run" in r.json()["reason"]
