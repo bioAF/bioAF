@@ -77,6 +77,35 @@ def _prepare_report_for_iframe(html: str) -> str:
 
 
 class PipelineMonitorService:
+    # What a failed run keeps of its log. The budget is unchanged; where it is
+    # spent is. Nextflow puts the diagnosis at the START of its error block (the
+    # process that failed, its exit status, the command's own error) and
+    # boilerplate at the end, so keeping the last N characters reliably kept the
+    # part nobody needs. Observed on run 31 of the demo: the stored message began
+    # mid-URI and named neither the process nor the exit status.
+    _FAILURE_EXCERPT_LIMIT = 500
+    _FAILURE_BANNER = "ERROR ~"
+
+    @staticmethod
+    def _failure_excerpt(log_content: str | None) -> str:
+        """The most diagnostic slice of a failed run's log, within the budget.
+
+        Anchored on the last error banner, because a retried process logs one per
+        attempt and the final one is the failure that ended the run. A log with no
+        banner is not a Nextflow error block, and its tail is still the best guess
+        at what went wrong, so that behavior is left exactly as it was.
+        """
+        if not log_content:
+            return ""
+        start = log_content.rfind(PipelineMonitorService._FAILURE_BANNER)
+        excerpt = log_content[start:] if start != -1 else log_content
+        limit = PipelineMonitorService._FAILURE_EXCERPT_LIMIT
+        if len(excerpt) <= limit:
+            return excerpt
+        # From the banner forward when there is one, so the head survives; from
+        # the end when there is not, which is what this always did.
+        return excerpt[:limit] if start != -1 else excerpt[-limit:]
+
     @staticmethod
     async def sync_run_statuses(session: AsyncSession) -> None:
         """Background task: sync pipeline run statuses by reading Nextflow trace files."""
@@ -250,7 +279,7 @@ class PipelineMonitorService:
             try:
                 log_content = await compute_adapter.get_job_logs(job_id)
                 if log_content:
-                    run.error_message = log_content[-500:] if len(log_content) > 500 else log_content
+                    run.error_message = PipelineMonitorService._failure_excerpt(log_content)
                 else:
                     run.error_message = "Job failed (no logs available)"
             except Exception:

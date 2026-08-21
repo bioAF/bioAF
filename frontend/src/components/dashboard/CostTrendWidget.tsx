@@ -198,18 +198,29 @@ export function CostTrendWidget() {
           </div>
 
           {/* The tooltip is a hover, which a keyboard and a screen reader do not
-              have. The same numbers, as text. */}
-          <table className="sr-only" data-testid="cost-trend-table">
-            <caption>Daily cost for the last 30 days</caption>
-            <tbody>
-              {records.map((r, i) => (
-                <tr key={i}>
-                  <th scope="row">{shortDate(r.date)}</th>
-                  <td>${num(r.amount).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              have. The same numbers, as text.
+
+              The hiding class sits on a WRAPPER, never on the table itself. CSS
+              treats height on a table box as a minimum rather than a definite
+              size, so `sr-only`'s 1px height leaves a <table> as tall as its
+              rows; `clip` then hides it from view while it still occupies the
+              space, and since `sr-only` is absolutely positioned with no
+              positioned ancestor, that space escapes the dashboard's scroll
+              container and stretches the whole document. A <div> honours the
+              1px box and clips the table inside it. */}
+          <div className="sr-only">
+            <table data-testid="cost-trend-table">
+              <caption>Daily cost for the last 30 days</caption>
+              <tbody>
+                {records.map((r, i) => (
+                  <tr key={i}>
+                    <th scope="row">{shortDate(r.date)}</th>
+                    <td>${num(r.amount).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <Link
             href="/infrastructure/cost-center"
             className="text-xs text-bioaf-600 hover:underline mt-2 inline-block"

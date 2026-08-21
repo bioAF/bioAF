@@ -3,6 +3,7 @@
 import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { RegistryInstallAction } from "./RegistryInstallAction";
 import type {
   PipelineCatalog,
   RegistryListResponse,
@@ -233,28 +234,12 @@ export function RegistryBrowseModal({ open, canInstall, onClose, onInstalled }: 
                   )}
                 </div>
                 <div className="shrink-0 flex flex-col items-end gap-1">
-                  {p.update_available && canInstall && (
-                    <button
-                      onClick={() => applyUpdate(p)}
-                      className="text-sm px-3 py-1 rounded bg-amber-600 text-white hover:bg-amber-700"
-                    >
-                      Update to v{p.latest_release}
-                    </button>
-                  )}
-                  {!p.installed && canInstall && !p.archived && (
-                    <button
-                      onClick={() => openVersionPicker(p)}
-                      className="text-sm px-3 py-1 rounded bg-bioaf-600 text-white hover:bg-bioaf-700"
-                    >
-                      Install
-                    </button>
-                  )}
-                  {p.installed && !p.update_available && (
-                    <span className="text-xs text-gray-500">Latest installed</span>
-                  )}
-                  {!canInstall && !p.installed && (
-                    <span className="text-xs text-gray-500">View only</span>
-                  )}
+                  <RegistryInstallAction
+                    pipeline={p}
+                    canInstall={canInstall}
+                    onInstall={openVersionPicker}
+                    onUpdate={applyUpdate}
+                  />
                 </div>
               </li>
             ))}

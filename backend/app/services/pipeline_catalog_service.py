@@ -171,6 +171,46 @@ class PipelineCatalogService:
             return {}
 
     @staticmethod
+    async def fetch_input_schema(source_url: str | None, version: str | None) -> dict | None:
+        """Fetch ``assets/schema_input.json``: the pipeline's samplesheet contract.
+
+        Sibling of ``fetch_pipeline_schema``, pinned to the same version, so the
+        stored contract is the one the installed release actually enforces.
+
+        Three outcomes, deliberately distinct:
+          - a parsed schema
+          - ``SCHEMA_ABSENT`` when the pipeline publishes none (a 404 is a fact
+            about the pipeline, and recording it stops the lazy launch-time path
+            re-requesting a known-missing file forever)
+          - ``None`` on any failure, recording nothing so the next launch retries
+
+        Never raises. A GitHub outage must not block a launch that works today.
+        """
+        import httpx
+
+        from app.services.samplesheet_schema import SCHEMA_ABSENT
+
+        if not source_url:
+            return None
+
+        raw_url = source_url.replace("github.com", "raw.githubusercontent.com")
+        schema_url = f"{raw_url}/{version or 'master'}/assets/schema_input.json"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(schema_url)
+                if response.status_code == 200:
+                    return response.json()
+                if response.status_code == 404:
+                    logger.info("No samplesheet schema published at %s", schema_url)
+                    return SCHEMA_ABSENT
+                logger.warning("Could not fetch %s: %d", schema_url, response.status_code)
+                return None
+        except Exception as exc:
+            logger.warning("Could not fetch %s: %s", schema_url, exc)
+            return None
+
+    @staticmethod
     async def list_pipelines(
         session: AsyncSession, org_id: int
     ) -> list[tuple[PipelineCatalogEntry, str | None, int | None]]:

@@ -34,7 +34,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 logger = logging.getLogger("bioaf.qc.multiqc_registry")
 
@@ -305,6 +305,42 @@ def sample_roster(raw: dict) -> list[str]:
     return []
 
 
+class Roster(NamedTuple):
+    """Sample names bioAF holds for a run, and which record they came from.
+
+    Carried together so a number on a dashboard can always be traced: the two
+    sources are the sheet the run submitted and the run's own sample links, and
+    they are not equally precise.
+    """
+
+    names: list[str]
+    source: str
+
+
+def roster_from_emitted(emitted: object) -> list[str]:
+    """The sample names bioAF itself wrote into the sheet it submitted.
+
+    ``pipeline_runs.samplesheet_emitted_json`` is ``[{name, uuid, sample_id}]``,
+    one entry per ROW, so a sample sequenced over two lanes appears twice. The
+    roster is samples, so names are de-duplicated while keeping emission order.
+
+    This is the roster for a pipeline that runs no aligner. It is not a guess
+    from a report: it is the record of what bioAF asked the pipeline to process.
+    Anything that is not a list of dicts carrying a name is no roster at all,
+    which covers every run that predates the column.
+    """
+    if not isinstance(emitted, list):
+        return []
+    names: list[str] = []
+    for row in emitted:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        if isinstance(name, str) and name and name not in names:
+            names.append(name)
+    return names
+
+
 def _attribute(entry_name: str, roster: list[str]) -> str | None:
     """The roster sample an entry belongs to: the longest id it starts with.
 
@@ -320,7 +356,9 @@ def _attribute(entry_name: str, roster: list[str]) -> str | None:
     return best
 
 
-def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str, str]]:
+def read_depth_and_samples(
+    data: dict, *, run_roster: Roster | None = None
+) -> tuple[int | None, int | None, dict[str, str]]:
     """Per-sample raw read depth (mean across samples) and the sample count.
 
     Depth stays the RAW, pre-trim FastQC count because that is what the
@@ -332,6 +370,12 @@ def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str
     identical counts and collapse, separate lanes differ and add. Two lanes with
     exactly equal read counts are indistinguishable from a mate pair and collapse;
     that is preferred over trusting FastQC's per-pipeline name suffixes.
+
+    ``run_roster`` is what bioAF holds for the run itself, used only when the
+    report carries no aligner section of its own. The aligner stays authoritative
+    where it exists, because it is written after lanes are merged and mates
+    paired; bioAF's own record is what makes a no-aligner pipeline answerable at
+    all, and without either the answer is that we do not know.
     """
     raw = (data or {}).get("report_saved_raw_data")
     if not isinstance(raw, dict):
@@ -339,6 +383,7 @@ def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str
 
     sources: dict[str, str] = {}
     roster = sample_roster(raw)
+    roster_source = (_roster_module(raw) or "aligner") if roster else None
 
     fastqc_sections = select_sections(raw, "fastqc")
     entries: dict[str, float] = {}
@@ -355,15 +400,26 @@ def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str
         # depth rather than a number derived from something else.
         total_samples = len(roster) or None
         if total_samples:
-            sources["total_samples"] = _roster_module(raw) or "aligner"
+            sources["total_samples"] = roster_source or "aligner"
         return None, total_samples, sources
 
+    if not roster and run_roster and run_roster.names:
+        # A pipeline that runs no aligner publishes no per-sample section at all,
+        # so the roster comes from what bioAF itself holds for the run. Taken
+        # only if it actually accounts for reads in THIS report: names matching
+        # no entry would otherwise count samples with no data behind them.
+        if any(_attribute(name, run_roster.names) is not None for name in entries):
+            roster = list(run_roster.names)
+            roster_source = run_roster.source
+
     if not roster:
-        # No trustworthy grouping. Fall back to the per-file mean rather than
-        # inventing one from entry names.
-        sources["total_sequences"] = "fastqc"
-        sources["total_samples"] = "fastqc"
-        return int(round(_mean(list(entries.values())))), len(entries), sources
+        # Nothing to group by. FastQC has one entry per FILE, and mates, lanes
+        # and samples are three multipliers the entry count cannot tell apart, so
+        # any number here would be the file count wearing a sample's name. That
+        # is what this function exists to prevent, and it is no less wrong for
+        # being the last resort: report neither rather than one that reads as
+        # fact.
+        return None, None, sources
 
     grouped: dict[str, set[float]] = {sample: set() for sample in roster}
     for name, value in entries.items():
@@ -377,7 +433,7 @@ def read_depth_and_samples(data: dict) -> tuple[int | None, int | None, dict[str
         return None, len(roster) or None, sources
 
     sources["total_sequences"] = "fastqc"
-    sources["total_samples"] = _roster_module(raw) or "fastqc"
+    sources["total_samples"] = roster_source or "fastqc"
     return int(round(_mean(per_sample))), len(per_sample), sources
 
 
@@ -457,12 +513,15 @@ def harvest_extras(raw: dict, exclude: frozenset[tuple[str, str]] = frozenset())
 # --------------------------------------------------------------------------
 
 
-def parse_multiqc_metrics(data: dict) -> dict[str, Any]:
+def parse_multiqc_metrics(data: dict, *, run_roster: Roster | None = None) -> dict[str, Any]:
     """Map one parsed ``multiqc_data.json`` onto the controlled QC vocabulary.
 
     Returns the controlled keys (None where nothing supplied them) plus
     ``metric_sources`` (which module supplied each) and ``additional_metrics``
     (everything numeric that has no controlled key).
+
+    ``run_roster`` is passed through to the depth derivation, which is the only
+    thing that needs to know which samples the run actually covered.
     """
     metrics: dict[str, Any] = dict(EMPTY_METRICS)
     metrics["metric_sources"] = {}
@@ -508,26 +567,22 @@ def parse_multiqc_metrics(data: dict) -> dict[str, Any]:
     # Depth and sample count are derived per SAMPLE, not per FastQC file entry,
     # so mates and lanes cannot distort them. This overrides the registry's
     # file-level `total_sequences` above.
-    depth, total_samples, depth_sources = read_depth_and_samples(data)
+    depth, total_samples, depth_sources = read_depth_and_samples(data, run_roster=run_roster)
     if depth is not None:
         metrics["total_sequences"] = depth
+    elif total_samples is None:
+        # Neither could be established, which means nothing here knows which
+        # files belong to one sample. The registry mapped a FILE-level
+        # `total_sequences` out of general_stats above, and leaving it would
+        # publish a per-file mean under the label "reads per sample": the same
+        # defect the derivation exists to remove, just in the other sentence.
+        metrics["total_sequences"] = None
+        metrics["metric_sources"].pop("total_sequences", None)
     metrics["total_samples"] = total_samples
     metrics["metric_sources"].update(depth_sources)
 
     metrics["additional_metrics"] = harvest_extras(raw, exclude=frozenset(winners))
     return metrics
-
-
-def _count_samples(raw: dict) -> int | None:
-    """Deprecated file-level count, kept only as the no-roster fallback path."""
-    fastqc = select_sections(raw, "fastqc")
-    if fastqc:
-        return len(fastqc[0]) or None
-    widest = 0
-    for mapping in _REGISTRY:
-        for section in select_sections(raw, mapping.module):
-            widest = max(widest, len(section))
-    return widest or None
 
 
 __all__ = [
@@ -538,6 +593,8 @@ __all__ = [
     "normalize_section_id",
     "parse_multiqc_metrics",
     "read_depth_and_samples",
+    "Roster",
+    "roster_from_emitted",
     "read_general_stats",
     "sample_roster",
     "select_sections",

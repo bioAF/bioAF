@@ -318,6 +318,20 @@ Generated quality-control metrics and visualizations for a single
 built from the pipeline's QC config. Has its own generation status (generating /
 complete / failed).
 
+### Read Group
+
+The files of one [Sample](#sample) that came off a single flow cell and lane. Both
+halves are the identity: `L001` on two flow cells is two different lanes. The
+industry term, from the SAM spec's `@RG`, where `PU` is flowcell.lane.barcode.
+
+A sample bioAF holds no sequencing identity for has exactly one read group, so a
+lab receiving pre-merged FASTQs from a
+[CRO](#cro-contract-research-organization) is unaffected.
+
+Distinct from [Sample Batch](#sample-batch) and
+[Sequencing Batch](#sequencing-batch), which are cohorts ACROSS samples; a read
+group is a decomposition of one sample.
+
 ### Reference Dataset
 
 A curated, versioned biological reference (genome, annotation, index, atlas, markers)
@@ -340,7 +354,8 @@ An individual biological specimen belonging to one [Experiment](#experiment), ca
 phenotypic metadata (organism, tissue, treatment condition, chemistry version). Has its
 own status lifecycle and an independent `qc_status` (`pass` / `warning` / `fail`). Can
 be assigned to a [Sample Batch](#sample-batch) and a [Sequencing Batch](#sequencing-batch).
-Samples do not have a parent sample.
+Its files decompose into one or more [Read Groups](#read-group). Samples do not have a
+parent sample.
 
 ### Sample Batch
 
@@ -442,3 +457,4 @@ are read through this map. New work uses the current term only.
 | Deprecated term | Current term | Reason | Date |
 |---|---|---|---|
 | NotebookSession (as parent of all session types) | [Compute Session](#compute-session) | Compute Session is now the canonical parent term; Notebook Session is one of its two subtypes. | 2026-05-14 |
+| Sequencing Unit | [Read Group](#read-group) | A term bioAF was inventing, matching nothing in the literature or the tools. Read Group is the industry term, from the SAM spec's `@RG`. | 2026-08-19 |

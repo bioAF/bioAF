@@ -120,6 +120,7 @@ from app.models.sdr import (
 from app.models.validation_study import ValidationStudy
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.comparison_target import ComparisonTarget
+from app.models.samplesheet_mapping import SamplesheetMapping
 
 __all__ = [
     "User",
@@ -241,4 +242,5 @@ __all__ = [
     "ValidationStudy",
     "ReproductionPlan",
     "ComparisonTarget",
+    "SamplesheetMapping",
 ]

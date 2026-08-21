@@ -25,6 +25,8 @@ import json
 from pathlib import Path
 
 from app.services.qc.multiqc_registry import (
+    Roster,
+    roster_from_emitted,
     parse_multiqc_metrics,
     read_depth_and_samples,
     sample_roster,
@@ -128,9 +130,18 @@ def test_records_where_depth_and_sample_count_came_from():
 # --------------------------------------------------------------------------
 
 
-def test_without_a_roster_it_falls_back_to_the_per_file_mean():
-    """No aligner section means no trustworthy grouping. Fall back to the old
-    per-file behavior rather than guessing a grouping from FastQC names."""
+def test_without_any_roster_neither_number_is_reported():
+    """Changed deliberately. This asserted the old fallback: per-file mean as the
+    depth and the ENTRY COUNT as the sample count, sourced "fastqc".
+
+    That fallback is the file-for-sample confusion this module exists to prevent,
+    and it reached users: every no-aligner run on the demo reported its FastQC
+    file count as a sample count, so nf-core/demo runs of one sample over two
+    lanes each said "4 samples". Two files might be one paired sample or two
+    single-end samples, and nothing in the report says which, so the honest
+    answer is neither number. A run launched by bioAF supplies the roster the
+    report lacks (see below); one that predates that record gets no number
+    rather than a wrong one."""
     data = {
         "report_saved_raw_data": {
             "multiqc_fastqc": {
@@ -142,9 +153,9 @@ def test_without_a_roster_it_falls_back_to_the_per_file_mean():
 
     depth, samples, sources = read_depth_and_samples(data)
 
-    assert depth == 2_000_000
-    assert samples == 2
-    assert sources["total_samples"] == "fastqc"
+    assert depth is None
+    assert samples is None
+    assert "total_samples" not in sources
 
 
 def test_a_fastqc_entry_matching_no_roster_sample_is_still_counted():
@@ -204,3 +215,148 @@ def test_the_generic_engine_uses_the_corrected_derivation():
 
     assert metrics["total_sequences"] == 66_601_887
     assert metrics["total_samples"] == 1
+
+
+# --------------------------------------------------------------------------
+# When the pipeline runs no aligner at all
+# --------------------------------------------------------------------------
+#
+# `#84` took the roster from an aligner section, which is correct by
+# construction because it is written after lanes are merged and mates paired.
+# A pipeline that runs no aligner has no such section, and that branch shipped
+# reporting the FastQC ENTRY COUNT as the sample count and the per-file mean as
+# the depth: exactly the file-for-sample confusion the rest of this file exists
+# to prevent. Its own spec called for "FastQC grouped by sample; honest None if
+# grouping is ambiguous."
+#
+# It is no longer ambiguous. bioAF now records the sheet each run submitted
+# (`pipeline_runs.samplesheet_emitted_json`), so the roster can come from what
+# bioAF ITSELF wrote rather than from guessing at FastQC's name suffixes.
+#
+# `generic_run34.json` is nf-core/demo's real report from demo run 34, MultiQC
+# 1.33: `multiqc_fastqc` and `multiqc_general_stats` and nothing else. One
+# sample over two lanes, paired, so four entries whose true depth is
+# 33,436,697 + 33,165,190 = 66,601,887, the same library and the same ground
+# truth as run 11.
+
+
+def test_a_no_aligner_report_has_no_roster_of_its_own():
+    data = _fixture("generic_run34.json")
+
+    assert sample_roster(data["report_saved_raw_data"]) == []
+    assert sorted(data["report_saved_raw_data"]["multiqc_fastqc"]) == [
+        "SAMPLE-101_1",
+        "SAMPLE-101_2",
+        "SAMPLE-101_3",
+        "SAMPLE-101_4",
+    ]
+
+
+def test_the_emitted_samplesheet_supplies_the_roster_a_no_aligner_run_lacks():
+    """The whole point. Four files, one sample, and bioAF knows it because it
+    wrote the sheet."""
+    depth, samples, sources = read_depth_and_samples(
+        _fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "samplesheet")
+    )
+
+    assert samples == 1
+    assert depth == 66_601_887
+    assert sources["total_samples"] == "samplesheet"
+    # Depth is still the RAW FastQC count. Only the ROSTER changed source.
+    assert sources["total_sequences"] == "fastqc"
+
+
+def test_without_any_roster_the_count_is_absent_rather_than_the_file_count():
+    """What shipped reported 4 samples and a per-file mean for this run. Both
+    were the file count wearing a sample's name. With nothing to group by, the
+    honest answer is that we do not know."""
+    depth, samples, sources = read_depth_and_samples(_fixture("generic_run34.json"))
+
+    assert samples is None
+    assert depth is None
+    assert sources.get("total_samples") is None
+
+
+def test_an_aligner_section_still_outranks_the_emitted_sheet():
+    """The aligner's roster is written after lanes are merged and mates paired,
+    so it stays authoritative where it exists. A sheet naming something else
+    must not move a number that #84 already got right."""
+    depth, samples, sources = read_depth_and_samples(
+        _fixture("scrnaseq_run11.json"), run_roster=Roster(["SOMETHING-ELSE"], "samplesheet")
+    )
+
+    assert depth == 66_601_887
+    assert samples == 1
+    assert sources["total_samples"] == "star"
+
+
+def test_an_emitted_roster_naming_nobody_in_the_report_is_not_a_roster():
+    """A sheet whose names match no FastQC entry groups nothing. Reporting the
+    sheet's length would be a sample count with no reads behind it."""
+    depth, samples, _sources = read_depth_and_samples(
+        _fixture("generic_run34.json"), run_roster=Roster(["UNRELATED-SAMPLE"], "samplesheet")
+    )
+
+    assert samples is None
+    assert depth is None
+
+
+def test_roster_from_emitted_reads_the_names_bioaf_wrote():
+    assert roster_from_emitted([{"name": "SAMPLE-101", "uuid": "abc", "sample_id": 1}]) == ["SAMPLE-101"]
+    # Every shape a run that predates the column, or one that emitted nothing,
+    # can present.
+    assert roster_from_emitted(None) == []
+    assert roster_from_emitted([]) == []
+    assert roster_from_emitted([{"uuid": "abc"}]) == []
+    assert roster_from_emitted("not a list") == []
+
+
+def test_one_name_per_sample_however_many_rows_it_took():
+    """A sample sequenced over two lanes emits two ROWS under one name. The
+    roster is samples, so the name appears once."""
+    assert roster_from_emitted(
+        [
+            {"name": "SAMPLE-101", "sample_id": 1},
+            {"name": "SAMPLE-101", "sample_id": 1},
+            {"name": "SAMPLE-102", "sample_id": 2},
+        ]
+    ) == ["SAMPLE-101", "SAMPLE-102"]
+
+
+def test_the_generic_engine_carries_the_emitted_roster_through():
+    metrics = parse_multiqc_metrics(_fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "samplesheet"))
+
+    assert metrics["total_samples"] == 1
+    assert metrics["total_sequences"] == 66_601_887
+    # The metrics that never depended on the roster are untouched.
+    assert metrics["percent_gc"] == 46.0
+
+
+def test_a_report_with_no_roster_reports_no_depth_either():
+    """The count and the depth stand or fall together.
+
+    The registry maps a file-level `total_sequences` out of general_stats before
+    the per-sample derivation runs, and the derivation only OVERRIDES it when it
+    has a number of its own. So suppressing the sample count alone left the
+    per-file mean in place under the label "reads per sample", which is the same
+    defect in the other sentence: run 34 would have said it had no sample count
+    and a mean of 33,300,944 reads per sample.
+    """
+    metrics = parse_multiqc_metrics(_fixture("generic_run34.json"))
+
+    assert metrics["total_samples"] is None
+    assert metrics["total_sequences"] is None
+    # Only the two that depend on knowing which files are one sample. Everything
+    # else in the report is per-file by nature and stays.
+    assert metrics["percent_gc"] == 46.0
+    assert metrics["avg_sequence_length"] == 59.5
+
+
+def test_the_roster_source_is_whatever_record_answered():
+    """A run's samples are a weaker record than the sheet it submitted, so the
+    two are not interchangeable and the dashboard says which one it used."""
+    _depth, _samples, sources = read_depth_and_samples(
+        _fixture("generic_run34.json"), run_roster=Roster(["SAMPLE-101"], "run_samples")
+    )
+
+    assert sources["total_samples"] == "run_samples"

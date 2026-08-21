@@ -1,0 +1,112 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/nf-core/rnastructurome/master/assets/schema_input.json",
+    "title": "nf-core/rnastructurome pipeline - params.input schema",
+    "description": "Schema for the file provided with params.input",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "sample": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "Sample name must be provided and cannot contain spaces",
+                "meta": ["id"]
+            },
+            "sample_id": {
+                "type": "string",
+                "meta": ["sample_id"]
+            },
+            "fastq_1": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
+                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+            },
+            "fastq_2": {
+                "type": "string",
+                "format": "file-path",
+                "exists": true,
+                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
+                "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+            },
+            "method": {
+                "type": "string",
+                "meta": ["method"]
+            },
+            "principle": {
+                "type": "string",
+                "meta": ["principle"]
+            },
+            "chemical": {
+                "type": "string",
+                "meta": ["chemical"],
+                "description": "Chemical probing reagent used (e.g. '1M7')."
+            },
+            "RT_enzyme": {
+                "type": "string",
+                "meta": ["RT_enzyme"],
+                "description": "Reverse transcriptase enzyme used (e.g. 'M-MLV')."
+            },
+            "organism": {
+                "type": "string",
+                "meta": ["organism"],
+                "description": "Organism name used for transcript reference resolution. Latin binomials such as 'Homo sapiens' are normalised to Ensembl species format."
+            },
+            "pH": {
+                "type": "number",
+                "meta": ["pH"],
+                "description": "pH of the DMS reaction. When method is 'dms' and pH >= 8.0, reactive bases are set to 'ACGU' (all four bases); otherwise defaults to 'AC'."
+            },
+            "adapter_3p": {
+                "type": "string",
+                "meta": ["adapter_3p"]
+            },
+            "adapter_5p": {
+                "type": "string",
+                "meta": ["adapter_5p"]
+            },
+            "umi_pattern": {
+                "type": "string",
+                "meta": ["umi_pattern"]
+            },
+            "condition": {
+                "type": "string",
+                "enum": ["treated", "untreated", "denatured"],
+                "meta": ["condition"],
+                "description": "Sample condition for rf-norm grouping (treated / untreated / denatured). Samples are normalised only against rows with the same sample_group and replicate. Untreated requires a matching treated sample; denatured requires matching treated and untreated samples.",
+                "help_text": "TODO (rnacentral-probing-metadata-main): merge_metadata.py must be updated to populate this column from the YAML 'conditions' field. Until then, samples without a condition are treated as 'treated'."
+            },
+            "sample_group": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "meta": ["sample_group"],
+                "description": "sample_group identifier used by rf-norm pairing. Only samples with the same sample_group and replicate are normalised together.",
+                "help_text": "Populate this column for all rf-norm inputs. rf-norm will error if sample_group is missing."
+            },
+            "replicate": {
+                "anyOf": [
+                    {
+                        "type": "string",
+                        "pattern": "^\\S+$"
+                    },
+                    {
+                        "type": "integer"
+                    }
+                ],
+                "meta": ["replicate"],
+                "description": "Replicate identifier used by rf-norm pairing. Only samples with the same sample_group and replicate are normalised together.",
+                "help_text": "Populate this column for all rf-norm inputs. rf-norm will error if replicate is missing. Use a stable value such as rep1, rep2, or 1. Matching is exact after Nextflow converts the value to text."
+            },
+            "group": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "meta": ["group"],
+                "description": "Deprecated legacy rf-norm grouping key. rf-norm now requires explicit sample_group and replicate columns instead.",
+                "help_text": "Retained only for input compatibility while upstream metadata generators are updated. It is not used by rf-norm."
+            }
+        },
+        "required": ["sample", "fastq_1", "sample_group", "condition", "replicate"]
+    }
+}

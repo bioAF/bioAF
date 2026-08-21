@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
+from app.services.read_groups import read_groups_for
 from app.services.sample_service import SampleService
 
 
@@ -76,6 +77,30 @@ async def get_sample(
     if not sample:
         raise HTTPException(404, "Sample not found")
     return _sample_response(sample)
+
+
+@router.get("/{sample_id}/read-groups")
+async def get_sample_read_groups(
+    sample_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+):
+    """How this sample's files decompose into READ GROUPS.
+
+    A read group (`@RG` in the SAM spec) is one unit of sequencing of one
+    library, told apart by its flow cell and lane. bioAF's model was sample ->
+    files with nothing in between, so a sample sequenced over several lanes had
+    nowhere to record which unit a file came from, and four pipelines in the
+    catalog ask for that axis under four different names.
+
+    DERIVED rather than stored: a `read_groups` table waits until something needs
+    to hang metadata on the unit itself. Everything unknown collapses to one
+    group, so a sample of pre-merged FASTQs reports exactly one.
+    """
+    sample = await SampleService.get_sample_with_files(session, sample_id)
+    if not sample:
+        raise HTTPException(404, "Sample not found")
+    return {"sample_id": sample.id, "read_groups": read_groups_for(list(sample.files or []))}
 
 
 @router.patch("/{sample_id}", response_model=SampleResponse)

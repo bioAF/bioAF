@@ -42,6 +42,11 @@ def _read_file_bytes(path: str) -> bytes:
         return f.read()
 
 
+def _read_file_prefix(path: str, length: int) -> bytes:
+    with open(path, "rb") as f:
+        return f.read(length)
+
+
 def _write_file_bytes(path: str, data: bytes) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as f:
@@ -265,6 +270,12 @@ class NfsStorageProvider(StorageProvider):
         if not os.path.exists(path):
             raise StorageObjectNotFound(uri)
         return await asyncio.to_thread(_read_file_bytes, path)
+
+    async def read_prefix(self, uri: str, length: int) -> bytes:
+        path = self._path(uri)
+        if not os.path.exists(path):
+            raise StorageObjectNotFound(uri)
+        return await asyncio.to_thread(_read_file_prefix, path, length)
 
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         await self.write_bytes(uri, text.encode("utf-8"), content_type=content_type)

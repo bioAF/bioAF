@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
-from app.services.qc.multiqc_registry import read_depth_and_samples
+from app.services.qc.multiqc_registry import Roster, read_depth_and_samples
+from app.services.qc.roster import roster_for_run
 
 logger = logging.getLogger("bioaf.qc.chipseq")
 
@@ -282,7 +283,7 @@ def _scan_general_stats(gstats: Any, *keys: str) -> list[float]:
     return out
 
 
-def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
+def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = None) -> dict[str, Any]:
     """Parse per-sample FastQC (raw) + samtools + Picard + phantompeakqualtools +
     MACS2/FRiP from a ChIP-seq multiqc_data.json, aggregating per-sample by mean.
     Mapping/duplication percentages are converted to the scale the controlled QC
@@ -308,7 +309,7 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
             # Per-SAMPLE derivation (aligner roster, raw FastQC counts, lanes
             # added and mates collapsed). ChIP runs are paired-end, so counting
             # FastQC entries reported twice the samples that exist.
-            depth, total_samples, _sources = read_depth_and_samples(data)
+            depth, total_samples, _sources = read_depth_and_samples(data, run_roster=run_roster)
             if depth is not None:
                 metrics["total_sequences"] = depth
             if total_samples is not None:
@@ -460,7 +461,7 @@ async def extract(
         if multiqc_uri:
             logger.info("Found chipseq multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(base) :])
             text = await adapter.read_text(multiqc_uri)
-            metrics = read_multiqc_metrics(text)
+            metrics = read_multiqc_metrics(text, run_roster=await roster_for_run(session, run))
             try:
                 # Generic MultiQC report_plot_data parser (shared with the RNA-seq templates).
                 from app.services.qc.templates.scrnaseq import read_multiqc_chart_data
@@ -493,9 +494,9 @@ def generate_summary(metrics: dict[str, Any]) -> str:
     total = metrics.get("total_sequences")
 
     if n and total is not None:
-        summary = f"This ChIP-seq run analyzed **{n} samples** with a mean of **{total:,} reads per sample**."
+        summary = f"This ChIP-seq run analyzed **{n} sample{'' if n == 1 else 's'}** with a mean of **{total:,} reads per sample**."
     elif n:
-        summary = f"This ChIP-seq run analyzed **{n} samples**."
+        summary = f"This ChIP-seq run analyzed **{n} sample{'' if n == 1 else 's'}**."
     elif total is not None:
         summary = f"This ChIP-seq run had a mean of **{total:,} reads per sample**."
     else:

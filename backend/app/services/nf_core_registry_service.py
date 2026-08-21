@@ -239,6 +239,10 @@ class NfCoreRegistryService:
 
         source_url = f"https://github.com/{registry_row.full_name}"
         schema = await PipelineCatalogService.fetch_pipeline_schema(source_url, version)
+        # The samplesheet contract, pinned to the same version as the parameter
+        # schema above. A failure here stores nothing and the launch path
+        # re-resolves it lazily, so a GitHub hiccup never blocks an install.
+        input_schema = await PipelineCatalogService.fetch_input_schema(source_url, version)
         qc_template = QC_TEMPLATE_MAP.get(name, "generic")
 
         entry = PipelineCatalogEntry(
@@ -250,6 +254,12 @@ class NfCoreRegistryService:
             source_url=source_url,
             version=version,
             schema_json=schema or None,
+            input_schema_json=input_schema,
+            # Which release the contract belongs to, so an upgrade is noticed.
+            # Recorded only when the fetch succeeded: stamping a version against
+            # a contract that was never stored would make the launch path treat
+            # the entry as current and never resolve it.
+            input_schema_version=version if input_schema is not None else None,
             is_builtin=False,
             enabled=True,
             qc_template=qc_template,

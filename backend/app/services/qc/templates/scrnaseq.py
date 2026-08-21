@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
-from app.services.qc.multiqc_registry import read_depth_and_samples, read_general_stats
+from app.services.qc.multiqc_registry import Roster, read_depth_and_samples, read_general_stats
+from app.services.qc.roster import roster_for_run
 
 logger = logging.getLogger("bioaf.qc.scrnaseq")
 
@@ -411,7 +412,7 @@ def read_starsolo_summary(summary_csv_text: str) -> dict[str, Any]:
     return metrics
 
 
-def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
+def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = None) -> dict[str, Any]:
     metrics: dict[str, Any] = {
         "total_sequences": None,
         "percent_duplicates": None,
@@ -445,7 +446,7 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
         # (two lanes x two mates) and reported 133,203,774 against a true
         # 66,601,887. Summing also disagreed with every other template, which
         # meant a paper's per-sample depth claim could never match on scRNA.
-        depth, total_samples, _sources = read_depth_and_samples(data)
+        depth, total_samples, _sources = read_depth_and_samples(data, run_roster=run_roster)
         if depth is not None:
             metrics["total_sequences"] = depth
         if total_samples is not None:
@@ -678,7 +679,7 @@ async def extract(
         if multiqc_uri:
             logger.info("Found multiqc_data.json for run %d", run.id)
             multiqc_text = await adapter.read_text(multiqc_uri)
-            multiqc_metrics = read_multiqc_metrics(multiqc_text)
+            multiqc_metrics = read_multiqc_metrics(multiqc_text, run_roster=await roster_for_run(session, run))
             for k, v in multiqc_metrics.items():
                 if v is not None and metrics.get(k) is None:
                     metrics[k] = v

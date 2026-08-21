@@ -214,9 +214,9 @@ class FetchngsIngestService:
         nf-core/rnaseq|scrnaseq run cannot launch without each sample's input files (the launch path's
         per-sample FASTQ gate is strict). This closes that gap: it reads the same samplesheet and, per
         row, registers fastq_1/fastq_2 under the run's durable ``{outdir}/fastq/`` as
-        ``pipeline_output`` files, tagged ``read:R1|R2`` and ``lane:NNN`` (a distinct lane per source
-        run so sibling runs collapsed under one sample become separate, mergeable sample-sheet rows),
-        and links each to the sample whose external_id matches the row.
+        ``pipeline_output`` files carrying their read type and their source run accession (so sibling
+        runs collapsed under one sample become separate, mergeable sample-sheet rows), and links each
+        to the sample whose external_id matches the row.
 
         Best-effort and idempotent, exactly like ``ingest_for_run``: a non-fetchngs run, a missing
         experiment, or an unreadable samplesheet is a no-op returning ``[]``; files already registered
@@ -248,7 +248,7 @@ class FetchngsIngestService:
         # Existing run-scoped FASTQ File rows, keyed by durable URI. A row at a URI is either one a
         # prior attach tick created, OR a generic ``pipeline_output`` row the pipeline monitor
         # registered for the run's downloaded FASTQ on completion (same run + same URIs, but with no
-        # sample link and no read/lane tags). We must REUSE and LINK those, not skip them: skipping left
+        # sample link and no sequencing identity). We must REUSE and LINK those, not skip them: skipping left
         # every sample with no linked FASTQ, so the driver's per-sample gate saw "no runnable samples"
         # and the study wrongly early-exited to missing_data even though the fetch succeeded.
         existing_by_uri: dict[str, File] = {
@@ -264,7 +264,6 @@ class FetchngsIngestService:
             if f.storage_uri is not None
         }
 
-        lane_for: dict[str, str] = {}
         created: list[File] = []
         linked = 0
         try:
@@ -274,9 +273,12 @@ class FetchngsIngestService:
                     sample = samples_by_external.get(_first(row, _EXTERNAL_ID_COLUMNS))
                     if sample is None:
                         continue
-                    # One lane per source run so a sample's sibling runs stay distinct (mergeable) rows.
-                    run_key = (row.get("run_accession") or _first(row, _EXTERNAL_ID_COLUMNS)).strip()
-                    lane = lane_for.setdefault(run_key, f"{len(lane_for) + 1:03d}")
+                    # The source run, recorded as itself. A sample's sibling runs must stay distinct
+                    # (mergeable) sheet rows, and this used to be done by fabricating a lane number
+                    # per run: those were never lanes, and once a pipeline's own `lane` column gets
+                    # filled bioAF would have emitted the fiction as a real lane. The accession
+                    # separates the units on its own, so `lane` stays NULL, which is the truth.
+                    run_key = (row.get("run_accession") or _first(row, _EXTERNAL_ID_COLUMNS)).strip() or None
                     for column, read in _FASTQ_COLUMNS:
                         value = (row.get(column) or "").strip()
                         if not value:
@@ -294,7 +296,9 @@ class FetchngsIngestService:
                                 experiment_id=run.experiment_id,
                                 uploader_user_id=run.submitted_by_user_id,
                                 ingest_source="fetchngs",
-                                tags_json=[f"read:{read}", f"lane:{lane}"],
+                                tags_json=[f"read:{read}"],
+                                read_type=read,
+                                source_run_accession=run_key,
                                 md5_checksum=_row_md5(row, read[-1]),
                             )
                             session.add(f)
@@ -302,9 +306,12 @@ class FetchngsIngestService:
                             existing_by_uri[storage_uri] = f
                             created.append(f)
                         elif not (f.tags_json or []):
-                            # Adopt a monitor-registered generic output row: give it the read/lane tags
-                            # the sample-sheet builder needs to pair mates by lane.
-                            f.tags_json = [f"read:{read}", f"lane:{lane}"]
+                            # Adopt a monitor-registered generic output row: give it the sequencing
+                            # identity the sample-sheet builder needs to pair mates and to keep
+                            # sibling runs on separate rows.
+                            f.tags_json = [f"read:{read}"]
+                            f.read_type = read
+                            f.source_run_accession = run_key
                         # Idempotent (ON CONFLICT DO NOTHING); safe for reused rows and re-run ticks.
                         await FileService.link_file_to_sample(session, f.id, sample.id)
                         linked += 1
