@@ -272,11 +272,18 @@ async def test_viewer_cannot_review(client, viewer_token, experiment_and_run):
 
 
 @pytest.mark.asyncio
-async def test_get_active_review_404_when_none(client, comp_bio_token, experiment_and_run):
+async def test_get_active_review_returns_null_when_none(client, comp_bio_token, experiment_and_run):
+    """A run nobody has reviewed yet is a normal state, not a failed request.
+
+    The endpoint answers 200 with a null body so the Review tab can ask "has this
+    run been reviewed?" without the browser recording a failed request on every
+    visit to an unreviewed run.
+    """
     run_id = experiment_and_run["run_id"]
 
     response = await client.get(
         f"/api/pipeline-runs/{run_id}/review",
         headers={"Authorization": f"Bearer {comp_bio_token}"},
     )
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json() is None
