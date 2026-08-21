@@ -393,3 +393,49 @@ test("delete button does nothing when user cancels confirmation", async () => {
 
   expect(mockDelete).not.toHaveBeenCalled();
 });
+
+test("the delete gate says the file itself is erased, not merely hidden", async () => {
+  // Issue #86. "This cannot be undone" was true of the catalogue row and false
+  // of the data: the bytes stayed in the bucket. Now they go, so the sentence a
+  // scientist reads before pressing Delete has to say what is destroyed, or the
+  // consent is for something other than what happens.
+  mockGet.mockImplementation(makeGetMock());
+
+  render(<DataFilesPage />);
+  await waitFor(() => {
+    expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getAllByRole("checkbox")[1]);
+  fireEvent.click(screen.getByText("Delete"));
+
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveTextContent(/permanently|cannot be recovered/i);
+  expect(dialog).toHaveTextContent(/storage|data/i);
+});
+
+test("a delete that only half worked says so instead of claiming nothing was removed", async () => {
+  // Each file is its own request, so a bucket that refuses one of them still
+  // erases the others. Telling the scientist "nothing was removed" would send
+  // them looking for data that is already gone.
+  mockGet.mockImplementation(makeGetMock());
+  mockDelete.mockImplementation((path: string) =>
+    path.endsWith("/2")
+      ? Promise.reject(new Error("The file's storage could not be reached, so nothing was deleted. Try again."))
+      : Promise.resolve({}),
+  );
+
+  render(<DataFilesPage />);
+  await waitFor(() => {
+    expect(screen.getByText("sample_R1.fastq.gz")).toBeInTheDocument();
+  });
+  fireEvent.click(screen.getAllByRole("checkbox")[0]);
+  fireEvent.click(screen.getByText("Delete"));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+  const { toastMock } = jest.requireMock("@/components/shared/Toast");
+  await waitFor(() => {
+    expect(toastMock.error).toHaveBeenCalledWith(expect.stringMatching(/1 of 2 files/i));
+  });
+  expect(toastMock.error).not.toHaveBeenCalledWith(expect.stringMatching(/Nothing was removed/i));
+});

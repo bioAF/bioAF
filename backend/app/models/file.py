@@ -90,12 +90,17 @@ class File(Base):
     storage_deleted: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)
     # When this file was deleted from view, and by whom. NULL means it is live.
     #
-    # Deletion is SOFT (decision of 2026-08-19): the row and its `uuid` are never
-    # removed, because a catalogue number that stops resolving the moment
-    # somebody tidies up is not a catalogue number, and a published provenance
-    # record must never dangle. Distinct from `storage_deleted` above, which says
-    # the BYTES are gone: freeing storage and retiring the record are two
-    # different acts and either can happen without the other.
+    # Deletion is SOFT for the RECORD (decision of 2026-08-19): the row and its
+    # `uuid` are never removed, because a catalogue number that stops resolving
+    # the moment somebody tidies up is not a catalogue number, and a published
+    # provenance record must never dangle.
+    #
+    # It is HARD for the BYTES (issue #86): a delete that reclaims no space is
+    # not a delete, so the object is erased and `storage_deleted` above is set
+    # to say so. The two columns stay distinct because either can still happen
+    # without the other: a stack teardown frees storage under records that are
+    # very much live, and an object two live records share outlives the retiring
+    # of one of them.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     deleted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     is_global: Mapped[bool] = mapped_column(Boolean, server_default="false", nullable=False)

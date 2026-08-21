@@ -22,6 +22,7 @@ import { clickableRow } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { useConfirm } from "@/hooks/useConfirm";
+import { logError } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
@@ -301,22 +302,41 @@ export function FileBrowser({
   const handleDeleteSelected = async () => {
     if (selectedIds.size === 0) return;
     const count = selectedIds.size;
+    // The sentence has to match what actually happens. Deleting used to hide
+    // the row and leave every byte in storage, so "this cannot be undone" was
+    // consent for something milder than the act; the data now goes with it.
     const ok = await confirm({
       title: `Delete ${count} ${count === 1 ? "file" : "files"}?`,
-      message: "This cannot be undone.",
+      message:
+        count === 1
+          ? "The file is permanently erased from storage to free the space. It cannot be recovered, and neither can any result that still needs it. bioAF keeps a record that the file existed and which runs used it."
+          : `All ${count} files are permanently erased from storage to free the space. They cannot be recovered, and neither can any result that still needs them. bioAF keeps a record that the files existed and which runs used them.`,
       confirmLabel: "Delete",
       variant: "danger",
     });
     if (!ok) return;
-    try {
-      await Promise.all(
-        Array.from(selectedIds).map((id) => api.delete(`/api/files/${id}`)),
+    // Each file is its own request, so a bucket that refuses one of them has
+    // still erased the others. Reporting the whole batch as failed would send a
+    // scientist looking for data that is already gone.
+    const outcomes = await Promise.allSettled(
+      Array.from(selectedIds).map((id) => api.delete(`/api/files/${id}`)),
+    );
+    const failed = outcomes.filter((o) => o.status === "rejected");
+    setSelectedIds(new Set());
+    fetchFiles();
+    if (failed.length === 0) return;
+    failed.forEach((o) => logError("deleting a file", (o as PromiseRejectedResult).reason));
+    if (failed.length === count) {
+      toast.error(
+        count === 1
+          ? "The file could not be deleted, so it is still here. The technical detail is in the application logs."
+          : "None of the files could be deleted, so they are all still here. The technical detail is in the application logs.",
       );
-      setSelectedIds(new Set());
-      fetchFiles();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not delete the selected files. Nothing was removed.");
+      return;
     }
+    toast.error(
+      `Deleted ${count - failed.length} of ${count} files. The rest are still here. The technical detail is in the application logs.`,
+    );
   };
 
   const triggerDownload = async (fileId: number) => {
