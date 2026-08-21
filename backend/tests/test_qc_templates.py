@@ -117,3 +117,36 @@ def test_bulk_rnaseq_compute_quality_basic_thresholds():
 
     empty: dict = {}
     assert TEMPLATES["bulk_rnaseq"].compute_quality(empty) == "pending_review"
+
+
+# --------------------------------------------------------------------------
+# One sample is one sample
+# --------------------------------------------------------------------------
+#
+# Every summary hardcoded "samples". That read as "1 samples" whenever a run
+# really did cover one, which the per-sample roster now makes the ordinary
+# result rather than a rarity: a single sample sequenced over two lanes used to
+# be counted as its four FastQC files.
+
+
+def test_every_template_says_one_sample_in_the_singular():
+    from app.services.qc.templates import atacseq, bulk_rnaseq, chipseq, generic
+
+    for template, metrics in (
+        (generic, {"total_samples": 1, "total_sequences": 66_601_887}),
+        (bulk_rnaseq, {"total_samples": 1, "total_sequences": 66_601_887}),
+        (atacseq, {"total_samples": 1, "total_sequences": 58_365_790, "peak_count": 31_914}),
+        (chipseq, {"total_samples": 1, "total_sequences": 24_427_238, "peak_count": 100}),
+    ):
+        summary = template.generate_summary({**template.EMPTY_METRICS, **metrics})
+
+        assert "1 sample**" in summary or "1 sample*" in summary, f"{template.__name__}: {summary}"
+        assert "1 samples" not in summary, f"{template.__name__}: {summary}"
+
+
+def test_more_than_one_sample_stays_plural():
+    from app.services.qc.templates import generic
+
+    summary = generic.generate_summary({**generic.EMPTY_METRICS, "total_samples": 4, "total_sequences": 6_677_908})
+
+    assert "4 samples" in summary

@@ -40,6 +40,28 @@
     color-scheme: dark;
   }
 
+  /* Every page scrolls inside its own `<main>`, so that is where an absolutely
+     positioned descendant belongs. Without a containing block here it resolves
+     against the INITIAL containing block, which is the document, and its static
+     position then sets a floor on documentElement.scrollHeight that the 100vh
+     shell cannot shrink below.
+
+     `sr-only` is the case that bit us. It is `position: absolute`, so the cost
+     chart's visually-hidden table escapes `main`'s clipping entirely: an
+     overflow container does NOT clip a descendant whose containing block is one
+     of its own ancestors. documentElement.scrollHeight then equals that box's
+     document position, so once enough widgets push the cost card below the fold
+     the root becomes genuinely scrollable, and reaching the end of `main`
+     carries the gesture into it and drags the whole app, sidebar included.
+
+     Reported at a 842px viewport with doc=1201 and 359px of root overflow.
+     Reproduced by pushing the widget below the fold: doc=1178, overflow=336,
+     with doc exactly equal to the hidden box's document position. With this
+     rule: doc=842, overflow=0, and the widget's own layout unchanged. */
+  main {
+    position: relative;
+  }
+
   /* Keyboard-only focus ring. `:focus-visible` fires for keyboard / assistive-tech
      navigation but not mouse clicks, so pointer users see no outline while keyboard
      users get a clear, brand-colored indicator on every interactive element. The app

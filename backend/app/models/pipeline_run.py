@@ -25,6 +25,27 @@ class PipelineRun(Base):
     progress_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    # The EXACT samplesheet handed to Nextflow, and the design that produced it.
+    # Both are snapshots, not references: a mapping edited next week must not
+    # rewrite the history of a run that already used it, and re-deriving the
+    # sheet later would read today's samples, files and mapping rather than the
+    # ones this run received. The design snapshot keeps its authorship stamps, so
+    # "who set this value" stays answerable after the run has finished, which is
+    # what an audited quality system asks for.
+    samplesheet_csv: Mapped[str | None] = mapped_column(Text, nullable=True)
+    samplesheet_mapping_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The same sheet with a `bioaf_sample_uid` column beside it, so a person can
+    # check by eye which asset each row stood for. Kept SEPARATE from the sheet
+    # above and never submitted: nf-schema validates the whole sheet against the
+    # pipeline's declared properties, so one undeclared column fails all of it.
+    samplesheet_snapshot_csv: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What each name this run EMITTED stood for: [{name, uuid, sample_id}]. A
+    # pipeline names its outputs after the samplesheet's value, and that value is
+    # not always the name the sample carries today, so matching against this is
+    # what keeps an output attributed to the sample it came from. Separate from
+    # the design above, which answers who STATED each value rather than what was
+    # put in the sheet.
+    samplesheet_emitted_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
     work_dir: Mapped[str | None] = mapped_column(String(500), nullable=True)

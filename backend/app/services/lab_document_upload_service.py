@@ -49,6 +49,14 @@ def _assert_public_url(url: str) -> None:
     multicast, or unspecified. Raises ValidationError on any violation. Called for
     the initial URL and again for every redirect target so an external host cannot
     bounce the fetch onto an internal address.
+
+    **This guard is an allowlist, not a denylist.** It must PROVE that every
+    resolved address is public before it returns, and any path that returns
+    without having proved that is a hole. It used to raise only from inside the
+    loop over the resolver's results, so a resolver that returned nothing at all
+    skipped the loop body and fell off the end, and the caller went on to fetch
+    an address the guard had learned nothing about. "I know nothing about this
+    host" is not "this host is fine", and neither is "the resolver failed".
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -59,7 +67,17 @@ def _assert_public_url(url: str) -> None:
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except socket.gaierror:
+    except (OSError, UnicodeError):
+        # gaierror subclasses OSError, so this one clause covers a name that does
+        # not resolve, a resolver that failed transiently, and descriptor
+        # exhaustion alike. UnicodeError is what getaddrinfo raises for an
+        # over-long IDNA label. The last two used to escape as 500s, which is a
+        # server error standing in for a refusal already decided on.
+        raise ValidationError("Could not resolve URL host")
+    if not infos:
+        # An empty result is the resolver saying it learned nothing. The loop
+        # below refuses a bad address, so nothing to loop over meant nothing to
+        # refuse, and the fetch went ahead against an address never checked.
         raise ValidationError("Could not resolve URL host")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])

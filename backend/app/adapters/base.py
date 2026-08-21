@@ -332,6 +332,20 @@ class StorageProvider(ABC):
         """Download an object as bytes. Raises StorageObjectNotFound."""
         raise NotImplementedError
 
+    async def read_prefix(self, uri: str, length: int) -> bytes:
+        """Download the FIRST ``length`` bytes of an object.
+
+        A whole-object read is not an option for the case this exists for: a
+        FASTQ's first record answers which flow cell and lane it came from, and
+        the file holding it may be hundreds of GB. Every backend can serve a
+        byte range, so this is a range request rather than a download the caller
+        truncates.
+
+        Returns fewer bytes when the object is shorter, and raises
+        StorageObjectNotFound when there is none.
+        """
+        raise NotImplementedError
+
     async def write_text(self, uri: str, text: str, *, content_type: str = "text/plain") -> None:
         """Upload text to an object, replacing any existing object."""
         raise NotImplementedError

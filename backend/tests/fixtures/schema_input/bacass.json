@@ -1,0 +1,86 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/nf-core/bacass/master/assets/schema_input.json",
+    "title": "nf-core/bacass pipeline - params.input schema",
+    "description": "Schema for the file provided with params.input",
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "ID": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "unique": false,
+                "errorMessage": "Sample name must be provided and cannot contain spaces",
+                "meta": ["sample"]
+            },
+            "R1": {
+                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+                "anyOf": [
+                    {
+                        "type": ["string", "null"],
+                        "pattern": "^(\\S+\\.f(ast)?q\\.gz|NA)$"
+                    },
+                    {
+                        "type": "string",
+                        "maxLength": 0
+                    }
+                ]
+            },
+            "R2": {
+                "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+                "anyOf": [
+                    {
+                        "type": ["string", "null"],
+                        "pattern": "^(\\S+\\.f(ast)?q\\.gz|NA)$"
+                    },
+                    {
+                        "type": "string",
+                        "maxLength": 0
+                    }
+                ]
+            },
+            "LongFastQ": {
+                "errorMessage": "FastQ file for long reads cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+                "anyOf": [
+                    {
+                        "type": ["string", "null"],
+                        "pattern": "^(\\S+\\.f(ast)?q\\.gz|NA)$"
+                    },
+                    {
+                        "type": "string",
+                        "minLength": 0
+                    }
+                ]
+            },
+            "Fast5": {
+                "errorMessage": "A valid path to Fast5 files. Example: ./data/FAST5",
+                "anyOf": [
+                    {
+                        "type": ["string", "null"],
+                        "pattern": "^(\\/[\\S\\s]*|NA)$"
+                    },
+                    {
+                        "type": "string",
+                        "minLength": 0
+                    }
+                ]
+            },
+            "GenomeSize": {
+                "errorMessage": "A number (including decimals) ending with 'm', representing genome size. No spaces allowed.",
+                "meta": ["gsize"],
+                "anyOf": [
+                    {
+                        "type": ["string", "null"],
+                        "pattern": "(\\b\\d+\\.\\d+m\\b|NA)"
+                    },
+                    {
+                        "type": "string",
+                        "maxLength": 0
+                    }
+                ]
+            }
+        },
+        "required": ["ID"]
+    }
+}

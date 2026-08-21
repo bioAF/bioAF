@@ -64,6 +64,10 @@ class Sample(Base):
     organism: Mapped[str | None] = mapped_column(String(100), nullable=True)
     tissue_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     donor_source: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Donor sex, for pipelines that require it (nf-core/raredisease). Optional by
+    # design: most assays neither use nor need it, so it is never required on
+    # intake. A pipeline that needs it blocks with a clear message when empty.
+    sex: Mapped[str | None] = mapped_column(String(20), nullable=True)
     treatment_condition: Mapped[str | None] = mapped_column(String(255), nullable=True)
     chemistry_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     viability_pct: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)

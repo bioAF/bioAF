@@ -231,3 +231,35 @@ test("the arrow keys stop at the ends rather than wrapping", async () => {
   fireEvent.keyDown(chart, { key: "ArrowRight" });
   expect(screen.getByTestId("cost-trend-tooltip")).toHaveTextContent("Aug 2");
 });
+
+test("the screen-reader table is hidden without taking up layout space", async () => {
+  // `sr-only` hides an element by pinning it to a 1px box. That does not work on
+  // a <table>: CSS treats height on a table box as a MINIMUM, so the table stays
+  // as tall as its rows. `clip` still hides it from view, so the result is an
+  // invisible 440px block, and because `sr-only` also makes it absolute with no
+  // positioned ancestor it escapes the dashboard's scroll container and stretches
+  // the whole document instead.
+  //
+  // Measured on the deployed demo 2026-08-15 at a 1440x900 viewport: 16 rows,
+  // documentElement.scrollHeight 1059 against a 900 viewport, so the entire app
+  // scrolled. The bug is data-dependent, which is why it only appeared once the
+  // month had accumulated enough days to push the table past the fold.
+  //
+  // The hiding box therefore has to be an element that honours a fixed height.
+  mockGet.mockResolvedValueOnce({
+    records: Array.from({ length: 30 }, (_, i) => ({
+      date: `2026-08-${String(i + 1).padStart(2, "0")}`,
+      amount: 10 + i,
+    })),
+    total_amount: 675,
+  });
+  render(<CostTrendWidget />);
+  await waitFor(() => expect(screen.getByTestId("cost-trend-chart")).toBeInTheDocument());
+
+  const table = screen.getByTestId("cost-trend-table");
+  expect(table.className).not.toMatch(/\bsr-only\b/);
+
+  const hider = table.closest(".sr-only");
+  expect(hider).not.toBeNull();
+  expect(hider!.tagName).not.toBe("TABLE");
+});

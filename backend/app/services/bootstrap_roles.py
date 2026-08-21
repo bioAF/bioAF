@@ -49,6 +49,11 @@ ALL_RESOURCES_ACTIONS: dict[str, list[str]] = {
     # Literature validation (lit_validation). request starts a study and runs the
     # reproduction-plan extraction; approve is the C1 human gate; view reads studies/plans.
     "lit_validation": ["request", "approve", "view"],
+    # Saved samplesheet designs. Authoring one needs only pipelines:launch, and
+    # promoting one to a project follows projects:edit. This grant covers the
+    # organization rung alone, which is the only one where one person's decision
+    # reaches people who did not choose it. Admin-only by default.
+    "samplesheet_mappings": ["promote_organization"],
 }
 
 BUILTIN_ROLES: dict[str, tuple[str, dict[str, list[str]]]] = {

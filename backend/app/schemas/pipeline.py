@@ -3,6 +3,21 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class SamplesheetInputSpec(BaseModel):
+    """One samplesheet column the user must supply at launch.
+
+    Only columns whose value is constant across the whole run appear here, so a
+    single field collects them. ``allowed_values`` comes from the pipeline's own
+    schema, so the options offered cannot drift from what it accepts; empty means
+    unconstrained free text.
+    """
+
+    name: str
+    parameter: str
+    required: bool = True
+    allowed_values: list[str] = []
+
+
 class PipelineCatalogResponse(BaseModel):
     id: int
     pipeline_key: str
@@ -12,6 +27,11 @@ class PipelineCatalogResponse(BaseModel):
     source_url: str | None = None
     version: str | None = None
     parameter_schema: dict | None = None
+    # Required samplesheet columns the user must answer, from the pipeline's
+    # assets/schema_input.json. Distinct from parameter_schema, which carries
+    # nextflow_schema.json's pipeline PARAMETERS; a samplesheet column such as
+    # instrument_platform appears in neither the params nor any existing form.
+    samplesheet_inputs: list[SamplesheetInputSpec] = []
     default_params: dict | None = None
     is_builtin: bool
     enabled: bool

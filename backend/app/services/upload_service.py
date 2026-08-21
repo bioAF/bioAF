@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +8,8 @@ from app.exceptions import ValidationError
 from app.models.file import File
 from app.services.event_bus import event_bus
 from app.services.event_types import DATA_UPLOADED
+from app.services import sequencing_identity
+from app.services.sequencing_enrichment import enrich_from_header
 from app.services.file_service import FileService
 
 logger = logging.getLogger("bioaf.upload_service")
@@ -16,26 +17,17 @@ logger = logging.getLogger("bioaf.upload_service")
 # In-memory pending uploads (in production, use Redis or DB table)
 _pending_uploads: dict[str, dict] = {}
 
-# Illumina filename pattern: SampleName_S1_L001_R1_001.fastq.gz
-ILLUMINA_PATTERN = re.compile(
-    r"^(?P<sample_name>.+?)_S(?P<sample_number>\d+)_L(?P<lane>\d{3})_(?P<read>R[12I])_(?P<set_number>\d{3})\.fastq\.gz$"
-)
+# One reading of the Illumina convention, shared with the sample-sheet builder.
+# These names are re-exported because callers already import them from here.
+ILLUMINA_PATTERN = sequencing_identity.ILLUMINA_PATTERN
+READ_TYPES = sequencing_identity.READ_TYPES
 
 
 class UploadService:
     @staticmethod
     def parse_illumina_filename(filename: str) -> dict | None:
         """Extract sample name, lane, read number, set number from Illumina filename."""
-        match = ILLUMINA_PATTERN.match(filename)
-        if not match:
-            return None
-        return {
-            "sample_name": match.group("sample_name"),
-            "sample_number": int(match.group("sample_number")),
-            "lane": int(match.group("lane")),
-            "read": match.group("read"),
-            "set_number": int(match.group("set_number")),
-        }
+        return sequencing_identity.parse_illumina_filename(filename)
 
     @staticmethod
     def validate_fastq_filename(filename: str) -> bool:
@@ -201,6 +193,28 @@ class UploadService:
             experiment_id=pending["experiment_id"],
             is_global=pending.get("is_global", False),
         )
+
+        # Sequencing identity as typed columns. The tags above are kept for one
+        # release so anything still reading them keeps working, but these are
+        # what the sample sheet pairs mates on: a lane held as a string is why
+        # `lane:1` here and `lane:001` from another ingest path used to describe
+        # one physical lane as two units. A name outside the convention leaves
+        # them NULL, never a fabricated value.
+        # A lane is 1-based, and `R[12I]` also matches `RI`, which is not a read
+        # code that exists. Both are filtered here rather than written and
+        # explained later: a typed column that holds a fiction is worse than one
+        # holding NULL.
+        if illumina_info:
+            file.lane = illumina_info["lane"] or None
+            file.read_type = illumina_info["read"] if illumina_info["read"] in READ_TYPES else None
+
+        # Then the file's own header, which carries the flow cell and lane
+        # whatever the name says, and which is the only source for a lab that
+        # follows no naming convention at all. The header WINS over the name
+        # above: a name is a hint, and a file renamed after ingest loses it.
+        # Optional throughout, so a file bioAF cannot read leaves the columns as
+        # they are and the sheet treats everything unknown as one unit.
+        await enrich_from_header(file)
 
         # Link to samples
         for sample_id in pending["sample_ids"]:

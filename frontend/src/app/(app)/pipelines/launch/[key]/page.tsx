@@ -10,6 +10,14 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
+import { SamplesheetInputs } from "@/components/pipelines/SamplesheetInputs";
+import { ParameterForm } from "@/components/pipelines/ParameterForm";
+import { detectProtocol, pipelineAcceptsProtocol } from "@/components/pipelines/protocolDetection";
+import { LaunchBlockedNotice } from "@/components/pipelines/LaunchBlockedNotice";
+import { PerSampleValueGrid, type PerSampleValues } from "@/components/pipelines/PerSampleValueGrid";
+import { SamplesheetColumnEditor } from "@/components/pipelines/SamplesheetColumnEditor";
+import { SamplesheetReview } from "@/components/pipelines/SamplesheetReview";
 import type {
   PipelineCatalog,
   Experiment,
@@ -17,37 +25,29 @@ import type {
   SampleBrief,
   PipelineRunLaunchRequest,
   PipelineRun,
-  ParameterSchema,
+  PipelineRunPreflight,
+  DeclaredColumn,
 } from "@/lib/types";
 
-type Step = 1 | 2 | 3 | 4;
+/** The wizard's steps, named rather than numbered. "Values" appears only when
+ *  the pipeline declares columns bioAF may not fill, so the position of every
+ *  later step depends on the pipeline: a number would mean two different things
+ *  on two different launches. */
+type StepKey = "experiment" | "samples" | "values" | "parameters" | "review";
 
-const CHEMISTRY_TO_PROTOCOL: Record<string, string> = {
-  "v1": "10XV1",
-  "v2": "10XV2",
-  "v3": "10XV3",
-  "v3.1": "10XV3",
-  "nextgem v3.1": "10XV3",
-  "nextgem v3": "10XV3",
-  "10x chromium 3' v1": "10XV1",
-  "10x chromium 3' v2": "10XV2",
-  "10x chromium 3' v3": "10XV3",
-  "10x chromium 3' v3.1": "10XV3",
-  "10x chromium 5' v1": "10XV1",
-  "10x chromium 5' v2": "10XV2",
-  "10x chromium 5' v3": "10XV3",
+const STEP_LABELS: Record<StepKey, string> = {
+  experiment: "Experiment",
+  samples: "Samples",
+  values: "Values",
+  parameters: "Parameters",
+  review: "Review",
 };
 
-function detectProtocol(samples: SampleBrief[]): string | null {
-  const versions = new Set(
-    samples
-      .map((s) => s.chemistry_version?.trim().toLowerCase())
-      .filter(Boolean) as string[],
-  );
-  if (versions.size !== 1) return null;
-  const version = [...versions][0];
-  return CHEMISTRY_TO_PROTOCOL[version] || null;
-}
+const SAVE_SCOPES: { value: string; label: string }[] = [
+  { value: "experiment", label: "this experiment" },
+  { value: "project", label: "this project" },
+  { value: "organization", label: "the whole organisation" },
+];
 
 export default function PipelineLauncherPage() {
   const router = useRouter();
@@ -65,14 +65,25 @@ export default function PipelineLauncherPage() {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState(false);
 
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<StepKey>("experiment");
   const [selectedExperimentId, setSelectedExperimentId] = useState<number | null>(
     preselectedExperimentId ? Number(preselectedExperimentId) : null,
   );
   const [selectedSampleIds, setSelectedSampleIds] = useState<number[]>([]);
   const [userParams, setUserParams] = useState<Record<string, unknown>>({});
+  // What the scientist stated per sample, keyed by sample id. Sent to the
+  // preflight as well as the launch, so the block clears as they answer rather
+  // than at the end.
+  const [sampleValues, setSampleValues] = useState<PerSampleValues>({});
+  const [saveScope, setSaveScope] = useState("experiment");
+  const [savingDesign, setSavingDesign] = useState(false);
+  // The columns declared for a pipeline that publishes no contract. Null until
+  // the preflight has said what is in force, so an empty editor is never
+  // mistaken for a declaration of no columns.
+  const [declaredColumns, setDeclaredColumns] = useState<DeclaredColumn[] | null>(null);
 
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
+  const [preflight, setPreflight] = useState<PipelineRunPreflight | null>(null);
 
   useEffect(() => {
     loadData();
@@ -83,6 +94,49 @@ export default function PipelineLauncherPage() {
     if (selectedExperimentId && pipeline) loadSamples(selectedExperimentId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExperimentId, pipeline]);
+
+  // Ask whether this run could start, while the user can still change the
+  // answer. The same checks run at launch; this only moves when they are heard.
+  useEffect(() => {
+    if (!selectedExperimentId || !pipeline) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await api.post<PipelineRunPreflight>("/api/pipeline-runs/preflight", {
+          pipeline_key: pipelineKey,
+          experiment_id: selectedExperimentId,
+          sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
+          parameters: userParams,
+          sample_values: sampleValues,
+          // Only once the editor holds something. Null is "we have not been told
+          // yet", which is the state of the very first preflight, and it must
+          // reach the server as SILENCE so the saved design stands. Sending []
+          // there would preview a generic sheet for an experiment that has a
+          // declaration saved, and the editor would then adopt that emptiness.
+          ...(declaredColumns !== null ? { columns: declaredColumns } : {}),
+        });
+        if (cancelled) return;
+        setPreflight(result);
+        // Adopted once, and never again while the scientist is editing: a
+        // later preflight must not overwrite the column they are part way
+        // through changing.
+        setDeclaredColumns((held) => held ?? result.prefill?.columns ?? []);
+      } catch (e) {
+        // A preflight that cannot run must not block a launch that would work.
+        logError("checking whether this pipeline can run", e);
+        if (!cancelled) setPreflight(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  // `declaredColumns` is here so that editing a column re-previews the sheet.
+  // Without it the Values step could change the declaration and the Review step
+  // would still show the sheet from before the edit. It cannot loop: the adopt
+  // above returns the held array unchanged once it is non-null.
+  //
+  // The disable must stay on the line immediately before the array, or it
+  // stops applying to it and unsuppresses the `pipelineKey` warning.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues, declaredColumns]);
 
   async function loadData() {
     try {
@@ -113,10 +167,15 @@ export default function PipelineLauncherPage() {
       const data = await api.get<SampleBrief[]>(`/api/experiments/${experimentId}/samples`);
       setSamples(data);
       setSelectedSampleIds(data.map((s) => s.id));
-      // Auto-detect protocol from sample chemistry_version
+      // Auto-detect the 10x protocol from sample chemistry, but only offer it to
+      // a pipeline whose own schema declares that parameter and accepts that
+      // value. Injecting it blindly sent `protocol: 10XV3` to every pipeline,
+      // including ones with no such parameter (sarek) and one whose parameter of
+      // the same name means the input sample type (nanoseq).
       const protocol = detectProtocol(data);
-      setDetectedProtocol(protocol);
-      if (protocol) {
+      const accepted = pipelineAcceptsProtocol(pipeline?.parameter_schema ?? null, protocol);
+      setDetectedProtocol(accepted ? protocol : null);
+      if (accepted && protocol) {
         setUserParams((prev) => ({ ...prev, protocol }));
       }
     } catch (e) {
@@ -134,7 +193,12 @@ export default function PipelineLauncherPage() {
         experiment_id: selectedExperimentId,
         sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
         parameters: userParams,
+        sample_values: sampleValues,
         drop_samples_without_files: dropSamplesWithoutFiles,
+        // What the review step just showed. Saving is a separate, deliberate
+        // act (design 02 section 4) and this does not perform it: the columns
+        // bind THIS run only, and the next one reads whatever is saved.
+        ...(declaredColumns !== null ? { columns: declaredColumns } : {}),
       };
       const run = await api.post<PipelineRun>("/api/pipeline-runs", request);
       router.push(`/pipelines/runs/${run.id}`);
@@ -184,6 +248,48 @@ export default function PipelineLauncherPage() {
     );
   }
 
+  /** A cell corrected on the review step. It becomes a stated value for this
+   *  run, which is what the preview then regenerates from, so the table always
+   *  shows the sheet that would actually be submitted. */
+  function correctCell(sampleId: number, column: string, value: string) {
+    setSampleValues((prev) => {
+      const row = { ...(prev[String(sampleId)] ?? {}) };
+      if (value) row[column] = value;
+      else delete row[column];
+      const next = { ...prev, [String(sampleId)]: row };
+      if (Object.keys(row).length === 0) delete next[String(sampleId)];
+      return next;
+    });
+  }
+
+  /** Saving the design is deliberate at every rung (design section 4). Nothing
+   *  is promoted by launching, so a one-off accommodation never becomes what the
+   *  next person inherits. */
+  async function saveDesign() {
+    if (!selectedExperimentId) return;
+    setSavingDesign(true);
+    try {
+      await api.post("/api/samplesheet-mappings", {
+        pipeline_key: pipelineKey,
+        scope: saveScope,
+        experiment_id: selectedExperimentId,
+        project_id: experiments.find((e) => e.id === selectedExperimentId)?.project?.id ?? null,
+        values: sampleValues,
+        ...(preflight?.declaration?.declarable ? { columns: declaredColumns ?? [] } : {}),
+      });
+      toast.success("Saved for next time");
+    } catch (e) {
+      logError("saving these values for next time", e);
+      toast.error(
+        e instanceof ApiError && e.status === 403
+          ? "Saving for the whole organisation needs an administrator."
+          : "Could not save these values. The launch is unaffected.",
+      );
+    } finally {
+      setSavingDesign(false);
+    }
+  }
+
   if (!loading && !pipeline && loadError) {
     return (
       <main className="flex-1 flex items-center justify-center">
@@ -203,6 +309,43 @@ export default function PipelineLauncherPage() {
 
   const selectedExperiment = experiments.find((e) => e.id === selectedExperimentId);
 
+  // The Values step exists only when this pipeline declares columns bioAF may
+  // not fill. Asking for nothing would be a step that always says "nothing to
+  // do here", and hiding it when it IS needed strands the user on a Launch
+  // button that never enables.
+  const perSampleInputs = preflight?.per_sample_inputs ?? [];
+  // A pipeline that publishes no contract has a Values step whatever it asks
+  // for, because declaring the columns is the only way its sheet becomes
+  // anything other than bioAF's standard three.
+  const declarable = preflight?.declaration?.declarable ?? false;
+  const steps: StepKey[] = [
+    "experiment",
+    "samples",
+    // ...and a step the user is STANDING ON stays, whether or not it still has
+    // anything to collect. The grid drops a gap that carries a remedy, so
+    // answering the last answerable question empties it; without this clause
+    // the step vanished mid-flow, the indicator silently renumbered from five
+    // to four, and Next resolved to Select Samples. The block explaining the
+    // remedy renders here, so this is also where the explanation lives.
+    ...(perSampleInputs.length > 0 || declarable || step === "values" ? (["values"] as StepKey[]) : []),
+    "parameters",
+    "review",
+  ];
+  // Kept apart from the clamped index below on purpose: -1 means "the step on
+  // screen is not in the list", and moving relative to a silent 0 is what
+  // turned a missing step into a backwards jump. Navigation refuses instead.
+  const currentIndex = steps.indexOf(step);
+  const stepIndex = Math.max(0, currentIndex);
+  const goNext = () => {
+    if (currentIndex < 0) return;
+    setStep(steps[Math.min(currentIndex + 1, steps.length - 1)]);
+  };
+  const goBack = () => {
+    if (currentIndex < 0) return;
+    setStep(steps[Math.max(currentIndex - 1, 0)]);
+  };
+  const selectedSamples = samples.filter((s) => selectedSampleIds.includes(s.id));
+
   return (
     <main className="flex-1 overflow-y-auto p-6">
       {loading ? (
@@ -216,21 +359,19 @@ export default function PipelineLauncherPage() {
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 mb-8">
-        {[1, 2, 3, 4].map((s) => (
-          <div key={s} className="flex items-center gap-2">
+        {steps.map((key, index) => (
+          <div key={key} className="flex items-center gap-2">
             <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-              s === step ? "bg-bioaf-600 text-white" : s < step ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
-            }`}>{s}</div>
-            <span className="text-sm text-gray-500">
-              {s === 1 ? "Experiment" : s === 2 ? "Samples" : s === 3 ? "Parameters" : "Review"}
-            </span>
-            {s < 4 && <div className="w-8 h-px bg-gray-300" />}
+              index === stepIndex ? "bg-bioaf-600 text-white" : index < stepIndex ? "bg-green-500 text-white" : "bg-gray-200 text-gray-500"
+            }`}>{index + 1}</div>
+            <span className="text-sm text-gray-500">{STEP_LABELS[key]}</span>
+            {index < steps.length - 1 && <div className="w-8 h-px bg-gray-300" />}
           </div>
         ))}
       </div>
 
       {/* Step 1: Select Experiment */}
-      {step === 1 && (
+      {step === "experiment" && (
         <Card className="max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">Select Experiment</h2>
           <select
@@ -246,7 +387,7 @@ export default function PipelineLauncherPage() {
           </select>
           <div className="mt-4 flex justify-end">
             <button
-              onClick={() => setStep(2)}
+              onClick={goNext}
               disabled={!selectedExperimentId}
               className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50"
             >Next</button>
@@ -255,7 +396,7 @@ export default function PipelineLauncherPage() {
       )}
 
       {/* Step 2: Select Samples */}
-      {step === 2 && (
+      {step === "samples" && (
         <Card>
           <h2 className="text-lg font-semibold mb-4">Select Samples</h2>
           <div className="mb-3 flex items-center gap-4">
@@ -300,14 +441,67 @@ export default function PipelineLauncherPage() {
             </tbody>
           </table>
           <div className="mt-4 flex justify-between">
-            <button onClick={() => setStep(1)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => setStep(3)} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goNext} disabled={selectedSampleIds.length === 0} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700 disabled:opacity-50">Next</button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step: the values this pipeline needs per sample, which bioAF may not
+          guess. A dedicated step after sample selection keeps "which samples"
+          separate from "what values", and it appears only when there is
+          something to ask. */}
+      {step === "values" && (
+        <Card>
+          <h2 className="text-lg font-semibold mb-4">Values for each sample</h2>
+          {declarable && (
+            <SamplesheetColumnEditor
+              columns={declaredColumns ?? []}
+              fileTypes={preflight?.declaration?.file_types ?? []}
+              customFields={preflight?.declaration?.custom_fields ?? []}
+              onChange={setDeclaredColumns}
+            />
+          )}
+          <PerSampleValueGrid
+            specs={perSampleInputs}
+            samples={selectedSamples}
+            values={sampleValues}
+            onChange={setSampleValues}
+            prefill={preflight?.prefill ?? null}
+          />
+          <LaunchBlockedNotice preflight={preflight} />
+          <div className="flex items-center gap-2 mb-4 text-sm">
+            <span className="text-gray-500">Save these values for</span>
+            <select
+              aria-label="Save these values for"
+              value={saveScope}
+              onChange={(e) => setSaveScope(e.target.value)}
+              className="border rounded-md px-2 py-1 text-sm"
+            >
+              {SAVE_SCOPES.map((scope) => (
+                <option key={scope.value} value={scope.value}>{scope.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={saveDesign}
+              disabled={
+                savingDesign ||
+                (Object.keys(sampleValues).length === 0 && (declaredColumns ?? []).length === 0)
+              }
+              className="border px-3 py-1 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50"
+            >
+              {savingDesign ? "Saving..." : "Save for next time"}
+            </button>
+          </div>
+          <div className="flex justify-between">
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <Button onClick={goNext}>Next</Button>
           </div>
         </Card>
       )}
 
       {/* Step 3: Configure Parameters */}
-      {step === 3 && (
+      {step === "parameters" && (
         <Card>
           <h2 className="text-lg font-semibold mb-4">Configure Parameters</h2>
           {detectedProtocol && (
@@ -315,7 +509,18 @@ export default function PipelineLauncherPage() {
               Protocol auto-detected as <span className="font-semibold">{detectedProtocol}</span> from sample chemistry version.
             </div>
           )}
-          <ProtocolInfo />
+          {/* Explains 10x Chromium barcode/UMI layout, so it belongs only to a
+              pipeline that actually takes a 10x protocol. It used to render for
+              every pipeline, which put a scRNA-seq primer on top of sarek. */}
+          {pipelineAcceptsProtocol(pipeline.parameter_schema, detectedProtocol) && <ProtocolInfo />}
+          <SamplesheetInputs
+            specs={pipeline.samplesheet_inputs || []}
+            values={userParams}
+            onChange={setUserParams}
+          />
+          {/* Shown here as well as on Review: a user who cannot run this at all
+              should not spend time filling in parameters first. */}
+          <LaunchBlockedNotice preflight={preflight} />
           <ParameterForm
             schema={pipeline.parameter_schema}
             defaultParams={pipeline.default_params || {}}
@@ -323,15 +528,15 @@ export default function PipelineLauncherPage() {
             onChange={setUserParams}
           />
           <div className="mt-4 flex justify-between">
-            <button onClick={() => setStep(2)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => setStep(4)} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button onClick={goNext} className="bg-bioaf-600 text-white px-6 py-2 rounded-md text-sm hover:bg-bioaf-700">Next</button>
           </div>
         </Card>
       )}
 
       {/* Step 4: Review & Launch */}
-      {step === 4 && (
-        <Card className="max-w-2xl">
+      {step === "review" && (
+        <Card>
           <h2 className="text-lg font-semibold mb-4">Review & Launch</h2>
           <dl className="space-y-3 mb-6">
             <div><dt className="text-sm text-gray-500">Pipeline</dt><dd className="text-sm font-medium">{pipeline.name} v{pipeline.version}</dd></div>
@@ -356,9 +561,19 @@ export default function PipelineLauncherPage() {
               </dd>
             </div>
           </dl>
+          {/* The sheet itself, not a summary of it. bioAF resolves a file column
+              by matching the schema's own pattern, and a regex match is not
+              proof of the right file, so this is the last place a wrong
+              resolution can be caught. */}
+          <SamplesheetReview preview={preflight?.samplesheet ?? null} onCorrect={correctCell} />
+          <LaunchBlockedNotice preflight={preflight} />
           <div className="flex justify-between">
-            <button onClick={() => setStep(3)} className="border px-6 py-2 rounded-md text-sm">Back</button>
-            <button onClick={() => handleLaunch()} disabled={launching} className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50">
+            <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
+            <button
+              onClick={() => handleLaunch()}
+              disabled={launching || preflight?.can_launch === false}
+              className="bg-green-600 text-white px-8 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50"
+            >
               {launching ? "Launching..." : "Launch Pipeline"}
             </button>
           </div>
@@ -367,101 +582,6 @@ export default function PipelineLauncherPage() {
       </>
       )}
     </main>
-  );
-}
-
-// Auto-generated parameter form from nextflow_schema.json
-function ParameterForm({
-  schema,
-  defaultParams,
-  values,
-  onChange,
-}: {
-  schema: ParameterSchema | null;
-  defaultParams: Record<string, unknown>;
-  values: Record<string, unknown>;
-  onChange: (v: Record<string, unknown>) => void;
-}) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
-
-  if (!schema?.definitions) {
-    return (
-      <div className="text-sm text-gray-500">
-        <p className="mb-3">No parameter schema available. Enter parameters as JSON:</p>
-        <textarea
-          aria-label="Pipeline parameters as JSON"
-          value={JSON.stringify(values, null, 2)}
-          onChange={(e) => {
-              try {
-                onChange(JSON.parse(e.target.value));
-              } catch {
-                // Typing JSON means passing through invalid states on the way to a
-                // valid one. Reporting each keystroke would be noise, not help.
-              }
-            }}
-          className="w-full h-40 border rounded px-3 py-2 font-mono text-xs"
-        />
-      </div>
-    );
-  }
-
-  const managedParams = new Set(["input", "outdir"]);
-
-  function setValue(key: string, val: unknown) {
-    onChange({ ...values, [key]: val });
-  }
-
-  const groups = Object.entries(schema.definitions);
-
-  return (
-    <div className="space-y-6">
-      {groups.map(([groupKey, group]) => {
-        if (!group.properties) return null;
-        const entries = Object.entries(group.properties).filter(
-          ([k, prop]) => !managedParams.has(k) && !prop.hidden,
-        );
-        const advancedEntries = Object.entries(group.properties).filter(
-          ([k, prop]) => !managedParams.has(k) && prop.hidden,
-        );
-
-        if (entries.length === 0 && advancedEntries.length === 0) return null;
-
-        return (
-          <div key={groupKey}>
-            <h3 className="font-medium text-sm text-gray-700 mb-3">{group.title || groupKey}</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {entries.map(([paramKey, prop]) => (
-                <ParameterField
-                  key={paramKey}
-                  paramKey={paramKey}
-                  prop={prop}
-                  required={group.required?.includes(paramKey)}
-                  value={values[paramKey] ?? prop.default ?? defaultParams[paramKey]}
-                  onChange={(v) => setValue(paramKey, v)}
-                />
-              ))}
-            </div>
-            {advancedEntries.length > 0 && (
-              <details className="mt-3">
-                <summary className="text-sm text-gray-500 cursor-pointer">Advanced ({advancedEntries.length} params)</summary>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
-                  {advancedEntries.map(([paramKey, prop]) => (
-                    <ParameterField
-                      key={paramKey}
-                      paramKey={paramKey}
-                      prop={prop}
-                      required={group.required?.includes(paramKey)}
-                      value={values[paramKey] ?? prop.default ?? defaultParams[paramKey]}
-                      onChange={(v) => setValue(paramKey, v)}
-                    />
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-        );
-      })}
-    </div>
   );
 }
 
@@ -494,72 +614,3 @@ function ProtocolInfo() {
   );
 }
 
-function ParameterField({
-  paramKey,
-  prop,
-  required,
-  value,
-  onChange,
-}: {
-  paramKey: string;
-  prop: NonNullable<NonNullable<ParameterSchema["definitions"]>[string]["properties"]>[string];
-  required?: boolean;
-  value: unknown;
-  onChange: (v: unknown) => void;
-}) {
-  const label = paramKey.replace(/_/g, " ");
-
-  if (prop.enum) {
-    return (
-      <div>
-        <label id="lbl-page-1" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <select aria-labelledby="lbl-page-1" value={String(value ?? "")} onChange={(e) => onChange(e.target.value)} className="w-full border rounded px-3 py-1.5 text-sm">
-          <option value="">--</option>
-          {prop.enum.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
-        </select>
-        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-      </div>
-    );
-  }
-
-  if (prop.type === "boolean") {
-    return (
-      <div className="flex items-center gap-2">
-        <input type="checkbox" aria-label={label} checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        <label className="text-sm">{label}{required ? " *" : ""}</label>
-        {prop.description && <span className="text-xs text-gray-500">({prop.description})</span>}
-      </div>
-    );
-  }
-
-  if (prop.type === "number" || prop.type === "integer") {
-    return (
-      <div>
-        <label id="lbl-page-2" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-        <input aria-labelledby="lbl-page-2"
-          type="number"
-          value={value != null ? String(value) : ""}
-          min={prop.minimum}
-          max={prop.maximum}
-          onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-          className="w-full border rounded px-3 py-1.5 text-sm"
-        />
-        {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-      </div>
-    );
-  }
-
-  // Default: string
-  return (
-    <div>
-      <label id="lbl-page-3" className="text-xs text-gray-500">{label}{required ? " *" : ""}</label>
-      <input aria-labelledby="lbl-page-3"
-        type="text"
-        value={String(value ?? "")}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full border rounded px-3 py-1.5 text-sm"
-      />
-      {prop.description && <p className="text-xs text-gray-500 mt-0.5">{prop.description}</p>}
-    </div>
-  );
-}

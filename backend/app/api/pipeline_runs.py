@@ -17,6 +17,7 @@ from app.schemas.pipeline_run import (
     PipelineRunCompareResponse,
     PipelineRunDetailResponse,
     PipelineRunLaunchRequest,
+    PipelineRunPreflightResponse,
     PipelineRunListResponse,
     PipelineRunResponse,
     SampleSummary,
@@ -25,6 +26,7 @@ from app.schemas.pipeline_run import (
 from app.services import role_service
 from app.services.pipeline_monitor_service import PipelineMonitorService
 from app.services.pipeline_run_service import PipelineRunService
+from app.services.samplesheet_mapping_service import SamplesheetMappingService
 
 router = APIRouter(prefix="/api/pipeline-runs", tags=["pipeline-runs"])
 
@@ -73,7 +75,7 @@ def _run_response(run) -> PipelineRunResponse:
     )
 
 
-def _detail_response(run) -> PipelineRunDetailResponse:
+def _detail_response(run, design: dict | None = None) -> PipelineRunDetailResponse:
     base = _run_response(run)
     processes = [
         PipelineProcessResponse(
@@ -95,6 +97,9 @@ def _detail_response(run) -> PipelineRunDetailResponse:
         **base.model_dump(),
         processes=processes,
         samples=samples,
+        samplesheet_csv=run.samplesheet_csv,
+        samplesheet_design=design,
+        samplesheet_snapshot_csv=run.samplesheet_snapshot_csv,
     )
 
 
@@ -174,6 +179,23 @@ async def launch_run(
     return _run_response(run)
 
 
+@router.post("/preflight", response_model=PipelineRunPreflightResponse)
+async def preflight_run(
+    data: PipelineRunLaunchRequest,
+    current_user: dict = require_permission("pipelines", "launch"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Would this launch succeed? Answers without creating a run.
+
+    Declared before /{run_id} so the path converter does not swallow it.
+    """
+    org_id = int(current_user["org_id"])
+    result = await PipelineRunService.preflight(session, org_id, data)
+    # The lazy schema fetch may have stored a contract worth keeping.
+    await session.commit()
+    return PipelineRunPreflightResponse(**result)
+
+
 @router.get("/{run_id}", response_model=PipelineRunDetailResponse)
 async def get_run(
     run_id: int,
@@ -184,7 +206,9 @@ async def get_run(
     run = await PipelineRunService.get_run(session, run_id, org_id)
     if not run:
         raise HTTPException(404, "Run not found")
-    return _detail_response(run)
+    # The design is stored with user ids and read with names.
+    design = await SamplesheetMappingService.describe(session, run.samplesheet_mapping_json)
+    return _detail_response(run, design)
 
 
 @router.post("/{run_id}/cancel", response_model=PipelineRunResponse)
