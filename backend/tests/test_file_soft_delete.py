@@ -16,6 +16,10 @@ oversight: the file's own record and identity survive forever, while the working
 rows that pointed at it (a plot archive entry, a parse result) are still cleaned
 up exactly as they were. What survives is the catalogue entry and the run
 provenance that references it.
+
+The bytes are a separate question and issue #86 settled it: they go. This file
+still asserts that the record survives; test_file_delete_frees_storage.py
+asserts that the object behind it does not.
 """
 
 import pytest
@@ -142,9 +146,16 @@ class TestTheRecordSurvives:
         assert [r.file_id for r in surviving] == [world["doomed"].id]
 
     @pytest.mark.asyncio
-    async def test_deleting_the_record_does_not_claim_the_bytes_are_gone(self, client, session, world):
-        """Two different facts, and bioAF already separated them. Conflating
-        them would say the storage was freed when nothing touched it."""
+    async def test_the_surviving_record_says_the_bytes_are_gone(self, client, session, world):
+        """Two different facts, and bioAF keeps them apart. This one asserts
+        which way round they land after a user-initiated delete: the record
+        survives, the object does not, and the record says so.
+
+        Superseded the original assertion (that deletion left the bytes alone)
+        when issue #86 established that a delete which frees nothing is not a
+        delete. What is actually freed, and what is refused, lives in
+        test_file_delete_frees_storage.py.
+        """
         await _delete(client, world)
 
         storage_deleted = (
@@ -152,7 +163,7 @@ class TestTheRecordSurvives:
                 text("SELECT storage_deleted FROM files WHERE id = :fid").bindparams(fid=world["doomed"].id)
             )
         ).scalar()
-        assert storage_deleted is False
+        assert storage_deleted is True
 
 
 class TestItIsGoneFromEveryWorkingView:

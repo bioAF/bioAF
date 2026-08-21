@@ -119,3 +119,15 @@ class PermissionDeniedError(DomainError):
 
     status_code = 403
     code = "permission_denied"
+
+
+class StorageUnavailableError(DomainError):
+    """The object store could not carry out an operation the caller depends on.
+
+    Raised where failing quietly would leave the catalogue asserting something
+    about the bytes that is not true: deleting a file, for instance, must not
+    retire the record while the object survives in the bucket.
+    """
+
+    status_code = 502
+    code = "storage_unavailable"
