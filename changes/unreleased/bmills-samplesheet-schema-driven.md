@@ -53,6 +53,19 @@
 - Retire a deleted file from view without removing it from the catalogue, so an
   exported dataset or a published provenance record never dangles.
 
+### Results and QC
+
+- Count the samples a run covered, rather than the sequencing files it read. A
+  pipeline that runs no aligner publishes nothing that says which files belong
+  to one sample, so a single sample sequenced over two lanes was reported as
+  four samples, and its "reads per sample" was a per-file mean: half the real
+  depth. bioAF now takes the roster from the samplesheet the run itself
+  submitted.
+- Where bioAF has no record of that sheet, report neither the sample count nor
+  the read depth, and say so, rather than showing a file count under the word
+  "Samples". Existing dashboards keep their values until they are regenerated.
+- Say "1 sample" rather than "1 samples".
+
 ### Fixes
 
 - Keep the part of a failed run's log that says what failed. The stored message
@@ -64,3 +77,5 @@
 - Re-fetch a pipeline's samplesheet contract when its version moves.
 - Say when a registry pipeline has no release available to install.
 - Offer the 10x protocol only to pipelines whose own schema accepts it.
+- Refuse a lab-document import URL whose host cannot be shown to resolve to a
+  public address, instead of attempting the fetch.
