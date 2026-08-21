@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
-from app.services.qc.multiqc_registry import read_depth_and_samples
+from app.services.qc.multiqc_registry import read_depth_and_samples, roster_from_emitted
 
 logger = logging.getLogger("bioaf.qc.bulk_rnaseq")
 
@@ -222,7 +222,7 @@ def _pick_raw_fastqc(raw: dict) -> dict:
     return best
 
 
-def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
+def read_multiqc_metrics(multiqc_json_text: str, *, emitted_roster: list[str] | None = None) -> dict[str, Any]:
     """Parse per-sample FastQC (raw) + STAR from a bulk-RNA-seq multiqc_data.json,
     aggregating per-sample by mean. STAR percentages are converted to the 0-1
     fractions the controlled QC vocabulary uses."""
@@ -245,7 +245,7 @@ def read_multiqc_metrics(multiqc_json_text: str) -> dict[str, Any]:
             # Depth and sample count are derived per SAMPLE by the shared helper
             # (aligner roster, raw FastQC counts, lanes added and mates collapsed)
             # so a paired-end or multi-lane run is not distorted by counting files.
-            depth, total_samples, _sources = read_depth_and_samples(data)
+            depth, total_samples, _sources = read_depth_and_samples(data, emitted_roster=emitted_roster)
             if depth is not None:
                 metrics["total_sequences"] = depth
             if total_samples is not None:
@@ -325,7 +325,7 @@ async def extract(
         if multiqc_uri:
             logger.info("Found bulk multiqc_data.json for run %d at %s", run.id, multiqc_uri[len(base) :])
             text = await adapter.read_text(multiqc_uri)
-            metrics = read_multiqc_metrics(text)
+            metrics = read_multiqc_metrics(text, emitted_roster=roster_from_emitted(run.samplesheet_emitted_json))
             try:
                 # Generic MultiQC report_plot_data parser (shared with scRNA-seq).
                 from app.services.qc.templates.scrnaseq import read_multiqc_chart_data
@@ -358,11 +358,11 @@ def generate_summary(metrics: dict[str, Any]) -> str:
     n = metrics.get("total_samples")
 
     if total is not None and n:
-        summary = f"This bulk RNA-seq run analyzed **{n} samples** with a mean of **{total:,} reads per sample**."
+        summary = f"This bulk RNA-seq run analyzed **{n} sample{'' if n == 1 else 's'}** with a mean of **{total:,} reads per sample**."
     elif total is not None:
         summary = f"This bulk RNA-seq run had a mean of **{total:,} reads per sample**."
     elif n:
-        summary = f"This bulk RNA-seq run analyzed **{n} samples**."
+        summary = f"This bulk RNA-seq run analyzed **{n} sample{'' if n == 1 else 's'}**."
     else:
         summary = "No metrics available."
 

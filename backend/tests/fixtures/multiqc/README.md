@@ -11,8 +11,16 @@ real output instead of hand-built shapes.
 | `chipseq_run22.json` | exp 13 / run 22 | nf-core/chipseq | 1.23 | `multiqc/broad_peak/multiqc_data/` |
 | `atacseq_run24.json` | exp 14 / run 24 | nf-core/atacseq | 1.13 | `multiqc/broad_peak/multiqc_data/` |
 | `scrnaseq_run11.json` | exp 3 / run 11 | STAR + FastQC | 1.31 | `multiqc/multiqc_data/` |
+| `generic_run34.json` | exp 3 / run 34 | nf-core/demo (FastQC + seqtk, NO aligner) | 1.33 | `multiqc/multiqc_data/` |
 
-Four MultiQC majors are represented on purpose. The report structure is not
+`generic_run34.json` is the only fixture with **no aligner section at all**,
+which is the case the per-sample roster could not cover from the report alone:
+`multiqc_fastqc` and `multiqc_general_stats` and nothing else, four entries
+(`SAMPLE-101_1` to `_4`) that are one sample over two lanes, paired. Its true
+depth is 33,436,697 + 33,165,190 = 66,601,887, the same library and the same
+ground truth as run 11. Captured 2026-08-20.
+
+Five MultiQC majors are represented on purpose. The report structure is not
 stable across them: `report_general_stats_data` is a **list** of per-sample
 dicts up to 1.23 and a **dict keyed by module** from 1.31. Any parser that
 walks it has to handle both.
