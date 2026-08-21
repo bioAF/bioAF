@@ -759,6 +759,10 @@ export interface PipelineRunPreflight {
   reason: string | null;
   details: {
     required_inputs?: string[];
+    // The samples carrying no input file at all, for the `samples_missing_files`
+    // verdict. A different kind of gap from `missing_columns`: no value typed
+    // into a grid resolves it, so the block offers to drop them instead.
+    samples_without_files?: { id: number; external_id: string | null }[];
     missing_columns?: Record<
       string,
       {
