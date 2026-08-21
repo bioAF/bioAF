@@ -46,7 +46,10 @@ class FakeStorage:
 
 
 BUCKET = "results-bucket"
-RUN = SimpleNamespace(id=42, experiment_id=7)
+# `samplesheet_emitted_json` stands in for the column every PipelineRun
+# carries: the sheet the run actually submitted, which is the sample roster for
+# a pipeline that runs no aligner. None here means a run that predates it.
+RUN = SimpleNamespace(id=42, experiment_id=7, samplesheet_emitted_json=None)
 PREFIX = f"gs://{BUCKET}/experiments/7/pipeline-runs/42/"
 
 
@@ -117,6 +120,35 @@ def test_quality_is_not_invented_without_metrics():
 
 
 def test_summary_states_plainly_when_nothing_was_found():
+    summary = generic.generate_summary(dict(generic.EMPTY_METRICS))
+
+    assert "no standard qc metrics" in summary.lower()
+
+
+def test_summary_does_not_claim_nothing_was_found_when_the_roster_is_what_is_missing():
+    """A no-aligner run whose sheet bioAF never recorded now reports no sample
+    count and no depth, because FastQC counts files. Everything else in the
+    report is still there, so "no standard QC metrics were found" would be a
+    false sentence over a dashboard that visibly shows GC content and read
+    length."""
+    summary = generic.generate_summary(
+        {
+            **generic.EMPTY_METRICS,
+            "total_samples": None,
+            "total_sequences": None,
+            "percent_gc": 46.0,
+            "avg_sequence_length": 59.5,
+        }
+    )
+
+    assert "no standard qc metrics" not in summary.lower()
+    # It says WHY the two are absent, rather than leaving a silent gap.
+    assert "sample" in summary.lower()
+
+
+def test_summary_still_says_nothing_was_found_when_nothing_was():
+    """The genuinely empty case keeps its wording: the distinction is between a
+    report we could not read and a report that does not identify samples."""
     summary = generic.generate_summary(dict(generic.EMPTY_METRICS))
 
     assert "no standard qc metrics" in summary.lower()

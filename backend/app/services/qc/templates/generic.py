@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.pipeline_run import PipelineRun
 from app.services.qc.extractors.gcs_helpers import get_results_bucket
 from app.services.qc.multiqc_registry import EMPTY_METRICS as _REGISTRY_EMPTY
-from app.services.qc.multiqc_registry import parse_multiqc_metrics
+from app.services.qc.multiqc_registry import parse_multiqc_metrics, roster_from_emitted
 
 logger = logging.getLogger("bioaf.qc.generic")
 
@@ -95,14 +95,28 @@ def generate_summary(metrics: dict[str, Any]) -> str:
 
     parts: list[str] = []
     if samples and depth:
-        parts.append(f"This run covered **{samples} samples** with a mean of **{depth:,} reads per sample**.")
+        parts.append(
+            f"This run covered **{samples} sample{'' if samples == 1 else 's'}** with a mean of **{depth:,} reads per sample**."
+        )
     elif samples:
-        parts.append(f"This run covered **{samples} samples**.")
+        parts.append(f"This run covered **{samples} sample{'' if samples == 1 else 's'}**.")
     elif depth:
         parts.append(f"This run had a mean of **{depth:,} reads per sample**.")
 
     if mapped is not None:
         parts.append(f"Mean genome mapping rate was **{mapped:.1%}**.")
+
+    # Depth and the sample count go together: both are absent when nothing in the
+    # report says which files belong to which sample. Say so, because the metrics
+    # beside this sentence are visibly present and a silent gap reads as though
+    # the run produced no reads. Only for a report that DID yield something: a
+    # report we could not read at all keeps its own wording below.
+    if samples is None and depth is None and _has_any_metric(metrics):
+        parts.append(
+            "The sample count and read depth are not reported for this run: its QC report counts "
+            "sequencing files, and bioAF has no record of the samplesheet this run submitted, so "
+            "there is nothing to say which files belong to which sample."
+        )
 
     if not parts:
         return (
@@ -188,6 +202,12 @@ async def extract(
             logger.info("No multiqc_data.json found under multiqc/ for run %d", run.id)
             return dict(EMPTY_METRICS)
 
+        # The samples bioAF wrote into the sheet it submitted. A pipeline that
+        # runs no aligner publishes no per-sample section, and this is the only
+        # thing that knows a repeated FastQC name is one sample over two lanes
+        # rather than two samples.
+        emitted = roster_from_emitted(run.samplesheet_emitted_json)
+
         parsed: list[tuple[str, dict]] = []
         for uri in report_uris:
             try:
@@ -195,7 +215,7 @@ async def extract(
             except (ValueError, StorageObjectNotFound) as exc:
                 logger.warning("Could not read MultiQC report %s for run %d: %s", uri, run.id, exc)
                 continue
-            parsed.append((uri, parse_multiqc_metrics(data)))
+            parsed.append((uri, parse_multiqc_metrics(data, emitted_roster=emitted)))
 
         if not parsed:
             return dict(EMPTY_METRICS)

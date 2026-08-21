@@ -98,6 +98,11 @@ def test_read_multiqc_metrics_prefers_raw_fastqc_regardless_of_suffix():
                 "S1": {"Total Sequences": 9_000_000.0, "%GC": 42.0},
                 "S2": {"Total Sequences": 11_000_000.0, "%GC": 42.0},
             },
+            # The roster. A bulk RNA-seq run has an aligner, and depth is now
+            # grouped by its samples rather than averaged over files, so this
+            # test needs one to keep testing what it is about: which FastQC
+            # section is the raw one.
+            "multiqc_star": {"S1": {"total_reads": 8_000_000.0}, "S2": {"total_reads": 10_000_000.0}},
         }
     }
     m = bulk_rnaseq.read_multiqc_metrics(json.dumps(swapped))
@@ -106,9 +111,13 @@ def test_read_multiqc_metrics_prefers_raw_fastqc_regardless_of_suffix():
 
 
 def test_read_multiqc_metrics_handles_missing_star_section():
+    """Without STAR there is no roster, and without a roster there is no depth:
+    FastQC counts files, and files are not samples. This asserted 7,000,000, the
+    per-file mean. A run bioAF launched supplies the roster instead, from the
+    sheet it emitted; see test_qc_per_sample_depth.py."""
     no_star = {"report_saved_raw_data": {"multiqc_fastqc": _MULTIQC["report_saved_raw_data"]["multiqc_fastqc"]}}
     m = bulk_rnaseq.read_multiqc_metrics(json.dumps(no_star))
-    assert m["total_sequences"] == 7_000_000
+    assert m["total_sequences"] is None
     assert m["reads_mapped_genome"] is None
     assert m["reads_mapped_genome_unique"] is None
 
