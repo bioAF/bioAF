@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { LaunchBlockedNotice } from "./LaunchBlockedNotice";
 import type { PipelineRunPreflight } from "@/lib/types";
 
@@ -429,4 +429,55 @@ it("keeps both remedies in the detail when the summary names neither", () => {
 
   expect(timesSaid("choose a pipeline that reads a lane")).toBe(1);
   expect(timesSaid("launch them as separate samples")).toBe(1);
+});
+
+/**
+ * Issue #85: a sample with no input files at all.
+ *
+ * The launch has always refused these and offered to drop them; the preflight
+ * did not run that check, so the block arrived on the button press. Now that it
+ * arrives here instead, the remedy has to arrive with it: the Launch button is
+ * disabled while `can_launch` is false, so a notice that only states the problem
+ * would strand a scientist the launch used to get moving again.
+ */
+const missingFiles: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_files",
+  reason: "Some selected samples have no linked input files",
+  details: {
+    samples_without_files: [
+      { id: 9, external_id: "SAMPLE-201" },
+      { id: 11, external_id: null },
+    ],
+  },
+};
+
+it("names the samples that have no input files", () => {
+  render(<LaunchBlockedNotice preflight={missingFiles} />);
+
+  expect(screen.getByText(/SAMPLE-201/)).toBeInTheDocument();
+  // A sample with no external id is still named, by the only identifier it has.
+  expect(screen.getByText(/sample 11/)).toBeInTheDocument();
+});
+
+it("offers to drop them, because the Launch button is disabled behind this block", () => {
+  const onDrop = jest.fn();
+  render(<LaunchBlockedNotice preflight={missingFiles} onDropSamplesWithoutFiles={onDrop} />);
+
+  fireEvent.click(screen.getByRole("button", { name: /drop/i }));
+
+  expect(onDrop).toHaveBeenCalledTimes(1);
+});
+
+it("offers no drop where the caller cannot act on one", () => {
+  render(<LaunchBlockedNotice preflight={missingFiles} />);
+
+  expect(screen.queryByRole("button", { name: /drop/i })).not.toBeInTheDocument();
+});
+
+it("does not offer to drop samples for a block that dropping cannot fix", () => {
+  const onDrop = jest.fn();
+  render(<LaunchBlockedNotice preflight={missingFields} onDropSamplesWithoutFiles={onDrop} />);
+
+  expect(screen.queryByRole("button", { name: /drop/i })).not.toBeInTheDocument();
 });

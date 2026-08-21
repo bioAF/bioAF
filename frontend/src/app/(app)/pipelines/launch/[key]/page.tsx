@@ -84,6 +84,11 @@ export default function PipelineLauncherPage() {
 
   const [detectedProtocol, setDetectedProtocol] = useState<string | null>(null);
   const [preflight, setPreflight] = useState<PipelineRunPreflight | null>(null);
+  // Whether the scientist has agreed to leave the samples with no input files
+  // out of this run. It travels to the PREFLIGHT as well as the launch, which is
+  // the whole point: the sheet they review is then the sheet that runs, without
+  // the rows for samples that are not in it.
+  const [dropSamplesWithoutFiles, setDropSamplesWithoutFiles] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -94,6 +99,13 @@ export default function PipelineLauncherPage() {
     if (selectedExperimentId && pipeline) loadSamples(selectedExperimentId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExperimentId, pipeline]);
+
+  // A drop that was right for one selection is not a standing answer for the
+  // next. Changing the samples (or the experiment) puts the question back, so a
+  // sample added later cannot be dropped by a decision taken before it existed.
+  useEffect(() => {
+    setDropSamplesWithoutFiles(false);
+  }, [selectedExperimentId, selectedSampleIds]);
 
   // Ask whether this run could start, while the user can still change the
   // answer. The same checks run at launch; this only moves when they are heard.
@@ -108,6 +120,7 @@ export default function PipelineLauncherPage() {
           sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
           parameters: userParams,
           sample_values: sampleValues,
+          drop_samples_without_files: dropSamplesWithoutFiles,
           // Only once the editor holds something. Null is "we have not been told
           // yet", which is the state of the very first preflight, and it must
           // reach the server as SILENCE so the saved design stands. Sending []
@@ -136,7 +149,7 @@ export default function PipelineLauncherPage() {
   // The disable must stay on the line immediately before the array, or it
   // stops applying to it and unsuppresses the `pipelineKey` warning.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues, declaredColumns]);
+  }, [selectedExperimentId, pipeline, selectedSampleIds, userParams, sampleValues, declaredColumns, dropSamplesWithoutFiles]);
 
   async function loadData() {
     try {
@@ -184,7 +197,7 @@ export default function PipelineLauncherPage() {
     }
   }
 
-  async function handleLaunch(dropSamplesWithoutFiles = false) {
+  async function handleLaunch(dropForThisAttempt = dropSamplesWithoutFiles) {
     if (!selectedExperimentId || !pipeline) return;
     setLaunching(true);
     try {
@@ -194,7 +207,9 @@ export default function PipelineLauncherPage() {
         sample_ids: selectedSampleIds.length > 0 ? selectedSampleIds : null,
         parameters: userParams,
         sample_values: sampleValues,
-        drop_samples_without_files: dropSamplesWithoutFiles,
+        // What the review was held under, so the sheet approved on screen is the
+        // sheet submitted. Defaults to the decision already taken in the block.
+        drop_samples_without_files: dropForThisAttempt,
         // What the review step just showed. Saving is a separate, deliberate
         // act (design 02 section 4) and this does not perform it: the columns
         // bind THIS run only, and the next one reads whatever is saved.
@@ -208,7 +223,7 @@ export default function PipelineLauncherPage() {
       if (
         err instanceof ApiError &&
         err.code === "samples_missing_files" &&
-        !dropSamplesWithoutFiles
+        !dropForThisAttempt
       ) {
         const offending =
           (err.details?.samples_without_files as
@@ -469,7 +484,7 @@ export default function PipelineLauncherPage() {
             onChange={setSampleValues}
             prefill={preflight?.prefill ?? null}
           />
-          <LaunchBlockedNotice preflight={preflight} />
+          <LaunchBlockedNotice preflight={preflight} onDropSamplesWithoutFiles={() => setDropSamplesWithoutFiles(true)} />
           <div className="flex items-center gap-2 mb-4 text-sm">
             <span className="text-gray-500">Save these values for</span>
             <select
@@ -520,7 +535,7 @@ export default function PipelineLauncherPage() {
           />
           {/* Shown here as well as on Review: a user who cannot run this at all
               should not spend time filling in parameters first. */}
-          <LaunchBlockedNotice preflight={preflight} />
+          <LaunchBlockedNotice preflight={preflight} onDropSamplesWithoutFiles={() => setDropSamplesWithoutFiles(true)} />
           <ParameterForm
             schema={pipeline.parameter_schema}
             defaultParams={pipeline.default_params || {}}
@@ -566,7 +581,7 @@ export default function PipelineLauncherPage() {
               proof of the right file, so this is the last place a wrong
               resolution can be caught. */}
           <SamplesheetReview preview={preflight?.samplesheet ?? null} onCorrect={correctCell} />
-          <LaunchBlockedNotice preflight={preflight} />
+          <LaunchBlockedNotice preflight={preflight} onDropSamplesWithoutFiles={() => setDropSamplesWithoutFiles(true)} />
           <div className="flex justify-between">
             <button onClick={goBack} className="border px-6 py-2 rounded-md text-sm">Back</button>
             <button
