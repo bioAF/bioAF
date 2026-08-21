@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.exceptions import StorageUnavailableError
 from app.models.file import File
 from app.models.plot_archive_entry import PlotArchiveEntry
 from app.services.audit_service import log_action
@@ -377,10 +378,60 @@ class FileService:
         )
 
     @staticmethod
+    async def _free_storage(session: AsyncSession, file: File) -> bool:
+        """Erase the object behind ``file``. Returns whether bytes were freed.
+
+        Deletion has to reclaim the space or it is not deletion (issue #86): a
+        scientist deleting a 40 GB BAM is buying back disk, and a catalogue that
+        only hides the row goes on billing them for it.
+
+        Two cases free nothing and are not failures. There may be no object left
+        (``storage_deleted`` already set by a stack teardown, or no URI at all),
+        and the object may still belong to another live catalogue entry, whose
+        owner asked for nothing to be deleted.
+        """
+        uri = file.storage_uri or file.gcs_uri
+        if file.storage_deleted or not uri:
+            return False
+
+        still_needed = (
+            await session.execute(
+                select(func.count(File.id)).where(
+                    or_(File.storage_uri == uri, File.gcs_uri == uri),
+                    File.id != file.id,
+                    File.deleted_at.is_(None),
+                )
+            )
+        ).scalar()
+        if still_needed:
+            logger.info("File %s shares its object with %d live record(s); leaving the bytes", file.id, still_needed)
+            return False
+
+        from app.adapters.registry import get_storage_adapter
+
+        try:
+            # The adapter contract makes this idempotent: an object that is
+            # already gone is not an error, so a record whose bytes vanished on
+            # their own is never stuck undeletable.
+            await get_storage_adapter().delete(uri)
+        except Exception as exc:
+            logger.exception("Could not delete object %s for file %s", uri, file.id)
+            raise StorageUnavailableError(
+                "The file's storage could not be reached, so nothing was deleted. Try again."
+            ) from exc
+        return True
+
+    @staticmethod
     async def delete_file_record(session: AsyncSession, file_id: int, org_id: int, user_id: int) -> bool:
         file = await FileService.get_file(session, file_id, org_id)
         if not file:
             return False
+
+        # Bytes first, record second. If storage fails the exception propagates
+        # before anything is committed, so the file stays whole and listed
+        # rather than reading as deleted while its object survives, which is the
+        # exact state issue #86 exists to end.
+        storage_freed = await FileService._free_storage(session, file)
 
         await log_action(
             session,
@@ -388,7 +439,11 @@ class FileService:
             entity_type="file",
             entity_id=file_id,
             action="delete",
-            details={"filename": file.filename},
+            details={
+                "filename": file.filename,
+                "size_bytes": file.size_bytes,
+                "storage_freed": storage_freed,
+            },
         )
 
         # Clean up any associated plot thumbnails from GCS before removing entries
@@ -445,16 +500,18 @@ class FileService:
             text("UPDATE manifest_entries SET file_id = NULL WHERE file_id = :fid").bindparams(fid=file_id)
         )
 
-        # SOFT. The row and its `uuid` are never removed: a catalogue number
-        # that stops resolving the moment somebody tidies up is not a catalogue
-        # number, and a run that consumed this file must go on being able to say
-        # so. `storage_deleted` above is a different fact and is left alone;
-        # freeing the bytes and retiring the record are separate acts.
+        # SOFT for the RECORD, hard for the BYTES. The row and its `uuid` are
+        # never removed: a catalogue number that stops resolving the moment
+        # somebody tidies up is not a catalogue number, and a run that consumed
+        # this file must go on being able to say so. The object itself is gone
+        # by now, and `storage_deleted` is the tombstone saying so, so nothing
+        # offers the scientist a download that cannot be served.
         #
         # The working rows above ARE still cleaned up. What survives is the
-        # catalogue entry and the provenance that references it, which is what
-        # the decision asked for.
+        # catalogue entry and the provenance that references it.
         file.deleted_at = datetime.now(timezone.utc)
         file.deleted_by_user_id = user_id
+        if storage_freed:
+            file.storage_deleted = True
         await session.flush()
         return True
