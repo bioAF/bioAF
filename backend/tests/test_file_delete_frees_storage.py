@@ -149,9 +149,7 @@ class TestNothingIsDeletedWhenTheBytesCannotBe:
         with patcher:
             await _delete(client, world)
 
-        r = await client.get(
-            "/api/files", params={"experiment_id": world["exp"].id}, headers=_headers(world["admin"])
-        )
+        r = await client.get("/api/files", params={"experiment_id": world["exp"].id}, headers=_headers(world["admin"]))
         assert [f["id"] for f in r.json()["files"]] == [world["doomed"].id]
 
 
