@@ -45,7 +45,9 @@ export function ReviewPanel({ pipelineRunId, userRole, onReviewSubmitted }: Revi
     try {
       const [reviewList, active] = await Promise.all([
         api.get<PipelineRunReviewListResponse>(`/api/pipeline-runs/${pipelineRunId}/reviews`),
-        api.get<PipelineRunReview>(`/api/pipeline-runs/${pipelineRunId}/review`).catch(() => null),
+        // Answers null for a run nobody has reviewed yet, so a rejection here is
+        // a real failure and belongs in the same banner as the list read.
+        api.get<PipelineRunReview | null>(`/api/pipeline-runs/${pipelineRunId}/review`),
       ]);
       setReviews(reviewList.reviews);
       setActiveReview(active);

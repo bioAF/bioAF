@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -78,14 +78,21 @@ async def list_reviews(
     return PipelineRunReviewListResponse(reviews=[_review_response(r) for r in reviews])
 
 
-@router.get("/{run_id}/review", response_model=PipelineRunReviewResponse)
+@router.get("/{run_id}/review", response_model=PipelineRunReviewResponse | None)
 async def get_active_review(
     run_id: int,
     current_user: dict = require_permission("pipelines", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    """Get the active (non-superseded) review for a pipeline run."""
+    """Get the active (non-superseded) review for a pipeline run, or null if none.
+
+    A run nobody has reviewed yet is a normal state, not a failed request: every
+    run starts there and stays there until a reviewer files a verdict. Answering
+    404 made the browser record a failed request on every visit to an unreviewed
+    run, which buries real failures in noise. Absence is reported as a null body
+    so the caller can still tell "not reviewed" from "could not be read".
+    """
     review = await PipelineReviewService.get_active_review(session, run_id)
     if not review:
-        raise HTTPException(404, "No active review found for this pipeline run")
+        return None
     return _review_response(review)
