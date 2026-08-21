@@ -343,3 +343,90 @@ it("says a row is incomplete rather than that the field cannot be derived", () =
   expect(screen.getByText(/would be empty/i)).toBeInTheDocument();
   expect(screen.getByText(/SAMPLE-101/)).toBeInTheDocument();
 });
+
+/**
+ * The block is a summary sentence plus a per-column detail, written for the
+ * same fact by different hands. Every test above asks whether some wording is
+ * PRESENT, which is why all sixteen passed while the alert said this on the
+ * deployed demo:
+ *
+ *     This pipeline takes one row per sample, and some samples have more than
+ *     one set of reads. Merge those reads, or launch them as separate samples.
+ *
+ *     This pipeline takes one row per sample, and these have more than one set
+ *     of reads: SAMPLE-101
+ *     Merge those reads, or launch them as separate samples.
+ *
+ * A block that repeats itself reads as a rendering mistake, at exactly the
+ * point the scientist is deciding whether to trust what bioAF is telling them
+ * about their data. So these count rather than look.
+ */
+
+/** The whole alert as one whitespace-normalised string, which is how a person
+ *  reads it: the summary and the detail are one paragraph to them, whatever
+ *  elements they arrive in. */
+function alertText(): string {
+  return (screen.getByRole("alert").textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function timesSaid(phrase: string): number {
+  return alertText().split(phrase).length - 1;
+}
+
+it("states the one-row-per-sample rule and its remedy once each", () => {
+  render(<LaunchBlockedNotice preflight={oneRowPerSample} />);
+
+  expect(timesSaid("takes one row per sample")).toBe(1);
+  expect(timesSaid("Merge those reads, or launch them as separate samples")).toBe(1);
+  // What the summary cannot say, and the only reason the detail exists.
+  expect(screen.getByRole("alert")).toHaveTextContent("SAMPLEA");
+});
+
+it("states the merge-reads rule and its remedy once each", () => {
+  render(<LaunchBlockedNotice preflight={cameOffOneRun} />);
+
+  expect(timesSaid("came off one sequencing run")).toBe(1);
+  expect(timesSaid("choose a pipeline that reads a lane")).toBe(1);
+  // The flow cell and the lanes are what the summary cannot name.
+  expect(screen.getByRole("alert")).toHaveTextContent("HLK3VDSX7");
+  expect(screen.getByRole("alert")).toHaveTextContent(/lanes 1 and 2/i);
+});
+
+/** Two columns whose remedies DIFFER. The summary can then only say that no
+ *  value would separate the rows, so it names neither remedy, and dropping them
+ *  from the detail would leave the scientist with nothing to do. This is the
+ *  case a blanket trim would break, which is why the trim is conditional. */
+const twoDifferentRemedies: PipelineRunPreflight = {
+  can_launch: false,
+  code: "samples_missing_required_fields",
+  reason: "Some rows cannot be told apart by 'run' and 'sample', and no value would separate them.",
+  details: {
+    missing_columns: {
+      run: {
+        sample_field: null,
+        allowed_values: [],
+        reason: "not_unique",
+        unique_with: ["sample"],
+        remedy: "merge_reads",
+        repeated: [{ run: "HLK3VDSX7", source: "flowcell", lanes: ["1", "2"] }],
+        samples: [{ id: 5, external_id: "GUT_A" }],
+      },
+      sample: {
+        sample_field: "external_id",
+        allowed_values: [],
+        reason: "not_unique",
+        unique_with: [],
+        remedy: "one_row_per_sample",
+        repeated: [],
+        samples: [{ id: 5, external_id: "GUT_A" }],
+      },
+    },
+  },
+};
+
+it("keeps both remedies in the detail when the summary names neither", () => {
+  render(<LaunchBlockedNotice preflight={twoDifferentRemedies} />);
+
+  expect(timesSaid("choose a pipeline that reads a lane")).toBe(1);
+  expect(timesSaid("launch them as separate samples")).toBe(1);
+});

@@ -13,6 +13,24 @@ function listOf(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/** Whether the summary sentence above the list has already stated the remedy.
+ *
+ *  The summary and the per-column detail were written for the same fact by
+ *  different hands, and both render, so the one-row-per-sample block said its
+ *  rule and its remedy twice, one line under the other. A block that repeats
+ *  itself reads as a rendering mistake at the moment the scientist is deciding
+ *  whether to trust what bioAF says about their data.
+ *
+ *  It is conditional because the summary can only name a remedy when every gap
+ *  carries the SAME one: `_blocked_summary` falls back to "no value would
+ *  separate them" where they differ, and trimming the detail there would leave
+ *  nobody saying what to do. Same rule, so the block neither stutters nor goes
+ *  silent. */
+function summaryNamesTheRemedy(missing: Record<string, { remedy?: string | null }>): boolean {
+  const remedies = new Set(Object.values(missing).map((info) => info.remedy ?? null));
+  return remedies.size === 1 && !remedies.has(null);
+}
+
 /** Why this pipeline cannot run with the selected samples, shown while the user
  *  can still do something about it.
  *
@@ -24,6 +42,10 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
   if (!preflight || preflight.can_launch) return null;
 
   const missing = preflight.details?.missing_columns;
+  // Only what the summary cannot say belongs in the detail below it. The
+  // summary has to be on screen for that to hold, so an absent one keeps the
+  // detail whole rather than trusting it to have spoken.
+  const alreadySaid = Boolean(preflight.reason) && !!missing && summaryNamesTheRemedy(missing);
 
   return (
     <div className="mb-6 p-3 border border-red-200 bg-red-50 rounded" role="alert">
@@ -96,7 +118,9 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
                   is the reads, or a different pipeline. */}
               {info.reason === "not_unique" && info.remedy === "merge_reads" && (
                 <>
-                  {" cannot tell these rows apart, because they came off one sequencing run:"}
+                  {alreadySaid
+                    ? " would repeat across:"
+                    : " cannot tell these rows apart, because they came off one sequencing run:"}
                   <ul className="mt-0.5 ml-4 list-disc text-gray-600">
                     {(info.repeated ?? []).map((entry) => (
                       <li key={`${entry.source}:${entry.run}`}>
@@ -111,9 +135,11 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
                       </li>
                     ))}
                   </ul>
-                  <div className="mt-0.5 text-gray-600">
-                    Merge those reads into one pair per sample, or choose a pipeline that reads a lane.
-                  </div>
+                  {!alreadySaid && (
+                    <div className="mt-0.5 text-gray-600">
+                      Merge those reads into one pair per sample, or choose a pipeline that reads a lane.
+                    </div>
+                  )}
                 </>
               )}
 
@@ -121,13 +147,17 @@ export function LaunchBlockedNotice({ preflight }: { preflight: PipelineRunPrefl
                   of any other column can ever separate two of its rows. */}
               {info.reason === "not_unique" && info.remedy === "one_row_per_sample" && (
                 <>
-                  {"This pipeline takes one row per sample, and these have more than one set of reads:"}
+                  {alreadySaid
+                    ? "More than one set of reads:"
+                    : "This pipeline takes one row per sample, and these have more than one set of reads:"}
                   <div className="mt-0.5 text-gray-600">
                     {info.samples.map((s) => s.external_id || `sample ${s.id}`).join(", ")}
                   </div>
-                  <div className="mt-0.5 text-gray-600">
-                    Merge those reads, or launch them as separate samples.
-                  </div>
+                  {!alreadySaid && (
+                    <div className="mt-0.5 text-gray-600">
+                      Merge those reads, or launch them as separate samples.
+                    </div>
+                  )}
                 </>
               )}
 
