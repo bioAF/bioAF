@@ -13,8 +13,10 @@ The derivation here:
    which is per-sample by construction because it is written after lanes are
    merged and mates paired.
 2. Attribute each FastQC entry to its sample by name.
-3. Within a sample, sum the DISTINCT per-file counts: mates report identical
-   counts and collapse, lanes differ and add.
+3. Within a sample, divide the files by the read groups bioAF submitted for it
+   to get the mate multiplier, and count every file once per read group.
+   Without that record, fall back to summing the DISTINCT per-file counts:
+   mates report identical counts and collapse, lanes differ and add.
 
 Depth deliberately still comes from FastQC, not from the aligner's own total,
 because `total_sequences` is the RAW (pre-trim) count that papers report. STAR's
@@ -37,6 +39,19 @@ FIXTURES = Path(__file__).parent / "fixtures" / "multiqc"
 
 def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text())
+
+
+# One sample, two read groups, single-end, that happen to yield exactly the same
+# number of reads. Its true depth is 10,000,000. See `#88`.
+_TIED_READ_GROUPS = {
+    "report_saved_raw_data": {
+        "multiqc_star": {"s": {"total_reads": 10.0}},
+        "multiqc_fastqc": {
+            "s_L1": {"Total Sequences": 5_000_000.0},
+            "s_L2": {"Total Sequences": 5_000_000.0},
+        },
+    }
+}
 
 
 # --------------------------------------------------------------------------
@@ -185,22 +200,15 @@ def test_no_fastqc_at_all_yields_no_depth():
     assert samples == 1
 
 
-def test_identical_lane_counts_collapse_a_known_limitation():
-    """Mates are recognized by reporting identical counts, so two lanes that
-    happen to yield exactly the same number of reads are indistinguishable from
-    a mate pair and get counted once. Documented rather than fixed: the
-    alternative is trusting FastQC name suffixes, which vary by pipeline."""
-    data = {
-        "report_saved_raw_data": {
-            "multiqc_star": {"s": {"total_reads": 10.0}},
-            "multiqc_fastqc": {
-                "s_L1": {"Total Sequences": 5_000_000.0},
-                "s_L2": {"Total Sequences": 5_000_000.0},
-            },
-        }
-    }
+def test_identical_read_group_counts_collapse_without_the_run_record():
+    """Mates are recognized by reporting identical counts, so two read groups
+    that happen to yield exactly the same number of reads are indistinguishable
+    from a mate pair and get counted once.
 
-    depth, _samples, _sources = read_depth_and_samples(data)
+    Still true of a report read on its own, and still preferable to trusting
+    FastQC's name suffixes, which vary by pipeline. What removes the guess is
+    bioAF's own record of the sheet it submitted, below."""
+    depth, _samples, _sources = read_depth_and_samples(_TIED_READ_GROUPS)
 
     assert depth == 5_000_000
 
@@ -360,3 +368,102 @@ def test_the_roster_source_is_whatever_record_answered():
     )
 
     assert sources["total_samples"] == "run_samples"
+
+
+# --------------------------------------------------------------------------
+# How many read groups the run submitted
+# --------------------------------------------------------------------------
+#
+# Mates were told from read groups by whether their counts matched, which is a
+# guess dressed as a rule: two read groups of one sample that happen to yield
+# exactly the same number of reads look like a mate pair, collapse, and cost the
+# sample one read group's worth of depth. `#88`.
+#
+# bioAF does not have to guess. It wrote the sheet, one row per read group, and
+# kept it. Files divided by read groups is the mate multiplier exactly, and a
+# tie between read groups stops meaning anything.
+
+
+def test_the_run_record_separates_read_groups_that_tie():
+    """The defect in `#88`. Two read groups, single-end, 5,000,000 reads each:
+    the depth is 10,000,000 and used to be reported as 5,000,000."""
+    depth, samples, _sources = read_depth_and_samples(
+        _TIED_READ_GROUPS, run_roster=Roster(["s"], "samplesheet", {"s": 2})
+    )
+
+    assert depth == 10_000_000
+    assert samples == 1
+
+
+def test_the_record_is_used_even_when_the_roster_came_from_the_aligner():
+    """The aligner says WHO the samples are; it does not say how many read groups
+    each was sequenced over, so the tie is just as invisible on that path. Run 11
+    has a STAR section and two read groups whose counts differ, so the answer is
+    the one `#84` already established."""
+    depth, samples, sources = read_depth_and_samples(
+        _fixture("scrnaseq_run11.json"),
+        run_roster=Roster(["SAMPLE-101"], "samplesheet", {"SAMPLE-101": 2}),
+    )
+
+    assert depth == 66_601_887
+    assert samples == 1
+    # Only the depth consults the record. The roster still comes from the aligner.
+    assert sources["total_samples"] == "star"
+
+
+def test_mates_are_still_counted_once_when_the_read_groups_are_known():
+    """Run 34: one sample, two read groups, paired, so four files and a mate
+    multiplier of two. The same ground truth as run 11, reached without an
+    aligner section."""
+    depth, samples, _sources = read_depth_and_samples(
+        _fixture("generic_run34.json"),
+        run_roster=Roster(["SAMPLE-101"], "samplesheet", {"SAMPLE-101": 2}),
+    )
+
+    assert depth == 66_601_887
+    assert samples == 1
+
+
+def test_one_read_group_paired_still_counts_the_pair_once():
+    """The common case, and the one a wrong mate multiplier would double."""
+    depth, _samples, _sources = read_depth_and_samples(
+        _fixture("atacseq_run24.json"),
+        run_roster=Roster(["SRX9040499_REP1_T1"], "samplesheet", {"SRX9040499_REP1_T1": 1}),
+    )
+
+    assert depth == 58_365_790
+
+
+def test_a_count_that_does_not_divide_the_files_is_not_used():
+    """Three files over two read groups is not one mate multiplier, so the record
+    does not describe this report and the report is left to speak for itself. A
+    partially-uploaded mate must not silently scale the whole sample."""
+    data = {
+        "report_saved_raw_data": {
+            "multiqc_star": {"s": {"total_reads": 10.0}},
+            "multiqc_fastqc": {
+                "s_L1_R1": {"Total Sequences": 4_000_000.0},
+                "s_L1_R2": {"Total Sequences": 4_000_000.0},
+                "s_L2_R1": {"Total Sequences": 3_000_000.0},
+            },
+        }
+    }
+
+    depth, _samples, _sources = read_depth_and_samples(data, run_roster=Roster(["s"], "samplesheet", {"s": 2}))
+
+    assert depth == 7_000_000  # the distinct-count fallback, unchanged
+
+
+def test_a_record_naming_a_different_sample_changes_nothing():
+    """Counts are looked up by sample, so a record covering samples this report
+    does not contain leaves every sample here on the fallback."""
+    depth, _samples, _sources = read_depth_and_samples(
+        _TIED_READ_GROUPS, run_roster=Roster(["s"], "samplesheet", {"SOMEONE-ELSE": 2})
+    )
+
+    assert depth == 5_000_000
+
+
+def test_a_roster_carries_no_read_group_counts_unless_given_them():
+    """Every existing construction site keeps working, on the fallback."""
+    assert Roster(["s"], "samplesheet").read_groups == {}

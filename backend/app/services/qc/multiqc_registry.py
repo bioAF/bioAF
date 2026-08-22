@@ -311,10 +311,16 @@ class Roster(NamedTuple):
     Carried together so a number on a dashboard can always be traced: the two
     sources are the sheet the run submitted and the run's own sample links, and
     they are not equally precise.
+
+    ``read_groups`` is how many read groups the submitted sheet carried for each
+    sample, where that is known. It answers a different question from the names
+    (how many times a sample was sequenced, not which samples there were), which
+    is why a run whose roster comes from an aligner still uses it.
     """
 
     names: list[str]
     source: str
+    read_groups: dict[str, int] = {}
 
 
 def roster_from_emitted(emitted: object) -> list[str]:
@@ -366,16 +372,19 @@ def read_depth_and_samples(
     post-trim and would silently change the quantity. The aligner is used only to
     establish the sample roster.
 
-    Within a sample the DISTINCT per-file counts are summed: paired mates report
-    identical counts and collapse, separate lanes differ and add. Two lanes with
-    exactly equal read counts are indistinguishable from a mate pair and collapse;
-    that is preferred over trusting FastQC's per-pipeline name suffixes.
+    Within a sample, the files divide evenly by the read groups bioAF submitted
+    for it, and that quotient is the mate multiplier: every file counts, each one
+    over its mates. Without that record the mates are inferred from the counts
+    themselves (see ``_sample_depth``), which is what shipped and what `#88`
+    corrects.
 
-    ``run_roster`` is what bioAF holds for the run itself, used only when the
-    report carries no aligner section of its own. The aligner stays authoritative
-    where it exists, because it is written after lanes are merged and mates
-    paired; bioAF's own record is what makes a no-aligner pipeline answerable at
-    all, and without either the answer is that we do not know.
+    ``run_roster`` is what bioAF holds for the run itself. Its NAMES are used
+    only when the report carries no aligner section of its own: the aligner stays
+    authoritative there, because it is written after lanes are merged and mates
+    paired, while bioAF's own record is what makes a no-aligner pipeline
+    answerable at all, and without either the answer is that we do not know. Its
+    READ GROUP COUNTS are used either way, because no aligner section says how
+    many times a sample was sequenced.
     """
     raw = (data or {}).get("report_saved_raw_data")
     if not isinstance(raw, dict):
@@ -421,20 +430,47 @@ def read_depth_and_samples(
         # fact.
         return None, None, sources
 
-    grouped: dict[str, set[float]] = {sample: set() for sample in roster}
+    grouped: dict[str, list[float]] = {sample: [] for sample in roster}
     for name, value in entries.items():
         owner = _attribute(name, roster)
         # An entry matching no roster sample is still real data; keep it as its
         # own group so it cannot silently vanish from the depth.
-        grouped.setdefault(owner if owner is not None else f"\0{name}", set()).add(value)
+        grouped.setdefault(owner if owner is not None else f"\0{name}", []).append(value)
 
-    per_sample = [sum(values) for values in grouped.values() if values]
+    read_groups = (run_roster.read_groups if run_roster else None) or {}
+    per_sample = [_sample_depth(values, read_groups.get(sample)) for sample, values in grouped.items() if values]
     if not per_sample:
         return None, len(roster) or None, sources
 
     sources["total_sequences"] = "fastqc"
     sources["total_samples"] = roster_source or "fastqc"
     return int(round(_mean(per_sample))), len(per_sample), sources
+
+
+def _sample_depth(files: list[float], read_groups: int | None) -> float:
+    """One sample's raw read count, from the per-file counts FastQC reported.
+
+    A sample's files are its read groups times its mates, and only the product is
+    visible in the report. When bioAF knows how many read groups it submitted for
+    the sample, the mate multiplier is that product divided by the record: every
+    file then counts, each one over its mates, and two read groups reporting
+    identical counts are still two.
+
+    Without the record, mates are recognized by reporting identical counts, so
+    the DISTINCT counts are summed. That is a guess: two read groups that happen
+    to tie look exactly like a mate pair and cost the sample one read group's
+    worth of depth (`#88`). It is still the right fallback, because the only
+    alternative a bare report offers is trusting FastQC's name suffixes, which
+    vary by pipeline.
+
+    A count that does not divide the files does not describe this report (a mate
+    that never reached MultiQC, a sample renamed between sheet and report), so it
+    is left alone rather than applied to a shape it does not fit.
+    """
+    if read_groups and read_groups > 0 and len(files) % read_groups == 0:
+        mates = len(files) // read_groups
+        return sum(files) / mates
+    return sum(set(files))
 
 
 def _roster_module(raw: dict) -> str | None:
