@@ -51,6 +51,10 @@ dependencies:
 # than naming it keeps the pipeline usable with any input file the scientist attaches. `sort` makes
 # the pick deterministic when more than one is present, and the count is printed so a run against an
 # unintended second BAM is visible in the log rather than silent.
+#
+# There is deliberately no separate `bamtofastq --version` diagnostic: 1.4.1 rejects that flag and
+# exits non-zero, which under the wrapper's `set -e` kills the run before the conversion. It prints
+# its version banner on every invocation anyway, so the diagnostic bought nothing.
 BAMTOFASTQ_ENTRYPOINT = """\
 BAM=$(find /data -type f -name '*.bam' | sort | head -n 1)
 if [ -z "$BAM" ]; then
@@ -58,7 +62,6 @@ if [ -z "$BAM" ]; then
   exit 1
 fi
 echo "bamtofastq: $(find /data -type f -name '*.bam' | wc -l) BAM file(s) staged; converting $BAM"
-bamtofastq --version
 bamtofastq $PARAM_BAMTOFASTQ_ARGS "$BAM" /outputs/fastq
 echo "bamtofastq: wrote"
 find /outputs -type f -name '*.fastq.gz' | sort

@@ -211,3 +211,30 @@ async def test_the_request_fits_the_pool_the_pod_is_pinned_to(session, admin_use
     assert float(version.cpu_request) <= 1.5
     assert version.memory_request.endswith("Gi")
     assert int(version.memory_request.removesuffix("Gi")) <= 5
+
+
+@pytest.mark.asyncio
+async def test_the_entrypoint_only_invokes_the_converter_to_convert(session, admin_user):
+    """bamtofastq 1.4.1 takes `<bam> <output-path>` and rejects `--version`; it prints its version
+    banner on every invocation regardless. A diagnostic call to it exits non-zero, and the wrapper
+    runs under `set -e`, so the conversion never happens and the run fails with an empty /outputs."""
+    await ensure_bamtofastq_pipeline(session)
+    pipeline = await _pipeline(session, admin_user.organization_id)
+    version = (
+        (
+            await session.execute(
+                select(CustomPipelineVersion).where(CustomPipelineVersion.custom_pipeline_id == pipeline.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    calls = [
+        ln.strip()
+        for ln in version.entrypoint_command.splitlines()
+        if ln.strip().startswith("bamtofastq")
+    ]
+    assert len(calls) == 1, f"expected exactly one bamtofastq invocation, got {calls}"
+    assert "--version" not in version.entrypoint_command
+    assert "/outputs/fastq" in calls[0]
