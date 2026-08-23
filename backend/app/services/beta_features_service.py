@@ -4,20 +4,21 @@ Platform-wide, admin-gated toggles for features not yet ready for every user. St
 `platform_config` key-value table under the ``beta_feature_<key>`` prefix (default off), so no migration
 is needed and the flag is instance-wide.
 
-Two orthogonal concepts:
-- **availability**: whether the Beta Features surface is exposed at all. True only when the instance is
-  bioAF-operated, i.e. an active, human admin account uses a ``@bioaf.co`` email. This is what hides the
-  whole Settings > Beta Features menu from customer instances.
-- **enablement**: whether a specific beta feature is toggled on. Independent per key; default off.
+One concept: **enablement**, whether a specific beta feature is toggled on. Independent per key,
+default off, and only an admin (``infrastructure:configure``) can change it.
+
+There was a second concept, **availability**, which asked whether the instance was bioAF-operated by
+looking for an active admin with a ``@bioaf.co`` email, and it hid the Beta Features surface entirely
+from everyone else. It was removed: it meant a beta feature could only ever be enabled, or even seen,
+on an instance bioAF staffs, so "beta" and "internal-only" were the same thing for every customer.
+Beta now means what it says. Gating a feature to particular PEOPLE is what roles and permissions are
+for; an email domain is not an authorization mechanism.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.role import Role
-from app.models.user import User
 from app.platform.platform_config_service import PlatformConfigService
 
 # The registry of beta features. Adding a key here is all it takes to surface a new toggle; the label
@@ -30,28 +31,10 @@ BETA_FEATURES: dict[str, dict[str, str]] = {
 }
 
 _FLAG_PREFIX = "beta_feature_"
-_BIOAF_EMAIL_SUFFIX = "@bioaf.co"
 
 
 def _flag_key(key: str) -> str:
     return f"{_FLAG_PREFIX}{key}"
-
-
-async def is_available(session: AsyncSession) -> bool:
-    """True when this instance is bioAF-operated: an active, non-service-account admin uses a
-    ``@bioaf.co`` email. Gates whether the Beta Features surface is exposed at all."""
-    stmt = (
-        select(User.id)
-        .join(Role, User.role_id == Role.id)
-        .where(
-            Role.name == "admin",
-            User.status == "active",
-            User.is_service_account.is_(False),
-            func.lower(User.email).like(f"%{_BIOAF_EMAIL_SUFFIX}"),
-        )
-        .limit(1)
-    )
-    return (await session.execute(stmt)).first() is not None
 
 
 async def is_enabled(session: AsyncSession, key: str) -> bool:
@@ -74,5 +57,5 @@ async def get_flags(session: AsyncSession) -> dict[str, bool]:
 
 
 async def get_state(session: AsyncSession) -> dict:
-    """The full client-facing state: availability + per-feature enablement."""
-    return {"available": await is_available(session), "flags": await get_flags(session)}
+    """The full client-facing state: per-feature enablement."""
+    return {"flags": await get_flags(session)}
