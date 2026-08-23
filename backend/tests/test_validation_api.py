@@ -502,3 +502,13 @@ async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch)
     assert r.json()["state"] == "classified"
     assert r.json()["classification"] == "missing_data"
     assert r.json()["confidence"] is None  # missing_data -> Could Not Reproduce (no confidence)
+
+
+async def test_plan_surfaces_the_papers_tool_list(client, admin_token, monkeypatch):
+    """The tool list is the input an attributed divergence is argued from, so a human ratifying a
+    verdict has to be able to see it."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["plan"]["tools"] == ["TopHat"]

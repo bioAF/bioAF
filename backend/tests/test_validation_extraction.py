@@ -291,3 +291,31 @@ async def test_extract_requires_active_provider(session, admin_user, monkeypatch
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", none_active)
     with pytest.raises(Exception):
         await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+
+
+@pytest.mark.asyncio
+async def test_extract_persists_the_papers_tool_list(session, admin_user, monkeypatch):
+    """The extractor already reads which tools the paper used, and bioAF used to spend that on one
+    boolean (`_mentions_nf_core`) and a prose sentence, then throw the structured list away. It is the
+    only input an honest divergence attribution has: knowing the paper called cells with CellRanger
+    while we called them with STARsolo is what turns an unexplained cell-count divergence into an
+    expected difference between two tools."""
+    _patch_llm(monkeypatch, _GOOD)
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    plan = await ValidationExtractionService.extract(
+        session, study, "full text", admin_user.organization_id, admin_user.id
+    )
+    assert plan.tools_json == ["TopHat", "Cufflinks"]
+
+
+@pytest.mark.asyncio
+async def test_extract_persists_an_empty_tool_list_when_the_paper_states_none(session, admin_user, monkeypatch):
+    """An empty list, never null: attribution reads this on every divergence and a None would make
+    every caller defensive about a value that is simply 'the paper named no tools'."""
+    no_tools = _GOOD.replace('"tools": ["TopHat", "Cufflinks"], ', "")
+    _patch_llm(monkeypatch, no_tools)
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    plan = await ValidationExtractionService.extract(
+        session, study, "full text", admin_user.organization_id, admin_user.id
+    )
+    assert plan.tools_json == []

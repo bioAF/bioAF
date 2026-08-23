@@ -624,6 +624,10 @@ class ValidationDriverService:
             reference_genome=plan.reference_genome if plan else None,
             concordance_results=[concordance] if concordance else None,
             differential_attribution=differential_attribution,
+            # E3 per-metric attribution: the tools the PAPER named, next to the pipeline we ran, so a
+            # divergence with a known tool-pair cause is explained instead of merely reported.
+            paper_tools=(plan.tools_json if plan else None),
+            pipeline_key=(plan.pipeline_key if plan else None),
         )
         evidence["classification_result"] = result
         study.evidence_json = evidence

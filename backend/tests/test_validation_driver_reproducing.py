@@ -286,3 +286,51 @@ async def test_comparing_folds_in_concordance_verdict(session, admin_user, monke
     result = study.evidence_json["classification_result"]
     assert result["classification"] == "validated"
     assert result["coverage"]["concordance_agree"] == 1
+
+
+@pytest.mark.asyncio
+async def test_comparing_explains_a_tool_pair_divergence_end_to_end(session, admin_user):
+    """The scRNA case the whole of step 5 exists for, at driver level: the paper's finding reproduced,
+    and the only diverging number is a cell count that differs because the paper called cells with
+    CellRanger and bioAF called them with STARsolo."""
+    from app.services.reproduction_plan_service import ReproductionPlanService
+
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await ReproductionPlanService.create_plan(
+        session,
+        study,
+        admin_user.id,
+        pipeline_key="nf-core/scrnaseq",
+        mapping_confidence="exact",
+        reference_genome="GRCh38",
+        tools=["CellRanger", "Seurat"],
+        differential_design={"contrasts": [{"name": "x"}], "thresholds": {"log2fc": 1.0, "padj": 0.05}},
+    )
+    study.state = "comparing"
+    study.evidence_json = {
+        "computed_metrics": {"cell_count": 7431},
+        "comparison_targets": [{"metric_key": "cell_count", "claimed_value": 10234, "unit": "count"}],
+        "level3_result": {
+            "concordance": {
+                "kind": "gene",
+                "verdict": "agree",
+                "paper_n": 100,
+                "our_n": 95,
+                "overlap": 88,
+                "concordant": 85,
+                "directional_overlap_frac": 0.85,
+                "enrichment_p": 1e-30,
+                "notes": [],
+            }
+        },
+    }
+    await session.flush()
+
+    await ValidationDriverService._handle_comparing(session, study)
+
+    result = study.evidence_json["classification_result"]
+    assert result["classification"] == "validated"
+    assert result["auto_finalize"] is False
+    assert result["divergence_attribution"]["cell_count"]["our_tool"] == "STARsolo"
+    assert "CellRanger" in result["reasoning"]
+    assert study.state == "comparing"  # held for a human, never auto-finalized

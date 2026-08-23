@@ -88,6 +88,9 @@ class ReproductionPlanResponse(BaseModel):
     pipeline_key: str | None = None
     pipeline_version: str | None = None
     parameters: dict | None = None
+    # The tools the paper's own methods named. Visible on the plan because it is what an attributed
+    # divergence is argued from, so a human ratifying a verdict can check the argument's input.
+    tools: list | None = None
     differential_design: dict | None = None
     finding_claim: dict | None = None
     reference_genome: str | None = None
