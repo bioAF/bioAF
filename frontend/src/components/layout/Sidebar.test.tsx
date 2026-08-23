@@ -61,7 +61,7 @@ beforeEach(() => {
   });
   mockBetaFeatures.mockReset();
   // Default-deny: beta items hidden unless a test opts in.
-  mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
+  mockBetaFeatures.mockReturnValue({ flags: {}, loading: false });
 });
 
 function makeComponent(key: string, category: string, enabled: boolean) {
@@ -234,28 +234,24 @@ describe("Sidebar beta gating", () => {
   });
 
   test("hides Validation Studies when the lit_validation flag is off", () => {
-    mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
+    mockBetaFeatures.mockReturnValue({ flags: {}, loading: false });
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.queryByText("Validation Studies")).not.toBeInTheDocument();
   });
 
   test("shows Validation Studies when the lit_validation flag is on", () => {
-    mockBetaFeatures.mockReturnValue({ available: true, flags: { lit_validation: true }, loading: false });
+    mockBetaFeatures.mockReturnValue({ flags: { lit_validation: true }, loading: false });
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Lab Knowledge"));
     expect(screen.getByText("Validation Studies")).toBeInTheDocument();
   });
 
-  test("hides the Beta Features settings menu when beta is not available", () => {
-    mockBetaFeatures.mockReturnValue({ available: false, flags: {}, loading: false });
-    render(<Sidebar />);
-    fireEvent.click(screen.getByText("Settings"));
-    expect(screen.queryByText("Beta Features")).not.toBeInTheDocument();
-  });
-
-  test("shows the Beta Features settings menu when beta is available", () => {
-    mockBetaFeatures.mockReturnValue({ available: true, flags: {}, loading: false });
+  test("shows the Beta Features settings menu on any instance", () => {
+    // The menu used to be hidden unless an admin's email ended in @bioaf.co, which meant every
+    // customer admin was locked out of their own beta toggles. It is admin-permission gated, and
+    // that is the whole gate now.
+    mockBetaFeatures.mockReturnValue({ flags: {}, loading: false });
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Settings"));
     expect(screen.getByText("Beta Features")).toBeInTheDocument();

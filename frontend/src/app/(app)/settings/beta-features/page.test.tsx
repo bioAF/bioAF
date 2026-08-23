@@ -18,15 +18,15 @@ beforeEach(() => {
 
 describe("BetaFeaturesPage", () => {
   it("renders a labeled toggle per beta feature reflecting its state", async () => {
-    mockGet.mockResolvedValue({ available: true, flags: { lit_validation: false } });
+    mockGet.mockResolvedValue({ flags: { lit_validation: false } });
     render(<BetaFeaturesPage />);
     const toggle = await screen.findByRole("switch", { name: /Literature Validation/i });
     expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
   it("PUTs the new value and reflects it when a toggle is clicked", async () => {
-    mockGet.mockResolvedValue({ available: true, flags: { lit_validation: false } });
-    mockPut.mockResolvedValue({ available: true, flags: { lit_validation: true } });
+    mockGet.mockResolvedValue({ flags: { lit_validation: false } });
+    mockPut.mockResolvedValue({ flags: { lit_validation: true } });
     render(<BetaFeaturesPage />);
     const toggle = await screen.findByRole("switch", { name: /Literature Validation/i });
     fireEvent.click(toggle);
@@ -41,11 +41,14 @@ describe("BetaFeaturesPage", () => {
     );
   });
 
-  it("disables the toggle and warns when beta is not available on this instance", async () => {
-    mockGet.mockResolvedValue({ available: false, flags: { lit_validation: false } });
+  it("leaves the toggle usable on any instance", async () => {
+    // Previously the toggle was disabled and a "not available on this instance" warning shown
+    // unless an admin's email ended in @bioaf.co, so a customer admin could see the switch and
+    // never move it.
+    mockGet.mockResolvedValue({ flags: { lit_validation: false } });
     render(<BetaFeaturesPage />);
     const toggle = await screen.findByRole("switch", { name: /Literature Validation/i });
-    expect(toggle).toBeDisabled();
-    expect(screen.getByText(/not available on this instance/i)).toBeInTheDocument();
+    expect(toggle).not.toBeDisabled();
+    expect(screen.queryByText(/not available on this instance/i)).not.toBeInTheDocument();
   });
 });

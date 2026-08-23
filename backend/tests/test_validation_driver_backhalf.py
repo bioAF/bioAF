@@ -629,7 +629,7 @@ async def test_extracting_activates_level3_and_routes_to_reproducing(session, ad
     # B2e design + B4 confirmed finding claim on the plan.
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.differential_design_json = {
-        "contrasts": [{"name": "t vs c", "test_samples": ["S1"], "reference_samples": ["S2"]}],
+        "contrasts": [{"name": "t vs c", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
         "thresholds": {"log2fc": 1.0, "padj": 0.05},
     }
     plan.finding_claim_json = {
@@ -666,7 +666,7 @@ async def test_extracting_activates_level3_and_routes_to_reproducing(session, ad
     level3 = study.evidence_json["level3"]
     assert level3["template_id"] == tmpl.id
     assert level3["kind"] == "gene"
-    assert level3["parameters"]["test_samples"] == "S1"
+    assert level3["parameters"]["test_samples"] == "S1,S2"
 
 
 @pytest.mark.asyncio
@@ -783,3 +783,128 @@ async def test_advance_is_isolated_per_study(session, admin_user, monkeypatch):
     await session.refresh(study_b)
     assert study_a.state == "extracting"  # A advanced despite B failing
     assert study_b.state == "error"
+
+
+@pytest.mark.asyncio
+async def test_extracting_records_why_a_configured_level3_did_not_run(session, admin_user, monkeypatch):
+    """`build_level3_inputs` returns nothing from seven places, and every one of them used to drop the
+    study to Level-2 with a single INFO log line. A scientist who confirmed a ground-truth set and got
+    `inconclusive` back had no way to learn that the finding step never ran, let alone why."""
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/rnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [{"name": "t vs c", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    }
+    plan.finding_claim_json = {
+        "kind": "gene",
+        "confirmed": True,
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        "finding_set": {"kind": "gene", "namespace": "symbol", "n_sig": 1, "entities": [{"id": "A1BG"}]},
+    }
+    await session.flush()  # no count matrix and no template: the inputs cannot be assembled
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    assert study.state == "comparing"
+    skipped = study.evidence_json["level3_skipped"]
+    assert skipped["reason"]
+    assert skipped["reason_code"] == "no_input_file"
+
+
+@pytest.mark.asyncio
+async def test_a_level2_study_records_no_skip_key(session, admin_user, monkeypatch):
+    """A QC-only paper with no confirmed ground-truth set never configured Level-3, so saying it was
+    'skipped' would report an absence as a failure."""
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/rnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+    await session.flush()
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    assert study.state == "comparing"
+    assert "level3_skipped" not in study.evidence_json
+
+
+@pytest.mark.asyncio
+async def test_extracting_activates_level3_for_an_scrnaseq_study(session, admin_user, monkeypatch):
+    """The capability, at driver level: an scRNA-seq study with a confirmed gene finding set and a
+    fittable contrast reaches `reproducing` on the pseudobulk template, which is exactly what it could
+    never do before."""
+    from app.models.template_notebook import TemplateNotebook
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={"cell_count": 7431})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/scrnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.pipeline_key = "nf-core/scrnaseq"
+    plan.differential_design_json = {
+        "contrasts": [
+            {
+                "name": "stim vs ctrl",
+                "test_samples": ["D1_stim", "D2_stim"],
+                "reference_samples": ["D1_ctrl", "D2_ctrl"],
+            }
+        ],
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    }
+    plan.finding_claim_json = {
+        "kind": "gene",
+        "confirmed": True,
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        "finding_set": {"kind": "gene", "namespace": "symbol", "n_sig": 1, "entities": [{"id": "ISG15"}]},
+    }
+    for name in ("D1_stim", "D2_stim", "D1_ctrl", "D2_ctrl"):
+        session.add(
+            File(
+                organization_id=admin_user.organization_id,
+                gcs_uri=f"gs://b/{name}_filtered_matrix.h5ad",
+                storage_uri=f"gs://b/{name}_filtered_matrix.h5ad",
+                filename=f"{name}_filtered_matrix.h5ad",
+                file_type="h5ad",
+                source_pipeline_run_id=analysis.id,
+            )
+        )
+    tmpl = TemplateNotebook(
+        organization_id=admin_user.organization_id,
+        name="pseudobulk DE",
+        category="differential_expression",
+        notebook_path="notebooks/de_pseudobulk_deseq2.ipynb",
+        parameters_json={},
+        is_builtin=True,
+    )
+    session.add(tmpl)
+    await session.flush()
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    assert study.state == "reproducing"
+    level3 = study.evidence_json["level3"]
+    assert level3["template_id"] == tmpl.id
+    assert level3["transform"] == "pseudobulk"
+    assert len(level3["parameters"]["counts_paths"].split(",")) == 4
+    assert level3["parameters"]["test_samples"] == "D1_stim,D2_stim"

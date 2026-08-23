@@ -118,7 +118,11 @@ async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypa
         f"/api/validation-studies/{sid}/differential-design",
         json={
             "contrasts": [
-                {"name": "dex vs untreated", "test_samples": ["SRX30659361"], "reference_samples": ["SRX30659368"]}
+                {
+                    "name": "dex vs untreated",
+                    "test_samples": ["SRX30659361", "SRX30659362"],
+                    "reference_samples": ["SRX30659368", "SRX30659369"],
+                }
             ],
             "thresholds": {"log2fc": 1.5, "padj": 0.01},
         },
@@ -127,7 +131,7 @@ async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypa
     assert r.status_code == 200, r.text
     design = r.json()["plan"]["differential_design"]
     assert design["thresholds"] == {"log2fc": 1.5, "padj": 0.01}
-    assert design["contrasts"][0]["test_samples"] == ["SRX30659361"]
+    assert design["contrasts"][0]["test_samples"] == ["SRX30659361", "SRX30659362"]
 
 
 async def test_finding_set_candidates_returns_autofetched(client, admin_token, monkeypatch):
@@ -498,3 +502,42 @@ async def test_missing_data_early_exit_via_api(client, admin_token, monkeypatch)
     assert r.json()["state"] == "classified"
     assert r.json()["classification"] == "missing_data"
     assert r.json()["confidence"] is None  # missing_data -> Could Not Reproduce (no confidence)
+
+
+async def test_plan_surfaces_the_papers_tool_list(client, admin_token, monkeypatch):
+    """The tool list is the input an attributed divergence is argued from, so a human ratifying a
+    verdict has to be able to see it."""
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["plan"]["tools"] == ["TopHat"]
+
+
+async def test_plan_declares_which_finding_kinds_its_pipeline_supports(client, admin_token, monkeypatch):
+    """The C1 gate offered both `gene` and `interval` for every plan_ready study with no pipeline
+    check at all, so a scientist could paste a DEG table for an ATAC study and spend hours of compute
+    to learn there was never a route. The declaration is computed from the wiring, server-side."""
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.json()["plan"]["supported_finding_kinds"] == ["gene"]  # _GOOD maps to nf-core/rnaseq
+
+    assert supported_finding_kinds("nf-core/scrnaseq") == ["gene"]
+    assert supported_finding_kinds("nf-core/atacseq") == ["interval"]
+    assert supported_finding_kinds("nf-core/chipseq") == ["interval"]
+
+
+async def test_a_plan_with_no_pipeline_declares_no_supported_kinds(client, admin_token, monkeypatch):
+    """A paper whose method mapped to nothing has no Level-3 route. The gate must say so rather than
+    error or silently offer both kinds."""
+    unmappable = _GOOD.replace('"assay": "bulk RNA-seq"', '"assay": "a bespoke in-house assay"')
+    _patch_llm(monkeypatch, unmappable)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    plan = r.json()["plan"]
+    assert plan["pipeline_key"] is None
+    assert plan["supported_finding_kinds"] == []

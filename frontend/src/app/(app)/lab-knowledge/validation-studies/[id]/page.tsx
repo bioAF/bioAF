@@ -41,6 +41,9 @@ interface ReproductionPlanView {
   blockers?: string[] | null;
   differential_design?: DifferentialDesign | null;
   finding_claim?: FindingClaim | null;
+  // The tools the paper's own methods named, and which finding kinds this pipeline can reproduce.
+  tools?: string[] | null;
+  supported_finding_kinds?: string[] | null;
 }
 
 interface ValidationStudy {
@@ -198,7 +201,11 @@ export default function ValidationStudyPage() {
 
         {study.evidence?.classification_result && (
           <section className="mb-6">
-            <ValidationVerdictPanel result={study.evidence.classification_result} />
+            <ValidationVerdictPanel
+              result={study.evidence.classification_result}
+              level3Skipped={study.evidence.level3_skipped}
+              level3Failed={study.evidence.level3_failed}
+            />
           </section>
         )}
 
@@ -248,6 +255,7 @@ export default function ValidationStudyPage() {
               studyId={study.id}
               design={plan?.differential_design}
               claim={plan?.finding_claim}
+              supportedFindingKinds={plan?.supported_finding_kinds}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
             />
           </section>

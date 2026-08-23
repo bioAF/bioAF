@@ -35,6 +35,12 @@ export interface ClassificationResult {
   classification?: string | null;
   auto_finalize?: boolean | null;
   reasoning?: string | null;
+  // Per-metric: which divergences a named tool-pair difference accounts for. A diverging metric
+  // absent from here is unexplained and still counts against the verdict.
+  divergence_attribution?: Record<
+    string,
+    { cause?: string | null; paper_tool?: string | null; our_tool?: string | null; explanation?: string | null }
+  > | null;
 }
 
 export interface Evidence {
@@ -43,6 +49,10 @@ export interface Evidence {
   classification_result?: ClassificationResult | null;
   // Level-3 finding-concordance evidence (ADR-069), present once the reproducing step scored E6.
   level3_result?: import("./Level3ResultPanel").Level3Result | null;
+  // The finding step was configured but could not run, or ran and failed. Either way the study keeps
+  // the Level-2 verdict it earned; these say which stronger verdict was not available and why.
+  level3_skipped?: { reason?: string | null; reason_code?: string | null } | null;
+  level3_failed?: { reason?: string | null } | null;
   data_run_id?: number | null;
   analysis_run_id?: number | null;
   qc_dashboard_id?: number | null;

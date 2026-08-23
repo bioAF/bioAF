@@ -49,6 +49,14 @@ class ReproductionPlan(Base):
     # a paper with no obtainable set stays None (verdict caps at Level-2, never a fabricated set).
     finding_claim_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    # The tools the PAPER's own methods section named (aligner, quantifier, cell caller, DE method).
+    # Extracted as `method.tools` and, before this column existed, spent on one boolean
+    # (`_mentions_nf_core`) and a prose sentence and then discarded. It is the only input divergence
+    # attribution has: a cell count that differs because the paper used CellRanger and we used
+    # STARsolo is a known, explainable technical difference, not an unexplained discrepancy.
+    # NULL means "extracted before this was kept"; [] means "the paper named no tools".
+    tools_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # B3 mapping rationale: how confident the method -> nf-core mapping is, and why.
     mapping_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)  # exact | partial | none
     mapping_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
