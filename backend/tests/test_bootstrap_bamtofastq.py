@@ -230,11 +230,7 @@ async def test_the_entrypoint_only_invokes_the_converter_to_convert(session, adm
         .first()
     )
 
-    calls = [
-        ln.strip()
-        for ln in version.entrypoint_command.splitlines()
-        if ln.strip().startswith("bamtofastq")
-    ]
+    calls = [ln.strip() for ln in version.entrypoint_command.splitlines() if ln.strip().startswith("bamtofastq")]
     assert len(calls) == 1, f"expected exactly one bamtofastq invocation, got {calls}"
     assert "--version" not in version.entrypoint_command
     assert "/outputs/fastq" in calls[0]
