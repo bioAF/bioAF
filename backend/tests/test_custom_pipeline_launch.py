@@ -420,7 +420,11 @@ async def test_stage_commands_use_relative_paths(session, admin_user, ready_env_
         )
 
     spec = captured["job_spec"]
-    assert spec["stage_commands"][0].startswith("gcloud auth activate-service-account")
+    # The activation is guarded by a file test: the adapter mounts the key only in
+    # `service_account_key` mode, and an unguarded activation killed staging on every Workload
+    # Identity / IRSA cluster. The activation itself is unchanged where a key IS mounted.
+    assert spec["stage_commands"][0].startswith('if [ -f "/secrets/gcp/key.json" ]')
+    assert "gcloud auth activate-service-account" in spec["stage_commands"][0]
     cp_commands = spec["stage_commands"][1:]
     assert len(cp_commands) == 2
     for cmd in cp_commands:
@@ -799,3 +803,64 @@ async def test_audit_log_written(session, admin_user, ready_env_version, experim
     ).scalar_one()
     assert audit.user_id == admin_user.id
     assert audit.details_json["custom_pipeline_version_id"] == version.id
+
+
+# --- key-file auth must not be assumed (Workload Identity / IRSA clusters) ---
+
+
+def _stage_script(file_specs):
+    return " && ".join(CustomPipelineService._build_stage_commands(file_specs))
+
+
+_SPEC = [
+    {
+        "file_id": 1,
+        "filename": "sample.bam",
+        "relative_path": "exp/sample.bam",
+        "gcs_uri": "gs://bucket/sample.bam",
+        "project_id": None,
+        "project_name": None,
+        "experiment_id": 1,
+        "experiment_name": "exp",
+        "sample_id": None,
+        "sample_name": None,
+    }
+]
+
+
+def test_input_staging_survives_a_cluster_with_no_mounted_key():
+    """The compute adapter mounts /secrets/gcp/key.json ONLY in `service_account_key` credential
+    mode. Under Workload Identity (`vm_default`) and AWS IRSA it mounts nothing and the pod
+    authenticates ambiently through its service account. Running the key activation unconditionally
+    made gcloud exit 1 on the missing file, so the stage-inputs init container died before copying a
+    single byte and every custom-pipeline run on such a cluster failed. The Nextflow path already
+    guards on `has_gcs_secret`; this path did not."""
+    script = _stage_script(_SPEC)
+    assert "/secrets/gcp/key.json" in script
+    # Guarded, so an absent key is a no-op rather than a fatal error.
+    assert "if [ -f" in script
+    assert "fi" in script
+    # The copy itself still happens.
+    assert "gs://bucket/sample.bam" in script
+
+
+def test_output_sync_survives_a_cluster_with_no_mounted_key():
+    """Same bug, same shape, in the EXIT trap that copies /outputs to the results bucket. Here it is
+    worse than a failure: the trap ends `|| true`, so an unguarded activation would make the sync a
+    silent no-op and the run would report success having published nothing."""
+    wrapped = CustomPipelineService._build_entrypoint_wrapper(
+        entrypoint_command="echo hi",
+        results_bucket="bioaf-results",
+        output_prefix="experiments/1",
+        run_id=7,
+    )
+    assert "if [ -f" in wrapped
+    assert "/outputs/*" in wrapped
+
+
+def test_the_guard_keeps_the_activation_for_a_cluster_that_does_mount_a_key():
+    """The fix must not disable key auth where a key IS mounted: the guard is a file test, so the
+    activation still runs whenever the adapter mounted one."""
+    script = _stage_script(_SPEC)
+    assert "gcloud auth activate-service-account" in script
+    assert "--key-file=/secrets/gcp/key.json" in script
