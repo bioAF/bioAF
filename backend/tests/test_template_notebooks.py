@@ -126,6 +126,10 @@ async def test_templates_ordered_by_sort_order(client, admin_token):
     response = await client.get("/api/template-notebooks", headers={"Authorization": f"Bearer {admin_token}"})
     data = response.json()
     notebooks = data["notebooks"]
-    # QC comes first; the Level-3 differential-accessibility template has the highest sort_order.
+    # QC comes first, then the interactive scRNA templates, then the Level-3 headless ones. Assert the
+    # ordering itself rather than which template happens to have been added most recently.
+    from app.services.template_notebook_service import BUILTIN_TEMPLATES
+
     assert notebooks[0]["category"] == "qc"
-    assert notebooks[-1]["category"] == "differential_accessibility"
+    expected = [t["name"] for t in sorted(BUILTIN_TEMPLATES, key=lambda t: t["sort_order"])]
+    assert [n["name"] for n in notebooks] == expected

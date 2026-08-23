@@ -12,7 +12,7 @@ the driver stays orchestration glue.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,7 @@ class InputRule:
     filename_exact: str | None = None
     filename_contains: tuple[str, ...] = ()
     filename_excludes: tuple[str, ...] = ()
+    filename_prefix_excludes: tuple[str, ...] = ()
     path_segment: str | None = None
 
     def matches(self, f: File) -> bool:
@@ -49,6 +50,8 @@ class InputRule:
         if not all(n in name for n in self.filename_contains):
             return False
         if any(n in name for n in self.filename_excludes):
+            return False
+        if any(name.startswith(pre.lower()) for pre in self.filename_prefix_excludes):
             return False
         if self.path_segment is not None:
             segments = {s.lower() for s in (f.storage_uri or f.gcs_uri or "").split("/")}
@@ -80,7 +83,6 @@ class Level3Wiring:
     # Recorded on the bundle so a verdict can say how its matrix was built.
     transform: str | None = None
     id_column: str | None = None
-    extra_parameters: dict = field(default_factory=dict)
 
 
 _SALMON_GENE_COUNTS = "salmon.merged.gene_counts.tsv"
@@ -114,6 +116,27 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
             InputRule(filename_exact=_SALMON_GENE_COUNTS),
         ),
         id_column="gene_id",
+    ),
+    # scRNA-seq findings are `gene` findings, but nf-core/scrnaseq emits cells x genes per sample, not
+    # genes x samples. `pseudobulk` is the route between the two: sum each sample's cells to one column.
+    #
+    # The per-sample files are used, never the concatenated `combined_*`: `concat_h5ad.py` calls
+    # `ad.concat(..., label="sample")` with the file-path stem as the key, which OVERWRITES the clean
+    # obs["sample"] the per-sample file already carried. The per-sample files need no grouping at all.
+    #
+    # CellBender's output is the same cell-called matrix with ambient RNA removed, so it is preferred
+    # when present. `raw` is never an input: it is every barcode the sequencer saw, overwhelmingly
+    # empty droplets, and summing it would pseudobulk the ambient soup along with the cells. A run with
+    # no cell-called matrix refuses rather than falling back.
+    ("nf-core/scrnaseq", "gene"): Level3Wiring(
+        template_notebook_path="notebooks/de_pseudobulk_deseq2.ipynb",
+        input_rules=(
+            InputRule(filename_contains=("_cellbender_filter_matrix.h5ad",), filename_prefix_excludes=("combined_",)),
+            InputRule(filename_contains=("_filtered_matrix.h5ad",), filename_prefix_excludes=("combined_",)),
+        ),
+        path_parameter="counts_paths",
+        multiple=True,
+        transform="pseudobulk",
     ),
     ("nf-core/atacseq", "interval"): Level3Wiring(
         template_notebook_path="notebooks/da_peaks_deseq2.ipynb",
@@ -248,7 +271,6 @@ async def resolve_level3(
         "reference_samples": ",".join(reference_samples),
         "lfc_threshold": float(lfc) if lfc is not None else 1.0,
         "padj_threshold": float(padj) if padj is not None else 0.05,
-        **wiring.extra_parameters,
     }
     if wiring.id_column:
         parameters["id_column"] = wiring.id_column
