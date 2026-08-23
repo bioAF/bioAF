@@ -75,6 +75,11 @@ function formatSubjects(m?: Record<string, string> | null): string {
 
 const norm = (s?: string | null) => (s ?? "").trim().toLowerCase();
 
+const KIND_LABELS: Record<string, string> = {
+  gene: "Gene set (RNA-seq / scRNA-seq DE)",
+  interval: "Interval set (ATAC/ChIP DA)",
+};
+
 // Pre-group the fetched samples so the scientist confirms rather than constructs: an accession the
 // extractor already placed in an arm wins; otherwise a condition that matches the extractor's
 // test/reference condition text places it; otherwise it starts excluded for the human to assign.
@@ -109,11 +114,16 @@ export function Level3Gate({
   studyId,
   design,
   claim,
+  supportedFindingKinds,
   onChanged,
 }: {
   studyId: number;
   design?: DifferentialDesign | null;
   claim?: FindingClaim | null;
+  // Which finding kinds this plan's pipeline actually has a Level-3 route for, computed server-side
+  // from the wiring. Undefined on a response rendered before the field existed, which degrades to
+  // offering both rather than to an empty gate.
+  supportedFindingKinds?: string[] | null;
   onChanged: (updated: unknown) => void;
 }) {
   const { canAccess } = usePermissions();
@@ -128,7 +138,11 @@ export function Level3Gate({
   const [lfc, setLfc] = useState(design?.thresholds?.log2fc != null ? String(design.thresholds.log2fc) : "");
   const [padj, setPadj] = useState(design?.thresholds?.padj != null ? String(design.thresholds.padj) : "");
 
-  const [kind, setKind] = useState<"gene" | "interval">((claim?.kind as "gene" | "interval") ?? "gene");
+  // A pipeline with no Level-3 route offers nothing; one with a single route offers only that.
+  const kinds = supportedFindingKinds ?? ["gene", "interval"];
+  const [kind, setKind] = useState<"gene" | "interval">(
+    (claim?.kind as "gene" | "interval") ?? ((kinds[0] as "gene" | "interval") ?? "gene"),
+  );
   const [tableText, setTableText] = useState("");
   const [source, setSource] = useState(claim?.source_locator ?? "");
 
@@ -370,7 +384,20 @@ export function Level3Gate({
         </button>
       </div>
 
-      {/* Ground-truth result set */}
+      {/* Ground-truth result set. Offered only for the finding kinds this pipeline can reproduce:
+          confirming a set with no route to run it costs the scientist their time and then hours of
+          compute to reach an answer that was never available. Say so rather than hiding the section,
+          which would leave them hunting for a control that vanished. */}
+      {kinds.length === 0 ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Paper&apos;s ground-truth result set</p>
+          <p className="rounded border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+            This study&apos;s pipeline cannot reproduce a reported finding, so there is no result set to
+            confirm. The run still produces quality-control evidence, and the validation is assessed on
+            that alone.
+          </p>
+        </div>
+      ) : (
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Paper&apos;s ground-truth result set</p>
         {fs && (
@@ -396,8 +423,11 @@ export function Level3Gate({
               value={kind}
               onChange={(e) => setKind(e.target.value as "gene" | "interval")}
             >
-              <option value="gene">Gene set (RNA-seq DE)</option>
-              <option value="interval">Interval set (ATAC/ChIP DA)</option>
+              {kinds.map((k) => (
+                <option key={k} value={k}>
+                  {KIND_LABELS[k] ?? k}
+                </option>
+              ))}
             </select>
           </label>
           <label className="flex-1 text-xs text-gray-600">
@@ -435,6 +465,7 @@ export function Level3Gate({
           </button>
         </div>
       </div>
+      )}
 
       {error && <p className="text-sm text-red-700">{error}</p>}
     </div>

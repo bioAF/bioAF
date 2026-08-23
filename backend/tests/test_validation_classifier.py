@@ -5,6 +5,7 @@ computed QC metrics. No DB, no LLM: the verdict is deterministic and auditable (
 """
 
 from app.services.validation_classifier_service import (
+    attribute_divergences,
     classify_study,
     compare_targets,
     normalize_target_key,
@@ -401,3 +402,178 @@ class TestPeakCountQualifierAliasing:
         assert result["auto_finalize"] is False
         assert result["coverage"]["comparable"] == 0
         assert result["coverage"]["advisory"] == 2
+
+
+# ---- E3 per-metric divergence attribution + the veto it lifts (plan_0 step 5) ----
+
+_AGREEING_CONCORDANCE = {
+    "kind": "gene",
+    "verdict": "agree",
+    "paper_n": 100,
+    "our_n": 95,
+    "overlap": 88,
+    "concordant": 85,
+    "directional_overlap_frac": 0.85,
+    "enrichment_p": 1e-30,
+    "notes": [],
+}
+
+
+def _scrna_study(**kwargs):
+    """A reproduced scRNA finding alongside the cell-count divergence STARsolo always produces."""
+    defaults = dict(
+        targets=[_target("cell_count", 10234)],
+        computed_metrics={"cell_count": 7431},
+        concordance_results=[_AGREEING_CONCORDANCE],
+        paper_tools=["CellRanger", "Seurat"],
+        pipeline_key="nf-core/scrnaseq",
+    )
+    defaults.update(kwargs)
+    targets = defaults.pop("targets")
+    computed = defaults.pop("computed_metrics")
+    return classify_study(targets, computed, **defaults)
+
+
+class TestToolAttribution:
+    def test_cell_caller_difference_explains_the_yield_metrics(self):
+        """bioAF runs STARsolo; most published scRNA papers used CellRanger. The two use different
+        cell-calling algorithms and routinely disagree on cell count by more than the 25% tolerance,
+        which cascades into genes/UMIs per cell and saturation."""
+        attributed = attribute_divergences(
+            [
+                {"mapped_key": k, "claimed_normalized": 10.0, "computed_value": 5.0}
+                for k in (
+                    "cell_count",
+                    "median_genes_per_cell",
+                    "mean_genes_per_cell",
+                    "median_umi_per_cell",
+                    "mean_umi_per_cell",
+                    "saturation",
+                )
+            ],
+            paper_tools=["CellRanger"],
+            pipeline_key="nf-core/scrnaseq",
+        )
+        assert set(attributed) == {
+            "cell_count",
+            "median_genes_per_cell",
+            "mean_genes_per_cell",
+            "median_umi_per_cell",
+            "mean_umi_per_cell",
+            "saturation",
+        }
+        assert attributed["cell_count"]["paper_tool"] == "CellRanger"
+        assert attributed["cell_count"]["our_tool"] == "STARsolo"
+
+    def test_a_cell_caller_difference_does_not_explain_the_mapping_rate(self):
+        """Mapping rate is stable across pipelines. Explaining it away with a cell-caller difference
+        would let a real divergence hide behind an unrelated cause."""
+        attributed = attribute_divergences(
+            [{"mapped_key": "reads_mapped_genome", "claimed_normalized": 0.95, "computed_value": 0.60}],
+            paper_tools=["CellRanger"],
+            pipeline_key="nf-core/scrnaseq",
+        )
+        assert attributed == {}
+
+    def test_an_empty_tool_list_attributes_nothing(self):
+        for tools in ([], None):
+            assert (
+                attribute_divergences(
+                    [{"mapped_key": "cell_count", "claimed_normalized": 10.0, "computed_value": 5.0}],
+                    paper_tools=tools,
+                    pipeline_key="nf-core/scrnaseq",
+                )
+                == {}
+            )
+
+    def test_an_unrecognised_tool_list_attributes_nothing(self):
+        assert (
+            attribute_divergences(
+                [{"mapped_key": "cell_count", "claimed_normalized": 10.0, "computed_value": 5.0}],
+                paper_tools=["a bespoke in-house script"],
+                pipeline_key="nf-core/scrnaseq",
+            )
+            == {}
+        )
+
+    def test_a_paper_that_used_our_own_tool_attributes_nothing(self):
+        """If the paper called cells with STARsolo too, a cell-count divergence is NOT a tool
+        difference and must keep counting against the verdict."""
+        assert (
+            attribute_divergences(
+                [{"mapped_key": "cell_count", "claimed_normalized": 10.0, "computed_value": 5.0}],
+                paper_tools=["STARsolo"],
+                pipeline_key="nf-core/scrnaseq",
+            )
+            == {}
+        )
+
+    def test_attribution_is_deterministic(self):
+        """spec-03: the LLM does not pick the verdict. The LLM's contribution is upstream (reading
+        which tools the paper used); the attribution over that list is pure, auditable code."""
+        args = ([{"mapped_key": "cell_count", "claimed_normalized": 10.0, "computed_value": 5.0}],)
+        kwargs = {"paper_tools": ["CellRanger"], "pipeline_key": "nf-core/scrnaseq"}
+        assert attribute_divergences(*args, **kwargs) == attribute_divergences(*args, **kwargs)
+
+
+class TestAttributedDivergenceDoesNotVetoAFinding:
+    def test_agreeing_concordance_plus_an_attributed_qc_divergence_validates(self):
+        result = _scrna_study()
+        assert result["classification"] == "validated"
+        assert result["auto_finalize"] is False  # a consequential claim always holds for a human
+
+    def test_the_reasoning_names_both_values_and_both_tools(self):
+        """This sentence is the product; the verdict label is a summary of it."""
+        reasoning = _scrna_study()["reasoning"]
+        assert "10,234" in reasoning or "10234" in reasoning
+        assert "7,431" in reasoning or "7431" in reasoning
+        assert "CellRanger" in reasoning
+        assert "STARsolo" in reasoning
+
+    def test_an_unattributable_qc_divergence_still_vetoes(self):
+        """An unexplained divergence must still count against the verdict; that is the whole reason
+        not to make the gate simply tier-blind in the other direction."""
+        result = _scrna_study(paper_tools=["a bespoke in-house script"])
+        assert result["classification"] != "validated"
+
+    def test_a_finding_tier_divergence_still_vetoes(self):
+        """peak_count is finding-tier: the paper reporting a different number of peaks is a
+        disagreement about a RESULT, not about data quality, whatever tool produced it."""
+        result = classify_study(
+            [_target("peak_count", 40000)],
+            {"peak_count": 12000},
+            concordance_results=[_AGREEING_CONCORDANCE],
+            paper_tools=["MACS2", "HOMER"],
+            pipeline_key="nf-core/chipseq",
+        )
+        assert result["classification"] != "validated"
+
+    def test_a_concordance_divergence_still_vetoes(self):
+        result = _scrna_study(concordance_results=[{**_AGREEING_CONCORDANCE, "verdict": "diverge", "concordant": 3}])
+        assert result["classification"] != "validated"
+
+    def test_no_finding_agreement_plus_a_qc_divergence_still_vetoes(self):
+        """The lift only applies on top of a finding-tier agreement. Explaining away every QC
+        divergence on a study that reproduced no finding would turn an honest inconclusive into a
+        clean-looking one."""
+        result = _scrna_study(concordance_results=None)
+        assert result["classification"] != "validated"
+        assert result["coverage"]["diverge"] == 1
+
+    def test_the_attribution_is_reported_per_metric(self):
+        result = _scrna_study()
+        cause = result["divergence_attribution"]["cell_count"]
+        assert cause["paper_tool"] == "CellRanger"
+        assert cause["our_tool"] == "STARsolo"
+        assert cause["cause"]
+
+    def test_a_study_with_no_divergence_reports_no_attribution(self):
+        result = classify_study(
+            [_target("cell_count", 10234)],
+            {"cell_count": 10000},
+            concordance_results=[_AGREEING_CONCORDANCE],
+            paper_tools=["CellRanger"],
+            pipeline_key="nf-core/scrnaseq",
+        )
+        assert result["classification"] == "validated"
+        assert result["divergence_attribution"] == {}

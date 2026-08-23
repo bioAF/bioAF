@@ -23,9 +23,6 @@ export interface NavChild {
   capability?: string;
   /** Hidden unless this beta feature flag is enabled (spec-07). See useBetaFeatures. */
   betaFlag?: string;
-  /** Shown only when beta features are available on this instance (a bioAF-operated
-   * instance). Used for the Beta Features menu itself. */
-  requiresBetaAvailability?: boolean;
 }
 
 export interface NavSection {
@@ -129,7 +126,7 @@ export const navConfig: NavSection[] = [
       { label: "Integrations", path: "/settings/integrations", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Workbench Settings", path: "/settings/work-nodes", permission: { resource: "work_nodes", action: "configure" }, capability: "work_nodes" },
       { label: "Networking", path: "/settings/networking", permission: { resource: "infrastructure", action: "edit" } },
-      { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" }, requiresBetaAvailability: true },
+      { label: "Beta Features", path: "/settings/beta-features", permission: { resource: "infrastructure", action: "configure" } },
       { label: "Platform Info", path: "/settings/info", permission: { resource: "infrastructure", action: "view" } },
     ],
   },

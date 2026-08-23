@@ -55,3 +55,28 @@ describe("ValidationVerdictPanel", () => {
     expect(screen.getByText(/automatically/i)).toBeInTheDocument();
   });
 });
+
+test("says why a configured Level-3 was skipped", () => {
+  render(
+    <ValidationVerdictPanel
+      result={{ classification: "inconclusive", reasoning: "r", auto_finalize: false }}
+      level3Skipped={{ reason: "the analysis run published no file matching the input it needs" }}
+    />,
+  );
+  expect(screen.getByText(/published no file matching/i)).toBeInTheDocument();
+});
+
+test("says when the Level-3 notebook failed", () => {
+  render(
+    <ValidationVerdictPanel
+      result={{ classification: "inconclusive", reasoning: "r", auto_finalize: false }}
+      level3Failed={{ reason: "the differential reproduction notebook failed while running" }}
+    />,
+  );
+  expect(screen.getByText(/failed while running/i)).toBeInTheDocument();
+});
+
+test("renders nothing extra when the finding step neither ran nor failed", () => {
+  render(<ValidationVerdictPanel result={{ classification: "validated", reasoning: "r", auto_finalize: true }} />);
+  expect(screen.queryByText(/finding step/i)).not.toBeInTheDocument();
+});

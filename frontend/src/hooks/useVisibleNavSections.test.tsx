@@ -19,7 +19,7 @@ beforeEach(() => {
   mockPermissions.mockReturnValue({ canAccess: () => true, roleName: "admin", loading: false, failed: false });
   mockComponents.mockReturnValue({ components: [component("nextflow_k8s", "pipeline_orchestration", true)], loading: false, failed: false });
   mockCapabilities.mockReturnValue({ has: () => true });
-  mockBeta.mockReturnValue({ available: false, flags: {} });
+  mockBeta.mockReturnValue({ flags: {} });
 });
 
 test("returns nothing at all while permissions are still loading", () => {
@@ -54,7 +54,7 @@ test("drops a beta child while its flag is off", () => {
 });
 
 test("keeps a beta child once its flag is on", () => {
-  mockBeta.mockReturnValue({ available: true, flags: { lit_validation: true } });
+  mockBeta.mockReturnValue({ flags: { lit_validation: true } });
   const { result } = renderHook(() => useVisibleNavSections());
   const knowledge = result.current.sections.find((s) => s.label === "Lab Knowledge");
   expect(knowledge!.children!.map((c) => c.label)).toContain("Validation Studies");

@@ -269,3 +269,43 @@ test("shows the parsed finding-set summary once a claim is confirmed", async () 
   expect(screen.getByText(/confirmed/i)).toBeInTheDocument();
   await waitFor(() => expect(mockGet).toHaveBeenCalledWith("/api/validation-studies/1/sample-manifest"));
 });
+
+// --- capability declaration (plan_0 step 6) ---
+
+test("offers only the finding kind the study's pipeline can actually reproduce", async () => {
+  render(
+    <Level3Gate
+      studyId={1}
+      design={DESIGN}
+      claim={null}
+      supportedFindingKinds={["interval"]}
+      onChanged={jest.fn()}
+    />,
+  );
+  const select = screen.getByLabelText(/result set kind/i) as HTMLSelectElement;
+  const options = Array.from(select.options).map((o) => o.value);
+  expect(options).toEqual(["interval"]);
+});
+
+test("offers gene for an scRNA-seq study", async () => {
+  render(
+    <Level3Gate studyId={1} design={DESIGN} claim={null} supportedFindingKinds={["gene"]} onChanged={jest.fn()} />,
+  );
+  const select = screen.getByLabelText(/result set kind/i) as HTMLSelectElement;
+  expect(Array.from(select.options).map((o) => o.value)).toEqual(["gene"]);
+});
+
+test("states plainly that a pipeline with no Level-3 route cannot reproduce a finding", async () => {
+  // Hiding the section would leave a scientist wondering where the control went; saying why is the
+  // point of declaring the capability at all.
+  render(<Level3Gate studyId={1} design={DESIGN} claim={null} supportedFindingKinds={[]} onChanged={jest.fn()} />);
+  expect(screen.getByText(/cannot reproduce a reported finding/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/result set kind/i)).not.toBeInTheDocument();
+});
+
+test("an older response with no declaration degrades to offering both kinds", async () => {
+  // A study whose plan was rendered before the field existed must not throw or render an empty gate.
+  render(<Level3Gate studyId={1} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  const select = screen.getByLabelText(/result set kind/i) as HTMLSelectElement;
+  expect(Array.from(select.options).map((o) => o.value)).toEqual(["gene", "interval"]);
+});

@@ -206,6 +206,164 @@ _SPECS: tuple[MetricSpec, ...] = (
 _CLEARED_MAPPING_CONFIDENCE = {"exact", "high", "full"}
 
 
+# ---- E3 per-metric divergence attribution (plan_0 step 5) ----
+#
+# `_attribute` below asks "could OUR side explain this divergence?" with two inputs (mapping
+# confidence, reference build), which is the right shape and too poor to answer the question, and it
+# answers globally rather than per metric. This table answers it per metric from the one input that
+# actually carries the information: which tools the PAPER said it used, next to which tools bioAF's
+# pipeline actually runs.
+#
+# Curated and rule-based on purpose. spec-03 is explicit that the LLM does not pick the verdict, so a
+# human can audit exactly why a study landed where it did. The LLM's contribution is upstream: reading
+# the tool names out of the methods section.
+
+# What bioAF's own pipelines use, per role. Read off the pipeline defaults in app/pipeline_defaults/:
+# scrnaseq runs `aligner: star` (STARsolo), rnaseq runs `aligner: star_salmon` with
+# `pseudo_aligner: salmon`, and atacseq/chipseq call peaks with MACS2 over BWA alignments.
+_OUR_TOOLS: dict[str, dict[str, str]] = {
+    "nf-core/scrnaseq": {"cell_caller": "STARsolo", "aligner": "STAR"},
+    "nf-core/rnaseq": {"aligner": "STAR", "quantifier": "Salmon"},
+    "nf-core/atacseq": {"aligner": "BWA", "peak_caller": "MACS2"},
+    "nf-core/chipseq": {"aligner": "BWA", "peak_caller": "MACS2"},
+}
+
+# Paper-side tool names -> (role, canonical display name). A tool is listed under its DISTINGUISHING
+# role: CellRanger aligns and quantifies too, but what separates it from STARsolo in practice is its
+# cell-calling algorithm, and mapping rates are stable across both.
+_TOOL_ROLES: tuple[tuple[str, str, str], ...] = (
+    # cell calling (scRNA)
+    ("cellranger", "cell_caller", "CellRanger"),
+    ("cell ranger", "cell_caller", "CellRanger"),
+    ("starsolo", "cell_caller", "STARsolo"),
+    ("alevin", "cell_caller", "alevin-fry"),
+    ("bustools", "cell_caller", "kallisto|bustools"),
+    ("kallisto", "cell_caller", "kallisto|bustools"),
+    ("dropseqtools", "cell_caller", "Drop-seq tools"),
+    ("drop-seq", "cell_caller", "Drop-seq tools"),
+    ("umi-tools", "cell_caller", "UMI-tools"),
+    ("umi_tools", "cell_caller", "UMI-tools"),
+    ("optimus", "cell_caller", "Optimus"),
+    # expression quantification (bulk)
+    ("salmon", "quantifier", "Salmon"),
+    ("rsem", "quantifier", "RSEM"),
+    ("kallisto", "quantifier", "kallisto"),
+    ("featurecounts", "quantifier", "featureCounts"),
+    ("htseq", "quantifier", "HTSeq"),
+    ("cufflinks", "quantifier", "Cufflinks"),
+    ("stringtie", "quantifier", "StringTie"),
+    # genome alignment
+    ("star", "aligner", "STAR"),
+    ("hisat", "aligner", "HISAT2"),
+    ("tophat", "aligner", "TopHat"),
+    ("bowtie", "aligner", "Bowtie"),
+    ("bwa", "aligner", "BWA"),
+    ("subread", "aligner", "Subread"),
+    # peak calling (ATAC/ChIP)
+    ("macs2", "peak_caller", "MACS2"),
+    ("macs3", "peak_caller", "MACS3"),
+    ("macs", "peak_caller", "MACS"),
+    ("homer", "peak_caller", "HOMER"),
+    ("sicer", "peak_caller", "SICER"),
+    ("epic2", "peak_caller", "epic2"),
+    ("genrich", "peak_caller", "Genrich"),
+)
+
+# Which computed metrics a difference in each role can honestly explain. Deliberately narrow: a role
+# that explains everything explains nothing, and a real divergence hiding behind an unrelated cause is
+# worse than an unexplained one.
+_ROLE_EXPLAINS: dict[str, frozenset[str]] = {
+    "cell_caller": frozenset(
+        {
+            "cell_count",
+            "median_genes_per_cell",
+            "mean_genes_per_cell",
+            "median_umi_per_cell",
+            "mean_umi_per_cell",
+            "median_reads_per_cell",
+            "mean_reads_per_cell",
+            "saturation",
+            "valid_barcodes",
+            "total_genes_detected",
+            "mito_pct_median",
+        }
+    ),
+    "quantifier": frozenset({"total_genes_detected"}),
+    "aligner": frozenset({"reads_mapped_genome", "reads_mapped_genome_unique", "percent_duplicates"}),
+    "peak_caller": frozenset({"peak_count", "frip"}),
+}
+
+_ROLE_CAUSE: dict[str, str] = {
+    "cell_caller": "cell-calling algorithms differ",
+    "quantifier": "expression quantifiers differ",
+    "aligner": "genome aligners differ",
+    "peak_caller": "peak callers differ",
+}
+
+
+def _fmt(value) -> str:
+    """Format a metric value the way a scientist writes it: thousands separated, no trailing noise."""
+    if not _is_number(value):
+        return "not reported"
+    v = float(value)
+    if abs(v - round(v)) < 1e-9 and abs(v) >= 1:
+        return f"{int(round(v)):,}"
+    return f"{v:.4g}"
+
+
+def _paper_tool_roles(paper_tools) -> dict[str, str]:
+    """Map the paper's free-text tool names to {role: canonical name}. First match per role wins, so
+    the order of ``_TOOL_ROLES`` is the precedence (a name matching two roles takes the earlier)."""
+    found: dict[str, str] = {}
+    for raw in paper_tools or []:
+        text = _slug(raw).replace("_", "")
+        for needle, role, display in _TOOL_ROLES:
+            if _slug(needle).replace("_", "") in text:
+                found.setdefault(role, display)
+                break
+    return found
+
+
+def attribute_divergences(diverged: list[dict], *, paper_tools=None, pipeline_key=None) -> dict[str, dict]:
+    """Explain each diverging metric by a NAMED difference between the paper's tool and ours.
+
+    Returns ``{mapped_key: {"cause", "paper_tool", "our_tool", "explanation"}}`` for the divergences a
+    known tool-pair difference accounts for, and says nothing about the rest. An unrecognised tool
+    list, an empty one, or a paper that used the same tool we did all attribute nothing, so an
+    unexplained divergence stays unexplained.
+    """
+    ours = _OUR_TOOLS.get(pipeline_key or "", {})
+    theirs = _paper_tool_roles(paper_tools)
+    if not ours or not theirs:
+        return {}
+
+    attributed: dict[str, dict] = {}
+    for row in diverged or []:
+        key = row.get("mapped_key")
+        if not key:
+            continue
+        for role, our_tool in ours.items():
+            paper_tool = theirs.get(role)
+            if not paper_tool or _slug(paper_tool) == _slug(our_tool):
+                continue
+            if key not in _ROLE_EXPLAINS.get(role, frozenset()):
+                continue
+            cause = _ROLE_CAUSE[role]
+            attributed[key] = {
+                "cause": cause,
+                "paper_tool": paper_tool,
+                "our_tool": our_tool,
+                "explanation": (
+                    f"The paper reported {_fmt(row.get('claimed_normalized'))} for {key} using "
+                    f"{paper_tool}; this run measured {_fmt(row.get('computed_value'))} using {our_tool}. "
+                    f"{cause[0].upper()}{cause[1:]}, so this is an expected difference between the two "
+                    "tools rather than a discrepancy in the paper's data."
+                ),
+            }
+            break
+    return attributed
+
+
 def _slug(text) -> str:
     """Normalize a key or unit to a comparable slug: lowercased, non-alphanumerics collapsed to '_'."""
     s = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower())
@@ -410,6 +568,8 @@ def classify_study(
     reference_genome: str | None = None,
     concordance_results: list[dict] | None = None,
     differential_attribution: dict | None = None,
+    paper_tools: list[str] | None = None,
+    pipeline_key: str | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -463,10 +623,29 @@ def classify_study(
     }
     attribution = {"our_side": "n/a", "reasons": []}
 
+    # E3 per-metric attribution: which divergences a NAMED difference between the paper's tool and
+    # ours accounts for. Pure and deterministic; the LLM's contribution was upstream, reading the tool
+    # names out of the paper.
+    divergence_attribution = attribute_divergences(diverged, paper_tools=paper_tools, pipeline_key=pipeline_key)
+
     # Combined predicates: a concordance verdict joins the scalar sets in the same decision tree.
     scored_any = bool(comparable) or bool(conc_agree) or bool(conc_diverge) or bool(conc_partial)
-    has_diverge = bool(diverged) or bool(conc_diverge)
     has_finding = bool(finding_agrees) or bool(conc_agree)
+
+    # An EXPLAINED qc_floor divergence no longer vetoes a finding-tier agreement. bioAF runs STARsolo
+    # and most scRNA-seq papers used CellRanger, so a cell-count divergence beyond tolerance is the
+    # expected case, not the edge case, and letting it silently veto a finding that reproduced cleanly
+    # reports a known technical difference as if it were a discrepancy in the paper's data.
+    #
+    # Deliberately narrow. The lift needs a finding-tier agreement to sit on top of, every divergence
+    # must be qc_floor, and every one must have an attributed cause. A finding-tier divergence, a
+    # concordance `diverge`, an unattributable divergence, or no finding agreement at all all keep
+    # today's behavior exactly: an unexplained divergence must still count against the verdict.
+    explained_divergences = [
+        c for c in diverged if _tier(c["mapped_key"]) == "qc_floor" and c["mapped_key"] in divergence_attribution
+    ]
+    veto_lifted = has_finding and not conc_diverge and bool(diverged) and len(explained_divergences) == len(diverged)
+    has_diverge = (bool(diverged) or bool(conc_diverge)) and not veto_lifted
     # A partial finding reproduction is its own outcome: not a full agreement (so it does not satisfy
     # the finding gate), not a divergence (the overlap is real). It only decides the verdict when there
     # is no divergence and no full finding agreement to take precedence.
@@ -566,6 +745,19 @@ def classify_study(
             )
         auto_finalize = False
 
+    if veto_lifted:
+        # The explanation IS the product for an assessment feature; the label summarises it. State the
+        # divergence prominently rather than letting a clean-looking `validated` hide it, and hold the
+        # study for a human, as every Level-3 validated already does.
+        auto_finalize = False
+        reasoning += " " + " ".join(
+            divergence_attribution[c["mapped_key"]]["explanation"] for c in explained_divergences
+        )
+        reasoning += (
+            f" {len(explained_divergences)} technical QC metric(s) diverge for a known reason and are "
+            "reported rather than counted against the paper; confirm before finalizing."
+        )
+
     if coverage["advisory"]:
         reasoning += (
             f" ({coverage['advisory']} peak-count claim(s) were surfaced as advisory evidence and not "
@@ -576,6 +768,9 @@ def classify_study(
     return {
         "comparisons": comparisons,
         "attribution": attribution,
+        # Per-metric: which divergences a named tool-pair difference accounts for, and the sentence
+        # that says so. Rendered next to the verdict; a divergence absent from here is unexplained.
+        "divergence_attribution": divergence_attribution,
         "coverage": coverage,
         "classification": classification,
         "auto_finalize": auto_finalize,

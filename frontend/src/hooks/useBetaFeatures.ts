@@ -4,17 +4,19 @@ import { useEffect, useState } from "react";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 
-// Beta feature flags (spec-07). `available` gates whether the Settings > Beta Features surface is
-// exposed at all (true only on a bioAF-operated instance); `flags` carries per-feature enablement so
-// the nav can hide a beta entry (e.g. Validation Studies) until its flag is on.
+// Beta feature flags (spec-07). `flags` carries per-feature enablement so the nav can hide a beta
+// entry (e.g. Validation Studies) until an admin turns its flag on.
+//
+// There used to be an `available` field gating the whole Beta Features surface on the instance being
+// bioAF-operated (an admin with a @bioaf.co email). It was removed: it made every beta feature
+// internal-only on any instance bioAF does not staff.
 export interface BetaFeaturesState {
-  available: boolean;
   flags: Record<string, boolean>;
 }
 
 // Default-DENY: while loading, unauthenticated, or on error, hide everything beta. A hidden feature
 // must never flash into view before the real state resolves.
-const DENY: BetaFeaturesState = { available: false, flags: {} };
+const DENY: BetaFeaturesState = { flags: {} };
 
 export function useBetaFeatures() {
   const [state, setState] = useState<BetaFeaturesState>(DENY);
@@ -30,7 +32,7 @@ export function useBetaFeatures() {
     api
       .get<BetaFeaturesState>("/api/beta-features")
       .then((s) => {
-        if (alive) setState({ available: !!s.available, flags: s.flags ?? {} });
+        if (alive) setState({ flags: s.flags ?? {} });
       })
       .catch(() => {
         if (alive) setState(DENY);
@@ -43,5 +45,5 @@ export function useBetaFeatures() {
     };
   }, []);
 
-  return { available: state.available, flags: state.flags, loading };
+  return { flags: state.flags, loading };
 }

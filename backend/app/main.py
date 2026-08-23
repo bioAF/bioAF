@@ -220,6 +220,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Default pipeline environment seed failed: %s", e)
 
+    # Seed the 10x bamtofastq converter (an archival 10x BAM carries its barcodes in tags, so it is
+    # unreachable without this tool). Draft environment: it needs a build before it can launch.
+    from app.services.bootstrap_bamtofastq import ensure_bamtofastq_pipeline
+
+    try:
+        async with notif_session_factory() as b2f_seed_session:
+            await ensure_bamtofastq_pipeline(b2f_seed_session)
+            await b2f_seed_session.commit()
+    except Exception as e:
+        logger.warning("10x bamtofastq seed failed: %s", e)
+
     # Seed default notebook environment if none exists
     from app.services.environment_service import ensure_default_notebook_environment
 

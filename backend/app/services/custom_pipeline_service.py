@@ -898,6 +898,26 @@ class CustomPipelineService:
         return None, sample_name
 
     @staticmethod
+    def _optional_auth(adapter, key_file: str) -> str:
+        """The key-file activation, guarded so an absent key is a no-op instead of a fatal error.
+
+        The compute adapter mounts ``key_file`` ONLY in ``service_account_key`` credential mode. Under
+        Workload Identity (``vm_default``) and AWS IRSA it mounts nothing and the pod authenticates
+        ambiently through its service account, which is what the cellxgene adapter's own comment
+        describes. This service builds its shell before the adapter has decided, so it cannot ask, and
+        running the activation unconditionally made the storage CLI exit 1 on the missing file: the
+        stage-inputs init container died before copying a byte, and every custom-pipeline run on such
+        a cluster failed. The Nextflow path guards on ``has_gcs_secret``; this one had no equivalent.
+
+        Uses ``if``/``fi`` rather than ``[ -f x ] && cmd`` deliberately: the latter evaluates to 1 when
+        the file is absent, which under the wrapper's ``set -e`` aborts the run it was meant to spare.
+        """
+        auth = adapter.cli_auth_command(key_file)
+        if not auth:
+            return ""
+        return f'if [ -f "{key_file}" ]; then {auth}; fi'
+
+    @staticmethod
     def _build_stage_commands(file_specs: list[dict]) -> list[str]:
         # The cloud-specific staging CLI (auth + per-object copy) lives on the
         # storage adapter, selected by backend; the service names no CLI.
@@ -907,7 +927,7 @@ class CustomPipelineService:
         from app.adapters.registry import get_storage_adapter
 
         adapter = get_storage_adapter()
-        auth = adapter.cli_auth_command("/secrets/gcp/key.json")
+        auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
         if auth:
             commands.append(auth)
         for fs in file_specs:
@@ -994,7 +1014,7 @@ class CustomPipelineService:
             # on the adapter). `|| true` keeps the trap non-fatal so a sync failure
             # doesn't mask the pipeline's real exit status, but stderr stays visible
             # so failures show up in pod logs instead of silently dropping outputs.
-            auth = adapter.cli_auth_command("/secrets/gcp/key.json")
+            auth = CustomPipelineService._optional_auth(adapter, "/secrets/gcp/key.json")
             copy_out = adapter.cli_copy_out("/outputs/*", sync_target)
             sync_cmd = f"{auth} && {copy_out}" if auth else copy_out
             trap = f"trap '{sync_cmd} || true' EXIT"

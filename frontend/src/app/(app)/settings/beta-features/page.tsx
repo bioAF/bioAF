@@ -13,7 +13,6 @@ const BETA_FEATURE_LABELS: Record<string, { label: string; description: string }
 };
 
 interface BetaState {
-  available: boolean;
   flags: Record<string, boolean>;
 }
 
@@ -55,17 +54,11 @@ export default function BetaFeaturesPage() {
       </p>
 
       {error && <p className="mb-4 text-sm text-red-600">{error}</p>}
-      {state && !state.available && (
-        <p className="mb-4 text-sm text-amber-700">
-          Beta features are not available on this instance.
-        </p>
-      )}
-
       {state && (
         <div className="max-w-2xl space-y-3">
           {Object.entries(state.flags).map(([key, enabled]) => {
             const meta = BETA_FEATURE_LABELS[key] ?? { label: key, description: "" };
-            const disabled = !state.available || saving === key;
+            const disabled = saving === key;
             return (
               <div
                 key={key}

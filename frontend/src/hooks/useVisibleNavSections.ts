@@ -21,7 +21,7 @@ export function useVisibleNavSections() {
   const { canAccess, roleName, loading, failed: permissionsFailed } = usePermissions();
   const { has: hasCapability } = useCapabilities();
   const { components, loading: componentsLoading, failed: componentsFailed } = useComponents();
-  const { available: betaAvailable, flags: betaFlags } = useBetaFeatures();
+  const { flags: betaFlags } = useBetaFeatures();
 
   const passesComponentGate = useCallback(
     (gate?: ComponentGate): boolean => {
@@ -76,16 +76,14 @@ export function useVisibleNavSections() {
     [hasCapability],
   );
 
-  // A nav item passes its beta gate when its required beta flag is enabled (and, for the Beta Features
-  // menu itself, when beta features are available on this instance). useBetaFeatures default-denies
-  // while loading, so a hidden beta feature never flashes (spec-07).
+  // A nav item passes its beta gate when its required beta flag is enabled. useBetaFeatures
+  // default-denies while loading, so a hidden beta feature never flashes (spec-07).
   const passesBetaGate = useCallback(
-    (item: { betaFlag?: string; requiresBetaAvailability?: boolean }): boolean => {
-      if (item.requiresBetaAvailability && !betaAvailable) return false;
+    (item: { betaFlag?: string }): boolean => {
       if (item.betaFlag && !betaFlags[item.betaFlag]) return false;
       return true;
     },
-    [betaAvailable, betaFlags],
+    [betaFlags],
   );
 
   const sections: NavSection[] = useMemo(() => {

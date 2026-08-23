@@ -130,6 +130,33 @@ BUILTIN_TEMPLATES = [
         },
     },
     {
+        "name": "Differential Expression (pseudobulk DESeq2, headless)",
+        "description": "Reproduce a paper's DEG finding from scRNA-seq per-sample matrices (Level-3)",
+        "category": "differential_expression",
+        "notebook_path": "notebooks/de_pseudobulk_deseq2.ipynb",
+        "local_file": "de_pseudobulk_deseq2.ipynb",
+        "compatible_with": "nf-core/scrnaseq",
+        "sort_order": 8,
+        "parameters": {
+            # Comma-separated: nf-core/scrnaseq emits one cell-called matrix per sample and pseudobulk
+            # needs all of them, one per column of the genes x samples matrix.
+            "counts_paths": "/data/sample_filtered_matrix.h5ad",
+            # Must match the bulk template's output name: `_read_reproduction_output` picks the result
+            # table by scoring the FILENAME, so a name outside ("finding","result","de_","diff") can
+            # lose to another output and be read as the reproduced set.
+            "output_path": "/outputs/de_results.csv",
+            "test_samples": "",
+            "reference_samples": "",
+            "block_labels": "",
+            "lfc_threshold": 1.0,
+            "padj_threshold": 0.05,
+            # scanpy's `read_10x_mtx` defaults to var_names='gene_symbols', so the pipeline's h5ad
+            # rownames are SYMBOLS and rowData$gene_ids holds Ensembl. Symbols match the paper-side
+            # normalizer's preference order and the salmon path; ensembl is the fallback.
+            "gene_id_namespace": "symbol",
+        },
+    },
+    {
         "name": "Differential Accessibility (DESeq2, headless)",
         "description": "Reproduce a paper's differential-peak finding from a consensus-peak matrix (Level-3)",
         "category": "differential_accessibility",

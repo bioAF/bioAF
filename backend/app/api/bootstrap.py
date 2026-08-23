@@ -255,6 +255,7 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
     # idempotent and run on each backend startup as well, but invoking
     # them here means the user lands on a fully populated picker on
     # first install without waiting for a restart.
+    from app.services.bootstrap_bamtofastq import ensure_bamtofastq_pipeline
     from app.services.environment_service import (
         ensure_default_notebook_environment,
         ensure_default_pipeline_environment,
@@ -265,6 +266,7 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
         await ensure_default_work_node_environment(session)
         await ensure_default_pipeline_environment(session)
         await ensure_default_notebook_environment(session)
+        await ensure_bamtofastq_pipeline(session)
     except Exception as e:
         logger.warning("Default environment seed during bootstrap failed: %s", e)
 

@@ -264,6 +264,9 @@ class ValidationExtractionService:
             # B2e: capture the differential design (the finding to reproduce) for the C1 gate and
             # Level-3. None when the paper reports no contrast, keeping the plan Level-2-only.
             differential_design=_differential_design_or_none(parsed["differential_design"]),
+            # Keep the paper's own tool list. It is what lets a divergence be attributed to a named
+            # cause (CellRanger vs STARsolo) instead of merely reported.
+            tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
             reference_genome=reference_genome,
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,

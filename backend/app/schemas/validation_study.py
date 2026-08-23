@@ -88,6 +88,9 @@ class ReproductionPlanResponse(BaseModel):
     pipeline_key: str | None = None
     pipeline_version: str | None = None
     parameters: dict | None = None
+    # The tools the paper's own methods named. Visible on the plan because it is what an attributed
+    # divergence is argued from, so a human ratifying a verdict can check the argument's input.
+    tools: list | None = None
     differential_design: dict | None = None
     finding_claim: dict | None = None
     reference_genome: str | None = None
@@ -98,6 +101,11 @@ class ReproductionPlanResponse(BaseModel):
     extractor_model: str | None = None
     extractor_provider: str | None = None
     comparison_targets: list[ComparisonTargetResponse] = []
+    # Computed, not stored: which Level-3 finding kinds this plan's pipeline actually has a route for.
+    # The C1 gate offered both kinds for every plan_ready study with no pipeline check, so a scientist
+    # could paste a DEG table for an ATAC study and spend hours of compute to learn there was never a
+    # route. Empty means the pipeline maps, launches and produces QC, but reproduces no finding.
+    supported_finding_kinds: list[str] = []
 
 
 class ValidationStudySummary(BaseModel):
