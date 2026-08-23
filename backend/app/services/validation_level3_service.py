@@ -21,6 +21,7 @@ from app.models.reproduction_plan import ReproductionPlan
 from app.models.template_notebook import TemplateNotebook
 from app.models.validation_study import ValidationStudy
 from app.services.notebook_service import _build_relative_path, _resolve_input_file_context
+from app.services.reproduction_plan_service import validate_replicates
 
 logger = logging.getLogger("bioaf.validation_level3")
 
@@ -66,6 +67,17 @@ async def build_level3_inputs(
     design = plan.differential_design_json or {}
     contrasts = design.get("contrasts") or []
     if not contrasts:
+        return None
+
+    # Re-check the replicate floor HERE, at the point of use, not only at the C1 gate. The gate is
+    # bypassed two ways: `create_plan` writes the LLM's draft design straight onto the plan (so a design
+    # the human never edited was never validated), and `_resolve_sample_design` rewrites the arms AFTER
+    # the fetch, dropping picks that were not fetched -- a 3-vs-3 ratified at C1 becomes 1-vs-3 when two
+    # samples are embargoed, and the `samples_mismatch` override returns to `setup` with no re-check.
+    # This is the check that actually protects the run.
+    replicate_errors = validate_replicates({"contrasts": contrasts[:1]})
+    if replicate_errors:
+        logger.info("study %d: %s; staying Level-2", study.id, " ".join(replicate_errors))
         return None
 
     if study.analysis_run_id is None:

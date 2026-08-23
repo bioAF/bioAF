@@ -118,7 +118,11 @@ async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypa
         f"/api/validation-studies/{sid}/differential-design",
         json={
             "contrasts": [
-                {"name": "dex vs untreated", "test_samples": ["SRX30659361"], "reference_samples": ["SRX30659368"]}
+                {
+                    "name": "dex vs untreated",
+                    "test_samples": ["SRX30659361", "SRX30659362"],
+                    "reference_samples": ["SRX30659368", "SRX30659369"],
+                }
             ],
             "thresholds": {"log2fc": 1.5, "padj": 0.01},
         },
@@ -127,7 +131,7 @@ async def test_edit_differential_design_at_c1_gate(client, admin_token, monkeypa
     assert r.status_code == 200, r.text
     design = r.json()["plan"]["differential_design"]
     assert design["thresholds"] == {"log2fc": 1.5, "padj": 0.01}
-    assert design["contrasts"][0]["test_samples"] == ["SRX30659361"]
+    assert design["contrasts"][0]["test_samples"] == ["SRX30659361", "SRX30659362"]
 
 
 async def test_finding_set_candidates_returns_autofetched(client, admin_token, monkeypatch):

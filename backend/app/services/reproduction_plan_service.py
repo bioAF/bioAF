@@ -17,6 +17,33 @@ from app.services.audit_service import log_action
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 
+# DESeq2 estimates per-gene dispersion from WITHIN-group variance, so an arm with one sample has none
+# to estimate from. Two is valid (underpowered; three is the usual recommendation) and refusing at three
+# would turn away legitimate small-lab studies, so the floor is two and there is no warning at exactly
+# two. This bites hardest on the scRNA-seq path: pseudobulk collapses thousands of cells to one column
+# per SAMPLE, so an scRNA study's replicate count is its sample count, routinely 2-4.
+MIN_SAMPLES_PER_ARM = 2
+
+
+def validate_replicates(design: dict) -> list[str]:
+    """Guard against a contrast DESeq2 cannot fit. Returns human-readable problems (empty == valid).
+
+    Independent of ``validate_paired_designs``: both run on the same design and a human fixing a
+    rejection should see everything wrong with it in one pass.
+    """
+    errors: list[str] = []
+    for c in design.get("contrasts") or []:
+        name = c.get("name") or "contrast"
+        for arm in ("test", "reference"):
+            samples = c.get(f"{arm}_samples") or []
+            if len(samples) < MIN_SAMPLES_PER_ARM:
+                errors.append(
+                    f"{name}: the {arm} arm has {len(samples)} sample(s); differential analysis needs at "
+                    f"least {MIN_SAMPLES_PER_ARM} per arm to estimate within-group variance."
+                )
+    return errors
+
+
 def validate_paired_designs(design: dict) -> list[str]:
     """C1-gate guard for the optional matched-pairs / blocked design (ADR-069 item #2).
 
@@ -200,10 +227,12 @@ class ReproductionPlanService:
             raise HTTPException(404, "No reproduction plan to attach the differential design to.")
 
         normalized = _normalize_differential_design(design)
-        # Reject a confounded/unbalanced matched-pairs design at the C1 gate, before any spend.
-        paired_errors = validate_paired_designs(normalized)
-        if paired_errors:
-            raise HTTPException(400, "Invalid matched-pairs design. " + " ".join(paired_errors))
+        # Reject a design no differential analysis can fit, at the C1 gate, before any spend: too few
+        # replicates per arm, or a confounded/unbalanced matched-pairs block factor. Report both guards
+        # together so one round trip surfaces everything wrong with the design.
+        errors = validate_replicates(normalized) + validate_paired_designs(normalized)
+        if errors:
+            raise HTTPException(400, "Invalid differential design. " + " ".join(errors))
         plan.differential_design_json = _differential_design_or_none(normalized)
         await session.flush()
         await log_action(

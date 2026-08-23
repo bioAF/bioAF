@@ -311,3 +311,36 @@ async def test_extracting_persists_level3_bundle_and_routes_to_reproducing(
     assert evidence.get("level3") is not None, "evidence['level3'] was set in memory but not persisted"
     assert evidence["level3"]["template_id"] == de_template.id
     assert evidence["level3"]["kind"] == "gene"
+
+
+_UNDERPOWERED_DESIGN = {
+    "contrasts": [
+        {
+            "name": "dex vs untreated",
+            "test_samples": ["SRX1"],
+            "reference_samples": ["SRX3", "SRX4"],
+        }
+    ],
+    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+}
+
+
+@pytest.mark.asyncio
+async def test_build_level3_inputs_refuses_a_contrast_deseq2_cannot_fit(session, admin_user, analysis_run, de_template):
+    """The C1 gate's replicate guard is bypassed twice: `create_plan` writes the LLM's draft design
+    straight to the plan, and `_resolve_sample_design` rewrites the arms AFTER the fetch (dropping
+    picks that were never fetched, so a 3-vs-3 ratified at C1 becomes 1-vs-3). The point-of-use check
+    is what actually protects the run: refuse here, degrade to Level-2, spend no compute."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run, design=_UNDERPOWERED_DESIGN)
+    assert await build_level3_inputs(session, study, plan) is None
+
+
+@pytest.mark.asyncio
+async def test_build_level3_inputs_accepts_two_samples_per_arm(session, admin_user, analysis_run, de_template):
+    """Two per arm is valid for DESeq2 (underpowered, but a real design a small lab runs)."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)  # _DESIGN is 2 vs 2
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
+    assert level3["parameters"]["test_samples"] == "SRX1,SRX2"

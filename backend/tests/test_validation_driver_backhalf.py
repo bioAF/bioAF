@@ -629,7 +629,7 @@ async def test_extracting_activates_level3_and_routes_to_reproducing(session, ad
     # B2e design + B4 confirmed finding claim on the plan.
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.differential_design_json = {
-        "contrasts": [{"name": "t vs c", "test_samples": ["S1"], "reference_samples": ["S2"]}],
+        "contrasts": [{"name": "t vs c", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
         "thresholds": {"log2fc": 1.0, "padj": 0.05},
     }
     plan.finding_claim_json = {
@@ -666,7 +666,7 @@ async def test_extracting_activates_level3_and_routes_to_reproducing(session, ad
     level3 = study.evidence_json["level3"]
     assert level3["template_id"] == tmpl.id
     assert level3["kind"] == "gene"
-    assert level3["parameters"]["test_samples"] == "S1"
+    assert level3["parameters"]["test_samples"] == "S1,S2"
 
 
 @pytest.mark.asyncio
