@@ -512,3 +512,32 @@ async def test_plan_surfaces_the_papers_tool_list(client, admin_token, monkeypat
     r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
     assert r.status_code == 200, r.text
     assert r.json()["plan"]["tools"] == ["TopHat"]
+
+
+async def test_plan_declares_which_finding_kinds_its_pipeline_supports(client, admin_token, monkeypatch):
+    """The C1 gate offered both `gene` and `interval` for every plan_ready study with no pipeline
+    check at all, so a scientist could paste a DEG table for an ATAC study and spend hours of compute
+    to learn there was never a route. The declaration is computed from the wiring, server-side."""
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.json()["plan"]["supported_finding_kinds"] == ["gene"]  # _GOOD maps to nf-core/rnaseq
+
+    assert supported_finding_kinds("nf-core/scrnaseq") == ["gene"]
+    assert supported_finding_kinds("nf-core/atacseq") == ["interval"]
+    assert supported_finding_kinds("nf-core/chipseq") == ["interval"]
+
+
+async def test_a_plan_with_no_pipeline_declares_no_supported_kinds(client, admin_token, monkeypatch):
+    """A paper whose method mapped to nothing has no Level-3 route. The gate must say so rather than
+    error or silently offer both kinds."""
+    unmappable = _GOOD.replace('"assay": "bulk RNA-seq"', '"assay": "a bespoke in-house assay"')
+    _patch_llm(monkeypatch, unmappable)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    plan = r.json()["plan"]
+    assert plan["pipeline_key"] is None
+    assert plan["supported_finding_kinds"] == []

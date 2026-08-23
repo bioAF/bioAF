@@ -47,10 +47,14 @@ from app.services.result_set_normalizer import FindingSet, normalize_gene_table,
 from app.services.validation_classifier_service import classify_study
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
-from app.services.validation_level3_service import build_level3_inputs
+from app.services.validation_level3_service import resolve_level3
 from app.services.validation_study_service import ValidationStudyService
 
 logger = logging.getLogger("bioaf.validation_driver")
+
+# Decline paths that mean Level-3 was never CONFIGURED for this study (a QC-only paper with no
+# ground-truth set). Reporting those as "skipped" would report an absence as a failure.
+_LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 
 # States the background driver owns. `plan_ready` is the human's (C1 gate advances it to
 # acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
@@ -496,7 +500,7 @@ class ValidationDriverService:
         # (tests / a future approval-time path) are respected and not rebuilt.
         #
         # This runs BEFORE the single `study.evidence_json = evidence` assignment below, and that
-        # ordering is load-bearing: `build_level3_inputs` issues SELECTs whose autoflush would flush a
+        # ordering is load-bearing: `resolve_level3` issues SELECTs whose autoflush would flush a
         # previously-assigned evidence_json and clear its dirty flag, after which the in-place
         # `evidence["level3"] = ...` on this plain (non-Mutable) JSONB column plus a same-reference
         # reassignment goes untracked and is silently dropped -- the study would reach `reproducing`
@@ -504,9 +508,14 @@ class ValidationDriverService:
         # collapsing the Level-3 finding to a Level-2 verdict. Build the full evidence dict first, then
         # assign evidence_json exactly once so the reassignment is detected and persisted.
         if not evidence.get("level3"):
-            level3 = await build_level3_inputs(session, study, plan)
-            if level3:
-                evidence["level3"] = level3
+            decision = await resolve_level3(session, study, plan)
+            if decision.inputs:
+                evidence["level3"] = decision.inputs
+            elif decision.reason_code not in _LEVEL3_NEVER_CONFIGURED:
+                # The human confirmed a ground-truth set and something else stopped the finding step.
+                # Record which, so an `inconclusive` can say a configured Level-3 did not run instead
+                # of leaving the only account of it in a server log.
+                evidence["level3_skipped"] = {"reason": decision.reason, "reason_code": decision.reason_code}
 
         study.evidence_json = evidence
 

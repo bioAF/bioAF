@@ -36,6 +36,7 @@ from app.services.literature.ground_truth_fetch_service import GroundTruthFetchS
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
+from app.services.validation_level3_service import supported_finding_kinds
 from app.services.validation_study_service import ValidationStudyService
 
 # lit_validation is a beta feature: when its flag is off, every endpoint here 404s (matching the hidden
@@ -67,6 +68,7 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         blockers=plan.blockers_json,
         extractor_model=plan.extractor_model,
         extractor_provider=plan.extractor_provider,
+        supported_finding_kinds=supported_finding_kinds(plan.pipeline_key),
         comparison_targets=[
             ComparisonTargetResponse(
                 metric_key=t.metric_key,
