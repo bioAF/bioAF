@@ -546,18 +546,24 @@ class ValidationDriverService:
                 experiment_id=study.experiment_id,
             )
             evidence["level3_run_session_id"] = cs.id
-            study.evidence_json = evidence
             if cs.status == "failed":
-                return await ValidationDriverService._fail(session, study, "differential reproduction failed to launch")
+                return await ValidationDriverService._degrade_to_level2(
+                    session, study, evidence, "the differential reproduction notebook failed to launch"
+                )
+            study.evidence_json = evidence
             await session.flush()
             return True
 
         cs = await ValidationDriverService._load_compute_session(session, sid)
         if cs is None:
-            return await ValidationDriverService._fail(session, study, "reproduction session missing")
+            return await ValidationDriverService._degrade_to_level2(
+                session, study, evidence, "the differential reproduction session could not be found"
+            )
         cs = await NotebookExecutionService.poll_execution(session, cs)
         if cs.status == "failed":
-            return await ValidationDriverService._fail(session, study, "differential reproduction failed")
+            return await ValidationDriverService._degrade_to_level2(
+                session, study, evidence, "the differential reproduction notebook failed while running"
+            )
         if cs.status != "completed":
             return False  # still running
 
@@ -793,6 +799,25 @@ class ValidationDriverService:
         except Exception:
             logger.exception("validation study: failed to read reproduction output for session %d", cs.id)
             return None
+
+    @staticmethod
+    async def _degrade_to_level2(session: AsyncSession, study: ValidationStudy, evidence: dict, reason: str) -> bool:
+        """A Level-3 failure is ADDITIVE, not destructive: keep the Level-2 verdict and say what failed.
+
+        The study already earned a Level-2 QC verdict in ``extracting``; the Level-3 finding step is an
+        attempt to add a stronger, finding-tier verdict on top of it. Routing a notebook failure through
+        ``_fail`` sent the study to terminal ``error`` and threw that Level-2 evidence away, so a
+        reproduction that could not run scored WORSE than one that was never configured. Record the
+        reason under ``level3_failed`` and advance to ``comparing``, where the classifier produces the
+        Level-2 verdict it would have produced anyway and the page states that the finding step failed.
+        """
+        evidence["level3_failed"] = {"reason": reason}
+        study.evidence_json = evidence
+        logger.info("study %d: Level-3 reproduction failed (%s); degrading to Level-2", study.id, reason)
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+        )
+        return True
 
     @staticmethod
     async def _fail(session: AsyncSession, study: ValidationStudy, reason: str) -> bool:

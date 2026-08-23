@@ -51,15 +51,81 @@ async def test_reproducing_launches_execution_first_visit(session, admin_user, m
     assert study.evidence_json["level3_run_session_id"] == 777
 
 
+_LEVEL2_EVIDENCE = {
+    "computed_metrics": {"reads_mapped_genome": 0.93},
+    "comparison_targets": [{"metric_key": "alignment_rate", "claimed_value": 95.0, "unit": "%"}],
+}
+
+
+def _level3_evidence():
+    """A study that earned a Level-2 verdict in `extracting` and then routed to Level-3."""
+    return {**_LEVEL2_EVIDENCE, "level3": {"template_id": 1, "kind": "gene"}}
+
+
 @pytest.mark.asyncio
-async def test_reproducing_launch_failure_errors(session, admin_user, monkeypatch):
+async def test_reproducing_launch_failure_degrades_to_level2(session, admin_user, monkeypatch):
+    """A Level-3 failure must be ADDITIVE, not destructive: the study still owns the Level-2 verdict it
+    earned in `extracting`, so a notebook that will not launch degrades to comparing with the reason
+    recorded, never to terminal `error` that discards the whole study."""
+
     async def _fake_exec(*a, **k):
         return SimpleNamespace(id=778, status="failed")
 
     monkeypatch.setattr(NotebookExecutionService, "execute_template", _fake_exec)
-    study = await _study_in(session, admin_user, "reproducing", evidence={"level3": {"template_id": 1, "kind": "gene"}})
+    study = await _study_in(session, admin_user, "reproducing", evidence=_level3_evidence())
     await ValidationDriverService._handle_reproducing(session, study)
-    assert study.state == "error"
+    assert study.state == "comparing"
+    assert study.evidence_json["level3_failed"]["reason"]
+    assert study.failure_reason is None
+
+
+@pytest.mark.asyncio
+async def test_reproducing_midrun_failure_degrades_to_level2(session, admin_user, monkeypatch):
+    async def _load(_session, sid):
+        return SimpleNamespace(id=sid, status="running")
+
+    async def _poll(_session, cs):
+        return SimpleNamespace(status="failed")
+
+    monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+    monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+    study = await _study_in(
+        session, admin_user, "reproducing", evidence={**_level3_evidence(), "level3_run_session_id": 777}
+    )
+    await ValidationDriverService._handle_reproducing(session, study)
+    assert study.state == "comparing"
+    assert study.evidence_json["level3_failed"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_reproducing_missing_session_degrades_to_level2(session, admin_user, monkeypatch):
+    async def _load(_session, sid):
+        return None
+
+    monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+    study = await _study_in(
+        session, admin_user, "reproducing", evidence={**_level3_evidence(), "level3_run_session_id": 777}
+    )
+    await ValidationDriverService._handle_reproducing(session, study)
+    assert study.state == "comparing"
+    assert study.evidence_json["level3_failed"]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_level2_evidence_survives_a_level3_failure(session, admin_user, monkeypatch):
+    """The QC evidence written in `extracting` is what the classifier reads at `comparing`. A Level-3
+    failure must leave every bit of it intact, or the degrade silently produces a WORSE Level-2
+    verdict than the study would have reached with no Level-3 configured at all."""
+
+    async def _fake_exec(*a, **k):
+        return SimpleNamespace(id=779, status="failed")
+
+    monkeypatch.setattr(NotebookExecutionService, "execute_template", _fake_exec)
+    study = await _study_in(session, admin_user, "reproducing", evidence=_level3_evidence())
+    await ValidationDriverService._handle_reproducing(session, study)
+    evidence = study.evidence_json
+    assert evidence["computed_metrics"] == _LEVEL2_EVIDENCE["computed_metrics"]
+    assert evidence["comparison_targets"] == _LEVEL2_EVIDENCE["comparison_targets"]
 
 
 @pytest.mark.asyncio
