@@ -237,7 +237,9 @@ async def test_set_differential_design_accepts_two_per_arm(session, admin_user):
         session, study.id, admin_user.organization_id, admin_user.id, _arms(["T1", "T2"], ["R1", "R2"])
     )
     await session.commit()
-    assert saved.differential_design_json["contrasts"][0]["test_samples"] == ["T1", "T2"]
+    design = saved.differential_design_json
+    assert design is not None
+    assert design["contrasts"][0]["test_samples"] == ["T1", "T2"]
 
 
 @pytest.mark.asyncio

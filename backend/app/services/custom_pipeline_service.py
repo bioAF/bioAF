@@ -905,7 +905,7 @@ class CustomPipelineService:
         Workload Identity (``vm_default``) and AWS IRSA it mounts nothing and the pod authenticates
         ambiently through its service account, which is what the cellxgene adapter's own comment
         describes. This service builds its shell before the adapter has decided, so it cannot ask, and
-        running the activation unconditionally made gcloud exit 1 on the missing file: the
+        running the activation unconditionally made the storage CLI exit 1 on the missing file: the
         stage-inputs init container died before copying a byte, and every custom-pipeline run on such
         a cluster failed. The Nextflow path guards on ``has_gcs_secret``; this one had no equivalent.
 

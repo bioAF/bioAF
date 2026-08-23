@@ -64,6 +64,14 @@ def test_level3_params_inject_to_valid_r():
 _PSEUDOBULK = "de_pseudobulk_deseq2.ipynb"
 
 
+def _declared_parameters(notebook_path: str) -> dict:
+    """The parameter dict a builtin template declares, by notebook_path."""
+    tmpl = next(t for t in BUILTIN_TEMPLATES if t["notebook_path"] == notebook_path)
+    params = tmpl["parameters"]
+    assert isinstance(params, dict)
+    return params
+
+
 def _source(basename):
     nb = json.loads((PACKAGE_TEMPLATES_DIR / basename).read_text())
     return nb, "\n".join("".join(c.get("source", [])) for c in nb["cells"])
@@ -79,8 +87,7 @@ def test_pseudobulk_output_is_named_like_the_bulk_result_table():
     """`_read_reproduction_output` picks among a session's output files by scoring the name against
     ("finding", "result", "de_", "diff") and then tabular-ness. A name outside that set scores low and
     the WRONG file gets read as the reproduced set, which looks like a scientific divergence."""
-    tmpl = next(t for t in BUILTIN_TEMPLATES if t["notebook_path"] == f"notebooks/{_PSEUDOBULK}")
-    assert tmpl["parameters"]["output_path"] == "/outputs/de_results.csv"
+    assert _declared_parameters(f"notebooks/{_PSEUDOBULK}")["output_path"] == "/outputs/de_results.csv"
 
     from app.services.validation_driver_service import ValidationDriverService  # noqa: F401
 
@@ -96,9 +103,7 @@ def test_pseudobulk_declares_every_parameter_the_wiring_injects():
     from app.services.validation_level3_service import _WIRING
 
     wiring = _WIRING[("nf-core/scrnaseq", "gene")]
-    declared = set(
-        next(t for t in BUILTIN_TEMPLATES if t["notebook_path"] == wiring.template_notebook_path)["parameters"]
-    )
+    declared = set(_declared_parameters(wiring.template_notebook_path))
     injected = {
         wiring.path_parameter,
         "test_samples",
@@ -116,9 +121,9 @@ def test_every_wiring_entry_points_at_a_template_that_declares_its_parameters():
     from app.services.validation_level3_service import _WIRING
 
     for (pipeline, kind), wiring in _WIRING.items():
-        tmpl = next((t for t in BUILTIN_TEMPLATES if t["notebook_path"] == wiring.template_notebook_path), None)
-        assert tmpl is not None, f"{pipeline}/{kind} names an unregistered template"
-        declared = set(tmpl["parameters"])
+        registered = [t for t in BUILTIN_TEMPLATES if t["notebook_path"] == wiring.template_notebook_path]
+        assert registered, f"{pipeline}/{kind} names an unregistered template"
+        declared = set(_declared_parameters(wiring.template_notebook_path))
         always = {wiring.path_parameter, "test_samples", "reference_samples", "lfc_threshold", "padj_threshold"}
         assert always <= declared, f"{pipeline}/{kind}: template misses {always - declared}"
         if wiring.id_column:

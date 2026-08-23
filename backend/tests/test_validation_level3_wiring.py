@@ -425,6 +425,7 @@ async def test_scrnaseq_does_not_resolve_as_rnaseq(session, admin_user, analysis
     decision = await resolve_level3(session, study, plan)
     assert decision.inputs is None
     assert decision.reason_code == "no_input_file"
+    assert decision.reason is not None
     assert "scrnaseq" in decision.reason
 
 
@@ -454,10 +455,11 @@ async def test_file_selection_is_deterministic_across_repeated_calls(session, ad
     await _file_at(session, admin_user, analysis_run, f"gs://b/run/salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
     await _file_at(session, admin_user, analysis_run, f"gs://b/run/star_salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
     study, plan = await _study_with_plan(session, admin_user, analysis_run)
-    picks = {
-        tuple((await build_level3_inputs(session, study, plan))["input_file_ids"])  # noqa: C409
-        for _ in range(5)
-    }
+    picks = set()
+    for _ in range(5):
+        level3 = await build_level3_inputs(session, study, plan)
+        assert level3 is not None
+        picks.add(tuple(level3["input_file_ids"]))
     assert len(picks) == 1
 
 
@@ -473,6 +475,7 @@ async def test_two_indistinguishable_candidates_refuse_rather_than_pick(session,
 
     assert decision.inputs is None
     assert decision.reason_code == "ambiguous_input_file"
+    assert decision.reason is not None
     assert _SALMON_MATRIX in decision.reason
 
 
@@ -527,6 +530,7 @@ async def test_the_selected_input_is_recorded_for_audit(session, admin_user, ana
     await _count_matrix_file(session, admin_user, analysis_run)
     study, plan = await _study_with_plan(session, admin_user, analysis_run)
     level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
     assert level3["input_files"] == [_SALMON_MATRIX]
 
 
@@ -702,6 +706,7 @@ async def test_scrnaseq_never_mixes_raw_into_the_filtered_set(session, admin_use
     )
     study, plan = await _scrna_study(session, admin_user, scrna_run)
     level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
     assert level3["input_files"] == ["SRX1_filtered_matrix.h5ad", "SRX2_filtered_matrix.h5ad"]
 
 
@@ -724,6 +729,7 @@ async def test_scrnaseq_prefers_cellbender_over_plain_filtered(session, admin_us
 
     level3 = await build_level3_inputs(session, study, plan)
 
+    assert level3 is not None
     assert level3["input_files"] == [
         "SRX1_cellbender_filter_matrix.h5ad",
         "SRX2_cellbender_filter_matrix.h5ad",
