@@ -15,7 +15,7 @@ from app.models.template_notebook import TemplateNotebook
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
-from app.services.validation_level3_service import build_level3_inputs
+from app.services.validation_level3_service import build_level3_inputs, resolve_level3
 from app.services.validation_study_service import ValidationStudyService
 
 _DESIGN = {
@@ -84,12 +84,12 @@ async def _count_matrix_file(session, admin_user, run, filename="salmon.merged.g
     return f
 
 
-async def _study_with_plan(session, admin_user, run, *, design=_DESIGN, claim=_CLAIM):
+async def _study_with_plan(session, admin_user, run, *, design=_DESIGN, claim=_CLAIM, pipeline_key="nf-core/rnaseq"):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     study.analysis_run_id = run.id
     await session.flush()
     plan = await ReproductionPlanService.create_plan(
-        session, study, admin_user.id, pipeline_key="nf-core/rnaseq", differential_design=design
+        session, study, admin_user.id, pipeline_key=pipeline_key, differential_design=design
     )
     plan.finding_claim_json = claim
     await session.flush()
@@ -211,7 +211,12 @@ _NFCORE_CONSENSUS = "consensus_peaks.mLb.clN.featureCounts.txt"
 async def test_build_level3_inputs_assembles_interval_bundle(session, admin_user, analysis_run, da_template):
     f = await _count_matrix_file(session, admin_user, analysis_run, filename=_NFCORE_CONSENSUS)
     study, plan = await _study_with_plan(
-        session, admin_user, analysis_run, design=_INTERVAL_DESIGN, claim=_INTERVAL_CLAIM
+        session,
+        admin_user,
+        analysis_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
     )
 
     level3 = await build_level3_inputs(session, study, plan)
@@ -234,7 +239,12 @@ async def test_interval_count_matrix_heuristic_rejects_non_consensus_files(
     # A non-consensus output from the same run must NOT be mistaken for the DA count matrix.
     await _count_matrix_file(session, admin_user, analysis_run, filename="multiqc_report.html")
     study, plan = await _study_with_plan(
-        session, admin_user, analysis_run, design=_INTERVAL_DESIGN, claim=_INTERVAL_CLAIM
+        session,
+        admin_user,
+        analysis_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
     )
     assert await build_level3_inputs(session, study, plan) is None
 
@@ -344,3 +354,236 @@ async def test_build_level3_inputs_accepts_two_samples_per_arm(session, admin_us
     level3 = await build_level3_inputs(session, study, plan)
     assert level3 is not None
     assert level3["parameters"]["test_samples"] == "SRX1,SRX2"
+
+
+# --- (pipeline, kind) wiring: deterministic selection, refusal, multi-file ---
+
+
+@pytest_asyncio.fixture
+async def chip_run(session, admin_user):
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/chipseq",
+        pipeline_version="2.1.0",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+async def _file_at(session, admin_user, run, uri, filename):
+    """A run output at a real published PATH, which is what disambiguates same-named matrices."""
+    f = File(
+        organization_id=admin_user.organization_id,
+        gcs_uri=uri,
+        storage_uri=uri,
+        filename=filename,
+        file_type="count_matrix",
+        source_pipeline_run_id=run.id,
+    )
+    session.add(f)
+    await session.flush()
+    return f
+
+
+_SALMON_MATRIX = "salmon.merged.gene_counts.tsv"
+
+
+@pytest.mark.asyncio
+async def test_chipseq_resolves_the_consensus_peak_matrix(session, admin_user, chip_run, da_template):
+    """chipseq and atacseq share the consensus-peak matrix and the DA template."""
+    f = await _count_matrix_file(session, admin_user, chip_run, filename=_NFCORE_CONSENSUS)
+    study, plan = await _study_with_plan(
+        session,
+        admin_user,
+        chip_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/chipseq",
+    )
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
+    assert level3["template_id"] == da_template.id
+    assert level3["input_file_ids"] == [f.id]
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_does_not_resolve_as_rnaseq(session, admin_user, analysis_run, de_template):
+    """`scrnaseq` CONTAINS `rnaseq`. A substring rule would hand an scRNA-seq study the bulk gene-count
+    wiring and run DESeq2 on a matrix that is not there. Keys match exactly or not at all."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run, pipeline_key="nf-core/scrnaseq")
+    decision = await resolve_level3(session, study, plan)
+    assert decision.inputs is None
+    assert decision.reason_code == "no_wiring"
+
+
+@pytest.mark.asyncio
+async def test_rnaseq_prefers_the_aligner_matrix_over_the_pseudoaligner_matrix(
+    session, admin_user, analysis_run, de_template
+):
+    """bioAF runs nf-core/rnaseq with `aligner: star_salmon` AND `pseudo_aligner: salmon`, so BOTH
+    `star_salmon/` and `salmon/` publish a file called `salmon.merged.gene_counts.tsv` with different
+    column bases. Matching on the basename alone returned whichever row the database happened to
+    yield. The declared aligner's quantification wins, deterministically."""
+    pseudo = await _file_at(session, admin_user, analysis_run, f"gs://b/run/salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    aligner = await _file_at(
+        session, admin_user, analysis_run, f"gs://b/run/star_salmon/{_SALMON_MATRIX}", _SALMON_MATRIX
+    )
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [aligner.id]
+    assert pseudo.id not in level3["input_file_ids"]
+
+
+@pytest.mark.asyncio
+async def test_file_selection_is_deterministic_across_repeated_calls(session, admin_user, analysis_run, de_template):
+    await _file_at(session, admin_user, analysis_run, f"gs://b/run/salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    await _file_at(session, admin_user, analysis_run, f"gs://b/run/star_salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+    picks = {
+        tuple((await build_level3_inputs(session, study, plan))["input_file_ids"])  # noqa: C409
+        for _ in range(5)
+    }
+    assert len(picks) == 1
+
+
+@pytest.mark.asyncio
+async def test_two_indistinguishable_candidates_refuse_rather_than_pick(session, admin_user, analysis_run, de_template):
+    """This is a screening tool for papers of unknown validity. Two candidate matrices that no rule
+    separates is an unanswerable question, and a stated refusal beats an unexplained pick."""
+    await _file_at(session, admin_user, analysis_run, f"gs://b/run/a/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    await _file_at(session, admin_user, analysis_run, f"gs://b/run/b/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+
+    decision = await resolve_level3(session, study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "ambiguous_input_file"
+    assert _SALMON_MATRIX in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_atacseq_prefers_the_merged_library_consensus_matrix(session, admin_user, analysis_run, da_template):
+    """nf-core/atacseq publishes a per-library (mLb) and a per-replicate (mRp) consensus matrix, and
+    they have different column bases. Our design's arms name libraries, so mLb is the right one."""
+    mrp = await _count_matrix_file(
+        session, admin_user, analysis_run, filename="consensus_peaks.mRp.clN.featureCounts.txt"
+    )
+    mlb = await _count_matrix_file(session, admin_user, analysis_run, filename=_NFCORE_CONSENSUS)
+    study, plan = await _study_with_plan(
+        session,
+        admin_user,
+        analysis_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
+    )
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [mlb.id]
+    assert mrp.id not in level3["input_file_ids"]
+
+
+@pytest.mark.asyncio
+async def test_atacseq_falls_back_to_the_replicate_consensus_when_it_is_the_only_one(
+    session, admin_user, analysis_run, da_template
+):
+    f = await _count_matrix_file(
+        session, admin_user, analysis_run, filename="consensus_peaks.mRp.clN.featureCounts.txt"
+    )
+    study, plan = await _study_with_plan(
+        session,
+        admin_user,
+        analysis_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
+    )
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None
+    assert level3["input_file_ids"] == [f.id]
+
+
+@pytest.mark.asyncio
+async def test_the_selected_input_is_recorded_for_audit(session, admin_user, analysis_run, de_template):
+    """Which matrix a reproduction ran on is part of its provenance: a verdict that cannot say which
+    file produced it cannot be re-baselined or challenged."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3["input_files"] == [_SALMON_MATRIX]
+
+
+# Every decline path names itself, so an `inconclusive` study can say what stopped Level-3 instead of
+# leaving the answer in a server log.
+@pytest.mark.asyncio
+async def test_decline_reasons_are_distinguishable(session, admin_user, analysis_run, de_template):
+    seen = {}
+    reasons: list[str] = []
+
+    async def _code(**kwargs):
+        study, plan = await _study_with_plan(session, admin_user, analysis_run, **kwargs)
+        return study, plan
+
+    # no plan
+    study, _ = await _code()
+    d = await resolve_level3(session, study, None)
+    seen["no_plan"] = d.reason_code
+    reasons.append(d.reason)
+
+    # unconfirmed claim
+    study, plan = await _code(claim={**_CLAIM, "confirmed": False})
+    decision = await resolve_level3(session, study, plan)
+    seen["no_finding_claim"] = decision.reason_code
+    reasons.append(decision.reason)
+
+    # no contrast
+    study, plan = await _code(design={"contrasts": [], "thresholds": {}})
+    decision = await resolve_level3(session, study, plan)
+    seen["no_contrast"] = decision.reason_code
+    reasons.append(decision.reason)
+
+    # too few replicates
+    study, plan = await _code(design=_UNDERPOWERED_DESIGN)
+    decision = await resolve_level3(session, study, plan)
+    seen["too_few_replicates"] = decision.reason_code
+    reasons.append(decision.reason)
+
+    # no analysis run
+    study, plan = await _code()
+    study.analysis_run_id = None
+    await session.flush()
+    decision = await resolve_level3(session, study, plan)
+    seen["no_analysis_run"] = decision.reason_code
+    reasons.append(decision.reason)
+
+    # no wiring for this (pipeline, kind)
+    study, plan = await _code(pipeline_key="nf-core/fetchngs")
+    seen["no_wiring"] = (await resolve_level3(session, study, plan)).reason_code
+    reasons.append((await resolve_level3(session, study, plan)).reason)
+
+    assert seen == {k: k for k in seen}
+    assert all(reasons), "every decline path must carry a human-readable reason"
+    assert len(set(reasons)) == len(reasons), "two decline paths share the same wording"
+
+
+@pytest.mark.asyncio
+async def test_missing_input_file_and_missing_template_read_differently(session, admin_user, analysis_run):
+    """A missing input file is a fact about the paper's run; a missing template is a fact about this
+    bioAF instance. Collapsing them tells a scientist to go fix the wrong thing."""
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+    no_file = await resolve_level3(session, study, plan)
+    assert no_file.reason_code == "no_input_file"
+
+    await _count_matrix_file(session, admin_user, analysis_run)
+    no_template = await resolve_level3(session, study, plan)
+    assert no_template.reason_code == "no_template"
+    assert no_file.reason != no_template.reason
