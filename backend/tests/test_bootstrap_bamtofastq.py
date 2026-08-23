@@ -184,3 +184,30 @@ async def test_seeding_twice_is_idempotent(session, admin_user):
     )
     assert len(envs) == 1
     assert len(pipelines) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_request_fits_the_pool_the_pod_is_pinned_to(session, admin_user):
+    """Every pipeline job pod is pinned to `bioaf.io/pool=pipeline-head` (kubernetes.py sets that
+    nodeSelector and the matching toleration), and that pool is e2-standard-2: 1930m CPU and ~6.1Gi
+    ALLOCATABLE once the kubelet takes its cut. A request above either number is not "slow to
+    schedule", it is unschedulable forever, and the pod sits Pending while the run reports `running`.
+
+    bamtofastq streams a BAM and is I/O bound rather than parallel, so it does not need the headroom.
+    """
+    await ensure_bamtofastq_pipeline(session)
+    pipeline = await _pipeline(session, admin_user.organization_id)
+    version = (
+        (
+            await session.execute(
+                select(CustomPipelineVersion).where(CustomPipelineVersion.custom_pipeline_id == pipeline.id)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    assert version.cpu_request.endswith("m") is False  # plain cores, as the column's other rows use
+    assert float(version.cpu_request) <= 1.5
+    assert version.memory_request.endswith("Gi")
+    assert int(version.memory_request.removesuffix("Gi")) <= 5

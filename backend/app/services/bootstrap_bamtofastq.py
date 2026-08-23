@@ -196,10 +196,15 @@ async def _ensure_pipeline(session: AsyncSession, org_id: int, user_id: int, env
         code_source_type="inline",
         entrypoint_command=BAMTOFASTQ_ENTRYPOINT,
         environment_version_id=env_version.id,
-        # A 10x BAM is tens of GB and the conversion is I/O bound rather than parallel, so the
-        # defaults elsewhere (2 CPU / 8Gi) are the wrong shape; give it room to stream.
-        cpu_request="4",
-        memory_request="16Gi",
+        # Sized to the pool the pod actually lands on, not to the size of the input. Every pipeline
+        # job pod is pinned to `bioaf.io/pool=pipeline-head` (kubernetes.py sets that nodeSelector
+        # plus the matching toleration), and that pool is e2-standard-2: 1930m CPU and ~6.1Gi
+        # ALLOCATABLE after the kubelet's reservation. Ask for more and the pod is not slow to
+        # schedule, it is unschedulable forever, sitting Pending while the run reports `running`.
+        # The conversion streams a BAM and is I/O bound rather than parallel, so it does not need
+        # the headroom regardless of how large the input is.
+        cpu_request="1",
+        memory_request="4Gi",
         status="active",
         created_by_user_id=user_id,
     )
