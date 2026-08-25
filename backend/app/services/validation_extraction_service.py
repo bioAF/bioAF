@@ -23,7 +23,7 @@ from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services import llm_provider_config_service
 from app.services.llm_provider_clients import get_client
-from app.services.pipeline_mapper import map_method
+from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
 
@@ -230,7 +230,16 @@ class ValidationExtractionService:
         parsed = parse_extraction(output)
 
         method = parsed["method"]
-        mapping = map_method(method.get("assay"), method.get("tools"), method.get("reference_build"))
+        # Declared routes first; anything else is matched against the pipelines this instance
+        # can actually run, so a lab that installed the right pipeline is not told its paper is
+        # unreproducible. A fallback match is capped at Level-2 by having no _WIRING entry.
+        mapping = await resolve_pipeline_for_assay(
+            session,
+            org_id,
+            method.get("assay"),
+            method.get("tools"),
+            method.get("reference_build"),
+        )
 
         blockers = list(parsed["blockers"]) + list(mapping.blockers)
         if parsed["parse_failure"]:

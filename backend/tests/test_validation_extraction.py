@@ -319,3 +319,74 @@ async def test_extract_persists_an_empty_tool_list_when_the_paper_states_none(se
         session, study, "full text", admin_user.organization_id, admin_user.id
     )
     assert plan.tools_json == []
+
+
+# ---- B3 fallback: a paper outside the declared routes (plan_1) ----
+
+_MICROBIOME = _GOOD.replace(
+    '"assay": "bulk RNA-seq", "tools": ["TopHat", "Cufflinks"]',
+    '"assay": "16S rRNA amplicon sequencing of stool", "tools": ["QIIME2"]',
+)
+
+
+@pytest.mark.asyncio
+async def test_extract_reaches_a_pipeline_no_declared_route_covers(session, admin_user, monkeypatch):
+    """The whole point of the fallback, exercised through the real extraction path: a microbiome
+    paper used to end at not_reproducible before any compute, on an instance that had ampliseq
+    installed and used it every week."""
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+
+    session.add(
+        NfCoreRegistryPipeline(
+            name="ampliseq",
+            full_name="nf-core/ampliseq",
+            description="Amplicon sequencing analysis workflow using DADA2 and QIIME2",
+            topics=["16s", "amplicon-sequencing", "metagenomics", "microbiome", "qiime2"],
+            releases_json=[{"tag_name": "2.9.0"}],
+            latest_release="2.9.0",
+        )
+    )
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _MICROBIOME)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert plan.pipeline_key == "nf-core/ampliseq"
+    assert plan.pipeline_version == "2.9.0"
+    assert plan.mapping_confidence == "partial"
+    # The plan must say the reach is capped, since nobody has read what this pipeline emits.
+    assert "QC-level evidence" in (plan.mapping_notes or "")
+    assert not any("no nf-core equivalent" in (b or "").lower() for b in (plan.blockers_json or []))
+
+
+@pytest.mark.asyncio
+async def test_extract_still_prefers_the_declared_route(session, admin_user, monkeypatch):
+    """Regression: a registry row that scores against RNA words must never displace nf-core/rnaseq,
+    which is the only one of the two with a verified Level-3 route."""
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+
+    session.add(
+        NfCoreRegistryPipeline(
+            name="decoy",
+            full_name="nf-core/decoy",
+            description="bulk RNA-seq transcriptome quantification",
+            topics=["rna-seq", "transcriptomics"],
+            releases_json=[{"tag_name": "9.9.9"}],
+            latest_release="9.9.9",
+        )
+    )
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert plan.pipeline_key == "nf-core/rnaseq"
+    assert plan.pipeline_version == "3.14.0"
