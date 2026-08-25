@@ -149,7 +149,77 @@ _ASSEMBLY_ALIASES: dict[str, str] = {
 }
 
 
+# 10x Chromium chemistry as annotated on a sample, mapped to the `protocol` value STARsolo needs.
+#
+# This mirrors the frontend's `protocolDetection.ts`, which has derived it on the interactive launch
+# page since that page was built. The LAUNCH path never did, so an experiment annotated v2 was still
+# parsed as v3 -- and the lit_validation driver launches with no form at all, so for a validation
+# study it always was. 10XV2 is a 16bp barcode + a 10bp UMI and 10XV3 is 16 + 12, so reading one as
+# the other runs the UMI two bases past the end of the read, and STARsolo does not refuse it.
+#
+# Deliberately NOT shared with the frontend copy: one is a TypeScript module in the browser bundle
+# and the other decides what a run submits. Keeping them in step is a test's job, not an import's.
+_CHEMISTRY_TO_PROTOCOL: dict[str, str] = {
+    "v1": "10XV1",
+    "v2": "10XV2",
+    "v3": "10XV3",
+    "v3.1": "10XV3",
+    "nextgem v3.1": "10XV3",
+    "nextgem v3": "10XV3",
+    "10x chromium 3' v1": "10XV1",
+    "10x chromium 3' v2": "10XV2",
+    "10x chromium 3' v3": "10XV3",
+    "10x chromium 3' v3.1": "10XV3",
+    "10x chromium 5' v1": "10XV1",
+    "10x chromium 5' v2": "10XV2",
+    "10x chromium 5' v3": "10XV3",
+}
+
+
 class PipelineRunService:
+    @staticmethod
+    def _apply_10x_protocol(merged_params: dict, caller_params: dict, samples: list) -> dict:
+        """Parse the reads with the chemistry the samples declare, rather than with a constant.
+
+        nf-core/scrnaseq's own default for `protocol` is 'auto', but its workflow errors with "Only
+        cellranger supports `protocol = 'auto'`" for any other aligner, and bioAF runs STARsolo. So
+        an explicit value has to come from somewhere, and it came from the seeded defaults: 10XV3,
+        for every run, forever.
+
+        Samples that disagree REFUSE. STARsolo takes one protocol for the whole run, so a v2 sample
+        and a v3 sample cannot both be parsed correctly by it; the frontend already answers this with
+        null ("no single right answer"), and the launch path answered it by silently parsing one of
+        them wrongly.
+
+        A chemistry nobody annotated leaves the seeded default alone. Fetched SRA samples carry no
+        chemistry, and refusing there would switch lit_validation's scRNA route off entirely, so the
+        remaining gap is real and it is plan_2 step 3.5's: the honest derivation is the R1 read
+        length (26 for v2, 28 for v3), which is in the FASTQ bioAF has already downloaded.
+        """
+        if "protocol" in caller_params:
+            return merged_params
+
+        declared = {(getattr(s, "chemistry_version", None) or "").strip().lower() for s in samples}
+        declared.discard("")
+        if not declared:
+            return merged_params
+
+        mapped = {_CHEMISTRY_TO_PROTOCOL.get(c) for c in declared}
+        if None in mapped:
+            # An annotation bioAF does not recognise is not a disagreement, and guessing from a
+            # spelling would be the very thing this method exists to stop.
+            return merged_params
+        if len(mapped) > 1:
+            names = ", ".join(sorted(m for m in mapped if m))
+            raise ValidationError(
+                f"These samples were prepared with different 10x chemistries ({names}), and a single "
+                "run is parsed with one protocol, so one of them would be read with the wrong barcode "
+                "and UMI lengths. Launch each chemistry as its own run, or set `protocol` explicitly "
+                "to state which one applies."
+            )
+        merged_params["protocol"] = mapped.pop()
+        return merged_params
+
     @staticmethod
     def _apply_reference(
         pipeline_key: str,
@@ -645,6 +715,11 @@ class PipelineRunService:
                 gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
                 if gsize is not None:
                     merged_params["macs_gsize"] = gsize
+
+        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
+        # full key, not a substring: `scrnaseq` contains `rnaseq`.
+        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
+            merged_params = PipelineRunService._apply_10x_protocol(merged_params, data.parameters, samples)
 
         # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
         # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.

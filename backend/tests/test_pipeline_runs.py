@@ -1,3 +1,6 @@
+import pathlib
+import re
+
 import pytest
 import pytest_asyncio
 from unittest.mock import AsyncMock, patch
@@ -898,3 +901,115 @@ async def test_an_organizations_own_named_reference_is_left_alone(
     assert params["genome"] == "custom-genome-v1"
     # The seeded pair is untouched: bioAF has no opinion about somebody else's reference.
     assert "homo_sapiens" in params["fasta"]
+
+
+# --- the 10x chemistry a run is parsed with (plan_2 step 3.5) ------------------------------------
+#
+# `protocol` decides how STARsolo splits the barcode read: 10XV2 is a 16bp barcode + a 10bp UMI,
+# 10XV3 is 16 + 12. Reading a v2 library as v3 runs the UMI two bases past the end of the read, and
+# STARsolo does not refuse it. nf-core/scrnaseq's own default is 'auto', but its workflow errors with
+# "Only cellranger supports `protocol = 'auto'`" for any other aligner, and bioAF runs STARsolo, so
+# an explicit protocol has to come from somewhere. It came from a seeded constant: 10XV3, always.
+
+
+async def _set_chemistry(session, samples, values):
+    # Commit, not flush: the API client runs on its own session, so an uncommitted change is
+    # invisible to the launch path (which is exactly the annotation the launch path must read).
+    for sample, value in zip(samples, values):
+        sample.chemistry_version = value
+    await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_uses_the_chemistry_the_samples_declare(
+    client, admin_token, session, experiment, samples, initialized_catalog
+):
+    """The frontend has derived this from `chemistry_version` since the launch page was built
+    (`protocolDetection.ts`). The launch path never did, so an experiment annotated v2 was still
+    parsed as v3 -- and the validation driver launches with no form at all, so it ALWAYS was."""
+    await _set_chemistry(session, samples, ["v2", "v2", "v2"])
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq")
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["protocol"] == "10XV2"
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_reads_the_long_form_chemistry_spelling_too(
+    client, admin_token, session, experiment, samples, initialized_catalog
+):
+    """Samples are annotated by hand, and the same chemistry is written several ways. Spelled with
+    v2 deliberately: asserting v3 would pass on the seeded default alone and prove nothing."""
+    await _set_chemistry(session, samples, ["10x Chromium 3' v2", "V2", "10x chromium 5' v2"])
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq")
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["protocol"] == "10XV2"
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_refuses_a_run_whose_samples_disagree_about_chemistry(
+    client, admin_token, session, experiment, samples, initialized_catalog
+):
+    """STARsolo takes ONE protocol for the whole run, so a v2 sample and a v3 sample cannot both be
+    parsed correctly by it. The frontend already answers this with null ("no single right answer");
+    the launch path answered it by silently parsing one of them wrongly."""
+    await _set_chemistry(session, samples, ["v2", "v3", "v3"])
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq")
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "10XV2" in detail and "10XV3" in detail
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_keeps_the_seeded_protocol_when_nothing_declares_a_chemistry(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """Fetched SRA samples carry no chemistry, and refusing there would switch lit_validation's
+    scRNA route off entirely. So the seeded default still stands and this is NOT yet solved; the
+    honest derivation is the R1 read length (26 vs 28), which plan_2 step 3.5 carries. Pinned here so
+    the remaining gap is visible rather than assumed closed."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq")
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["protocol"] == "10XV3"
+
+
+@pytest.mark.asyncio
+async def test_an_explicitly_supplied_protocol_always_wins(
+    client, admin_token, session, experiment, samples, initialized_catalog
+):
+    """A derived protocol is a default, never a policy, exactly like the reference and the smrnaseq
+    parameters."""
+    await _set_chemistry(session, samples, ["v2", "v2", "v2"])
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", parameters={"protocol": "10XV4"})
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["protocol"] == "10XV4"
+
+
+_FRONTEND_PROTOCOL_MAP = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "components"
+    / "pipelines"
+    / "protocolDetection.ts"
+)
+
+
+@pytest.mark.skipif(not _FRONTEND_PROTOCOL_MAP.exists(), reason="frontend tree not present (deployed backend image)")
+def test_the_two_chemistry_maps_do_not_drift():
+    """The chemistry -> protocol mapping exists twice on purpose: once in the browser bundle for the
+    interactive launch page, once in the launch path that decides what a run actually submits. They
+    are not shared, so nothing but this stops one from gaining a spelling the other does not have --
+    and a spelling that resolves in the form but not at launch is a run parsed with the wrong barcode
+    length, with no error anywhere."""
+    from app.services.pipeline_run_service import _CHEMISTRY_TO_PROTOCOL
+
+    source = _FRONTEND_PROTOCOL_MAP.read_text()
+    body = source.split("CHEMISTRY_TO_PROTOCOL", 1)[1].split("};", 1)[0]
+    frontend = dict(re.findall(r'"([^"]+)":\s*"([^"]+)"', body))
+
+    assert frontend, "could not parse the frontend map; this test is now lying"
+    assert frontend == _CHEMISTRY_TO_PROTOCOL, (
+        "the frontend and launch-path chemistry maps have drifted: "
+        f"only in frontend={set(frontend) - set(_CHEMISTRY_TO_PROTOCOL)}, "
+        f"only in backend={set(_CHEMISTRY_TO_PROTOCOL) - set(frontend)}"
+    )
