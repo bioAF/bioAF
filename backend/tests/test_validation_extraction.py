@@ -323,40 +323,40 @@ async def test_extract_persists_an_empty_tool_list_when_the_paper_states_none(se
 
 # ---- B3 fallback: a paper outside the declared routes (plan_1) ----
 
-_MICROBIOME = _GOOD.replace(
+_PROTEOMICS = _GOOD.replace(
     '"assay": "bulk RNA-seq", "tools": ["TopHat", "Cufflinks"]',
-    '"assay": "16S rRNA amplicon sequencing of stool", "tools": ["QIIME2"]',
+    '"assay": "label-free quantitative proteomics", "tools": ["MaxQuant"]',
 )
 
 
 @pytest.mark.asyncio
 async def test_extract_reaches_a_pipeline_no_declared_route_covers(session, admin_user, monkeypatch):
-    """The whole point of the fallback, exercised through the real extraction path: a microbiome
-    paper used to end at not_reproducible before any compute, on an instance that had ampliseq
+    """The whole point of the fallback, exercised through the real extraction path: a proteomics
+    paper used to end at not_reproducible before any compute, on an instance that had quantms
     installed and used it every week."""
     from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 
     session.add(
         NfCoreRegistryPipeline(
-            name="ampliseq",
-            full_name="nf-core/ampliseq",
-            description="Amplicon sequencing analysis workflow using DADA2 and QIIME2",
-            topics=["16s", "amplicon-sequencing", "metagenomics", "microbiome", "qiime2"],
-            releases_json=[{"tag_name": "2.9.0"}],
-            latest_release="2.9.0",
+            name="quantms",
+            full_name="nf-core/quantms",
+            description="Quantitative mass spectrometry workflow",
+            topics=["proteomics", "mass-spectrometry", "dia", "dda", "openms"],
+            releases_json=[{"tag_name": "1.3.0"}],
+            latest_release="1.3.0",
         )
     )
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.flush()
-    _patch_llm(monkeypatch, _MICROBIOME)
+    _patch_llm(monkeypatch, _PROTEOMICS)
 
     plan = await ValidationExtractionService.extract(
         session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
     )
     await session.commit()
 
-    assert plan.pipeline_key == "nf-core/ampliseq"
-    assert plan.pipeline_version == "2.9.0"
+    assert plan.pipeline_key == "nf-core/quantms"
+    assert plan.pipeline_version == "1.3.0"
     assert plan.mapping_confidence == "partial"
     # The plan must say the reach is capped, since nobody has read what this pipeline emits.
     assert "QC-level evidence" in (plan.mapping_notes or "")

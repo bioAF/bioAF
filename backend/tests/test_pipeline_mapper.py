@@ -181,3 +181,32 @@ def test_cutandrun_offers_no_finding_set_at_the_gate():
     from app.services.validation_level3_service import supported_finding_kinds
 
     assert supported_finding_kinds("nf-core/cutandrun") == []
+
+
+# ---- microbiome (nf-core/ampliseq) ----
+
+
+def test_a_microbiome_paper_maps_to_ampliseq():
+    """Microbiome work is ordinary lab work and its papers deposit result tables routinely, because
+    the pipeline itself performs differential abundance."""
+    for assay in (
+        "16S rRNA amplicon sequencing",
+        "16S rRNA gene sequencing of stool",
+        "ITS amplicon sequencing",
+        "amplicon sequencing of the V4 region",
+        "18S rRNA metabarcoding",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/ampliseq", assay
+
+
+def test_the_microbiome_markers_do_not_claim_shotgun_metagenomics():
+    """Shotgun metagenomics is nf-core/mag, a different pipeline with a different output. Amplicon
+    markers must name the amplicon, not the field: "metagenomics" belongs to both."""
+    assert map_method("shotgun metagenomic sequencing").pipeline_key != "nf-core/ampliseq"
+
+
+def test_the_microbiome_markers_do_not_claim_bulk_rnaseq():
+    """ "16S rRNA" and "18S rRNA" contain "rna". Regression on the whole transcriptomics literature."""
+    assert map_method("bulk RNA-seq").pipeline_key == "nf-core/rnaseq"
+    assert map_method("RNA-seq of tumour tissue").pipeline_key == "nf-core/rnaseq"
+    assert map_method("small RNA-seq").pipeline_key == "nf-core/smrnaseq"

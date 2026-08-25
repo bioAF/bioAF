@@ -90,15 +90,19 @@ async def test_a_declared_route_always_wins(session, admin_user, catalog):
 
 
 @pytest.mark.asyncio
-async def test_a_microbiome_paper_resolves_to_ampliseq_from_its_topics(session, admin_user, catalog):
-    """ "16S rRNA amplicon sequencing" names no pipeline, but it names two of ampliseq's declared
-    topics. This paper ended at not_reproducible before any compute."""
+async def test_a_proteomics_paper_resolves_to_quantms_from_its_topics(session, admin_user, catalog):
+    """ "label-free quantitative proteomics" names no pipeline, but it names one of quantms's
+    declared topics and shares a word with its description.
+
+    Proteomics has no declared route and will not get one from plan_1: quantms emits long-form
+    MSstats input and runs its own differential test, so there is no features x samples matrix for
+    the DE notebook. Before the fallback, every one of these papers ended at not_reproducible."""
     mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "16S rRNA amplicon sequencing of stool samples", tools=[]
+        session, admin_user.organization_id, "label-free quantitative proteomics", tools=[]
     )
 
-    assert mapping.pipeline_key == "nf-core/ampliseq"
-    assert mapping.pipeline_version == "2.9.0"
+    assert mapping.pipeline_key == "nf-core/quantms"
+    assert mapping.pipeline_version == "1.3.0"
     assert mapping.blockers == []
 
 
@@ -121,11 +125,11 @@ async def test_a_fallback_match_is_never_confident_enough_to_clear_a_divergence(
     from app.services.validation_classifier_service import _CLEARED_MAPPING_CONFIDENCE
 
     mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "16S rRNA amplicon sequencing", tools=[]
+        session, admin_user.organization_id, "label-free quantitative proteomics", tools=[]
     )
 
     assert mapping.mapping_confidence not in _CLEARED_MAPPING_CONFIDENCE
-    assert "nf-core/ampliseq" in mapping.mapping_notes
+    assert "nf-core/quantms" in mapping.mapping_notes
 
 
 @pytest.mark.asyncio
@@ -135,7 +139,7 @@ async def test_a_fallback_match_reaches_level_2_only(session, admin_user, catalo
     from app.services.validation_level3_service import supported_finding_kinds
 
     mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "16S rRNA amplicon sequencing", tools=[]
+        session, admin_user.organization_id, "label-free quantitative proteomics", tools=[]
     )
 
     assert supported_finding_kinds(mapping.pipeline_key) == []
@@ -147,19 +151,19 @@ async def test_an_installed_pipeline_beats_an_equally_good_registry_one(session,
     text cannot separate are separated by that."""
     await _registry(
         session,
-        "ampliseq2",
-        "Amplicon sequencing analysis workflow using DADA2 and QIIME2",
-        ["16s", "amplicon-sequencing", "its", "metagenomics", "microbiome", "qiime2", "dada2"],
+        "quantms2",
+        "Quantitative mass spectrometry workflow",
+        ["proteomics", "mass-spectrometry", "dia", "dda", "openms"],
     )
-    await _installed(session, admin_user.organization_id, "ampliseq", version="2.9.0")
+    await _installed(session, admin_user.organization_id, "quantms", version="1.3.0")
 
     mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "16S rRNA amplicon sequencing", tools=[]
+        session, admin_user.organization_id, "label-free quantitative proteomics", tools=[]
     )
 
-    assert mapping.pipeline_key == "nf-core/ampliseq"
+    assert mapping.pipeline_key == "nf-core/quantms"
     # The installed version is what will actually run, so that is what the plan records.
-    assert mapping.pipeline_version == "2.9.0"
+    assert mapping.pipeline_version == "1.3.0"
 
 
 @pytest.mark.asyncio
@@ -169,18 +173,18 @@ async def test_two_candidates_nothing_separates_are_refused_by_name(session, adm
     and name both so the human can choose."""
     await _registry(
         session,
-        "ampliseq2",
-        "Amplicon sequencing analysis workflow using DADA2 and QIIME2",
-        ["16s", "amplicon-sequencing", "its", "metagenomics", "microbiome", "qiime2", "dada2"],
+        "quantms2",
+        "Quantitative mass spectrometry workflow",
+        ["proteomics", "mass-spectrometry", "dia", "dda", "openms"],
     )
 
     mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "16S rRNA amplicon sequencing", tools=[]
+        session, admin_user.organization_id, "label-free quantitative proteomics", tools=[]
     )
 
     assert mapping.pipeline_key is None
     assert mapping.mapping_confidence == "none"
-    assert any("ampliseq" in b and "ampliseq2" in b for b in mapping.blockers), mapping.blockers
+    assert any("quantms" in b and "quantms2" in b for b in mapping.blockers), mapping.blockers
 
 
 @pytest.mark.asyncio

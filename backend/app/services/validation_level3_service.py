@@ -138,6 +138,28 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         multiple=True,
         transform="pseudobulk",
     ),
+    # A microbiome finding is "these taxa changed", which is an id with a direction and a
+    # significance: the same comparison family a DEG list is, so E6 needs no new code and the kind
+    # stays `gene`.
+    #
+    # Verified from the source: DADA2_MERGE publishes into `${outdir}/dada2` (conf/modules.config
+    # @ 2.18.0, lines 265-271) and emits `path("ASV_table.tsv")` (modules/local/dada2_merge.nf). The
+    # script transposes the DADA2 sequence table, keys each row by an md5 of its sequence, reorders
+    # to [ASV_ID, samples..., sequence], drops `sequence`, and writes tab-separated with
+    # `row.names = FALSE`.
+    #
+    # `DADA2_table.tsv` is that same table WITH the trailing `sequence` column of raw nucleotides,
+    # published beside it by the same process. Handed to DESeq2 as a matrix it would coerce that
+    # column to NA and analyse a phantom sample, so the filename is matched exactly.
+    #
+    # Caveat, recorded rather than hidden: DESeq2 on ASV counts is defensible and widely done, but
+    # it is not the microbiome field's consensus (compositional data and zero inflation are why
+    # ANCOM-BC and ALDEx2 exist). A divergence here can be the method rather than the paper.
+    ("nf-core/ampliseq", "gene"): Level3Wiring(
+        template_notebook_path="notebooks/de_bulk_deseq2.ipynb",
+        input_rules=(InputRule(filename_exact="ASV_table.tsv", path_segment="dada2"),),
+        id_column="ASV_ID",
+    ),
     # nf-core/smrnaseq needs no new notebook: `mirna.tsv` is a `miRNA` column followed by
     # per-sample integer counts, which is the shape de_bulk_deseq2 already consumes. Nothing in that
     # notebook is RNA-specific; it reads `counts_path`, takes `id_column`, and selects the named

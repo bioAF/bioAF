@@ -106,6 +106,31 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "h3k",
         ),
     ),
+    # Amplicon microbiome work. Markers name the amplicon, never the field: "microbiome" and
+    # "metagenomics" belong equally to nf-core/mag (shotgun), which has a different output, and
+    # bare "its" is an English word. A vaguer microbiome string is left to the registry fallback,
+    # which is where an ambiguous match belongs.
+    #
+    # Route B, verified from the source: DADA2_MERGE publishes into `${outdir}/dada2`
+    # (conf/modules.config @ 2.18.0, lines 265-271) and emits `path("ASV_table.tsv")`
+    # (modules/local/dada2_merge.nf). The script transposes the DADA2 sequence table, names each row
+    # by an md5 of its sequence, reorders to [ASV_ID, samples..., sequence], drops `sequence`, and
+    # writes tab-separated with `row.names = FALSE`. So the shape is an `ASV_ID` column followed by
+    # per-sample integer counts, which de_bulk_deseq2 consumes unchanged.
+    AssayRoute(
+        pipeline_key="nf-core/ampliseq",
+        pipeline_version="2.18.0",
+        markers=(
+            "16s",
+            "18s rrna",
+            "its amplicon",
+            "its1",
+            "its2",
+            "metabarcoding",
+            "amplicon sequencing",
+            "amplicon-sequencing",
+        ),
+    ),
     # Small RNA before bulk: "small RNA-seq" contains "rna-seq". Markers name the molecule
     # (mirna/microrna) or qualify the RNA (small/smrna), never bare "rna", which would swallow the
     # whole transcriptomics literature.

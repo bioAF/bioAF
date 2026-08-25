@@ -843,3 +843,65 @@ def test_smrnaseq_offers_a_gene_finding_set_at_the_gate():
     from app.services.validation_level3_service import supported_finding_kinds
 
     assert supported_finding_kinds("nf-core/smrnaseq") == ["gene"]
+
+
+# ---- nf-core/ampliseq (plan_1 step 4): microbiome, the same DESeq2 notebook again ----
+
+_ASV_MATRIX = "ASV_table.tsv"
+# Published into the same directory by the same process. `DADA2_table.tsv` is the identical table
+# with the raw sequence appended as a trailing column, so it parses and it is not a count matrix.
+_DADA2_TABLE = "DADA2_table.tsv"
+_DADA2_STATS = "DADA2_stats.tsv"
+
+
+@pytest_asyncio.fixture
+async def ampliseq_run(session, admin_user):
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/ampliseq",
+        pipeline_version="2.18.0",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_ampliseq_reproduces_a_gene_finding_from_the_asv_table(session, admin_user, ampliseq_run, de_template):
+    """A microbiome finding is "these taxa changed", which is an id with a direction and a
+    significance: the same comparison family a DEG list is, so E6 needs no new code. ASV_table.tsv
+    is an ASV_ID column followed by per-sample integer counts."""
+    f = await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_ASV_MATRIX}", _ASV_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, ampliseq_run, pipeline_key="nf-core/ampliseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["template_id"] == de_template.id
+    assert level3["input_file_ids"] == [f.id]
+    assert level3["parameters"]["id_column"] == "ASV_ID"
+
+
+@pytest.mark.asyncio
+async def test_ampliseq_does_not_take_the_table_that_carries_the_sequence_column(
+    session, admin_user, ampliseq_run, de_template
+):
+    """DADA2_table.tsv is ASV_table.tsv plus a trailing `sequence` column of raw nucleotides. Handed
+    to DESeq2 as a matrix it would coerce that column to NA and quietly analyse a phantom sample."""
+    await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_DADA2_TABLE}", _DADA2_TABLE)
+    await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_DADA2_STATS}", _DADA2_STATS)
+    matrix = await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_ASV_MATRIX}", _ASV_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, ampliseq_run, pipeline_key="nf-core/ampliseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [matrix.id]
+
+
+def test_ampliseq_offers_a_gene_finding_set_at_the_gate():
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assert supported_finding_kinds("nf-core/ampliseq") == ["gene"]
