@@ -165,10 +165,38 @@ def _detect_namespace(ids: list[str]) -> str:
     return "symbol"
 
 
+def _squash(name: str) -> str:
+    """A column name reduced to its letters and digits, so punctuation cannot hide it.
+
+    Real deposited tables spell the same column every way there is: `log2(Fold_change)`,
+    `log2.fold.change`, `log2FoldChange`; `p-value`, `p.value`, `p_val`. Exact matching on the
+    lowercased header missed all the variants nobody had happened to enumerate, and the failure was
+    silent: the table parsed, every row was read, and zero entities came out.
+
+    Found by taking a real GEO deposit (GSE327014) to a verdict rather than by unit testing.
+    """
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
 def _pick(cands: list[str], header_lc: list[str]) -> int | None:
+    """The index of the first candidate present in the header, punctuation ignored.
+
+    Order encodes preference, so an exact pass runs first: a table carrying BOTH a nominal and an
+    adjusted p must still match the adjusted one on its own name rather than on whichever squashes
+    to the same string first.
+    """
     for c in cands:
         if c in header_lc:
             return header_lc.index(c)
+    squashed = [_squash(h) for h in header_lc]
+    for c in cands:
+        target = _squash(c)
+        # An empty candidate is the unnamed-index convention and must keep matching only a
+        # genuinely empty header cell, never every punctuation-only one.
+        if not target:
+            continue
+        if target in squashed:
+            return squashed.index(target)
     return None
 
 
