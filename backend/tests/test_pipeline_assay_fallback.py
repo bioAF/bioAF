@@ -231,3 +231,32 @@ async def test_a_pipeline_with_no_release_is_never_offered(session, admin_user):
     mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "ribosome profiling", tools=[])
 
     assert mapping.pipeline_key is None
+
+
+@pytest.mark.asyncio
+async def test_one_broad_topic_word_is_not_enough_to_route_a_paper(session, admin_user):
+    """nf-core topics carry disease and organism words, not just assay words. A paper that merely
+    says "cancer" has told us nothing about which pipeline could re-run it, and offering one on that
+    basis spends a fetch and a run on a coincidence. Two independent signals, or the pipeline's own
+    name, or nothing."""
+    await _registry(session, "sarek", "Analysis of germline and somatic variants", ["cancer", "variant-calling"])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "a bespoke assay in cancer", tools=[]
+    )
+
+    assert mapping.pipeline_key is None
+    assert any("no nf-core equivalent" in b.lower() for b in mapping.blockers)
+
+
+@pytest.mark.asyncio
+async def test_the_pipelines_own_name_in_the_methods_is_enough_on_its_own(session, admin_user):
+    """The opposite end: a methods section that names the pipeline has answered the question
+    outright, and needs no second signal."""
+    await _registry(session, "methylseq", "Methylation (Bisulfite-Sequencing) analysis", ["methylation"])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "a bespoke assay", tools=["methylseq"]
+    )
+
+    assert mapping.pipeline_key == "nf-core/methylseq"

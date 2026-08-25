@@ -210,3 +210,12 @@ def test_the_microbiome_markers_do_not_claim_bulk_rnaseq():
     assert map_method("bulk RNA-seq").pipeline_key == "nf-core/rnaseq"
     assert map_method("RNA-seq of tumour tissue").pipeline_key == "nf-core/rnaseq"
     assert map_method("small RNA-seq").pipeline_key == "nf-core/smrnaseq"
+
+
+def test_the_common_small_rna_abbreviations_do_not_fall_through_to_bulk():
+    """ "sRNAseq" contains "rnaseq". Found while reading a real small-RNA paper (Roy et al. 2023,
+    GSE221185), whose own methods call the assay sRNAseq throughout: without this marker the paper
+    maps to nf-core/rnaseq, launches a bulk quantification against 20 bp reads, and produces a
+    confident answer to a question nobody asked."""
+    for assay in ("sRNA-seq", "sRNAseq", "sRNA sequencing", "tsRNA profiling", "piRNA sequencing"):
+        assert map_method(assay).pipeline_key == "nf-core/smrnaseq", assay

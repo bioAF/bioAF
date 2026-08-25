@@ -148,11 +148,18 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "small rna",
             "small-rna",
             "smrna",
+            # "srna" catches the abbreviations papers actually use in their own methods -- sRNAseq,
+            # sRNA-seq, tsRNA -- every one of which contains "rnaseq" or "rna-seq" and would
+            # otherwise fall through to bulk. A real paper (Roy et al. 2023, GSE221185) calls its
+            # assay sRNAseq throughout, and without this it would have launched a bulk
+            # quantification against 20 bp reads and answered confidently.
+            "srna",
             "sncrna",
             "small non-coding",
             "mirna",
             "microrna",
             "mir-seq",
+            "pirna",
         ),
     ),
     AssayRoute(

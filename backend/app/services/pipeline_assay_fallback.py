@@ -92,8 +92,12 @@ _STOPWORDS = frozenset(
     }
 )
 
-# A candidate must clear this to be offered at all. One weak description-word hit is not evidence.
-_MIN_SCORE = 3
+# A candidate must clear this to be offered at all, and the threshold is set so that ONE topic hit
+# on its own does not. nf-core topics carry disease and organism words ("cancer", "human") as well
+# as assay words, so a paper that merely says "cancer" would otherwise be routed to whichever
+# pipeline happened to declare that topic. Clearing it takes the pipeline's own name, or two
+# independent signals.
+_MIN_SCORE = 4
 
 _SCORE_NAME = 4  # the pipeline's own name appears in the paper's text
 _SCORE_TOPIC = 3  # a declared topic appears as a phrase
