@@ -20,7 +20,23 @@ import re
 from dataclasses import dataclass, field
 
 # candidate column names across DESeq2 / edgeR / limma depositor conventions
-_LFC_COLS = ["log2foldchange", "log2fc", "logfc", "log2.fold.change", "lfc", "coef", "logfoldchange"]
+# Seurat's `FindMarkers` spellings are listed explicitly because `_squash` cannot reach them:
+# matching compares the WHOLE squashed name, and these are the canonical name with an affix
+# (`avg_log2FC`, `p_val_adj`) rather than a punctuation variant of it. Seurat is the dominant
+# single-cell analysis tool, so this is the most common shape a scRNA-seq paper deposits, and
+# missing it failed the same silent way the punctuation defect did: table parses, every row read,
+# zero entities out. `avg_logFC` is the v3-and-earlier spelling, still in the literature.
+_LFC_COLS = [
+    "log2foldchange",
+    "log2fc",
+    "logfc",
+    "log2.fold.change",
+    "lfc",
+    "coef",
+    "logfoldchange",
+    "avg_log2fc",
+    "avg_logfc",
+]
 _PADJ_COLS = [
     "padj",
     "adj.p.val",
@@ -32,6 +48,8 @@ _PADJ_COLS = [
     "p.adjust",
     "adj_pval",
     "adj.pvalue",
+    # Last: a Seurat table carries `p_val` too, and this must never be reached for that one.
+    "p_val_adj",
 ]
 _PVAL_COLS = ["pvalue", "p.value", "pval", "p_val"]
 # Order encodes PREFERENCE (_pick returns the first of these present in the header), so gene-symbol

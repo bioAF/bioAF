@@ -241,3 +241,50 @@ def test_punctuation_normalization_does_not_blur_distinct_columns():
     fs = normalize_gene_table(both, lfc_threshold=1.0, padj_threshold=0.05)
     assert fs.directions() == {"AAA": "up"}
     assert not any("raw p-value" in n for n in fs.parse_notes)
+
+
+# Seurat's FindMarkers, the dominant single-cell DE output. Real header and real rows, taken from
+# GSE312719_DE_analysis_SingleCellRNAseq.xlsx (10.1016/j.celrep.2026.117031), sheet
+# "HU_Inf_MF vs HU_control".
+_SEURAT_FINDMARKERS_TSV = (
+    "gene\tp_val\tavg_log2FC\tpct.1\tpct.2\tp_val_adj\n"
+    "PARP9\t3.3297162819680302E-274\t1.7295183630975901\t1\t1\t1.2854702678165799E-269\n"
+    "IFIT2\t1.5446925589325199E-183\t1.29896871601505\t1\t1\t5.96344009301487E-179\n"
+    "TENT5A\t8.9903339418906596E-154\t1.1210216174196399\t1\t1\t3.4708083216063101E-149\n"
+    "QUIET\t0.4\t0.02\t1\t1\t0.98\n"
+    "DOWNGENE\t1.0E-40\t-2.5\t1\t1\t1.0E-36\n"
+    "SUBTHRESHOLD\t1.0E-40\t0.3\t1\t1\t1.0E-36\n"
+)
+
+
+def test_a_seurat_findmarkers_table_parses():
+    """`avg_log2FC` and `p_val_adj` are the two columns almost every single-cell paper deposits, and
+    both missed. This is the SAME silent failure as the GSE327014 punctuation defect -- table parses,
+    every row read, zero entities out -- but `_squash` cannot reach it: these are not punctuation
+    variants, they are the canonical name with an affix, and matching is on the whole squashed name.
+
+    Seurat is the dominant single-cell analysis tool, so this was scRNA-seq's ground-truth path
+    failing for the most common format there is."""
+    fs = normalize_gene_table(_SEURAT_FINDMARKERS_TSV, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.namespace == "symbol"
+    assert fs.directions() == {
+        "PARP9": "up",
+        "IFIT2": "up",
+        "TENT5A": "up",
+        "DOWNGENE": "down",
+    }
+
+
+def test_a_seurat_table_uses_the_adjusted_p_not_the_nominal_one():
+    """FindMarkers deposits BOTH `p_val` and `p_val_adj`, which squash to different strings but sit
+    next to each other. Reading the nominal one would silently loosen the paper's own threshold and
+    inflate its ground-truth set."""
+    fs = normalize_gene_table(_SEURAT_FINDMARKERS_TSV, lfc_threshold=1.0, padj_threshold=0.05)
+    assert not any("raw p-value" in n for n in fs.parse_notes), fs.parse_notes
+
+
+def test_the_older_seurat_spelling_parses_too():
+    """Seurat v3 and earlier wrote `avg_logFC`. Papers deposited under it are still being validated."""
+    old = "gene\tp_val\tavg_logFC\tp_val_adj\nAAA\t1e-30\t2.0\t1e-26\nBBB\t1e-30\t-2.0\t1e-26\n"
+    fs = normalize_gene_table(old, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.directions() == {"AAA": "up", "BBB": "down"}
