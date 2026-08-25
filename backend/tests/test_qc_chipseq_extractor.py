@@ -255,3 +255,28 @@ def test_cutandrun_peak_sections_do_not_disturb_chipseq_parsing():
     yields."""
     metrics = chipseq.read_multiqc_metrics(json.dumps(_MULTIQC))
     assert metrics["peak_count"] == 25_000  # mean(30000, 20000) from multiqc_macs2_peak_count
+
+
+def test_cutandrun_peak_count_is_found_under_the_anchor_spelling_too():
+    """The one thing the real fixtures cannot settle.
+
+    Across both captured reports the raw-data key is `multiqc_<id>-plot`, where `<id>` is the
+    header's declared `#id`: chipseq declares `peak_count` and carries `multiqc_peak_count-plot`;
+    atacseq declares `mlib_peak_count` and carries `multiqc_mlib_peak_count-plot`. But both
+    pipelines set `#id` and `#anchor` to the SAME string, so neither fixture can say which of the
+    two names the key.
+
+    cutandrun is the first case where they differ: `#id: 'primary_peak_counts'` against
+    `#anchor: 'primary_peakcounts'`. Rather than bet on one reading of MultiQC's internals, accept
+    both. The cost of a spare candidate is nothing; the cost of guessing wrong is a peak_count of
+    None, which silently caps every cutandrun study at inconclusive."""
+    report = {
+        "report_saved_raw_data": {
+            "multiqc_primary_peakcounts-plot": {"S1": {"S1": 12_000.0}, "S2": {"S2": 8_000.0}},
+            "multiqc_primary_fripscore-plot": {"S1": {"S1": 0.30}, "S2": {"S2": 0.20}},
+        },
+        "report_general_stats_data": [],
+    }
+    metrics = chipseq.read_multiqc_metrics(json.dumps(report))
+    assert metrics["peak_count"] == 10_000
+    assert metrics["frip"] == 0.25

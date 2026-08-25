@@ -372,8 +372,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     # assets/multiqc/{peak_counts,peak_counts_consensus,frip_score}_header.txt @ 3.2.2. The
     # per-sample count is `primary_peak_counts` and is preferred; `consensus_peak_counts` is the
     # across-replicate figure, a different question, taken only when it is all the run reported.
-    # Both forms of the key are accepted because the `-plot` suffix is derived from the rule the
-    # real chipseq fixture proves, not yet observed in a captured cutandrun report.
+    # The `multiqc_<id>-plot` rule is proven twice over: chipseq declares `#id: peak_count` and its
+    # real report carries `multiqc_peak_count-plot`; atacseq declares `mlib_peak_count` and carries
+    # `multiqc_mlib_peak_count-plot`. What neither fixture can settle is whether the key follows
+    # `#id` or `#anchor`, because both pipelines set them to the same string. cutandrun is the first
+    # case where they diverge (`primary_peak_counts` vs `primary_peakcounts`), so both spellings are
+    # listed. A spare candidate costs nothing; guessing wrong costs a silent `inconclusive`.
     peaks = _plot_values(
         _find_section(
             raw,
@@ -382,8 +386,10 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             "multiqc_macs2_peak_count",
             "macs2_peak_count",
             "multiqc_primary_peak_counts-plot",
+            "multiqc_primary_peakcounts-plot",
             "multiqc_primary_peak_counts",
             "multiqc_consensus_peak_counts-plot",
+            "multiqc_consensus_peakcounts-plot",
             "multiqc_consensus_peak_counts",
         )
     )
@@ -400,6 +406,7 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             "multiqc_frip_score",
             "frip_score",
             "multiqc_primary_frip_score-plot",
+            "multiqc_primary_fripscore-plot",
             "multiqc_primary_frip_score",
         )
     )
