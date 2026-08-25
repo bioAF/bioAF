@@ -16,6 +16,7 @@ from app.api.dependencies import require_beta_feature, require_permission
 from app.api.provenance_reports import ReportFormat
 from app.database import get_session
 from app.models.literature import LiteraturePaper
+from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
     ClassifyRequest,
@@ -37,7 +38,6 @@ from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_level3_service import supported_finding_kinds
-from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.services.validation_study_service import ValidationStudyService
 
 # lit_validation is a beta feature: when its flag is off, every endpoint here 404s (matching the hidden
