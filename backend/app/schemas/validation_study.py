@@ -106,6 +106,13 @@ class ReproductionPlanResponse(BaseModel):
     # could paste a DEG table for an ATAC study and spend hours of compute to learn there was never a
     # route. Empty means the pipeline maps, launches and produces QC, but reproduces no finding.
     supported_finding_kinds: list[str] = []
+    # Computed, not stored: whether this org's catalog actually holds the plan's pipeline. Install
+    # state changes under a plan's feet, so storing it would go stale. None when the plan names no
+    # pipeline, because "not installed" would be a wrong answer to a question nobody asked.
+    pipeline_installed: bool | None = None
+    # The bare nf-core registry name (`ampliseq`), which is what the install endpoint takes. Carried
+    # so the gate's install action never has to parse it back out of the key.
+    pipeline_registry_name: str | None = None
 
 
 class ValidationStudySummary(BaseModel):

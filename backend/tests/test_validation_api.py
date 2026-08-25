@@ -541,3 +541,65 @@ async def test_a_plan_with_no_pipeline_declares_no_supported_kinds(client, admin
     plan = r.json()["plan"]
     assert plan["pipeline_key"] is None
     assert plan["supported_finding_kinds"] == []
+
+
+async def test_plan_says_whether_its_pipeline_is_installed_here(client, admin_token, monkeypatch, session):
+    """Nothing checked this before, so a plan naming a pipeline the instance did not have was
+    approved, fetchngs spent real compute downloading the data, and only then did launch_run raise
+    "Pipeline not found or not enabled". The check is cheap and belongs before the approval.
+
+    It answers about the catalog, not about BUILTIN_PIPELINES, because being a built-in is not the
+    same as being installed: the built-ins are seeded lazily on the first pipelines-list call, and
+    launch_run resolves a real catalog row or refuses. An org that has never opened that page
+    genuinely cannot launch nf-core/rnaseq, and the gate has to say so rather than assume.
+    """
+    _patch_llm(monkeypatch, _GOOD)  # maps to nf-core/rnaseq
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["plan"]["pipeline_installed"] is False
+
+    # Seeding the built-in catalog is what makes the pipeline launchable, and the plan follows it.
+    assert (await client.get("/api/pipelines", headers=_auth(admin_token))).status_code == 200
+    r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
+    assert r.json()["plan"]["pipeline_installed"] is True
+
+
+async def test_a_plan_naming_an_uninstalled_pipeline_says_so_before_approval(client, admin_token, monkeypatch, session):
+    """The fallback can name a pipeline the org has not installed yet, which is the point: the
+    scientist is told what to install rather than told their paper is unreproducible."""
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+
+    session.add(
+        NfCoreRegistryPipeline(
+            name="ampliseq",
+            full_name="nf-core/ampliseq",
+            description="Amplicon sequencing analysis workflow using DADA2 and QIIME2",
+            topics=["16s", "amplicon-sequencing", "metagenomics", "microbiome", "qiime2"],
+            releases_json=[{"tag_name": "2.9.0"}],
+            latest_release="2.9.0",
+        )
+    )
+    await session.commit()
+
+    microbiome = _GOOD.replace('"assay": "bulk RNA-seq"', '"assay": "16S rRNA amplicon sequencing of stool"')
+    _patch_llm(monkeypatch, microbiome)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    plan = r.json()["plan"]
+    assert plan["pipeline_key"] == "nf-core/ampliseq"
+    assert plan["pipeline_installed"] is False
+    # The install action needs the bare registry name, not the key, so the UI is not left parsing it.
+    assert plan["pipeline_registry_name"] == "ampliseq"
+
+
+async def test_a_plan_with_no_pipeline_makes_no_claim_about_installation(client, admin_token, monkeypatch):
+    """There is nothing to install, so `false` would be a wrong answer to a question nobody asked."""
+    unmappable = _GOOD.replace('"assay": "bulk RNA-seq"', '"assay": "a bespoke in-house assay"')
+    _patch_llm(monkeypatch, unmappable)
+    sid = (await client.post("/api/validation-studies", json={}, headers=_auth(admin_token))).json()["id"]
+    r = await client.post(f"/api/validation-studies/{sid}/read", json={"full_text": "x"}, headers=_auth(admin_token))
+    plan = r.json()["plan"]
+    assert plan["pipeline_installed"] is None
+    assert plan["pipeline_registry_name"] is None

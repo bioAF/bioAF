@@ -37,6 +37,7 @@ from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_level3_service import supported_finding_kinds
+from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.services.validation_study_service import ValidationStudyService
 
 # lit_validation is a beta feature: when its flag is off, every endpoint here 404s (matching the hidden
@@ -48,7 +49,7 @@ router = APIRouter(
 )
 
 
-def _plan_response(plan) -> ReproductionPlanResponse | None:
+async def _plan_response(session: AsyncSession, plan, org_id: int) -> ReproductionPlanResponse | None:
     if plan is None:
         return None
     return ReproductionPlanResponse(
@@ -69,6 +70,8 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         extractor_model=plan.extractor_model,
         extractor_provider=plan.extractor_provider,
         supported_finding_kinds=supported_finding_kinds(plan.pipeline_key),
+        pipeline_installed=await _is_pipeline_installed(session, org_id, plan.pipeline_key),
+        pipeline_registry_name=_registry_name(plan.pipeline_key),
         comparison_targets=[
             ComparisonTargetResponse(
                 metric_key=t.metric_key,
@@ -80,6 +83,35 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
             for t in (plan.comparison_targets or [])
         ],
     )
+
+
+def _registry_name(pipeline_key: str | None) -> str | None:
+    """The bare nf-core name the install endpoint takes: ``nf-core/ampliseq`` -> ``ampliseq``."""
+    if not pipeline_key or not pipeline_key.startswith("nf-core/"):
+        return None
+    return pipeline_key.split("/", 1)[1] or None
+
+
+async def _is_pipeline_installed(session: AsyncSession, org_id: int, pipeline_key: str | None) -> bool | None:
+    """Whether this org's catalog holds ``pipeline_key`` and has it enabled.
+
+    Checked here, at read time, because a plan can be written long before it is approved and a
+    pipeline can be installed in between. Nothing checked it at all before, so an approved plan
+    naming a pipeline the instance lacked spent a whole fetchngs download before ``launch_run``
+    refused it.
+    """
+    if not pipeline_key:
+        return None
+    row = (
+        await session.execute(
+            select(PipelineCatalogEntry.id).where(
+                PipelineCatalogEntry.organization_id == org_id,
+                PipelineCatalogEntry.pipeline_key == pipeline_key,
+                PipelineCatalogEntry.enabled.is_(True),
+            )
+        )
+    ).first()
+    return row is not None
 
 
 def _study_title(study: ValidationStudy, paper_title: str | None) -> str:
@@ -126,7 +158,7 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         reproduction_plan_id=study.reproduction_plan_id,
         approved_by_user_id=study.approved_by_user_id,
         failure_reason=study.failure_reason,
-        plan=_plan_response(plan),
+        plan=await _plan_response(session, plan, org_id),
         evidence=study.evidence_json,
     )
 
