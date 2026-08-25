@@ -757,3 +757,144 @@ async def test_launch_run_smrnaseq_refuses_to_pick_between_two_organisms(
 
     r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome=None)
     assert "mirtrace_species" not in r.json()["parameters"]
+
+
+# --- the reference a run actually aligns against (plan_2) ---------------------------------------
+#
+# Verified on the demo before any of these existed: `pipeline_catalog` stores
+#   nf-core/rnaseq    {"genome": "GRCh38", ...}
+#   nf-core/scrnaseq  {"fasta": "...homo_sapiens...", "gtf": "...Homo_sapiens...", ...}
+# and lit_validation writes `parameters_json = {}` on every plan by design. So the paper's own
+# reference_genome was captured, shown in the UI, and never reached the pipeline: `launch_run` filled
+# `genome` only when it was not already a key, and nf-core/scrnaseq's main.nf says outright that a
+# manually provided `--fasta` is not overwritten by the genome attributes.
+#
+# Study 7 on the demo is a MOUSE scRNA-seq paper sitting at plan_ready. Approving it aligned mouse
+# reads against the human primary assembly, completed, and produced a near-empty matrix for the
+# verdict machinery to blame on the science.
+
+
+async def _launch(client, admin_token, experiment, samples, key, parameters=None, genome="GRCh38"):
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        return await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": key,
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": parameters or {},
+                "reference_genome": genome,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_aligns_a_mouse_study_against_the_mouse_genome(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """The seeded scrnaseq defaults pin literal human Ensembl URLs, and inside nf-core an explicit
+    --fasta beats --genome, so a mouse study aligned against GRCh38 and completed. Deriving the pair
+    from the assembly the study declares is the same move `mirtrace_species` already makes."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="GRCm39")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert "mus_musculus" in params["fasta"], params["fasta"]
+    assert "GRCm39" in params["fasta"]
+    assert "Mus_musculus" in params["gtf"], params["gtf"]
+    assert "homo_sapiens" not in params["fasta"].lower()
+    assert "homo_sapiens" not in params["gtf"].lower()
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_still_aligns_a_human_study_against_the_human_genome(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """The regression guard on the case that already worked."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="GRCh38")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert "homo_sapiens" in params["fasta"]
+    assert "GRCh38" in params["fasta"]
+
+
+@pytest.mark.asyncio
+async def test_an_explicitly_supplied_reference_always_wins(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """A derived reference is a default, never a policy. A lab that states its own reference keeps
+    it, exactly as the smrnaseq parameters do."""
+    mine = "gs://my-bucket/custom.fa"
+    r = await _launch(
+        client,
+        admin_token,
+        experiment,
+        samples,
+        "nf-core/scrnaseq",
+        parameters={"fasta": mine, "gtf": "gs://my-bucket/custom.gtf"},
+        genome="GRCm39",
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["fasta"] == mine
+
+
+@pytest.mark.asyncio
+async def test_rnaseq_uses_the_studys_genome_rather_than_the_seeded_default(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """`genome: GRCh38` in the seeded defaults meant `"genome" not in merged_params` was never true,
+    so the branch that fills it from the study never fired. A mouse bulk RNA-seq paper ran against
+    GRCh38 while the run row and the UI both said GRCm39."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/rnaseq", genome="GRCm39")
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["genome"] == "GRCm39"
+
+
+@pytest.mark.asyncio
+async def test_a_reference_we_cannot_serve_refuses_instead_of_running_against_the_wrong_one(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """T2T-CHM13 is a genome the extractor normalizes and the reference table has no entry for. The
+    old behaviour was to launch anyway against whatever the defaults pinned. Refusing is the only
+    honest answer, and it has to name BOTH assemblies or it cannot be acted on."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="T2T-CHM13")
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "T2T-CHM13" in detail
+    assert "GRCh38" in detail
+
+
+@pytest.mark.asyncio
+async def test_a_genome_alias_resolves_to_the_assembly_bioaf_carries(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """Papers name the same build several ways. `hg38` is GRCh38, so it must be served, not refused:
+    the refusal exists for an assembly bioAF genuinely has no reference for, never for a spelling."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="hg38")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert "homo_sapiens" in params["fasta"]
+    assert params["genome"] == "GRCh38"
+
+
+@pytest.mark.asyncio
+async def test_an_organizations_own_named_reference_is_left_alone(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """`reference_genome` is not only an assembly field: a lab can name its own uploaded reference
+    dataset there. That is not a build bioAF should second-guess, and refusing it would break the
+    custom-reference path entirely, so anything outside the assembly vocabulary passes through
+    exactly as it did before."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="custom-genome-v1")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert params["genome"] == "custom-genome-v1"
+    # The seeded pair is untouched: bioAF has no opinion about somebody else's reference.
+    assert "homo_sapiens" in params["fasta"]

@@ -95,7 +95,123 @@ _MACS_GSIZE_BY_GENOME: dict[str, float] = {
 }
 
 
+# The reference a run actually aligns against, keyed by the assembly a study declares.
+#
+# Ensembl is already the source the seeded scrnaseq defaults use, and its FTP layout is regular
+# enough to key by assembly -- but only if you check, which is why every URL below was fetched
+# (HTTP 206 on a range request) rather than pattern-matched from the human one. Two of the four do
+# not follow it: mouse moved to GRCm39 at release 104, so GRCm38 only exists in the older releases,
+# and GRCh37 lives under its own `/pub/grch37` tree with a GTF frozen at build 87. A single-release
+# pattern would have produced two 404s at runtime, inside Nextflow, after the fetch was paid for.
+#
+# T2T-CHM13 is deliberately ABSENT. The extractor normalizes papers onto it, Ensembl's main FTP does
+# not carry it in this layout, and a missing entry is what makes a pinned pipeline refuse rather
+# than quietly align against whatever it was seeded with.
+_ENSEMBL = "https://ftp.ensembl.org/pub"
+_ENSEMBL_REFERENCE_BY_GENOME: dict[str, tuple[str, str]] = {
+    "GRCh38": (
+        f"{_ENSEMBL}/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh38.112.gtf.gz",
+    ),
+    "GRCm39": (
+        f"{_ENSEMBL}/release-112/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/mus_musculus/Mus_musculus.GRCm39.112.gtf.gz",
+    ),
+    "GRCm38": (
+        f"{_ENSEMBL}/release-102/fasta/mus_musculus/dna/Mus_musculus.GRCm38.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-102/gtf/mus_musculus/Mus_musculus.GRCm38.102.gtf.gz",
+    ),
+    "GRCh37": (
+        f"{_ENSEMBL}/grch37/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh37.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/grch37/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh37.87.gtf.gz",
+    ),
+}
+
+# The assembly names bioAF recognizes as a genome BUILD, folded onto the table keys above. A
+# `reference_genome` outside this set is an organization's own named reference dataset, not an
+# assembly, and it is left exactly as it was: the user owns that reference and
+# `_link_references_from_params` is what resolves it.
+#
+# Deliberately duplicated from the paper extractor's alias table rather than shared with it. That one
+# reads messy prose out of a methods section and may keep widening; this one decides what a launch
+# aligns against and must not move because a paper spelled something a new way.
+_ASSEMBLY_ALIASES: dict[str, str] = {
+    "grch38": "GRCh38",
+    "hg38": "GRCh38",
+    "grch37": "GRCh37",
+    "hg19": "GRCh37",
+    "grcm39": "GRCm39",
+    "mm39": "GRCm39",
+    "grcm38": "GRCm38",
+    "mm10": "GRCm38",
+    "t2t-chm13": "T2T-CHM13",
+    "chm13": "T2T-CHM13",
+}
+
+
 class PipelineRunService:
+    @staticmethod
+    def _apply_reference(
+        pipeline_key: str,
+        merged_params: dict,
+        caller_params: dict,
+        requested_genome: str | None,
+    ) -> dict:
+        """Point the run at the reference the STUDY declares, not the one the pipeline was seeded with.
+
+        One precedence, in one place: **what the scientist stated beats the study's assembly, which
+        beats the pipeline's seeded default.** It used to be the reverse of the last two, in two
+        different ways, and both were silent:
+
+        - `nf-core/rnaseq` is seeded with `genome: GRCh38`, so the old `"genome" not in merged_params`
+          guard never fired and a mouse paper's `reference_genome` was captured, shown in the UI, and
+          discarded.
+        - `nf-core/scrnaseq` is seeded with literal human `fasta`/`gtf` URLs. Setting `genome` there
+          does nothing at all, because nf-core/scrnaseq's own `main.nf` states that manually provided
+          files are not overwritten by the genome attributes. So the human URLs won regardless.
+
+        Neither failed. Both produced a completed run and a plausible, near-empty matrix, which is the
+        worst outcome for a tool whose job is checking other people's numbers.
+
+        A pipeline pinned by explicit `fasta`/`gtf` and an assembly with no entry in the table is the
+        one case that REFUSES: there is no way to serve it, and launching would align against a
+        different organism. Pipelines driven by `--genome` alone are passed the assembly and left to
+        fail loudly in nf-core if their iGenomes has no such build -- a stated failure, not a wrong
+        answer, which is the line this refusal is drawn on.
+        """
+        if not requested_genome:
+            return merged_params
+
+        # A stated reference is a statement, not a default. Anything the caller sent wins outright.
+        if any(key in caller_params for key in ("genome", "fasta", "gtf")):
+            return merged_params
+
+        assembly = _ASSEMBLY_ALIASES.get(requested_genome.strip().lower())
+        if assembly is None:
+            # Not an assembly: an organization's own named reference. Untouched, and `genome` is
+            # filled only when nothing else claimed it, which is what this branch always did.
+            if "genome" not in merged_params:
+                merged_params["genome"] = requested_genome
+            return merged_params
+
+        pair = _ENSEMBL_REFERENCE_BY_GENOME.get(assembly)
+        pinned_by_files = "fasta" in merged_params or "gtf" in merged_params
+        if pinned_by_files:
+            if pair is None:
+                pinned = str(merged_params.get("fasta") or merged_params.get("gtf") or "")
+                named = next((g for g in _ENSEMBL_REFERENCE_BY_GENOME if g in pinned), "its seeded default")
+                raise ValidationError(
+                    f"{pipeline_key} has no reference for {assembly}, and it is pinned to "
+                    f"{named} by an explicit fasta/gtf that --genome cannot override. Running it "
+                    f"would align {assembly} reads against {named}. Supply fasta and gtf for "
+                    f"{assembly} explicitly, or pick an assembly bioAF carries: "
+                    f"{', '.join(sorted(_ENSEMBL_REFERENCE_BY_GENOME))}."
+                )
+            merged_params["fasta"], merged_params["gtf"] = pair
+
+        merged_params["genome"] = assembly
+        return merged_params
+
     @staticmethod
     def _requires_per_sample_fastq(pipeline, contract=None) -> bool:
         """Whether this pipeline consumes per-sample FASTQ input.
@@ -513,13 +629,12 @@ class PipelineRunService:
         merged_params = dict(pipeline.default_params_json or {})
         merged_params.update(data.parameters)
 
-        # reference_genome is the first-class control for the nf-core iGenomes `--genome` key. Translate
-        # it into the param so pipelines that don't hardcode a `genome` default still receive it: the
-        # built-in rnaseq defaults file sets genome, but registry-installed pipelines (chipseq, atacseq,
-        # ...) do not, so without this they launch with no genome and fail validation ("Missing --fasta").
-        # An explicit `genome` param (from defaults or the caller) wins.
-        if data.reference_genome and "genome" not in merged_params:
-            merged_params["genome"] = data.reference_genome
+        # reference_genome is the first-class control for the reference a run aligns against. See
+        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
+        # the caller stated beats both.
+        merged_params = PipelineRunService._apply_reference(
+            pipeline.pipeline_key, merged_params, data.parameters, data.reference_genome
+        )
 
         # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
         # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
