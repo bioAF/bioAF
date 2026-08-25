@@ -530,3 +530,148 @@ async def test_viewer_cannot_access_runs(client, viewer_token):
         headers={"Authorization": f"Bearer {viewer_token}"},
     )
     assert response.status_code == 403
+
+
+async def _install_smrnaseq(session, admin_user):
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    session.add(
+        PipelineCatalogEntry(
+            organization_id=admin_user.organization_id,
+            pipeline_key="nf-core/smrnaseq",
+            name="nf-core/smrnaseq",
+            source_type="nf-core",
+            version="2.4.1",
+            is_builtin=False,
+            enabled=True,
+        )
+    )
+    await session.commit()
+
+
+async def _launch_smrnaseq(client, admin_token, experiment, samples, parameters=None, genome="GRCh38"):
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        return await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": "nf-core/smrnaseq",
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": parameters or {},
+                "reference_genome": genome,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_quantifies_against_real_mirbase(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """nf-core/smrnaseq 2.4.1 defaults `mature` and `hairpin` to the nf-core CI **test dataset**, a
+    handful of sequences used to make the pipeline's own tests fast (nextflow.config lines 20-21).
+
+    Its own usage docs claim the defaults are real miRBase. They are not, and this is the third time
+    in this project that an nf-core doc disagreed with its config. A run left on those defaults does
+    not fail: it quantifies against a toy reference and emits a `mirna.tsv` that looks exactly like a
+    real one, which is the worst possible outcome for a tool whose job is checking other people's
+    numbers."""
+    await _install_smrnaseq(session, admin_user)
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples)
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert "test-datasets" not in str(params.get("mature")), params.get("mature")
+    assert "test-datasets" not in str(params.get("hairpin")), params.get("hairpin")
+    assert "mirbase.org" in str(params.get("mature"))
+    assert "mirbase.org" in str(params.get("hairpin"))
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_derives_the_mirbase_species_from_the_genome(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """`mirtrace_species` is null by default and takes a 3-letter miRBase code. It also decides which
+    per-species GFF3 the pipeline downloads, so without it there is no miRNA annotation at all. The
+    genome the study already declares answers it."""
+    await _install_smrnaseq(session, admin_user)
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome="GRCh38")
+    assert r.json()["parameters"]["mirtrace_species"] == "hsa"
+
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome="GRCm39")
+    assert r.json()["parameters"]["mirtrace_species"] == "mmu"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_sets_an_adapter_so_the_pipeline_starts_at_all(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """From the pipeline's own usage docs: "If you do not choose a profile that sets the
+    `three_prime_adapter`, `clip_r1` and `three_prime_clip_r1` options, the pipeline won't run."
+    bioAF launches with no profile, so without this every smrnaseq run stops before it starts.
+    auto-detect is what the docs name for the case where the kit is unknown, which it always is when
+    the input is somebody else's deposited data."""
+    await _install_smrnaseq(session, admin_user)
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples)
+    assert r.json()["parameters"]["three_prime_adapter"] == "auto-detect"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_never_overrides_what_the_scientist_stated(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """Every one of these is a default, not a policy. A lab that knows its kit and its reference
+    must keep them."""
+    await _install_smrnaseq(session, admin_user)
+    r = await _launch_smrnaseq(
+        client,
+        admin_token,
+        experiment,
+        samples,
+        parameters={
+            "mature": "gs://lab/our_mature.fa",
+            "hairpin": "gs://lab/our_hairpin.fa",
+            "mirtrace_species": "rno",
+            "three_prime_adapter": "TGGAATTCTCGGGTGCCAAGG",
+        },
+    )
+    params = r.json()["parameters"]
+    assert params["mature"] == "gs://lab/our_mature.fa"
+    assert params["hairpin"] == "gs://lab/our_hairpin.fa"
+    assert params["mirtrace_species"] == "rno"
+    assert params["three_prime_adapter"] == "TGGAATTCTCGGGTGCCAAGG"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_rnaseq_gains_no_small_rna_parameters(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """Regression: `smrnaseq` contains `rnaseq`, the same substring trap the Level-3 wiring hit."""
+    with (
+        patch(
+            "app.services.slurm_service.SlurmService._run_ssh_command",
+            new_callable=AsyncMock,
+            return_value="12345",
+        ),
+        patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock),
+    ):
+        r = await client.post(
+            "/api/pipeline-runs",
+            json={
+                "pipeline_key": "nf-core/rnaseq",
+                "experiment_id": experiment.id,
+                "sample_ids": [s.id for s in samples],
+                "parameters": {},
+                "reference_genome": "GRCh38",
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    params = r.json()["parameters"]
+    for key in ("mature", "hairpin", "mirtrace_species", "three_prime_adapter"):
+        assert key not in params, key

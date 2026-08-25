@@ -34,6 +34,36 @@ logger = logging.getLogger("bioaf.pipeline_runs")
 # (chipseq/atacseq). These are the standard MACS values: human ~2.7e9, mouse ~1.87e9. Keyed by the
 # controlled reference_genome vocabulary (+ common UCSC aliases). Unknown builds are left unset so
 # nf-core surfaces its own "specify --read_length or --macs_gsize" guidance rather than a wrong size.
+# nf-core/smrnaseq quantifies against miRBase, which is organised by 3-letter species code rather
+# than by genome build. The study already declares a reference build, so it can answer this.
+_MIRBASE_SPECIES_BY_GENOME: dict[str, str] = {
+    "GRCh38": "hsa",
+    "GRCh37": "hsa",
+    "hg38": "hsa",
+    "hg19": "hsa",
+    "T2T-CHM13": "hsa",
+    "GRCm39": "mmu",
+    "GRCm38": "mmu",
+    "mm10": "mmu",
+    "mm39": "mmu",
+    "Rnor_6.0": "rno",
+    "mRatBN7.2": "rno",
+    "rn6": "rno",
+    "GRCz11": "dre",
+    "danRer11": "dre",
+    "BDGP6": "dme",
+    "dm6": "dme",
+    "WBcel235": "cel",
+    "ce11": "cel",
+}
+
+# miRBase's current release, which is what a real run must quantify against. smrnaseq 2.4.1 defaults
+# these to a handful of sequences from the nf-core CI test dataset (nextflow.config lines 20-21).
+# Its own usage docs claim the defaults are already these URLs; they are not. Left on the test
+# reference a run does not fail, it emits a mirna.tsv that looks exactly like a real one.
+_MIRBASE_MATURE_URL = "https://mirbase.org/download/mature.fa"
+_MIRBASE_HAIRPIN_URL = "https://mirbase.org/download/hairpin.fa"
+
 _MACS_GSIZE_BY_GENOME: dict[str, float] = {
     "GRCh38": 2.7e9,
     "GRCh37": 2.7e9,
@@ -481,6 +511,26 @@ class PipelineRunService:
                 gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
                 if gsize is not None:
                     merged_params["macs_gsize"] = gsize
+
+        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
+        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
+        #
+        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
+        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
+        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
+        #    without it there is no miRNA annotation at all.
+        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
+        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
+        #    kit, which is always the case for somebody else's deposited data.
+        #
+        # All three are defaults, never policy: anything the scientist stated wins.
+        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
+            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
+            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
+            merged_params.setdefault("three_prime_adapter", "auto-detect")
+            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
+            if species is not None:
+                merged_params.setdefault("mirtrace_species", species)
 
         # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
         # is still free to do so. Deliberately BEFORE the run row, the sample
