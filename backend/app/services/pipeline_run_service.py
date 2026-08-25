@@ -57,6 +57,25 @@ _MIRBASE_SPECIES_BY_GENOME: dict[str, str] = {
     "ce11": "cel",
 }
 
+# miRBase organises everything by species, and a paper states its organism far more reliably than
+# its reference build: the heatstroke study this was found on (GSE327014) names no genome anywhere.
+_MIRBASE_SPECIES_BY_ORGANISM: dict[str, str] = {
+    "homo sapiens": "hsa",
+    "human": "hsa",
+    "mus musculus": "mmu",
+    "mouse": "mmu",
+    "rattus norvegicus": "rno",
+    "rat": "rno",
+    "danio rerio": "dre",
+    "zebrafish": "dre",
+    "drosophila melanogaster": "dme",
+    "caenorhabditis elegans": "cel",
+    "gallus gallus": "gga",
+    "sus scrofa": "ssc",
+    "bos taurus": "bta",
+    "arabidopsis thaliana": "ath",
+}
+
 # miRBase's current release, which is what a real run must quantify against. smrnaseq 2.4.1 defaults
 # these to a handful of sequences from the nf-core CI test dataset (nextflow.config lines 20-21).
 # Its own usage docs claim the defaults are already these URLs; they are not. Left on the test
@@ -528,7 +547,19 @@ class PipelineRunService:
             merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
             merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
             merged_params.setdefault("three_prime_adapter", "auto-detect")
+            # The genome is the more specific statement and the one the reads are aligned against,
+            # so it wins; the samples' organism is the fallback, and it is the one that actually
+            # answers for a paper that never named a build. Neither known means the parameter stays
+            # unset: a wrong species quantifies against the wrong miRBase and still produces a
+            # plausible-looking table.
             species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
+            if species is None:
+                organisms = {(s.organism or "").strip().lower() for s in samples}
+                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
+                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
+                # can be pointed at, and picking one of two would be a guess.
+                if len(codes) == 1:
+                    species = codes.pop()
             if species is not None:
                 merged_params.setdefault("mirtrace_species", species)
 

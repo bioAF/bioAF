@@ -675,3 +675,85 @@ async def test_launch_run_rnaseq_gains_no_small_rna_parameters(
     params = r.json()["parameters"]
     for key in ("mature", "hairpin", "mirtrace_species", "three_prime_adapter"):
         assert key not in params, key
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_reads_the_species_off_the_samples_when_no_genome_is_known(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """miRBase is organised by SPECIES, not by genome build, and a paper states its organism far
+    more reliably than its reference build.
+
+    Found on the demo carrying a real study to a verdict: the heatstroke paper
+    (10.3389/fphar.2026.1718110, GSE327014) names no genome anywhere, so the extractor recorded
+    reference_genome=None, and deriving the species from the genome alone left mirtrace_species
+    unset. Unset, smrnaseq downloads no per-species miRBase GFF3 and there is no miRNA annotation
+    at all. The organism was known the whole time."""
+    from sqlalchemy import update
+
+    from app.models.sample import Sample
+
+    await _install_smrnaseq(session, admin_user)
+    await session.execute(update(Sample).where(Sample.id.in_([s.id for s in samples])).values(organism="Mus musculus"))
+    await session.commit()
+
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome=None)
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["mirtrace_species"] == "mmu"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_prefers_the_genome_over_the_sample_organism(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """The genome is the more specific statement and the one the run is actually aligned against,
+    so it wins when both are present."""
+    from sqlalchemy import update
+
+    from app.models.sample import Sample
+
+    await _install_smrnaseq(session, admin_user)
+    await session.execute(update(Sample).where(Sample.id.in_([s.id for s in samples])).values(organism="Mus musculus"))
+    await session.commit()
+
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome="GRCh38")
+    assert r.json()["parameters"]["mirtrace_species"] == "hsa"
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_says_nothing_about_a_species_it_cannot_name(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """An organism bioAF has no miRBase code for must leave the parameter unset rather than guess.
+    A wrong species quantifies against the wrong miRBase and still produces a plausible table."""
+    from sqlalchemy import update
+
+    from app.models.sample import Sample
+
+    await _install_smrnaseq(session, admin_user)
+    await session.execute(
+        update(Sample).where(Sample.id.in_([s.id for s in samples])).values(organism="Chlorocebus sabaeus")
+    )
+    await session.commit()
+
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome=None)
+    assert "mirtrace_species" not in r.json()["parameters"]
+
+
+@pytest.mark.asyncio
+async def test_launch_run_smrnaseq_refuses_to_pick_between_two_organisms(
+    client, admin_token, session, admin_user, experiment, samples, initialized_catalog
+):
+    """A mixed-organism experiment is not something smrnaseq can be pointed at, and choosing one of
+    the two would be a guess that still produces a table."""
+    from sqlalchemy import update
+
+    from app.models.sample import Sample
+
+    await _install_smrnaseq(session, admin_user)
+    await session.execute(update(Sample).where(Sample.id == samples[0].id).values(organism="Mus musculus"))
+    await session.execute(update(Sample).where(Sample.id == samples[1].id).values(organism="Homo sapiens"))
+    await session.commit()
+
+    r = await _launch_smrnaseq(client, admin_token, experiment, samples, genome=None)
+    assert "mirtrace_species" not in r.json()["parameters"]
