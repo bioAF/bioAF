@@ -38,6 +38,13 @@ _PVAL_COLS = ["pvalue", "p.value", "pval", "p_val"]
 # aliases come before Ensembl aliases: our nf-core/salmon output is symbol-keyed, and a table that
 # carries both (e.g. MDPI-SI DESeq2 exports with GeneSymbol + ENSG) should match on the symbol.
 _ID_COLS = [
+    # miRNA identifiers first: a column literally named `mirna` is a stronger declaration than the
+    # generic `id`/`feature`, and small-RNA tables often carry both.
+    "mirna",
+    "mirna_id",
+    "mir",
+    "mature_mirna",
+    "mirna_name",
     "gene",
     "gene_id",
     "geneid",
@@ -73,7 +80,7 @@ class FindingEntity:
 @dataclass
 class FindingSet:
     kind: str  # "gene" | "interval"
-    namespace: str  # "symbol" | "ensembl_gene" | "entrez" | "interval" | "unknown"
+    namespace: str  # "symbol" | "ensembl_gene" | "entrez" | "mirbase" | "interval" | "unknown"
     entities: list[FindingEntity] = field(default_factory=list)
     n_tested: int = 0
     parse_notes: list[str] = field(default_factory=list)
@@ -134,16 +141,27 @@ def _to_float(v: str) -> float | None:
         return None
 
 
+# miRBase names a mature miRNA as <3-4 letter species>-<miR|mir|let>-<number>, optionally with an
+# arm suffix (-5p / -3p) that makes it a different molecule from its partner. They are NOT gene
+# symbols: a paper depositing HGNC symbols (MIR21) and a run reporting miRBase ids (hsa-miR-21-5p)
+# share no identifier at all, so calling both "symbol" turns an unmapped namespace into a false
+# divergence. Named honestly, the concordance service's existing namespace guard refuses instead.
+_MIRBASE_RE = re.compile(r"[a-z]{3,4}-(mir|let)-?\d", re.IGNORECASE)
+
+
 def _detect_namespace(ids: list[str]) -> str:
     sample = [i for i in ids[:200] if i]
     if not sample:
         return "unknown"
     ens = sum(1 for i in sample if re.match(r"ENS[A-Z]*G\d{6,}", i))
     entrez = sum(1 for i in sample if re.fullmatch(r"\d+", i))
+    mirbase = sum(1 for i in sample if _MIRBASE_RE.match(i))
     if ens > len(sample) * 0.5:
         return "ensembl_gene"
     if entrez > len(sample) * 0.5:
         return "entrez"
+    if mirbase > len(sample) * 0.5:
+        return "mirbase"
     return "symbol"
 
 

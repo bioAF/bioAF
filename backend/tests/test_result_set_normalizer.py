@@ -144,3 +144,46 @@ def test_to_dict_shape():
     d = fs.to_dict()
     assert d["n_up"] == 1 and d["n_down"] == 1 and d["n_sig"] == 2
     assert d["namespace"] == "symbol"
+
+
+# ---- miRNA identifiers (plan_1 step 2, nf-core/smrnaseq) ----
+
+# A deposited small-RNA DESeq2 table. The id column is NOT first: mirtop-derived tables commonly
+# carry baseMean ahead of it, and the column-0 fallback would take baseMean as the identifier and
+# produce a finding set of numbers.
+_MIRNA_CSV = (
+    "baseMean,miRNA,log2FoldChange,lfcSE,pvalue,padj\n"
+    "24266,hsa-miR-21-5p,5.75,0.09,0,0.0\n"  # up, significant
+    "5000,hsa-let-7a-5p,0.10,0.05,0.2,0.30\n"  # excluded
+    "1200,hsa-miR-155-3p,-2.40,0.10,0,0.001\n"  # down, significant
+)
+
+
+def test_a_mirna_table_is_keyed_by_its_declared_id_column():
+    """`miRNA` is recognised by declaration. Falling back to column 0 here would key the finding set
+    on baseMean, which parses, compares, and is meaningless."""
+    fs = normalize_gene_table(_MIRNA_CSV, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.directions() == {"hsa-miR-21-5p": "up", "hsa-miR-155-3p": "down"}
+    assert fs.n_tested == 3
+
+
+def test_mirna_identifiers_survive_normalization_unchanged():
+    """miRBase ids carry meaning in their case and suffix: -5p and -3p are the two arms of the same
+    hairpin and are different molecules. Nothing may upper-case or truncate them."""
+    fs = normalize_gene_table(_MIRNA_CSV, lfc_threshold=1.0, padj_threshold=0.05)
+    assert "hsa-miR-21-5p" in fs.directions()
+    assert "HSA-MIR-21-5P" not in fs.directions()
+
+
+def test_a_mirna_table_declares_the_mirbase_namespace():
+    """Not `symbol`. A paper that deposits HGNC symbols (MIR21) and a run that reports miRBase ids
+    (hsa-miR-21-5p) share no identifier, and comparing them without saying so turns an unmapped
+    namespace into a false divergence. The concordance service already refuses across namespaces."""
+    fs = normalize_gene_table(_MIRNA_CSV, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.namespace == "mirbase"
+
+
+def test_gene_symbol_tables_are_still_symbols():
+    """Regression: the miRBase pattern must not claim ordinary gene symbols."""
+    assert normalize_gene_table(_DESEQ2_CSV, lfc_threshold=1.0, padj_threshold=0.05).namespace == "symbol"
+    assert normalize_gene_table(_ENSEMBL_TSV, lfc_threshold=1.0, padj_threshold=0.05).namespace == "ensembl_gene"
