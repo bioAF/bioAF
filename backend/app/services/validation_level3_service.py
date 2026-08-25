@@ -138,6 +138,26 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         multiple=True,
         transform="pseudobulk",
     ),
+    # nf-core/smrnaseq needs no new notebook: `mirna.tsv` is a `miRNA` column followed by
+    # per-sample integer counts, which is the shape de_bulk_deseq2 already consumes. Nothing in that
+    # notebook is RNA-specific; it reads `counts_path`, takes `id_column`, and selects the named
+    # sample columns.
+    #
+    # Verified against the source, not the output docs: `DATATABLE_MERGE` publishes into
+    # `mirna_quant/mirtop/` with `pattern: "*.tsv"` (conf/modules.config @ 2.4.1, lines 485-491) and
+    # emits exactly `path "mirna.tsv"` (modules/local/datatable_merge/main.nf), written by
+    # `bin/collapse_mirtop.r` as `mirna = counts[, lapply(.SD, sum), by = miRNA]` with
+    # `sep = "\t", row.names = FALSE`.
+    #
+    # The filename must be matched EXACTLY: two sibling processes publish into the same directory,
+    # `PIVOT_WIDER` (`*joined_samples_mirtop.tsv`, long-form input to the merge) and `MIRTOP_EXPORT`
+    # (`*_rawData.tsv`, per-sample). Neither has samples for columns, so a "*.tsv under mirtop" rule
+    # would hand DESeq2 a table it would happily analyse and get wrong.
+    ("nf-core/smrnaseq", "gene"): Level3Wiring(
+        template_notebook_path="notebooks/de_bulk_deseq2.ipynb",
+        input_rules=(InputRule(filename_exact="mirna.tsv", path_segment="mirtop"),),
+        id_column="miRNA",
+    ),
     ("nf-core/atacseq", "interval"): Level3Wiring(
         template_notebook_path="notebooks/da_peaks_deseq2.ipynb",
         input_rules=_PEAK_INPUT_RULES,

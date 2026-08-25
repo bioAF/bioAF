@@ -97,3 +97,37 @@ def test_the_proven_assays_map_exactly_as_before():
     assert versions["nf-core/scrnaseq"] == "2.7.1"
     assert versions["nf-core/chipseq"] == "2.1.0"
     assert versions["nf-core/atacseq"] == "2.1.2"
+
+
+# ---- small RNA (nf-core/smrnaseq) ----
+
+
+def test_a_small_rna_paper_maps_to_smrnaseq():
+    """Small-RNA regulation is ordinary lab work, and until now every one of these papers ended at
+    not_reproducible before any compute."""
+    for assay in (
+        "small RNA-seq",
+        "smRNA-seq",
+        "microRNA sequencing",
+        "miRNA-seq",
+        "small non-coding RNA profiling",
+        "miR-seq of plasma exosomes",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/smrnaseq", assay
+
+
+def test_the_small_rna_markers_do_not_swallow_bulk_rnaseq():
+    """ "small RNA-seq" contains "rna-seq". The route order makes smrnaseq win that string; this is
+    the other half of the same guard, proving it does not win strings it has no claim on."""
+    for assay in (
+        "bulk RNA-seq",
+        "RNA-seq",
+        "mRNA-seq",
+        "total RNA-seq transcriptome profiling",
+        "poly(A) RNA-seq",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/rnaseq", assay
+
+
+def test_a_single_cell_paper_still_beats_the_small_rna_markers():
+    assert map_method("single-cell RNA-seq").pipeline_key == "nf-core/scrnaseq"

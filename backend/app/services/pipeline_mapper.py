@@ -75,6 +75,30 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "h3k",
         ),
     ),
+    # Small RNA before bulk: "small RNA-seq" contains "rna-seq". Markers name the molecule
+    # (mirna/microrna) or qualify the RNA (small/smrna), never bare "rna", which would swallow the
+    # whole transcriptomics literature.
+    #
+    # Route B (a full finding-tier verdict) because nf-core/smrnaseq already emits the matrix the
+    # bulk DESeq2 notebook consumes: DATATABLE_MERGE publishes `mirna.tsv` into
+    # `mirna_quant/mirtop/` (conf/modules.config @ 2.4.1, lines 485-491), written by
+    # bin/collapse_mirtop.r as `mirna = counts[, lapply(.SD, sum), by = miRNA]` with
+    # `sep = "\t", row.names = FALSE`, so the shape is a `miRNA` column followed by per-sample
+    # integer counts. Nothing in the DE notebook is RNA-specific.
+    AssayRoute(
+        pipeline_key="nf-core/smrnaseq",
+        pipeline_version="2.4.1",
+        markers=(
+            "small rna",
+            "small-rna",
+            "smrna",
+            "sncrna",
+            "small non-coding",
+            "mirna",
+            "microrna",
+            "mir-seq",
+        ),
+    ),
     AssayRoute(
         pipeline_key="nf-core/rnaseq",
         pipeline_version="3.14.0",

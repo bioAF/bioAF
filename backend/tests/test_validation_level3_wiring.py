@@ -746,3 +746,100 @@ async def test_scrnaseq_supported_kinds_are_declared():
     assert supported_finding_kinds("nf-core/atacseq") == ["interval"]
     assert supported_finding_kinds("nf-core/fetchngs") == []
     assert supported_finding_kinds(None) == []
+
+
+# ---- nf-core/smrnaseq (plan_1 step 2): the same DESeq2 notebook, a different matrix ----
+
+# Everything nf-core/smrnaseq 2.4.1 publishes into `mirna_quant/mirtop/`. Only the first is a
+# features x samples matrix; the other two are the long-form and per-sample intermediates that
+# produced it, and a rule matching "*.tsv under mirtop" would take whichever the database yielded.
+_MIRNA_MATRIX = "mirna.tsv"
+_MIRTOP_JOINED = "joined_samples_mirtop.tsv"
+_MIRTOP_RAW = "SRX1_rawData.tsv"
+
+
+@pytest_asyncio.fixture
+async def smrna_run(session, admin_user):
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/smrnaseq",
+        pipeline_version="2.4.1",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_reproduces_a_gene_finding_from_the_mirtop_matrix(session, admin_user, smrna_run, de_template):
+    """smrnaseq needs no new notebook: `mirna.tsv` is a `miRNA` column plus per-sample integer
+    counts, which is exactly what the bulk DESeq2 template already consumes. The id column is the
+    only thing that differs, and it is declared rather than left to the column-0 fallback."""
+    f = await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRNA_MATRIX}", _MIRNA_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["template_id"] == de_template.id
+    assert level3["input_file_ids"] == [f.id]
+    assert level3["kind"] == "gene"
+    params = level3["parameters"]
+    assert params["counts_path"].endswith(_MIRNA_MATRIX)
+    assert params["id_column"] == "miRNA"
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_picks_the_merged_matrix_and_none_of_its_siblings(session, admin_user, smrna_run, de_template):
+    """Three .tsv files land in the same published directory. Two of them are intermediates whose
+    columns are not samples, so feeding either to DESeq2 would produce a confident wrong answer."""
+    joined = await _file_at(
+        session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_JOINED}", _MIRTOP_JOINED
+    )
+    raw = await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_RAW}", _MIRTOP_RAW)
+    matrix = await _file_at(
+        session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRNA_MATRIX}", _MIRNA_MATRIX
+    )
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [matrix.id]
+    assert joined.id not in level3["input_file_ids"]
+    assert raw.id not in level3["input_file_ids"]
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_declines_when_the_run_published_no_mirtop_matrix(session, admin_user, smrna_run, de_template):
+    """A run that produced only intermediates has nothing to reproduce from, and says so rather
+    than degrading to whichever table it can find."""
+    await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_JOINED}", _MIRTOP_JOINED)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    decision = await resolve_level3(session, study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "no_input_file"
+    assert decision.reason is not None and "smrnaseq" in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_a_bulk_rnaseq_matrix_does_not_satisfy_the_smrnaseq_route(session, admin_user, smrna_run, de_template):
+    """`smrnaseq` contains `rnaseq`, the same trap scrnaseq set. A salmon gene-count matrix is not
+    a miRNA matrix and must not be silently accepted as one."""
+    await _file_at(session, admin_user, smrna_run, f"gs://b/run/star_salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    decision = await resolve_level3(session, study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "no_input_file"
+
+
+def test_smrnaseq_offers_a_gene_finding_set_at_the_gate():
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assert supported_finding_kinds("nf-core/smrnaseq") == ["gene"]
