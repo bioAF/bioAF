@@ -14,6 +14,7 @@ import {
   type DifferentialDesign,
   type FindingClaim,
 } from "@/components/validation/Level3Gate";
+import { PipelineInstallNotice } from "@/components/validation/PipelineInstallNotice";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
 import { SamplesMismatchNotice } from "@/components/validation/SamplesMismatchNotice";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
@@ -44,6 +45,11 @@ interface ReproductionPlanView {
   // The tools the paper's own methods named, and which finding kinds this pipeline can reproduce.
   tools?: string[] | null;
   supported_finding_kinds?: string[] | null;
+  // Whether this bioAF actually holds the plan's pipeline, and the bare registry name to install it
+  // by. Computed server-side per request: a pipeline can be installed between writing a plan and
+  // approving it.
+  pipeline_installed?: boolean | null;
+  pipeline_registry_name?: string | null;
 }
 
 interface ValidationStudy {
@@ -245,6 +251,18 @@ export default function ValidationStudyPage() {
               studyId={study.id}
               failureReason={study.failure_reason}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
+        {study.state === "plan_ready" && (
+          <section className="mb-6">
+            <PipelineInstallNotice
+              pipelineKey={plan?.pipeline_key}
+              pipelineVersion={plan?.pipeline_version}
+              registryName={plan?.pipeline_registry_name}
+              installed={plan?.pipeline_installed}
+              onInstalled={refresh}
             />
           </section>
         )}
