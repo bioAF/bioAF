@@ -367,6 +367,13 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     # older names + the general-stats scan. Only the IP samples appear here (controls have no peaks).
     # chipseq names the section `multiqc_peak_count-plot`; atacseq prefixes it `_mlib_` (merged library),
     # verified against real run-22 (chipseq) + run-24 (atacseq) output. Accept both.
+    #
+    # nf-core/cutandrun reports the same two metrics under its own custom-content ids, declared in
+    # assets/multiqc/{peak_counts,peak_counts_consensus,frip_score}_header.txt @ 3.2.2. The
+    # per-sample count is `primary_peak_counts` and is preferred; `consensus_peak_counts` is the
+    # across-replicate figure, a different question, taken only when it is all the run reported.
+    # Both forms of the key are accepted because the `-plot` suffix is derived from the rule the
+    # real chipseq fixture proves, not yet observed in a captured cutandrun report.
     peaks = _plot_values(
         _find_section(
             raw,
@@ -374,6 +381,10 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             "multiqc_mlib_peak_count-plot",
             "multiqc_macs2_peak_count",
             "macs2_peak_count",
+            "multiqc_primary_peak_counts-plot",
+            "multiqc_primary_peak_counts",
+            "multiqc_consensus_peak_counts-plot",
+            "multiqc_consensus_peak_counts",
         )
     )
     if not peaks:
@@ -383,7 +394,13 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
 
     frip = _plot_values(
         _find_section(
-            raw, "multiqc_frip_score-plot", "multiqc_mlib_frip_score-plot", "multiqc_frip_score", "frip_score"
+            raw,
+            "multiqc_frip_score-plot",
+            "multiqc_mlib_frip_score-plot",
+            "multiqc_frip_score",
+            "frip_score",
+            "multiqc_primary_frip_score-plot",
+            "multiqc_primary_frip_score",
         )
     )
     if not frip:

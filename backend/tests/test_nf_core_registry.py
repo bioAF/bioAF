@@ -692,3 +692,36 @@ async def test_api_registry_install_audit_log_attributed_to_user(
     )
     assert len(entries) == 1
     assert entries[0].user_id == admin_user.id
+
+
+@pytest.mark.asyncio
+async def test_install_cutandrun_uses_the_peak_calling_qc_template(session, admin_user):
+    """CUT&RUN is a peak-calling assay and its dashboard should read like one. Left on `generic` it
+    would show read depth and mapping and nothing else, because the generic MultiQC engine carries
+    no peak-calling module and therefore cannot emit peak_count at all. peak_count is the single
+    finding-tier scalar, so without this a cutandrun study can never reach `validated`."""
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+    from app.services.nf_core_registry_service import NfCoreRegistryService
+
+    session.add(
+        NfCoreRegistryPipeline(
+            name="cutandrun",
+            full_name="nf-core/cutandrun",
+            description="Analysis pipeline for CUT&RUN and CUT&Tag experiments",
+            releases_json=[{"tag_name": "3.2.2"}],
+            latest_release="3.2.2",
+        )
+    )
+    await session.flush()
+
+    with patch(
+        "app.services.pipeline_catalog_service.PipelineCatalogService.fetch_pipeline_schema",
+        new_callable=AsyncMock,
+        return_value={},
+    ):
+        entry = await NfCoreRegistryService.install_pipeline(
+            session, admin_user.organization_id, admin_user.id, "cutandrun", "3.2.2"
+        )
+        await session.commit()
+
+    assert entry.qc_template == "chipseq"

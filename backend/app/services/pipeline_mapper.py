@@ -58,6 +58,37 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "chromatin accessibility",
         ),
     ),
+    # CUT&RUN and CUT&Tag before ChIP-seq, and this ordering is load-bearing rather than tidy:
+    # these assays target the same histone marks, so a realistic CUT&RUN assay string ("CUT&RUN for
+    # H3K27me3") also carries the chipseq marker "h3k". Declared below chipseq, every one of these
+    # papers would silently run the wrong pipeline.
+    #
+    # Route A (Level-2 only) and deliberately so. Verified from the source, not the docs:
+    # cutandrun 3.2.2 has no featureCounts, no DESeq2 and no differential module anywhere in
+    # conf/modules.config; its consensus output is BED-shaped (`.consensus.peaks`,
+    # `.consensus.peak_counts`, lines 747-768) and CONSENSUS_PEAK_COUNTS is a PEAK_QC step, not a
+    # peaks x samples matrix. So there is no Level-3 route and `_WIRING` has no entry, which the
+    # C1 gate states rather than offering a control that leads nowhere. A CUT&RUN paper's headline
+    # claim IS a peak count, and peak_count is the one finding-tier scalar, so a Level-2 verdict
+    # here can still reach `validated`.
+    AssayRoute(
+        pipeline_key="nf-core/cutandrun",
+        pipeline_version="3.2.2",
+        markers=(
+            "cut&run",
+            "cut & run",
+            "cut-and-run",
+            "cut and run",
+            "cutandrun",
+            "cut&tag",
+            "cut & tag",
+            "cut-and-tag",
+            "cut and tag",
+            "cutandtag",
+            "cuttag",
+            "cut run",
+        ),
+    ),
     # Kept specific on purpose: a vague "bespoke ChIP variant" must stay unmappable
     # (not_reproducible), so bare "chip" is NOT a marker. macs2 is excluded because ATAC-seq also
     # uses it (it would mis-route ATAC papers to chipseq).

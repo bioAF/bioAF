@@ -131,3 +131,53 @@ def test_the_small_rna_markers_do_not_swallow_bulk_rnaseq():
 
 def test_a_single_cell_paper_still_beats_the_small_rna_markers():
     assert map_method("single-cell RNA-seq").pipeline_key == "nf-core/scrnaseq"
+
+
+# ---- CUT&RUN / CUT&Tag (nf-core/cutandrun) ----
+
+
+def test_cutandrun_and_cuttag_papers_both_map_to_cutandrun():
+    """One pipeline covers both assays. CUT&Tag is a tagmentation variant of CUT&RUN and nf-core
+    runs them through the same workflow."""
+    for assay in (
+        "CUT&RUN",
+        "CUT & RUN",
+        "CUT-and-RUN",
+        "cutandrun",
+        "CUT&Tag",
+        "CUT and Tag",
+        "cuttag",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/cutandrun", assay
+
+
+def test_a_cutandrun_paper_naming_a_histone_mark_does_not_map_to_chipseq():
+    """The realistic assay string. CUT&RUN targets the same histone marks ChIP-seq does, so almost
+    every one of these papers carries a chipseq marker too, and whichever route is declared first
+    wins. Declared below chipseq, every CUT&RUN paper would silently run the wrong pipeline."""
+    for assay in (
+        "CUT&RUN for H3K27me3",
+        "CUT&Tag targeting H3K4me3 in mouse ESCs",
+        "CUT&RUN chromatin profiling of histone modifications",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/cutandrun", assay
+
+
+def test_a_chipseq_paper_still_maps_to_chipseq():
+    """The other half of that guard: the cutandrun markers must claim only their own assay."""
+    for assay in (
+        "ChIP-seq",
+        "H3K27ac chromatin immunoprecipitation",
+        "ChIP-seq of histone modifications",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/chipseq", assay
+
+
+def test_cutandrun_offers_no_finding_set_at_the_gate():
+    """cutandrun emits no features x samples matrix: its consensus output is BED-shaped and its
+    peak counts are a PEAK_QC step, not a count matrix (conf/modules.config @ 3.2.2). So there is
+    no Level-3 route, and the honest state is a gate that offers no finding-set control and says
+    why, rather than one that offers a control leading nowhere."""
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assert supported_finding_kinds("nf-core/cutandrun") == []
