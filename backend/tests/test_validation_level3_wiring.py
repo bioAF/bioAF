@@ -737,6 +737,63 @@ async def test_scrnaseq_prefers_cellbender_over_plain_filtered(session, admin_us
 
 
 @pytest.mark.asyncio
+async def test_scrnaseq_asks_the_matrix_for_the_namespace_the_paper_deposited(
+    session, admin_user, scrna_run, pseudobulk_template
+):
+    """nf-core/scrnaseq's h5ad carries BOTH namespaces (Ensembl as the rownames, symbols in
+    `rowData$gene_symbol`), so which one the pseudobulk matrix should be keyed by is knowable: it is
+    the one the paper's confirmed finding set uses. Left unsent, the template's own default decided,
+    and a symbol-keyed paper met an Ensembl-keyed reproduction -- zero overlap, refused by the
+    concordance's namespace guard as `not_computed`, for a purely technical reason."""
+    await _h5ads(session, admin_user, scrna_run, ["SRX1_filtered_matrix.h5ad", "SRX2_filtered_matrix.h5ad"])
+    study, plan = await _scrna_study(session, admin_user, scrna_run)  # _CLAIM is namespace "symbol"
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["parameters"]["gene_id_namespace"] == "symbol"
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_asks_for_ensembl_when_the_paper_deposited_ensembl(
+    session, admin_user, scrna_run, pseudobulk_template
+):
+    """The FindingSet vocabulary spells it `ensembl_gene`; the template's parameter spells it
+    `ensembl`. Translating between them is this wiring's job, not the scientist's."""
+    claim = {
+        **_CLAIM,
+        "namespace": "ensembl_gene",
+        "finding_set": {
+            "kind": "gene",
+            "namespace": "ensembl_gene",
+            "n_sig": 1,
+            "entities": [{"id": "ENSG00000121410", "direction": "up"}],
+        },
+    }
+    await _h5ads(session, admin_user, scrna_run, ["SRX1_filtered_matrix.h5ad", "SRX2_filtered_matrix.h5ad"])
+    study, plan = await _study_with_plan(session, admin_user, scrna_run, claim=claim, pipeline_key="nf-core/scrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["parameters"]["gene_id_namespace"] == "ensembl"
+
+
+@pytest.mark.asyncio
+async def test_bulk_rnaseq_is_not_sent_a_namespace_it_does_not_declare(session, admin_user, analysis_run, de_template):
+    """The injector REBUILDS the parameters cell from the template's declared dict merged with the
+    overrides, so a parameter the bulk template never declares would be injected into an R cell that
+    does not read it. Only the route whose template declares it gets it."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert "gene_id_namespace" not in level3["parameters"]
+
+
+@pytest.mark.asyncio
 async def test_scrnaseq_supported_kinds_are_declared():
     from app.services.validation_level3_service import supported_finding_kinds
 

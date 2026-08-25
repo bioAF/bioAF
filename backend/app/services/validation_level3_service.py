@@ -83,6 +83,11 @@ class Level3Wiring:
     # Recorded on the bundle so a verdict can say how its matrix was built.
     transform: str | None = None
     id_column: str | None = None
+    # The template parameter that receives the gene-id namespace the pseudobulk matrix should be
+    # keyed by. Only nf-core/scrnaseq has the choice: its h5ad carries BOTH namespaces, so which one
+    # to emit is decided per study, from the paper. Every other route's matrix has one id column and
+    # no choice to make, and their templates do not declare the parameter.
+    namespace_parameter: str | None = None
 
 
 _SALMON_GENE_COUNTS = "salmon.merged.gene_counts.tsv"
@@ -137,6 +142,7 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         path_parameter="counts_paths",
         multiple=True,
         transform="pseudobulk",
+        namespace_parameter="gene_id_namespace",
     ),
     # A microbiome finding is "these taxa changed", which is an id with a direction and a
     # significance: the same comparison family a DEG list is, so E6 needs no new code and the kind
@@ -189,6 +195,23 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         input_rules=_PEAK_INPUT_RULES,
     ),
 }
+
+
+# FindingSet spells the namespaces one way and the pseudobulk template spells them another, because
+# one is a taxonomy over deposited tables and the other is a switch between two columns of an h5ad.
+_PAPER_NAMESPACE_TO_MATRIX = {"symbol": "symbol", "ensembl_gene": "ensembl"}
+
+
+def matrix_namespace_for(paper_namespace: str | None) -> str:
+    """Which namespace to key the reproduction matrix by, given the paper's confirmed finding set.
+
+    nf-core/scrnaseq's h5ad carries exactly two: Ensembl ids as the matrix rownames and symbols in
+    ``rowData$gene_symbol``. A paper in a THIRD namespace (entrez, miRBase) can be served by neither,
+    and guessing a mapping here would manufacture agreement out of an id translation nobody checked;
+    symbols are the honest attempt, and the concordance service's namespace guard is what refuses the
+    comparison when the attempt does not match.
+    """
+    return _PAPER_NAMESPACE_TO_MATRIX.get((paper_namespace or "").strip().lower(), "symbol")
 
 
 def supported_finding_kinds(pipeline_key: str | None) -> list[str]:
@@ -316,6 +339,11 @@ async def resolve_level3(
     }
     if wiring.id_column:
         parameters["id_column"] = wiring.id_column
+    # Ask the matrix for the namespace the PAPER used. Left unsent, the template's own default
+    # decided, so a symbol-keyed paper met an Ensembl-keyed reproduction: zero overlap, refused by
+    # the concordance's namespace guard, for a reason that has nothing to do with the science.
+    if wiring.namespace_parameter:
+        parameters[wiring.namespace_parameter] = matrix_namespace_for(finding_set.get("namespace"))
 
     # Matched-pairs / blocked design (ADR-069 item #2): flatten the per-sample subject map to a comma
     # list ALIGNED to the notebook's sample order (test then reference) so the DE template can build

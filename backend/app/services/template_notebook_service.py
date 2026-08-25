@@ -150,9 +150,11 @@ BUILTIN_TEMPLATES = [
             "block_labels": "",
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
-            # scanpy's `read_10x_mtx` defaults to var_names='gene_symbols', so the pipeline's h5ad
-            # rownames are SYMBOLS and rowData$gene_ids holds Ensembl. Symbols match the paper-side
-            # normalizer's preference order and the salmon path; ensembl is the fallback.
+            # Which namespace the pseudobulk matrix is keyed by. `mtx_to_h5ad_star.py` moves the
+            # ENSEMBL ids INTO the h5ad's index and leaves the symbols in var["gene_symbol"], so this
+            # is not the scanpy default it looks like. The Level-3 wiring overrides this per study
+            # with the namespace the paper's own finding set uses; the default only covers a
+            # hand-run of the template, and symbols are what papers deposit.
             "gene_id_namespace": "symbol",
         },
     },
