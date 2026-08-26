@@ -1013,3 +1013,84 @@ def test_the_two_chemistry_maps_do_not_drift():
         f"only in frontend={set(frontend) - set(_CHEMISTRY_TO_PROTOCOL)}, "
         f"only in backend={set(_CHEMISTRY_TO_PROTOCOL) - set(frontend)}"
     )
+
+
+# --- iGenomes vs the reference we actually supply ------------------------------------------------
+#
+# Confirmed from Nextflow's OWN resolved params on demo run 42, which failed every STAR_ALIGN in
+# ~25 seconds with no STAR_GENOMEGENERATE anywhere in the run:
+#
+#   genome          : GRCh38
+#   fasta           : ...Ensembl release-112...Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz
+#   gtf             : ...Ensembl release-112...Homo_sapiens.GRCh38.112.gtf.gz
+#   star_index      : s3://ngi-igenomes/igenomes//Homo_sapiens/NCBI/GRCh38/Sequence/STARIndex/
+#   igenomes_ignore : False
+#
+# `--genome` does not override an explicit --fasta/--gtf. It quietly supplies every OTHER reference
+# attribute, and `main.nf` assigns `params.star_index = getGenomeAttribute('star')`. So the run
+# aligned against a years-old NCBI-built STAR index while its fasta and GTF were Ensembl: STAR
+# rejects an index from an incompatible version immediately, which is the 25-second signature.
+
+
+@pytest.mark.asyncio
+async def test_supplying_our_own_reference_switches_igenomes_off(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """A pipeline bioAF hands explicit fasta/gtf must not also inherit iGenomes' index for the same
+    assembly name: they are different builds (Ensembl vs NCBI) and the index silently wins."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/scrnaseq", genome="GRCh38")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert params["igenomes_ignore"] is True
+    assert "homo_sapiens" in params["fasta"]
+
+
+@pytest.mark.asyncio
+async def test_a_genome_driven_pipeline_still_gets_igenomes(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """The guard on the other half. rnaseq, chipseq and atacseq carry no fasta of their own and rely
+    on `--genome` for the whole reference set, so switching iGenomes off there would leave them with
+    no reference at all ("Missing --fasta")."""
+    r = await _launch(client, admin_token, experiment, samples, "nf-core/rnaseq", genome="GRCm39")
+    assert r.status_code == 200, r.text
+    params = r.json()["parameters"]
+    assert params.get("igenomes_ignore") is not True
+    assert params["genome"] == "GRCm39"
+
+
+@pytest.mark.asyncio
+async def test_a_caller_supplied_reference_also_switches_igenomes_off(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """It is the presence of an explicit reference that matters, not who supplied it. A lab passing
+    its own fasta hits the same silent index substitution."""
+    r = await _launch(
+        client,
+        admin_token,
+        experiment,
+        samples,
+        "nf-core/rnaseq",
+        parameters={"fasta": "gs://my-bucket/custom.fa"},
+        genome="GRCh38",
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["igenomes_ignore"] is True
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_igenomes_ignore_is_never_overridden(
+    client, admin_token, experiment, samples, initialized_catalog
+):
+    """Still a default, never a policy."""
+    r = await _launch(
+        client,
+        admin_token,
+        experiment,
+        samples,
+        "nf-core/scrnaseq",
+        parameters={"igenomes_ignore": False},
+        genome="GRCh38",
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["parameters"]["igenomes_ignore"] is False

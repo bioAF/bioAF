@@ -57,6 +57,12 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
         f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "
         "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown.\n\n"
+        "For reference_build, give BOTH the genome assembly and the ANNOTATION the paper aligned "
+        'against, exactly as the paper words it (e.g. "GRCh38 / GENCODE v32", "mm10 / Ensembl 102", '
+        '"CellRanger refdata-gex-GRCh38-2020-A"). The assembly alone is not the reference: two papers '
+        "on the same assembly with different annotation releases do not share a gene set, and that "
+        "difference lands in the differential result we are compared against. Leave it empty if the "
+        "paper does not say.\n\n"
         "Also capture the paper's PRIMARY DIFFERENTIAL DESIGN in differential_design: the contrast(s) it "
         "tests (which condition is compared against which reference), the sample ids belonging to each "
         "group, and the significance thresholds it used (|log2 fold-change| and adjusted p / FDR). This is "
@@ -277,6 +283,12 @@ class ValidationExtractionService:
             # cause (CellRanger vs STARsolo) instead of merely reported.
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
             reference_genome=reference_genome,
+            # The controlled token collapses "GRCh38 / Gencode 29" and "GRCh38 / Ensembl 112" onto
+            # one value, and the ANNOTATION is the half that decides which genes exist and what they
+            # are called. Keep the paper's own words beside it: a DEG concordance can diverge purely
+            # because two correct gene sets came from different annotation releases, and that is an
+            # attribution a verdict should be able to make rather than blame on the science.
+            reference_build=_str_or_none(raw_genome),
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,
             blockers=blockers,

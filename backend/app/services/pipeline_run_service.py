@@ -178,6 +178,45 @@ _CHEMISTRY_TO_PROTOCOL: dict[str, str] = {
 
 class PipelineRunService:
     @staticmethod
+    def _schema_declares(schema: object, name: str) -> bool:
+        """Whether a pipeline's own nextflow_schema declares a parameter, at any nesting."""
+        if not isinstance(schema, dict):
+            return False
+        if name in (schema.get("properties") or {}):
+            return True
+        for group in ((schema.get("$defs") or schema.get("definitions")) or {}).values():
+            if isinstance(group, dict) and name in (group.get("properties") or {}):
+                return True
+        return False
+
+    @staticmethod
+    def _should_ignore_igenomes(pipeline, merged_params: dict) -> bool:
+        """Whether iGenomes must be switched off because this run brings its OWN reference.
+
+        `--genome` does not override `--fasta`/`--gtf`. It supplies every reference attribute the
+        caller did NOT name, and nf-core assigns them in `main.nf`
+        (`params.star_index = getGenomeAttribute('star')`). So a run given an Ensembl fasta and an
+        Ensembl GTF, plus `genome: GRCh38`, silently receives iGenomes' NCBI-built STAR index for a
+        different build of the same assembly name -- and the index is what the aligner actually uses.
+
+        Confirmed on demo run 42: every STAR_ALIGN died in ~25s, no STAR_GENOMEGENERATE ever ran, and
+        Nextflow's own params dump recorded
+        `star_index: s3://ngi-igenomes/igenomes//Homo_sapiens/NCBI/GRCh38/Sequence/STARIndex/`.
+
+        Asked of the pipeline's own schema, never of its name, because passing a parameter a pipeline
+        does not declare is itself a launch failure. A pipeline with no stored schema falls back to
+        whether it is an nf-core pipeline, since the nf-core template always carries this parameter.
+        """
+        if not (merged_params.get("fasta") or merged_params.get("gtf")):
+            # Nothing of ours to protect: rnaseq, chipseq and atacseq rely on --genome for the whole
+            # reference set, and switching iGenomes off would leave them with no reference at all.
+            return False
+        schema = getattr(pipeline, "schema_json", None)
+        if isinstance(schema, dict) and schema:
+            return PipelineRunService._schema_declares(schema, "igenomes_ignore")
+        return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+    @staticmethod
     def _apply_10x_protocol(merged_params: dict, caller_params: dict, samples: list) -> dict:
         """Parse the reads with the chemistry the samples declare, rather than with a constant.
 
@@ -715,6 +754,14 @@ class PipelineRunService:
                 gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
                 if gsize is not None:
                     merged_params["macs_gsize"] = gsize
+
+        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
+        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
+        # caller never having stated it themselves.
+        if "igenomes_ignore" not in data.parameters and PipelineRunService._should_ignore_igenomes(
+            pipeline, merged_params
+        ):
+            merged_params["igenomes_ignore"] = True
 
         # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
         # full key, not a substring: `scrnaseq` contains `rnaseq`.

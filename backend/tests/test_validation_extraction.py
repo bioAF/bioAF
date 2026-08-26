@@ -390,3 +390,45 @@ async def test_extract_still_prefers_the_declared_route(session, admin_user, mon
 
     assert plan.pipeline_key == "nf-core/rnaseq"
     assert plan.pipeline_version == "3.14.0"
+
+
+@pytest.mark.asyncio
+async def test_extract_keeps_the_papers_own_words_for_its_reference(session, admin_user, monkeypatch):
+    """`reference_genome` is a controlled token, so 'GRCh38 / Gencode 29' and 'GRCh38 / Ensembl 112'
+    both collapse to 'GRCh38' -- and the ANNOTATION, which is the half that decides which genes exist
+    and what they are called, is lost.
+
+    That matters twice over. It is a real, attributable source of divergence in a DEG concordance
+    (GENCODE and Ensembl do not carry the same gene set), and it is what tells the launch path
+    whether bioAF is supplying its own reference at all. The column already exists; the extractor
+    read the raw string and then dropped it on the floor."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD.replace('"reference_build": "GRCh37"', '"reference_build": "GRCh38 / Gencode 29"'))
+
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+    await session.commit()
+
+    assert plan.reference_genome == "GRCh38"
+    assert plan.reference_build == "GRCh38 / Gencode 29"
+
+
+@pytest.mark.asyncio
+async def test_extract_leaves_the_raw_build_null_when_the_paper_states_none(session, admin_user, monkeypatch):
+    """A paper that never names a reference must not gain one by inference."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD.replace('"reference_build": "GRCh37"', '"reference_build": ""'))
+
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+    await session.commit()
+
+    assert plan.reference_build is None
+
+
+def test_the_extraction_prompt_asks_for_the_annotation_not_only_the_assembly():
+    """The assembly alone is not the reference. A paper aligned to GRCh38 with GENCODE v32 and one
+    aligned to GRCh38 with Ensembl 112 do not share a gene set, and the difference lands in the DEG
+    list we are scored against, so the prompt has to ask for both."""
+    system, _ = ext.build_extraction_prompt("body")
+    assert "annotation" in system.lower()
