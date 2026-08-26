@@ -446,6 +446,26 @@ async def approve_plan(
     return await _study_response(session, study, org_id)
 
 
+@router.post("/{study_id}/retry", response_model=ValidationStudyResponse)
+async def retry_study(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Retry a study that failed on infrastructure rather than on its paper.
+
+    Gated on ``lit_validation:approve`` rather than ``request`` because it spends compute: a study
+    whose data was already fetched resumes at ``setup`` and relaunches the analysis on the next tick.
+    One with nothing fetched returns to the C1 gate instead, so the re-fetch is approved by a human
+    rather than started by a button.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.retry_study(session, study_id, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
 @router.post("/{study_id}/classify", response_model=ValidationStudyResponse)
 async def classify_study(
     study_id: int,

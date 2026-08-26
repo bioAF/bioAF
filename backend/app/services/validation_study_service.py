@@ -20,6 +20,26 @@ from app.models.validation_study import (
 from app.services.audit_service import log_action
 
 
+async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None) -> bool:
+    """Whether the study's experiment holds a sample with a linked input file.
+
+    The same definition the driver uses for "what becomes the analysis matrix": a sample with no
+    FASTQ is not something the analysis can be relaunched against.
+    """
+    if experiment_id is None:
+        return False
+    from app.models.sample import Sample, sample_files
+
+    row = (
+        await session.execute(
+            select(Sample.id)
+            .join(sample_files, Sample.id == sample_files.c.sample_id)
+            .where(Sample.experiment_id == experiment_id)
+        )
+    ).first()
+    return row is not None
+
+
 class ValidationStudyService:
     @staticmethod
     async def create_study(
@@ -60,6 +80,62 @@ class ValidationStudyService:
             select(ValidationStudy).where(ValidationStudy.organization_id == org_id).order_by(ValidationStudy.id.desc())
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def retry_study(
+        session: AsyncSession,
+        study_id: int,
+        org_id: int,
+        user_id: int,
+    ) -> ValidationStudy:
+        """Send an errored study back to the furthest point its existing work supports. Audited.
+
+        `error` means the infrastructure failed, not that the paper did: a wrong launch parameter, a
+        dead node, an unreachable reference. The model has called it "retryable" in a comment since
+        it was written while the transition table said otherwise, so the only ways out were a
+        hand-edited row or re-running a fetch that had already succeeded. Demo run 42 is the case
+        this exists for: 122 GB acquired, then every alignment rejected an index that did not match
+        the fasta beside it.
+
+        Where it resumes is decided by what survived, never by the caller:
+
+        - **Fetched samples with FASTQ** -> `setup`, which relaunches the analysis against them. The
+          expensive half is already paid for.
+        - **Nothing fetched** -> `plan_ready`, the C1 gate. Re-fetching spends real money, so a human
+          approves it deliberately.
+
+        The previous attempt's `analysis_run_id` and its Level-3 session are cleared. Left in place,
+        the driver reads the FAILED run as this attempt's result and reproduces from a session that
+        no longer applies.
+        """
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(
+                    ValidationStudy.id == study_id,
+                    ValidationStudy.organization_id == org_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not study:
+            raise HTTPException(404, "Validation study not found")
+        if study.state != "error":
+            raise HTTPException(
+                400,
+                f"Only a study in 'error' can be retried; this one is in '{study.state}'.",
+            )
+
+        resumable = await _has_runnable_samples(session, study.experiment_id)
+        target = "setup" if resumable else "plan_ready"
+
+        study.analysis_run_id = None
+        evidence = dict(study.evidence_json or {})
+        for key in ("level3_run_session_id", "level3", "qc", "acquire_retry_at"):
+            evidence.pop(key, None)
+        study.evidence_json = evidence or None
+        study.failure_reason = None
+        await session.flush()
+
+        return await ValidationStudyService.transition(session, study_id, org_id, user_id, target)
 
     @staticmethod
     async def transition(

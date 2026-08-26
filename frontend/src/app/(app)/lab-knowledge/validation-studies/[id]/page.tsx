@@ -16,6 +16,7 @@ import {
 } from "@/components/validation/Level3Gate";
 import { PipelineInstallNotice } from "@/components/validation/PipelineInstallNotice";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
+import { RetryNotice } from "@/components/validation/RetryNotice";
 import { SamplesMismatchNotice } from "@/components/validation/SamplesMismatchNotice";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -242,6 +243,16 @@ export default function ValidationStudyPage() {
                 </ul>
               </div>
             )}
+          </section>
+        )}
+
+        {study.state === "error" && (
+          <section className="mb-6">
+            <RetryNotice
+              studyId={study.id}
+              failureReason={study.failure_reason}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
           </section>
         )}
 
