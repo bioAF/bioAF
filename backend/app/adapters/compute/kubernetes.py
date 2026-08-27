@@ -9,6 +9,7 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 (impersonated bootstrap on vm_default installs, JSON key on legacy installs).
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -35,6 +36,7 @@ from app.adapters.models import (
     ProcessInfo,
     TerminationReason,
     to_job_state,
+    QuotaMetric,
 )
 from app.pipeline import nextflow_trace
 
@@ -272,6 +274,7 @@ class KubernetesComputeProvider(ComputeProvider):
             ssh_exec=True,
             spot_retry=True,
             job_report=True,
+            quota_introspection=True,
         )
 
     async def submit_job(self, job_spec: dict) -> JobSubmitResult:
@@ -827,6 +830,56 @@ class KubernetesComputeProvider(ComputeProvider):
         except Exception:
             return container_v1.ClusterManagerClient()
         return container_v1.ClusterManagerClient(credentials=credentials)
+
+    def _get_gcp_credentials(self):
+        """GCP credentials for direct Compute API calls, via credential_injector."""
+        return _load_gcp_credentials(self._cluster_config or {})
+
+    def _fetch_regional_quotas(self, project_id: str, region: str) -> dict:
+        """Blocking Compute API read of one region's quotas. Called off-loop."""
+        from google.cloud import compute_v1
+
+        credentials = self._get_gcp_credentials()
+        client = compute_v1.RegionsClient(credentials=credentials)
+        region_info = client.get(project=project_id, region=region)
+
+        return {
+            quota.metric: QuotaMetric(
+                metric=quota.metric,
+                usage=float(quota.usage),
+                limit=float(quota.limit),
+            )
+            for quota in (region_info.quotas or [])
+        }
+
+    async def get_regional_quotas(self, region: str | None = None) -> dict | None:
+        """Read the region's quotas, or None when they cannot be determined.
+
+        This is what the Components page preflight runs on. Moving the pipeline
+        pool to pd-balanced at 500 GB was accepted by terraform and by GKE, and
+        produced zero schedulable nodes, because pd-balanced bills to
+        SSD_TOTAL_GB whose regional limit was 500 GB. Nothing in the product
+        could see that; this is the seam that lets it.
+
+        Every failure path returns None rather than raising. The most likely one
+        is a service account without `compute.regions.get`, and an install that
+        has not granted it must still be able to configure its cluster.
+        """
+        await self._ensure_cluster_config_fresh()
+        cfg = self._cluster_config or {}
+
+        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
+        if not project_id:
+            return None
+        target_region = region or _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
+
+        try:
+            return await asyncio.to_thread(self._fetch_regional_quotas, project_id, target_region)
+        except Exception as exc:
+            # Debug, not warning: an install without the read permission would
+            # otherwise log this on every render of the Components page.
+            logger.debug("Regional quota read failed for %s/%s: %s", project_id, target_region, exc)
+            return None
 
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 

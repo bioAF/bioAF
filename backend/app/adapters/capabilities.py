@@ -31,6 +31,10 @@ class ProviderCapabilities(BaseModel):
     ssh_exec: bool = False
     spot_retry: bool = False
     job_report: bool = False
+    # Can this backend report the cloud quota its node pools draw on? Optional:
+    # a backend that cannot answer leaves the Components page's preflight
+    # "unverified" rather than blocking the operator.
+    quota_introspection: bool = False
     # Storage (GCS today; NFS later)
     signed_url_upload: bool = False
     storage_tier_metrics: bool = False

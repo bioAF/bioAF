@@ -53,6 +53,19 @@ class ComputeProvider(ABC):
         """
         return None
 
+    async def get_regional_quotas(self, region: str | None = None) -> dict | None:
+        """Report the region's resource quotas, or None when unknown.
+
+        Keyed by cloud metric name (``SSD_TOTAL_GB``, ``CPUS``, ...) with
+        `cluster_quota.QuotaMetric` values. None means "could not be read": no
+        reader on this backend, no credentials, or the cloud call failed.
+
+        Returning None rather than raising is deliberate. The Components page
+        calls this on every render, and a backend that cannot answer must
+        degrade the preflight to "unverified", never make the page unusable.
+        """
+        return None
+
     @abstractmethod
     async def submit_job(self, job_spec: dict) -> JobSubmitResult:
         """Submit a pipeline job. Returns a JobSubmitResult."""

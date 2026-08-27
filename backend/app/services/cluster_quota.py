@@ -33,6 +33,11 @@ import math
 import re
 from dataclasses import dataclass, field
 
+# QuotaMetric is the adapter layer's return model: this module decides against it,
+# it does not own it. Services may depend on adapters; the reverse is a layering
+# inversion that test_bal_layering pins.
+from app.adapters.models import QuotaMetric
+
 # Which regional quota a disk type bills to. This mapping is the whole incident:
 # the two buckets have wildly different limits (500 vs 4096 GB in bioaf-495400)
 # and nothing on the Components page said so.
@@ -54,15 +59,6 @@ STATUS_OK = "ok"
 STATUS_WARN = "warn"
 STATUS_BLOCK = "block"
 STATUS_UNVERIFIED = "unverified"
-
-
-@dataclass(frozen=True)
-class QuotaMetric:
-    """One regional quota: what is in use and what the ceiling is."""
-
-    metric: str
-    usage: float
-    limit: float
 
 
 @dataclass(frozen=True)
