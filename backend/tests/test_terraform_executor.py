@@ -1626,3 +1626,18 @@ async def test_run_plan_passes_bootstrap_sa_email_to_build_env(session):
     cfg = captured_configs[0]
     assert cfg.get("gcp_credential_source") == "vm_default"
     assert cfg.get("gcp_bootstrap_sa_email") == "bioaf-bootstrap@test-project.iam.gserviceaccount.com"
+
+
+# --- the pipeline pool's disk reaches terraform (findings-05 section 15) --------------------------
+
+
+def test_disk_settings_reach_tfvars():
+    """A variable nothing writes is a variable nobody has. Machine type, node count and spot all had
+    this plumbing; the disk had none, which is why the one setting that bounded run 43 was the one
+    that could not be changed."""
+    import inspect
+    from app.services import terraform_executor
+
+    source = inspect.getsource(terraform_executor)
+    assert 'tfvars["k8s_pipeline_disk_size_gb"]' in source
+    assert 'tfvars["k8s_pipeline_disk_type"]' in source

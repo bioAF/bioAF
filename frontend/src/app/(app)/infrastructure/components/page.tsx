@@ -22,6 +22,7 @@ import { logError } from "@/lib/errorReporting";
 import { invalidateComponentCache } from "@/hooks/useComponents";
 import { useConfirm } from "@/hooks/useConfirm";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
+import { DISK_TYPE_OPTIONS, describeDiskFor } from "./clusterDiskOptions";
 import { Button } from "@/components/ui/Button";
 import {
   INTERACTIVE_MACHINE_OPTIONS,
@@ -101,6 +102,8 @@ interface ClusterConfig {
   k8s_pipeline_machine_type: string;
   k8s_pipeline_max_nodes: number;
   k8s_pipeline_use_spot: boolean;
+  k8s_pipeline_disk_size_gb: number;
+  k8s_pipeline_disk_type: string;
   k8s_interactive_machine_type: string;
   k8s_interactive_max_nodes: number;
 }
@@ -555,13 +558,17 @@ export default function InfraComponentsPage() {
   }
 
   /**
-   * True when the pending edits replace a machine type, which is the only
-   * change that recreates a node pool. Scaling max_nodes or flipping spot does
-   * not destroy running work, so the confirmation must not claim it does.
+   * True when the pending edits change something in a pool's `node_config`,
+   * which is what forces GKE to recreate the pool: the machine type, or the
+   * node disk's size or type. Scaling max_nodes or flipping spot does not
+   * destroy running work, so the confirmation must not claim it does.
    */
   function redeployRecreatesAPool(): boolean {
     return (
       configEdits.k8s_pipeline_machine_type !== undefined ||
+      // A disk change recreates the node pool, exactly like a machine-type change.
+      configEdits.k8s_pipeline_disk_size_gb !== undefined ||
+      configEdits.k8s_pipeline_disk_type !== undefined ||
       configEdits.k8s_interactive_machine_type !== undefined
     );
   }
@@ -862,6 +869,44 @@ export default function InfraComponentsPage() {
                               />
                             </div>
                             )}
+                            <div>
+                              <label htmlFor="pipeline-disk-size" className="text-xs text-gray-500">
+                                Node Disk (GB)
+                              </label>
+                              <input id="pipeline-disk-size"
+                                type="number"
+                                min={50}
+                                max={1000}
+                                value={configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb}
+                                onChange={(e) =>
+                                  setConfigEdits({ ...configEdits, k8s_pipeline_disk_size_gb: Number(e.target.value) })
+                                }
+                                className="w-full border rounded px-2 py-1 text-sm mt-1"
+                                disabled={configSaving}
+                              />
+                              <p className="mt-1 text-xs text-gray-500">
+                                {describeDiskFor(
+                                  configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb,
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <label htmlFor="pipeline-disk-type" className="text-xs text-gray-500">
+                                Node Disk Type
+                              </label>
+                              <select id="pipeline-disk-type"
+                                value={configEdits.k8s_pipeline_disk_type ?? clusterConfig.k8s_pipeline_disk_type}
+                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_disk_type: e.target.value })}
+                                className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
+                                disabled={configSaving}
+                              >
+                                {DISK_TYPE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                             {has("spot_retry") && (
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-gray-500">Spot Instances</label>

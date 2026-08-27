@@ -42,6 +42,31 @@ variable "k8s_pipeline_max_nodes" {
   description = "Maximum number of nodes in the pipeline autoscaler"
 }
 
+variable "k8s_pipeline_disk_size_gb" {
+  type        = number
+  default     = 100
+  description = <<-EOT
+    Boot disk size for each pipeline node, in GB. This is the node's EPHEMERAL storage: the work
+    directory, container images, and (with Fusion) the local cache of the cloud work dir all live
+    on it. A task that exceeds what is left is EVICTED by kubelet, not failed by the tool, so this
+    bounds how large a single step's intermediates can get.
+
+    The default matches what the pool already runs. Raising it recreates the node pool.
+  EOT
+}
+
+variable "k8s_pipeline_disk_type" {
+  type        = string
+  default     = "pd-standard"
+  description = <<-EOT
+    Boot disk type for pipeline nodes: pd-standard (HDD), pd-balanced, or pd-ssd. Alignment is
+    heavily I/O bound and Fusion streams the work dir through this disk, so the type is a throughput
+    decision, not only a cost one.
+
+    The default matches what the pool already runs. Changing it recreates the node pool.
+  EOT
+}
+
 variable "k8s_pipeline_use_spot" {
   type        = bool
   default     = true

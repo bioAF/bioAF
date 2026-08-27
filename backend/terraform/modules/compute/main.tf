@@ -86,8 +86,8 @@ resource "google_container_node_pool" "pipelines" {
   node_config {
     machine_type = var.k8s_pipeline_machine_type
     spot         = var.k8s_pipeline_use_spot
-    disk_size_gb = 100
-    disk_type    = "pd-standard"
+    disk_size_gb = var.k8s_pipeline_disk_size_gb
+    disk_type    = var.k8s_pipeline_disk_type
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"

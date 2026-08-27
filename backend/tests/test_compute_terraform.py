@@ -437,3 +437,46 @@ def test_cluster_pins_default_pool_to_probed_zone():
     assert "var.gke_default_pool_zone" in cluster_block, (
         "cluster's node_locations must read from var.gke_default_pool_zone"
     )
+
+
+# --- the pipeline pool's disk (findings-05 section 15) -------------------------------------------
+#
+# Run 43's STAR alignments were EVICTED, not failed: "The node was low on resource:
+# ephemeral-storage. Threshold quantity: 10120387530, available: 9700780Ki. Container was using
+# 80520660Ki, request is 0." Each alignment wants ~80 GB of node local disk (Fusion caches cloud
+# storage through it, plus a ~30 GB STAR index and 12-18 GB of FASTQ) against a 100 GB node disk.
+#
+# Machine type, node count and spot were all tunable from the Components page. The disk was a
+# literal in this file, so the only lever that mattered was the one nobody could reach.
+
+
+def test_the_pipeline_pool_disk_is_configurable():
+    """A hardcoded disk means the one dimension that actually bounded the workload could not be
+    raised without editing terraform, while the three that did not bind it were all in the UI."""
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    assert 'variable "k8s_pipeline_disk_size_gb"' in variables_tf
+    assert 'variable "k8s_pipeline_disk_type"' in variables_tf
+
+    pool = _pipeline_pool_block(main_tf)
+    assert "disk_size_gb = var.k8s_pipeline_disk_size_gb" in pool
+    assert "disk_type    = var.k8s_pipeline_disk_type" in pool
+
+
+def test_the_disk_defaults_do_not_change_what_an_existing_install_gets():
+    """Defaults are the values the pools already run, deliberately. Changing a node_config forces
+    GKE to recreate the pool, so a new default would rebuild every existing installation's pipeline
+    nodes on the next apply -- for a setting they had not asked to change."""
+    variables_tf = (COMPUTE_MODULE_DIR / "variables.tf").read_text()
+
+    size = re.search(r'variable "k8s_pipeline_disk_size_gb"\s*\{[^}]*default\s*=\s*(\d+)', variables_tf)
+    dtype = re.search(r'variable "k8s_pipeline_disk_type"\s*\{[^}]*default\s*=\s*"([^"]+)"', variables_tf)
+    assert size and size.group(1) == "100", "the pipeline pool runs a 100 GB disk today"
+    assert dtype and dtype.group(1) == "pd-standard", "the pipeline pool runs pd-standard today"
+
+
+def _pipeline_pool_block(main_tf: str) -> str:
+    start = main_tf.index('resource "google_container_node_pool" "pipelines"')
+    nxt = main_tf.find('resource "google_container_node_pool"', start + 10)
+    return main_tf[start : nxt if nxt > 0 else len(main_tf)]

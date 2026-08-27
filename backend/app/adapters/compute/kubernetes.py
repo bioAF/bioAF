@@ -202,6 +202,9 @@ class KubernetesComputeProvider(ComputeProvider):
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
+        # The pool's node disk. Read here so the generated nextflow.config can size its
+        # ephemeral-storage request against the disk the tasks will actually land on.
+        "k8s_pipeline_disk_size_gb",
     ]
 
     def __init__(self, session_factory=None):
@@ -950,6 +953,7 @@ class KubernetesComputeProvider(ComputeProvider):
         gcs_work_dir: str | None = None,
         pipeline_machine_type: str | None = None,
         ignore_igenomes_base: bool = False,
+        pipeline_disk_gb: int | None = None,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -994,6 +998,27 @@ class KubernetesComputeProvider(ComputeProvider):
         machine = pipeline_machine_type or "n2-highmem-16"
         cpus, mem_gb = KubernetesComputeProvider._MACHINE_ALLOCATABLE.get(machine, (14, 110))
         lines.append(f"process.resourceLimits = [cpus: {cpus}, memory: '{mem_gb}.GB']")
+
+        # Ephemeral storage, which nothing declared until run 43 was evicted for want of it:
+        # "The node was low on resource: ephemeral-storage ... Container was using 80520660Ki,
+        # request is 0". Nextflow's `disk` directive is what the k8s executor turns into an
+        # ephemeral-storage request, and with no request the scheduler packs two genome-scale steps
+        # onto one node and kubelet kills the larger of them, hours in.
+        #
+        # The node's disk carries the OS, the container images and kubelet's ~10 GB eviction
+        # threshold as well as the work dir, so the request is sized against what is left rather
+        # than the raw disk. One genome-scale step per node is deliberate: it is what the memory
+        # limit above already implies on these machine types, and over-packing is what broke.
+        #
+        # It ESCALATES with the attempt. Nextflow cannot see a pod's termination reason, so an
+        # eviction and a Spot preemption are both just exit 137 and cannot be told apart -- which is
+        # why retrying unchanged was wrong. Asking for more room each time resolves the eviction
+        # case without needing to identify it, and costs a preempted task nothing. Capped at the
+        # usable disk, because a request above allocatable schedules nowhere at all.
+        usable_disk_gb = max(20, (pipeline_disk_gb or 100) - 20)
+        first_attempt_gb = max(10, usable_disk_gb // 2)
+        lines.append(f'process.disk = {{ "${{Math.min({usable_disk_gb}, {first_attempt_gb} * task.attempt)}}.GB" }}')
+
         lines.append("process.maxRetries = 3")
         # Exit 143 (SIGTERM) and 137 (SIGKILL) from Spot preemption: retry
         # without escalating. Other failures: escalate then finish.
@@ -1271,6 +1296,8 @@ class KubernetesComputeProvider(ComputeProvider):
             # storage seam, instead of a hardcoded gs:// literal.
             scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
+            pipeline_disk_raw = (nf_cfg.get("k8s_pipeline_disk_size_gb") or "").strip()
+            pipeline_disk = int(pipeline_disk_raw) if pipeline_disk_raw.isdigit() else None
             # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
             # validation of the public igenomes_base default (it 403s). GCP omits.
             nf_config = self._build_nextflow_k8s_config(
@@ -1279,6 +1306,7 @@ class KubernetesComputeProvider(ComputeProvider):
                 scratch_work_dir,
                 pipeline_machine,
                 ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
+                pipeline_disk_gb=pipeline_disk,
             )
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')

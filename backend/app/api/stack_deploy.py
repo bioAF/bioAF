@@ -18,7 +18,9 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,6 +106,8 @@ class ClusterConfigResponse(BaseModel):
     k8s_pipeline_machine_type: str
     k8s_pipeline_max_nodes: int
     k8s_pipeline_use_spot: bool
+    k8s_pipeline_disk_size_gb: int
+    k8s_pipeline_disk_type: str
     k8s_interactive_machine_type: str
     k8s_interactive_max_nodes: int
 
@@ -112,6 +116,11 @@ class ClusterConfigUpdate(BaseModel):
     k8s_pipeline_machine_type: str | None = None
     k8s_pipeline_max_nodes: int | None = None
     k8s_pipeline_use_spot: bool | None = None
+    # Bounded like the work-node equivalent (`WorkNodeConfig.boot_disk_gb`), which has carried the
+    # same control for standalone VMs all along. Below ~50 GB a node cannot hold a container image
+    # and a work dir at once; the ceiling is GCE's.
+    k8s_pipeline_disk_size_gb: int | None = Field(default=None, ge=50, le=1000)
+    k8s_pipeline_disk_type: Literal["pd-standard", "pd-balanced", "pd-ssd"] | None = None
     k8s_interactive_machine_type: str | None = None
     k8s_interactive_max_nodes: int | None = None
 
@@ -1021,6 +1030,8 @@ async def get_cluster_config(
         "k8s_pipeline_machine_type",
         "k8s_pipeline_max_nodes",
         "k8s_pipeline_use_spot",
+        "k8s_pipeline_disk_size_gb",
+        "k8s_pipeline_disk_type",
         "k8s_interactive_machine_type",
         "k8s_interactive_max_nodes",
     ]
@@ -1030,6 +1041,10 @@ async def get_cluster_config(
         k8s_pipeline_machine_type=config.get("k8s_pipeline_machine_type", "n2-highmem-16"),
         k8s_pipeline_max_nodes=int(config.get("k8s_pipeline_max_nodes", "20")),
         k8s_pipeline_use_spot=config.get("k8s_pipeline_use_spot", "true") == "true",
+        # Defaults mirror the terraform variables, so an install that never set them reports what
+        # its pool actually runs rather than a zero.
+        k8s_pipeline_disk_size_gb=int(config.get("k8s_pipeline_disk_size_gb", "100")),
+        k8s_pipeline_disk_type=config.get("k8s_pipeline_disk_type", "pd-standard"),
         k8s_interactive_machine_type=config.get("k8s_interactive_machine_type", "e2-standard-8"),
         k8s_interactive_max_nodes=int(config.get("k8s_interactive_max_nodes", "5")),
     )

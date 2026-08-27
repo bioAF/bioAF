@@ -283,3 +283,63 @@ class TestK8sExecutor:
         cat_pos = shell_cmd.index("cat /data/nextflow.config")
         nf_pos = shell_cmd.index("nextflow run")
         assert cat_pos < nf_pos
+
+
+# --- what run 43 cost us (findings-05 section 15) ------------------------------------------------
+
+
+def _config(**kw):
+    from app.adapters.compute.kubernetes import KubernetesComputeProvider
+
+    kw.setdefault("namespace", "bioaf-pipelines")
+    kw.setdefault("has_gcs_secret", False)
+    return KubernetesComputeProvider._build_nextflow_k8s_config(**kw)
+
+
+def test_task_pods_declare_the_disk_they_need():
+    """Every alignment in run 43 was evicted: "The node was low on resource: ephemeral-storage ...
+    Container was using 80520660Ki, **request is 0**". Requesting nothing means the scheduler places
+    two 80 GB tasks on one 100 GB node and kubelet kills whichever is largest, three hours in.
+
+    Nextflow's `disk` directive is what the k8s executor turns into an ephemeral-storage request, and
+    it has never been set."""
+    cfg = _config(pipeline_machine_type="n2-highmem-16")
+    assert "process.disk" in cfg
+
+
+def test_the_disk_request_scales_with_the_pool_it_will_run_on():
+    """A fixed request is wrong in both directions: too large and small steps stop scheduling, too
+    small and the packing that caused the eviction comes straight back. It has to follow the node's
+    actual disk, which is now configurable."""
+    small = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=100)
+    large = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500)
+
+    def caps(cfg):
+        """(ceiling, first-attempt request) out of `Math.min(<cap>, <base> * task.attempt)`."""
+        import re
+
+        m = re.search(r"process\.disk = .*Math\.min\((\d+), (\d+) \* task\.attempt\)", cfg)
+        assert m, "unexpected disk directive: " + cfg
+        return int(m.group(1)), int(m.group(2))
+
+    assert caps(large) > caps(small)
+    # Never the whole disk: the OS, the container images and the kubelet threshold all live there
+    # too, and a request that exceeds allocatable schedules nothing at all.
+    cap_small, base_small = caps(small)
+    assert cap_small < 100
+    assert base_small < cap_small
+
+
+def test_a_retry_asks_for_more_disk_than_the_attempt_that_was_evicted():
+    """137 was read as "Spot preemption: retry without escalating", and a disk eviction exits 137
+    too. Nextflow cannot see the pod's termination REASON, so the two cannot be told apart from the
+    exit status -- which is exactly why retrying unchanged was wrong: run 43 re-ran the same 3-hour
+    alignment into the same full disk, three times.
+
+    Escalating the disk request on each attempt resolves both cases without needing to tell them
+    apart. An evicted task comes back asking for more room, so the scheduler gives it a node to
+    itself; a genuinely preempted task is unaffected, because a larger request on a healthy node
+    costs nothing. This is the same shape as the memory escalation nf-core already relies on."""
+    cfg = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500)
+    disk_line = next(line for line in cfg.splitlines() if line.startswith("process.disk"))
+    assert "task.attempt" in disk_line, "a retry asks for the same disk that was just evicted: " + disk_line
