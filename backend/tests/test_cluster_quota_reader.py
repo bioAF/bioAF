@@ -144,3 +144,40 @@ def test_kubernetes_declares_quota_introspection(monkeypatch):
 
 def test_a_stub_backend_does_not_declare_quota_introspection():
     assert SlurmComputeProvider().capabilities().quota_introspection is False
+
+
+# -- counting what a pool currently holds ------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pool_node_count_reads_live_nodes_not_the_initial_count(adapter):
+    """`NodePoolStatus.current_nodes` is GKE's initial_node_count, which on an
+    autoscaling pool is the seed value and not what is running. Netting quota
+    against that would systematically understate the pool's own usage and could
+    block an operator re-applying a config on their own running nodes.
+    """
+    fake_core = MagicMock()
+    fake_core.list_node.return_value = MagicMock(items=[MagicMock(), MagicMock(), MagicMock()])
+
+    with patch.object(adapter, "_get_k8s_core_client", return_value=fake_core):
+        assert await adapter.count_pool_nodes("bioaf-pipelines") == 3
+
+    selector = fake_core.list_node.call_args.kwargs["label_selector"]
+    assert "bioaf-pipelines" in selector
+
+
+@pytest.mark.asyncio
+async def test_pool_node_count_is_zero_for_a_scaled_to_zero_pool(adapter):
+    fake_core = MagicMock()
+    fake_core.list_node.return_value = MagicMock(items=[])
+
+    with patch.object(adapter, "_get_k8s_core_client", return_value=fake_core):
+        assert await adapter.count_pool_nodes("bioaf-pipelines") == 0
+
+
+@pytest.mark.asyncio
+async def test_pool_node_count_is_unknown_when_the_cluster_is_unreachable(adapter):
+    """Unknown must be distinguishable from zero: zero grants headroom that
+    netting-out would then hand back, unknown must not."""
+    with patch.object(adapter, "_get_k8s_core_client", side_effect=RuntimeError("no cluster")):
+        assert await adapter.count_pool_nodes("bioaf-pipelines") is None

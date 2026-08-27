@@ -881,6 +881,36 @@ class KubernetesComputeProvider(ComputeProvider):
             logger.debug("Regional quota read failed for %s/%s: %s", project_id, target_region, exc)
             return None
 
+    # GKE stamps every node with the pool it belongs to. This is the label the
+    # cluster autoscaler and `kubectl get nodes -l` both key on.
+    _NODE_POOL_LABEL = "cloud.google.com/gke-nodepool"
+
+    def _count_pool_nodes(self, pool_name: str) -> int:
+        """Blocking count of the pool's nodes. Called off-loop."""
+        core_client = self._get_k8s_core_client()
+        nodes = core_client.list_node(label_selector=f"{self._NODE_POOL_LABEL}={pool_name}")
+        return len(nodes.items or [])
+
+    async def count_pool_nodes(self, pool_name: str) -> int | None:
+        """How many nodes the pool is currently running, or None if unknown.
+
+        Used to net a pool's own consumption out of the quota headroom it is
+        measured against, so re-applying an unchanged config on running nodes is
+        not blocked by those nodes.
+
+        This counts live nodes rather than reading ``NodePoolStatus.current_nodes``,
+        which is GKE's ``initial_node_count``: on an autoscaling pool that is the
+        seed value, not what is running.
+
+        None and 0 are different answers and callers must treat them so. Zero is
+        headroom that netting-out will hand back; unknown must not be.
+        """
+        try:
+            return await asyncio.to_thread(self._count_pool_nodes, pool_name)
+        except Exception as exc:
+            logger.debug("Node count failed for pool %s: %s", pool_name, exc)
+            return None
+
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 
     @staticmethod

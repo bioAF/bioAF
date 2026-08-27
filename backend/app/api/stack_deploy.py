@@ -29,6 +29,7 @@ from app.database import async_session_factory, get_session
 from app.exceptions import DomainError
 from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
+from app.services.cluster_quota_service import ClusterQuotaService
 from app.services.audit_service import log_action
 from app.services.terraform_cloud import AwsTerraformCloud, GcpTerraformCloud, get_terraform_cloud
 from app.services.notebook_image_service import build_notebook_image, cancel_build
@@ -102,6 +103,20 @@ class StorageDestroyRequest(BaseModel):
     confirm: bool = False
 
 
+class QuotaVerdictResponse(BaseModel):
+    """What the region's quota allows for a pool shape.
+
+    `status` is one of ok / warn / block / unverified. `block` means the pool
+    could not create a single node, which is the state that produced a RUNNING
+    node pool, a successful terraform apply, and zero schedulable capacity.
+    """
+
+    status: str
+    achievable_nodes: int | None = None
+    binding_metric: str | None = None
+    message: str = ""
+
+
 class ClusterConfigResponse(BaseModel):
     k8s_pipeline_machine_type: str
     k8s_pipeline_max_nodes: int
@@ -110,6 +125,10 @@ class ClusterConfigResponse(BaseModel):
     k8s_pipeline_disk_type: str
     k8s_interactive_machine_type: str
     k8s_interactive_max_nodes: int
+    # What the CURRENT pipeline pool can actually build. Present so an operator
+    # sees an unbuildable pool on the page rather than discovering it hours later
+    # when a run's pods sit Pending forever.
+    pipeline_pool_quota: QuotaVerdictResponse | None = None
 
 
 class ClusterConfigUpdate(BaseModel):
@@ -1047,7 +1066,33 @@ async def get_cluster_config(
         k8s_pipeline_disk_type=config.get("k8s_pipeline_disk_type", "pd-standard"),
         k8s_interactive_machine_type=config.get("k8s_interactive_machine_type", "e2-standard-8"),
         k8s_interactive_max_nodes=int(config.get("k8s_interactive_max_nodes", "5")),
+        pipeline_pool_quota=_verdict_response(await ClusterQuotaService.evaluate_pipeline_pool(session)),
     )
+
+
+def _verdict_response(verdict) -> QuotaVerdictResponse:
+    return QuotaVerdictResponse(
+        status=verdict.status,
+        achievable_nodes=verdict.achievable_nodes,
+        binding_metric=verdict.binding_metric,
+        message=verdict.message,
+    )
+
+
+@router.post("/api/v1/infrastructure/cluster/config/preflight")
+async def preflight_cluster_config(
+    body: ClusterConfigUpdate,
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> QuotaVerdictResponse:
+    """Report what a proposed pipeline-pool config could actually build.
+
+    Read-only: it mutates nothing and plans nothing. The Components page calls it
+    as the operator edits, so a config that cannot create a node is refused at the
+    form rather than discovered as a run that never starts.
+    """
+    verdict = await ClusterQuotaService.evaluate_pipeline_pool(session, proposed=body.model_dump(exclude_none=True))
+    return _verdict_response(verdict)
 
 
 @router.post("/api/v1/infrastructure/cluster/config")
@@ -1065,8 +1110,16 @@ async def update_cluster_config(
     if deployed != "true":
         raise HTTPException(status_code=400, detail="Compute stack is not deployed")
 
-    # Update config values
+    # Refuse a pool that could not create a single node. Only "block" refuses:
+    # a pool that runs fewer nodes than requested still works, and an unreadable
+    # quota must never stop an operator (a missing IAM role would otherwise make
+    # this page unusable).
     updates = body.model_dump(exclude_none=True)
+    verdict = await ClusterQuotaService.evaluate_pipeline_pool(session, proposed=updates)
+    if verdict.status == "block":
+        raise HTTPException(status_code=400, detail=verdict.message)
+
+    # Update config values
     for key, value in updates.items():
         await PlatformConfigService.set(session, key, str(value).lower() if isinstance(value, bool) else str(value))
     await session.flush()

@@ -145,6 +145,27 @@ def _headroom(
     return int(math.floor(free / per_node)), free
 
 
+def per_node_costs(plan: PoolPlan, quotas: dict[str, QuotaMetric]) -> dict[str, float]:
+    """What one node of `plan` consumes, by quota metric.
+
+    Public because the same arithmetic prices two different things: what a
+    PROPOSED pool would need, and what the CURRENT pool already holds (which is
+    netted out of the headroom the proposal is measured against).
+    """
+    costs: dict[str, float] = {}
+
+    disk_metric = disk_quota_metric(plan.disk_type)
+    if disk_metric:
+        costs[disk_metric] = float(plan.disk_size_gb)
+
+    vcpus = machine_vcpus(plan.machine_type)
+    if vcpus:
+        for cpu_metric in _cpu_quota_metrics(plan, quotas):
+            costs[cpu_metric] = float(vcpus)
+
+    return costs
+
+
 def evaluate_pool_quota(
     plan: PoolPlan,
     quotas: dict[str, QuotaMetric] | None,
@@ -165,16 +186,7 @@ def evaluate_pool_quota(
 
     pool_current_usage = pool_current_usage or {}
 
-    # Per-node cost, by quota bucket.
-    per_node: dict[str, float] = {}
-    disk_metric = disk_quota_metric(plan.disk_type)
-    if disk_metric:
-        per_node[disk_metric] = float(plan.disk_size_gb)
-
-    vcpus = machine_vcpus(plan.machine_type)
-    if vcpus:
-        for cpu_metric in _cpu_quota_metrics(plan, quotas):
-            per_node[cpu_metric] = float(vcpus)
+    per_node = per_node_costs(plan, quotas)
 
     supported: dict[str, int] = {}
     free_by_metric: dict[str, float] = {}
