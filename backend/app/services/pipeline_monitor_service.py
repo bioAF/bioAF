@@ -24,6 +24,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("bioaf.pipeline_monitor")
 
+# How long a run's tasks may be continuously unschedulable before the run is failed.
+#
+# Pending is normal: a scaled-to-zero pool provisions nodes in about 90 seconds
+# (observed), and Spot capacity shortfalls make the autoscaler retry across zones,
+# which is slower still. Ten minutes is an order of magnitude above the healthy
+# case and far below the 35 minutes run 44 spent looking alive while eleven pods
+# could never be placed.
+#
+# Only CONTINUOUS unschedulability counts. Any pod being placed resets the clock,
+# so partial progress is never mistaken for a dead run.
+UNSCHEDULABLE_GRACE_SECONDS = 600
+
 
 # Matches `<link rel="icon" ...>` / `<link rel='shortcut icon' ...>` regardless
 # of attribute order. The Nextflow report's favicon points at nextflow.io,
@@ -207,6 +219,76 @@ class PipelineMonitorService:
             await PipelineMonitorService._handle_completion(session, run)
 
     @staticmethod
+    async def _fail_if_unschedulable(session: AsyncSession, run: PipelineRun, compute_adapter) -> bool:
+        """Fail a run whose tasks can never be placed. Returns True if it did.
+
+        `_k8s_get_job_status` selects pods by `job-name`, which matches only the
+        Nextflow HEAD pod. The head stays healthy while its tasks sit Pending, so a
+        run against a pool that cannot create nodes is indistinguishable from a
+        working one. Run 44 spent 35 minutes that way and the only evidence was a
+        QUOTA_EXCEEDED line in the GCE audit log.
+
+        Three things this deliberately does NOT do:
+
+        - It does not act on `None`, which means the cluster could not be asked. A
+          monitoring failure must never fail a healthy run.
+        - It does not act when any task has been placed. Partial progress is a
+          working run, and Spot retries move across zones.
+        - It does not act on runs whose pods carry no run-id label (launched before
+          that shipped): they report zero tasks, and failing a run on evidence that
+          cannot be attributed to it would be worse than the blindness it replaces.
+        """
+        try:
+            scheduling = await compute_adapter.get_task_scheduling(run.id)
+        except Exception as exc:
+            logger.debug("Task scheduling unavailable for run %d: %s", run.id, exc)
+            return False
+
+        # Only a genuine answer is acted on. A backend that does not implement this,
+        # or returns something else, is "unknowable", which is not "fine": acting on
+        # it would let a monitoring gap fail a healthy run.
+        if not isinstance(scheduling, dict):
+            return False
+
+        metadata = dict(run.provider_metadata or {})
+        blocked = scheduling.get("unschedulable", 0)
+        placed = scheduling.get("scheduled", 0)
+
+        if blocked == 0 or placed > 0:
+            if metadata.pop("unschedulable_since", None) is not None:
+                run.provider_metadata = metadata
+            return False
+
+        since_raw = metadata.get("unschedulable_since")
+        now = datetime.now(timezone.utc)
+        if not since_raw:
+            metadata["unschedulable_since"] = now.isoformat()
+            run.provider_metadata = metadata
+            return False
+
+        try:
+            since = datetime.fromisoformat(since_raw)
+        except ValueError:
+            metadata["unschedulable_since"] = now.isoformat()
+            run.provider_metadata = metadata
+            return False
+
+        if (now - since).total_seconds() < UNSCHEDULABLE_GRACE_SECONDS:
+            return False
+
+        run.status = "failed"
+        run.completed_at = now
+        run.failure_reason = scheduling.get("reason") or "resource_exhausted"
+        minutes = int(UNSCHEDULABLE_GRACE_SECONDS // 60)
+        detail = scheduling.get("message") or "the scheduler could not place them"
+        run.error_message = f"No node could run this pipeline's tasks for over {minutes} minutes: {detail}"
+        metadata.pop("unschedulable_since", None)
+        run.provider_metadata = metadata
+
+        await PipelineMonitorService._handle_completion(session, run)
+        return True
+
+    @staticmethod
     async def _sync_k8s_run(session: AsyncSession, run: PipelineRun, job_id: str) -> None:
         """Sync a K8s Job run by querying the compute adapter for job status.
 
@@ -229,6 +311,9 @@ class PipelineMonitorService:
             run.k8s_pod_name = pod_name
             # Mirror into the neutral provider_metadata (BAL Phase 4).
             run.provider_metadata = {**(run.provider_metadata or {}), "pod_name": pod_name}
+
+        if await PipelineMonitorService._fail_if_unschedulable(session, run, compute_adapter):
+            return
 
         is_custom = run.custom_pipeline_version_id is not None
 

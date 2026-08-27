@@ -911,6 +911,76 @@ class KubernetesComputeProvider(ComputeProvider):
             logger.debug("Node count failed for pool %s: %s", pool_name, exc)
             return None
 
+    _RUN_ID_LABEL = "bioaf.io/run-id"
+
+    def _read_task_scheduling(self, run_id: int, namespace: str) -> dict:
+        """Blocking read of a run's task pods and whether they can be placed."""
+        from app.adapters.failure_classification import (
+            FAILURE_REASON_RESOURCE_EXHAUSTED,
+            classify_pod_failure,
+        )
+
+        core_client = self._get_k8s_core_client()
+        pods = core_client.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"{self._RUN_ID_LABEL}={run_id}",
+        )
+
+        scheduled = 0
+        blocked_messages: list[str] = []
+
+        for pod in pods.items or []:
+            # A pod with a node assigned has been placed, whatever it does next.
+            if getattr(pod.spec, "node_name", None):
+                scheduled += 1
+                continue
+            if getattr(pod.status, "phase", "") != "Pending":
+                scheduled += 1
+                continue
+
+            # `PodScheduled=False, reason=Unschedulable` is the scheduler saying it
+            # cannot place this pod, as opposed to a pod merely starting up.
+            for condition in getattr(pod.status, "conditions", None) or []:
+                if (
+                    condition.type == "PodScheduled"
+                    and condition.status == "False"
+                    and (condition.reason or "") == "Unschedulable"
+                ):
+                    blocked_messages.append(condition.message or "")
+                    break
+
+        reason = ""
+        message = ""
+        if blocked_messages:
+            # Reuse the enum the notebook and work-node surfaces already report, so
+            # one vocabulary covers every "the cloud could not give us a machine".
+            joined = " | ".join(m for m in blocked_messages if m)
+            reason, message = classify_pod_failure([{"reason": "Unschedulable", "message": joined}])
+            if not reason:
+                reason = FAILURE_REASON_RESOURCE_EXHAUSTED
+            message = message or joined
+
+        return {
+            "tasks": len(pods.items or []),
+            "scheduled": scheduled,
+            "unschedulable": len(blocked_messages),
+            "reason": reason,
+            "message": message,
+        }
+
+    async def get_task_scheduling(self, run_id: int, namespace: str = "bioaf-pipelines") -> dict | None:
+        """Whether this run's task pods can be placed, or None if unknowable.
+
+        None means the cluster could not be asked. It must not be read as "nothing
+        is wrong": the caller distinguishes it from a real answer of zero tasks,
+        because a monitoring failure must never itself fail a healthy run.
+        """
+        try:
+            return await asyncio.to_thread(self._read_task_scheduling, run_id, namespace)
+        except Exception as exc:
+            logger.debug("Task scheduling read failed for run %s: %s", run_id, exc)
+            return None
+
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 
     @staticmethod
@@ -1037,6 +1107,7 @@ class KubernetesComputeProvider(ComputeProvider):
         pipeline_machine_type: str | None = None,
         ignore_igenomes_base: bool = False,
         pipeline_disk_gb: int | None = None,
+        run_id: int | None = None,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -1060,6 +1131,14 @@ class KubernetesComputeProvider(ComputeProvider):
             f"k8s.namespace = '{namespace}'",
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
+
+        # Stamp every task pod with the run that created it. Nextflow sets no bioAF
+        # labels of its own and several runs share this namespace, so without it a
+        # Pending pod cannot be attributed and `_k8s_get_job_status` sees only the
+        # HEAD pod (it selects on `job-name`). That is why run 44 reported `running`
+        # for 35 minutes while eleven tasks sat unschedulable.
+        if run_id is not None:
+            lines.append(f"process.pod = [[label: 'bioaf.io/run-id', value: '{run_id}']]")
 
         # Skip nf-schema's live S3 validation of the public igenomes_base default
         # (IRSA-signed reads 403 on ngi-igenomes). AWS-gated; GCP never sets this.
@@ -1390,6 +1469,7 @@ class KubernetesComputeProvider(ComputeProvider):
                 pipeline_machine,
                 ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
                 pipeline_disk_gb=pipeline_disk,
+                run_id=job_spec.get("run_id") or None,
             )
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')
