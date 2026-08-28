@@ -296,6 +296,15 @@ def _config(**kw):
     return KubernetesComputeProvider._build_nextflow_k8s_config(**kw)
 
 
+def _disk_request_gb(cfg: str) -> int:
+    """The constant GB figure out of `process.disk = { \"<n>.GB\" }`."""
+    import re
+
+    m = re.search(r"process\.disk = .*?(\d+)\.GB", cfg)
+    assert m, "unexpected disk directive: " + cfg
+    return int(m.group(1))
+
+
 def test_task_pods_declare_the_disk_they_need():
     """Every alignment in run 43 was evicted: "The node was low on resource: ephemeral-storage ...
     Container was using 80520660Ki, **request is 0**". Requesting nothing means the scheduler places
@@ -308,38 +317,47 @@ def test_task_pods_declare_the_disk_they_need():
 
 
 def test_the_disk_request_scales_with_the_pool_it_will_run_on():
-    """A fixed request is wrong in both directions: too large and small steps stop scheduling, too
-    small and the packing that caused the eviction comes straight back. It has to follow the node's
-    actual disk, which is now configurable."""
-    small = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=100)
-    large = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500)
+    """A fixed number is wrong in both directions: too large and steps stop scheduling, too small
+    and the packing that caused the eviction comes straight back. It has to follow the node's
+    actual disk, which is configurable."""
+    small = _disk_request_gb(_config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=100))
+    large = _disk_request_gb(_config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500))
 
-    def caps(cfg):
-        """(ceiling, first-attempt request) out of `Math.min(<cap>, <base> * task.attempt)`."""
-        import re
-
-        m = re.search(r"process\.disk = .*Math\.min\((\d+), (\d+) \* task\.attempt\)", cfg)
-        assert m, "unexpected disk directive: " + cfg
-        return int(m.group(1)), int(m.group(2))
-
-    assert caps(large) > caps(small)
-    # Never the whole disk: the OS, the container images and the kubelet threshold all live there
-    # too, and a request that exceeds allocatable schedules nothing at all.
-    cap_small, base_small = caps(small)
-    assert cap_small < 100
-    assert base_small < cap_small
+    assert large > small
+    # Never the whole disk: the OS, container images and the kubelet threshold live there too.
+    assert small < 100
 
 
-def test_a_retry_asks_for_more_disk_than_the_attempt_that_was_evicted():
-    """137 was read as "Spot preemption: retry without escalating", and a disk eviction exits 137
-    too. Nextflow cannot see the pod's termination REASON, so the two cannot be told apart from the
-    exit status -- which is exactly why retrying unchanged was wrong: run 43 re-ran the same 3-hour
-    alignment into the same full disk, three times.
+def test_the_disk_request_does_not_change_between_attempts():
+    """A retry processes THE SAME DATA. Its footprint is identical, so its request must be.
 
-    Escalating the disk request on each attempt resolves both cases without needing to tell them
-    apart. An evicted task comes back asking for more room, so the scheduler gives it a node to
-    itself; a genuinely preempted task is unaffected, because a larger request on a healthy node
-    costs nothing. This is the same shape as the memory escalation nf-core already relies on."""
+    The previous directive multiplied the request by `task.attempt`, on the theory that an evicted
+    task should come back asking for more room. Nothing about the workload justifies that, and it
+    is what killed study 11's run 45: attempt 2 asked for 480Gi against 339 GiB of allocatable, so
+    every retry was unschedulable forever and the run hung until it was failed.
+
+    Run 43's eviction was caused by a request of ZERO, which let the scheduler pack two 80 GB steps
+    onto one 100 GB node. Declaring the real requirement fixes that. Escalating it does not."""
     cfg = _config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500)
     disk_line = next(line for line in cfg.splitlines() if line.startswith("process.disk"))
-    assert "task.attempt" in disk_line, "a retry asks for the same disk that was just evicted: " + disk_line
+    assert "task.attempt" not in disk_line, "the same data must not ask for more disk: " + disk_line
+
+
+def test_the_disk_request_fits_inside_what_a_node_can_actually_allocate():
+    """The old ceiling was `disk - 20`, which on a 500 GB node is 480. Real allocatable measured on
+    that node is 339 GiB: GKE reserves roughly 30%, not 20 GB. A request above allocatable schedules
+    NOWHERE, so the ceiling that existed to prevent that caused it."""
+    # Both figures are measured, not modelled: 339 GiB allocatable on the 500 GB node this pool
+    # runs today, and ~74 GB usable on the 100 GB node whose evictions started all of this.
+    for disk_gb, measured_allocatable_gib in ((500, 339), (100, 74)):
+        request = _disk_request_gb(_config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=disk_gb))
+        assert request <= measured_allocatable_gib, (
+            f"a {disk_gb} GB node allocates ~{measured_allocatable_gib} GiB; requesting {request} strands the pod"
+        )
+
+
+def test_a_genome_scale_step_still_fits_its_request():
+    """A STAR step on a human reference held ~80 GB on run 43. The request must cover it with room,
+    or the eviction this directive exists to prevent comes back."""
+    request = _disk_request_gb(_config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500))
+    assert request >= 100, "must cover an 80 GB step with margin"

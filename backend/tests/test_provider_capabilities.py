@@ -13,7 +13,15 @@ import pytest
 from app.adapters.capabilities import CapabilityNotSupported, ProviderCapabilities
 
 # The agreed starting flag set: the specced 10 plus messaging and billing
-# (reserved here, wired to their Phase 9 providers later).
+# (reserved here, wired to their Phase 9 providers later), plus quota_introspection.
+#
+# quota_introspection was added 2026-08-26 and reviewed, which is what this pin
+# exists to force. It says whether a backend can report the cloud quota its node
+# pools draw on. It is a capability rather than an inference because "this backend
+# cannot answer" and "this backend is misconfigured" must stay distinguishable: the
+# Components page preflight fails OPEN, so a GCP install missing compute.regions.get
+# degrades to "unverified" exactly like SLURM does, and only the flag says which of
+# them could ever have answered.
 ALL_FLAGS = (
     "cost_estimation",
     "autoscaling",
@@ -27,6 +35,7 @@ ALL_FLAGS = (
     "storage_tier_metrics",
     "messaging",
     "billing",
+    "quota_introspection",
 )
 
 
@@ -109,6 +118,9 @@ def test_kubernetes_compute_declares_its_capabilities():
         "ssh_exec",
         "spot_retry",
         "job_report",
+        # GKE can be asked what its region's quotas are, which is what lets the
+        # Components page refuse a node pool that could not build a single node.
+        "quota_introspection",
     }
 
 
@@ -165,6 +177,7 @@ def test_registry_aggregates_active_capabilities(_reset_registry):
         "notebooks",
         "cellxgene",
         "work_nodes",
+        "quota_introspection",
     }
     assert caps.messaging is False
     assert caps.billing is False

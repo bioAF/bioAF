@@ -20,6 +20,7 @@ from kubernetes import client
 
 from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
@@ -1085,6 +1086,26 @@ class KubernetesComputeProvider(ComputeProvider):
     # Allocatable resources per GCP machine type (after system reservations).
     # Used to set Nextflow resourceLimits so retry escalation never exceeds
     # what a single node can provide.  See ADR-042.
+    # What one genome-scale step actually holds, plus margin. A STAR step on a human reference
+    # measured ~80 GB on run 43 (a ~30 GB index, 12-18 GB of reads, outputs and the Fusion cache).
+    @staticmethod
+    def scratch_work_dir_key(run_id: int) -> str:
+        """Where this run's Nextflow work dir lives under the raw bucket.
+
+        Delegates to the shared layout so the launcher and the reaper can never drift:
+        if they did, the reaper would delete nothing, which looks identical to having
+        nothing to delete.
+        """
+        return work_dir_key(run_id)
+
+    _STEP_DISK_REQUEST_GB = 120
+
+    # Share of a node's raw disk that Kubernetes will actually allocate. Measured, not assumed: a
+    # 500 GB pd-standard node reports 339 GiB allocatable against 488 GiB capacity. Deliberately
+    # below that ratio, because a request over allocatable schedules nowhere and the failure is
+    # silent (pods simply stay Pending).
+    _ALLOCATABLE_DISK_FRACTION = 0.6
+
     _MACHINE_ALLOCATABLE: dict[str, tuple[int, int]] = {
         # (cpus, memory_gb)
         "n2-highmem-16": (14, 110),
@@ -1167,19 +1188,20 @@ class KubernetesComputeProvider(ComputeProvider):
         # ephemeral-storage request, and with no request the scheduler packs two genome-scale steps
         # onto one node and kubelet kills the larger of them, hours in.
         #
-        # The node's disk carries the OS, the container images and kubelet's ~10 GB eviction
-        # threshold as well as the work dir, so the request is sized against what is left rather
-        # than the raw disk. One genome-scale step per node is deliberate: it is what the memory
-        # limit above already implies on these machine types, and over-packing is what broke.
+        # The request is CONSTANT across attempts. A retry processes the same data and has the same
+        # footprint, so it needs the same room. An earlier version multiplied it by `task.attempt`
+        # on the theory that an evicted task should come back asking for more; nothing about the
+        # workload justifies that, and it is what killed run 45. Attempt 2 asked for 480Gi against
+        # 339 GiB of allocatable, so every retry was unschedulable forever while the run hung.
         #
-        # It ESCALATES with the attempt. Nextflow cannot see a pod's termination reason, so an
-        # eviction and a Spot preemption are both just exit 137 and cannot be told apart -- which is
-        # why retrying unchanged was wrong. Asking for more room each time resolves the eviction
-        # case without needing to identify it, and costs a preempted task nothing. Capped at the
-        # usable disk, because a request above allocatable schedules nowhere at all.
-        usable_disk_gb = max(20, (pipeline_disk_gb or 100) - 20)
-        first_attempt_gb = max(10, usable_disk_gb // 2)
-        lines.append(f'process.disk = {{ "${{Math.min({usable_disk_gb}, {first_attempt_gb} * task.attempt)}}.GB" }}')
+        # Sized against what a node can ALLOCATE, not its raw disk. A 500 GB GKE node reports
+        # 488 GiB of capacity and only 339 GiB allocatable: the OS, container images and kubelet's
+        # eviction threshold take roughly 30%, not the flat 20 GB the previous formula assumed. A
+        # request above allocatable schedules nowhere at all.
+        raw_disk_gb = pipeline_disk_gb or 100
+        allocatable_gb = int(raw_disk_gb * KubernetesComputeProvider._ALLOCATABLE_DISK_FRACTION)
+        disk_request_gb = max(10, min(KubernetesComputeProvider._STEP_DISK_REQUEST_GB, allocatable_gb))
+        lines.append(f'process.disk = {{ "{disk_request_gb}.GB" }}')
 
         lines.append("process.maxRetries = 3")
         # Exit 143 (SIGTERM) and 137 (SIGKILL) from Spot preemption: retry
@@ -1456,7 +1478,16 @@ class KubernetesComputeProvider(ComputeProvider):
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
             # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
             # storage seam, instead of a hardcoded gs:// literal.
-            scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
+            # Per-run, so an abandoned run's intermediates can be identified and deleted.
+            # A single shared directory accumulated 2.13 TB across five runs with nothing
+            # able to tell one run's garbage from another's live data.
+            scratch_work_dir = (
+                get_storage_adapter().build_uri(
+                    raw_bucket, KubernetesComputeProvider.scratch_work_dir_key(job_spec.get("run_id") or 0)
+                )
+                if raw_bucket
+                else None
+            )
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
             pipeline_disk_raw = (nf_cfg.get("k8s_pipeline_disk_size_gb") or "").strip()
             pipeline_disk = int(pipeline_disk_raw) if pipeline_disk_raw.isdigit() else None

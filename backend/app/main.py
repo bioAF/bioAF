@@ -288,6 +288,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_plot_archive_watcher_loop()))
     background_tasks.append(asyncio.create_task(_storage_stats_refresh_loop()))
     background_tasks.append(asyncio.create_task(_notification_cleanup_loop()))
+    background_tasks.append(asyncio.create_task(_work_dir_reaper_loop()))
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
     background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
     background_tasks.append(asyncio.create_task(_config_backup_loop()))
@@ -459,6 +460,33 @@ async def _notification_cleanup_loop():
             break
         except Exception as e:
             logger.error("Notification cleanup error: %s", e)
+
+
+async def _work_dir_reaper_loop():
+    """Delete abandoned runs' Nextflow work dirs once daily.
+
+    The shared work prefix reached 2.13 TB across five runs because nothing ever
+    removed a failed run's intermediates. They are billed monthly and are useless
+    two days after the run died.
+    """
+    from app.database import async_session_factory
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services.work_dir_reaper import WorkDirReaper
+
+    while True:
+        try:
+            await asyncio.sleep(86400)  # 24 hours
+            async with async_session_factory() as session:
+                raw_bucket = await PlatformConfigService.get(session, "raw_bucket_name")
+                if raw_bucket:
+                    reaped = await WorkDirReaper.reap(session, raw_bucket=raw_bucket)
+                    await session.commit()
+                    if reaped:
+                        logger.info("Reaped work dirs for runs: %s", reaped)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Work dir reaper error: %s", e)
 
 
 async def _idempotency_cleanup_loop():
