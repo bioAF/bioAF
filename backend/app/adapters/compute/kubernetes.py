@@ -918,6 +918,7 @@ class KubernetesComputeProvider(ComputeProvider):
         """Blocking read of a run's task pods and whether they can be placed."""
         from app.adapters.failure_classification import (
             FAILURE_REASON_RESOURCE_EXHAUSTED,
+            FAILURE_REASON_UNKNOWN,
             classify_pod_failure,
         )
 
@@ -957,7 +958,12 @@ class KubernetesComputeProvider(ComputeProvider):
             # one vocabulary covers every "the cloud could not give us a machine".
             joined = " | ".join(m for m in blocked_messages if m)
             reason, message = classify_pod_failure([{"reason": "Unschedulable", "message": joined}])
-            if not reason:
+            # classify_pod_failure returns the literal string "unknown", not an empty one, so a
+            # falsy check never fires and run 45 recorded `failure_reason: unknown` for a pod whose
+            # cause was plainly stated ("Insufficient ephemeral-storage"). A pod the scheduler could
+            # not place has a known cause by definition: the cluster could not supply what it asked
+            # for. Naming that beats naming nothing, even when the message matches no known signal.
+            if not reason or reason == FAILURE_REASON_UNKNOWN:
                 reason = FAILURE_REASON_RESOURCE_EXHAUSTED
             message = message or joined
 

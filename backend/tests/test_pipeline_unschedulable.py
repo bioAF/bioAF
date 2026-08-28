@@ -209,3 +209,49 @@ class TestUnschedulableRunsFail:
             await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
 
         assert running_k8s_run.status == "running"
+
+
+# -- the reason must be a reason ---------------------------------------------
+
+
+class TestUnschedulableReasonIsNeverUnknown:
+    """Run 45 recorded `failure_reason: "unknown"`, which defeats the point.
+
+    `classify_pod_failure` returns the literal string "unknown" rather than an empty
+    one, so a fallback written as `if not reason` never fires. A pod the scheduler
+    could not place has a known cause by definition: the cluster could not supply what
+    it asked for.
+    """
+
+    def test_an_unrecognised_scheduling_message_still_reports_resource_exhaustion(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from app.adapters.failure_classification import FAILURE_REASON_UNKNOWN
+
+        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+        provider = KubernetesComputeProvider()
+
+        pod = MagicMock()
+        pod.spec.node_name = None
+        pod.status.phase = "Pending"
+        condition = MagicMock()
+        condition.type = "PodScheduled"
+        condition.status = "False"
+        condition.reason = "Unschedulable"
+        # The exact text run 45 produced. It names no signal the classifier knows.
+        condition.message = (
+            "0/4 nodes are available: 1 Insufficient ephemeral-storage, "
+            "1 node(s) had untolerated taint(s), 2 node(s) didn't match Pod's node affinity/selector."
+        )
+        pod.status.conditions = [condition]
+
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = MagicMock(items=[pod])
+        monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
+
+        result = provider._read_task_scheduling(45, "bioaf-pipelines")
+
+        assert result["unschedulable"] == 1
+        assert result["reason"] != FAILURE_REASON_UNKNOWN
+        assert result["reason"] == "resource_exhausted"
+        assert "ephemeral-storage" in result["message"]
