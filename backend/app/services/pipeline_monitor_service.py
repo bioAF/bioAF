@@ -219,6 +219,56 @@ class PipelineMonitorService:
             await PipelineMonitorService._handle_completion(session, run)
 
     @staticmethod
+    async def _record_task_terminations(session: AsyncSession, run: PipelineRun, compute_adapter) -> None:
+        """Persist how this run's task containers died, while the pods still exist.
+
+        Exit 137 is SIGKILL, and OOM, disk eviction and Spot preemption all produce
+        it. Nextflow only records the number, so three separate runs were diagnosed by
+        inference rather than evidence: kubelet's
+        `containerStatuses[].state.terminated.reason` says which it was, but it goes
+        away with the pod, and run 47's own task logs were 0 bytes because the kill
+        truncated them before Fusion flushed.
+
+        Recorded onto provider_metadata rather than a new column, deduplicated by pod
+        and container because the monitor polls every 30s while a failed pod lingers
+        for many cycles.
+        """
+        try:
+            terminations = await compute_adapter.get_task_terminations(run.id)
+        except Exception as exc:
+            logger.debug("Task terminations unavailable for run %d: %s", run.id, exc)
+            return
+
+        if not isinstance(terminations, list) or not terminations:
+            return
+
+        metadata = dict(run.provider_metadata or {})
+        existing = list(metadata.get("task_terminations") or [])
+        seen = {(t.get("pod"), t.get("container")) for t in existing}
+
+        added = False
+        for t in terminations:
+            key = (t.get("pod"), t.get("container"))
+            if key in seen:
+                continue
+            seen.add(key)
+            existing.append(t)
+            added = True
+            logger.info(
+                "Run %d task %s terminated: exit=%s reason=%s",
+                run.id,
+                t.get("pod"),
+                t.get("exit_code"),
+                t.get("reason") or "unrecorded",
+            )
+
+        if added:
+            # Bounded: a run with thousands of retries must not grow the row without
+            # limit. The most recent are the ones worth keeping.
+            metadata["task_terminations"] = existing[-50:]
+            run.provider_metadata = metadata
+
+    @staticmethod
     async def _fail_if_unschedulable(session: AsyncSession, run: PipelineRun, compute_adapter) -> bool:
         """Fail a run whose tasks can never be placed. Returns True if it did.
 
@@ -326,6 +376,8 @@ class PipelineMonitorService:
             run.k8s_pod_name = pod_name
             # Mirror into the neutral provider_metadata (BAL Phase 4).
             run.provider_metadata = {**(run.provider_metadata or {}), "pod_name": pod_name}
+
+        await PipelineMonitorService._record_task_terminations(session, run, compute_adapter)
 
         if await PipelineMonitorService._fail_if_unschedulable(session, run, compute_adapter):
             return

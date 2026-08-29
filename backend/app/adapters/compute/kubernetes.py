@@ -975,6 +975,51 @@ class KubernetesComputeProvider(ComputeProvider):
             "message": message,
         }
 
+    def _read_task_terminations(self, run_id: int, namespace: str) -> list[dict]:
+        """Blocking read of how this run's task containers died. Called off-loop."""
+        core_client = self._get_k8s_core_client()
+        pods = core_client.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"{self._RUN_ID_LABEL}={run_id}",
+        )
+
+        terminations = []
+        for pod in pods.items or []:
+            for cs in getattr(pod.status, "container_statuses", None) or []:
+                terminated = getattr(cs.state, "terminated", None)
+                if not terminated:
+                    continue
+                finished = getattr(terminated, "finished_at", None)
+                terminations.append(
+                    {
+                        "pod": pod.metadata.name,
+                        "container": cs.name,
+                        "exit_code": terminated.exit_code,
+                        "reason": terminated.reason or "",
+                        "finished_at": finished.isoformat() if finished else None,
+                    }
+                )
+        return terminations
+
+    async def get_task_terminations(self, run_id: int, namespace: str = "bioaf-pipelines") -> list | None:
+        """How this run's task containers died, or None if unknowable.
+
+        Exit 137 is SIGKILL, which OOM, disk eviction and Spot preemption all
+        produce, and Nextflow only ever sees the number. kubelet knows which it was
+        and records it in `containerStatuses[].state.terminated.reason`, but that
+        disappears with the pod, and a killed task's own logs can be truncated to
+        nothing because Fusion never flushes them.
+
+        Reading it while the pod still exists is what makes the difference between
+        diagnosing a failure and inferring one. Three runs were lost to that
+        distinction.
+        """
+        try:
+            return await asyncio.to_thread(self._read_task_terminations, run_id, namespace)
+        except Exception as exc:
+            logger.debug("Task termination read failed for run %s: %s", run_id, exc)
+            return None
+
     async def get_task_scheduling(self, run_id: int, namespace: str = "bioaf-pipelines") -> dict | None:
         """Whether this run's task pods can be placed, or None if unknowable.
 

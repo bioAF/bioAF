@@ -316,3 +316,106 @@ class TestFailingARunStopsIt:
 
         assert running_k8s_run.status == "running"
         adapter.cancel_job.assert_not_awaited()
+
+
+# -- capturing why a task actually died --------------------------------------
+
+
+class TestTaskTerminationsAreCaptured:
+    """Three runs died on exit 137 and each diagnosis was inference.
+
+    137 is SIGKILL: OOM, disk eviction and Spot preemption all produce it, and
+    Nextflow only ever sees the number. kubelet knows which it was, in the pod's
+    `containerStatuses[].state.terminated.reason`, but the pods are deleted once the
+    run ends and run 47's own logs were 0 bytes because the kill truncated them
+    mid-stream.
+
+    Capturing the reason while the pod still exists is what turns the next 137 into
+    data instead of a guess.
+    """
+
+    def test_an_oom_killed_task_reports_its_reason(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+        provider = KubernetesComputeProvider()
+
+        pod = MagicMock()
+        pod.metadata.name = "nf-abc123"
+        cs = MagicMock()
+        cs.name = "star-align"
+        cs.state.terminated.exit_code = 137
+        cs.state.terminated.reason = "OOMKilled"
+        cs.state.terminated.finished_at = None
+        pod.status.container_statuses = [cs]
+
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = MagicMock(items=[pod])
+        monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
+
+        result = provider._read_task_terminations(47, "bioaf-pipelines")
+
+        assert len(result) == 1
+        assert result[0]["reason"] == "OOMKilled"
+        assert result[0]["exit_code"] == 137
+        assert result[0]["pod"] == "nf-abc123"
+
+    def test_a_healthy_task_reports_nothing(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+        provider = KubernetesComputeProvider()
+
+        pod = MagicMock()
+        pod.metadata.name = "nf-ok"
+        cs = MagicMock()
+        cs.name = "star-align"
+        cs.state.terminated = None
+        pod.status.container_statuses = [cs]
+
+        core = MagicMock()
+        core.list_namespaced_pod.return_value = MagicMock(items=[pod])
+        monkeypatch.setattr(provider, "_get_k8s_core_client", lambda: core)
+
+        assert provider._read_task_terminations(47, "bioaf-pipelines") == []
+
+    @pytest.mark.asyncio
+    async def test_the_reader_returns_none_when_the_cluster_cannot_be_asked(self, monkeypatch):
+        monkeypatch.setenv("BIOAF_COMPUTE_MODE", "k8s")
+        provider = KubernetesComputeProvider()
+        monkeypatch.setattr(provider, "_get_k8s_core_client", MagicMock(side_effect=RuntimeError("unreachable")))
+        assert await provider.get_task_terminations(47) is None
+
+    @pytest.mark.asyncio
+    async def test_the_monitor_records_terminations_on_the_run(self, session, running_k8s_run):
+        adapter = _adapter(_unschedulable(count=0))
+        adapter.get_task_terminations = AsyncMock(
+            return_value=[{"pod": "nf-abc", "container": "star", "exit_code": 137, "reason": "OOMKilled"}]
+        )
+
+        with patch(
+            "app.services.pipeline_monitor_service.get_compute_adapter",
+            return_value=adapter,
+        ):
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+
+        recorded = (running_k8s_run.provider_metadata or {}).get("task_terminations") or []
+        assert any(t["reason"] == "OOMKilled" for t in recorded)
+
+    @pytest.mark.asyncio
+    async def test_the_same_termination_is_not_recorded_twice(self, session, running_k8s_run):
+        """The monitor polls every 30s and a failed pod lingers across many cycles."""
+        adapter = _adapter(_unschedulable(count=0))
+        adapter.get_task_terminations = AsyncMock(
+            return_value=[{"pod": "nf-abc", "container": "star", "exit_code": 137, "reason": "OOMKilled"}]
+        )
+
+        with patch(
+            "app.services.pipeline_monitor_service.get_compute_adapter",
+            return_value=adapter,
+        ):
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+
+        recorded = (running_k8s_run.provider_metadata or {}).get("task_terminations") or []
+        assert len(recorded) == 1

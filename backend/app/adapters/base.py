@@ -66,6 +66,14 @@ class ComputeProvider(ABC):
         """
         return None
 
+    async def get_task_terminations(self, run_id: int, namespace: str = "") -> list | None:
+        """How a run's task containers died, or None when unknowable.
+
+        None means the backend could not be asked, which is distinct from "nothing
+        died" and callers must treat it so.
+        """
+        return None
+
     async def get_task_scheduling(self, run_id: int, namespace: str = "") -> dict | None:
         """Whether a run's task pods can be placed, or None when unknowable.
 
