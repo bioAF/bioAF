@@ -36,6 +36,12 @@ _LFC_COLS = [
     "logfoldchange",
     "avg_log2fc",
     "avg_logfc",
+    # DiffBind's spelling, and it IS log2: `dba.report` emits `Fold` alongside the log2 `Conc_*`
+    # group means it is the difference of (GSE157174 S1: 7.7 - 4.62 = 3.08). Last in the list so a
+    # table carrying both an explicit `log2FoldChange` and a `Fold` still prefers the explicit one.
+    # `_pick` matches a whole squashed header cell, never a substring, so this cannot capture a
+    # linear `Fold_Change` column (which squashes to "foldchange").
+    "fold",
 ]
 _PADJ_COLS = [
     "padj",
@@ -247,12 +253,38 @@ def _count_contrast_groups(header: list[str]) -> int:
     return len(labels)
 
 
+def _populated(row: list[str]) -> int:
+    """How many cells in a row actually carry a value."""
+    return sum(1 for c in row if _clean(c))
+
+
+def _strip_leading_title_rows(rows: list[list[str]]) -> list[list[str]]:
+    """Drop the title banner journals put above the real header of a supplementary table.
+
+    GSE157174's Supplementary Table S1 opens with `"Table S1 - 5,607 differentially accessible
+    peaks ",,,,,,,,,,,` and only then the header. Taken verbatim, that banner WAS the header, so
+    not even chrom/start/end could be located and the table yielded nothing.
+
+    Deliberately narrow: a row is a banner only if it carries at most one value AND some later row
+    carries more. A genuinely single-column table therefore keeps all of its rows.
+    """
+    best = max((_populated(r) for r in rows), default=0)
+    if best <= 1:
+        return rows
+    i = 0
+    while i < len(rows) and _populated(rows[i]) <= 1:
+        i += 1
+    return rows[i:]
+
+
 def _read_rows(text: str) -> tuple[list[str], list[list[str]]]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    first_line = text.split("\n", 1)[0]
-    delim = _sniff_delim(first_line)
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    # Sniff on the widest of the first few lines, not blindly on the first: a title banner can be
+    # comma-padded while the table below it is tab-separated.
+    delim = _sniff_delim(max(lines[:5], key=len)) if lines else ","
     rdr = csv.reader(io.StringIO(text), delimiter=delim)
-    rows = [r for r in rdr if r]
+    rows = _strip_leading_title_rows([r for r in rdr if r])
     if not rows:
         return [], []
     return rows[0], rows[1:]

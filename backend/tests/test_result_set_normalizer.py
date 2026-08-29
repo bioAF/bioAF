@@ -288,3 +288,56 @@ def test_the_older_seurat_spelling_parses_too():
     old = "gene\tp_val\tavg_logFC\tp_val_adj\nAAA\t1e-30\t2.0\t1e-26\nBBB\t1e-30\t-2.0\t1e-26\n"
     fs = normalize_gene_table(old, lfc_threshold=1.0, padj_threshold=0.05)
     assert fs.directions() == {"AAA": "up", "BBB": "down"}
+
+
+# The EXACT shape of a DiffBind/edgeR differential-accessibility deposit: Supplementary Table S1 of
+# 10.1038/s41598-021-93509-w (GSE157174, quiescent vs activated naive CD4+ T-cells), which is the
+# ATAC ground truth this feature is validated against.
+#
+# Two things about it defeated the parser, and neither is exotic:
+#   1. DiffBind names its log2 fold change column `Fold`, not `log2FoldChange`. It IS log2 (the
+#      header's own `Conc_CD3pos - Conc_CD3neg` equals it: 7.7 - 4.62 = 3.08), so it must be read
+#      as one rather than skipped.
+#   2. The published CSV opens with a one-cell TITLE row above the real header, which is how
+#      journals ship supplementary tables.
+_DIFFBIND_S1 = (
+    '"Table S1 - 5,607 differentially accessible peaks ",,,,,,,,,,,\n'
+    ",seqnames,start,end,width,strand,Conc,Conc_CD3pos,Conc_CD3neg,Fold,p.value,FDR\n"
+    "114621,chr7,105809051,105809885,835,*,6.86,7.7,4.62,3.08,9.86E-41,1.29E-35\n"  # up, significant
+    "127702,chr9,127396571,127397615,1045,*,7.05,7.88,4.82,3.07,5.96E-36,3.91E-31\n"  # up, significant
+    "113048,chr7,68326932,68327384,453,*,2.85,1.46,3.54,-2.09,0.0158,0.0483\n"  # down, significant
+)
+
+
+def test_normalize_interval_reads_diffbind_fold_column():
+    # `Fold` is DiffBind's spelling of log2FC. Without it the table parses, every row is read, and
+    # zero entities come out, which scores as `not_computed` rather than as a disagreement.
+    body = _DIFFBIND_S1.split("\n", 1)[1]
+    fs = normalize_interval_table(body, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.kind == "interval"
+    assert fs.directions() == {
+        "chr7:105809051-105809885": "up",
+        "chr9:127396571-127397615": "up",
+        "chr7:68326932-68327384": "down",
+    }
+
+
+def test_normalize_interval_reads_diffbind_fold_prefers_fdr_over_raw_p():
+    # The table carries BOTH `p.value` and `FDR`. The adjusted column must win: the third row's raw
+    # p (0.0158) and FDR (0.0483) are both under 0.05 here, so pin the effect sizes instead, which
+    # are what a wrong-column match would corrupt.
+    body = _DIFFBIND_S1.split("\n", 1)[1]
+    fs = normalize_interval_table(body, lfc_threshold=1.0, padj_threshold=0.05)
+    sigs = {e.id: e.significance for e in fs.entities}
+    assert sigs["chr7:68326932-68327384"] == 0.0483
+
+
+def test_normalize_interval_skips_a_supplementary_title_row():
+    # As published: a single-cell title above the real header. Fed verbatim, the title row was taken
+    # AS the header, so even chrom/start/end could not be located.
+    fs = normalize_interval_table(_DIFFBIND_S1, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.directions() == {
+        "chr7:105809051-105809885": "up",
+        "chr9:127396571-127397615": "up",
+        "chr7:68326932-68327384": "down",
+    }
