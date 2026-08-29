@@ -432,3 +432,66 @@ def test_the_extraction_prompt_asks_for_the_annotation_not_only_the_assembly():
     list we are scored against, so the prompt has to ask for both."""
     system, _ = ext.build_extraction_prompt("body")
     assert "annotation" in system.lower()
+
+
+@pytest.mark.asyncio
+async def test_extract_scopes_accessions_to_the_requested_one(session, admin_user, monkeypatch):
+    """A requester who names the study's accession has scoped it, and the plan must obey.
+
+    Real case: 10.1038/s41598-021-93509-w deposits GSE157174 and also CITES GSE114064
+    (transcriptomic) and GSE118189 (a different lab's ATAC). The extractor returned all three, and
+    since nothing edits `accessions_json` afterwards, approving would have fetched two irrelevant
+    series, one of which is not even the right assay.
+
+    `source_accession` was already on the request and was decorative: stored, displayed, and never
+    consulted. It is the human's own statement of which dataset this study reproduces.
+    """
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="GSE157174"
+    )
+    await session.flush()
+    three = _GOOD.replace('"accessions": ["GSE52778"]', '"accessions": ["GSE157174", "GSE114064", "GSE118189"]')
+    _patch_llm(monkeypatch, three)
+
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+    await session.commit()
+
+    assert plan.accessions_json == ["GSE157174"]
+    # The dropped ones are named at the C1 gate rather than discarded silently, so the human can see
+    # the extractor disagreed and say so.
+    dropped = [b for b in (plan.blockers_json or []) if "GSE114064" in b and "GSE118189" in b]
+    assert dropped, plan.blockers_json
+
+
+@pytest.mark.asyncio
+async def test_extract_keeps_every_accession_when_none_was_requested(session, admin_user, monkeypatch):
+    """With no `source_accession`, nothing has been scoped, so the extractor's list stands."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    three = _GOOD.replace('"accessions": ["GSE52778"]', '"accessions": ["GSE157174", "GSE114064"]')
+    _patch_llm(monkeypatch, three)
+
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+    await session.commit()
+
+    assert plan.accessions_json == ["GSE157174", "GSE114064"]
+    assert not [b for b in (plan.blockers_json or []) if "not the accession this study was requested for" in b]
+
+
+@pytest.mark.asyncio
+async def test_extract_honours_a_requested_accession_the_extractor_missed(session, admin_user, monkeypatch):
+    """The requester's accession wins even when the model did not find it in the text.
+
+    The paper is often not open access (study 11's body had to be assembled by hand), so the
+    requester can easily know the accession when the extracted text does not state it.
+    """
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="GSE157174"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)  # model returns only GSE52778
+
+    plan = await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
+    await session.commit()
+
+    assert plan.accessions_json == ["GSE157174"]

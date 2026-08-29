@@ -251,6 +251,26 @@ class ValidationExtractionService:
         if parsed["parse_failure"]:
             blockers.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]
+
+        # A requester who named the study's accession has already scoped it, so that is the dataset
+        # to reproduce. The extractor's list is a reading of the paper's prose, and prose does not
+        # distinguish the data a paper DEPOSITS from the data it merely cites: for
+        # 10.1038/s41598-021-93509-w the model returned its own GSE157174 plus GSE114064
+        # (transcriptomic) and GSE118189 (another lab's ATAC), and since no endpoint edits
+        # `accessions_json`, approving would have fetched all three.
+        #
+        # The requested accession wins even when the model did not return it, because the paper is
+        # often not open access and the requester can know what the extracted text does not say.
+        requested = (study.source_accession or "").strip()
+        if requested:
+            dropped = [a for a in accessions if a.strip().upper() != requested.upper()]
+            accessions = [requested]
+            if dropped:
+                blockers.append(
+                    f"The paper also names {', '.join(dropped)}, which is not the accession this "
+                    f"study was requested for ({requested}). Only {requested} will be fetched."
+                )
+
         if (parsed["data_availability"] == "none" or not accessions) and not any(
             "accession" in b.lower() for b in blockers
         ):
