@@ -361,3 +361,87 @@ def test_a_genome_scale_step_still_fits_its_request():
     or the eviction this directive exists to prevent comes back."""
     request = _disk_request_gb(_config(pipeline_machine_type="n2-highmem-16", pipeline_disk_gb=500))
     assert request >= 100, "must cover an 80 GB step with margin"
+
+
+def _bam_sort_bytes(cfg: str) -> int:
+    """The `--limitBAMsortRAM` value out of the STAR_ALIGN process override."""
+    import re
+
+    m = re.search(r"--limitBAMsortRAM (\d+)", cfg)
+    assert m, "no limitBAMsortRAM override: " + cfg
+    return int(m.group(1))
+
+
+def test_star_is_not_handed_the_whole_pod_for_bam_sorting():
+    """Run 46 died with 103 exit-137s during STAR_ALIGN, one roughly every 5 minutes.
+
+    nf-core derives `--limitBAMsortRAM` from `task.memory`, so STAR was told it could
+    use 118111600640 bytes: exactly 110 GiB, the pod's ENTIRE memory limit. STAR also
+    holds the genome index (~30 GB for human) resident at the same time, so the sum
+    cannot fit under any configuration and the kernel kills it.
+
+    Preemption produces the same exit code, but not one kill every five minutes;
+    that rate is a deterministic crash.
+    """
+    cfg = _config(pipeline_machine_type="n2-highmem-16")
+    pod_limit_bytes = 110 * 1024**3
+
+    assert _bam_sort_bytes(cfg) < pod_limit_bytes, "the sort buffer must not be the whole pod"
+
+
+def test_the_sort_buffer_leaves_room_for_the_genome_index():
+    """A ~30 GB human index sits alongside the sort buffer for the whole step."""
+    cfg = _config(pipeline_machine_type="n2-highmem-16")
+    pod_limit_gib = 110
+    sort_gib = _bam_sort_bytes(cfg) / 1024**3
+
+    assert pod_limit_gib - sort_gib >= 40, (
+        f"only {pod_limit_gib - sort_gib:.0f} GiB left for a ~30 GB index plus overhead"
+    )
+
+
+def test_the_sort_buffer_scales_with_the_machine():
+    """A smaller machine must get a smaller buffer, not the same fixed number."""
+    big = _bam_sort_bytes(_config(pipeline_machine_type="n2-highmem-16"))
+    small = _bam_sort_bytes(_config(pipeline_machine_type="n2-highmem-8"))
+    assert small < big
+
+
+def test_a_small_machine_still_reserves_index_room():
+    """A pure fraction of memory breaks down when the index is a large share of it:
+    half of 55 GiB is 27, and 27 + a 30 GB index still does not fit."""
+    cfg = _config(pipeline_machine_type="n2-highmem-8")
+    sort_gib = _bam_sort_bytes(cfg) / 1024**3
+    assert sort_gib + 30 < 55, f"{sort_gib:.0f} GiB sort + 30 GiB index exceeds a 55 GiB pod"
+
+
+def test_the_override_targets_star_align():
+    cfg = _config(pipeline_machine_type="n2-highmem-16")
+    star_line = next(line for line in cfg.splitlines() if "limitBAMsortRAM" in line)
+    assert "STAR_ALIGN" in star_line
+
+
+def test_the_override_keeps_every_upstream_star_flag():
+    """`ext.args` in Nextflow config REPLACES the pipeline's value, it does not append.
+
+    nf-core/scrnaseq 4.1.0 sets all of STAR's flags in one string:
+
+        ext.args = { "--readFilesCommand zcat --runDirPerm All_RWX --outWigType bedGraph
+                      --twopassMode Basic --outSAMtype BAM SortedByCoordinate
+                      --limitBAMsortRAM ${task.memory.toBytes()}" }
+
+    Overriding it to set only the sort limit would drop `--readFilesCommand zcat`
+    (the reads are gzipped) and `--outSAMtype BAM SortedByCoordinate` (no BAM for
+    anything downstream). Capping memory must not cost the pipeline its arguments.
+    """
+    cfg = _config(pipeline_machine_type="n2-highmem-16")
+    star_line = next(line for line in cfg.splitlines() if "limitBAMsortRAM" in line)
+
+    for flag in (
+        "--readFilesCommand zcat",
+        "--runDirPerm All_RWX",
+        "--outWigType bedGraph",
+        "--twopassMode Basic",
+        "--outSAMtype BAM SortedByCoordinate",
+    ):
+        assert flag in star_line, f"override dropped {flag}"

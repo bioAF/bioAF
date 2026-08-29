@@ -1104,6 +1104,11 @@ class KubernetesComputeProvider(ComputeProvider):
         """
         return work_dir_key(run_id)
 
+    # RAM the genome index and STAR's own structures need alongside the BAM sort
+    # buffer. A human GRCh38 index is ~30 GB resident for the whole step; the rest is
+    # STAR's working set and headroom before the kernel intervenes.
+    _GENOME_INDEX_RESERVE_GB = 45
+
     _STEP_DISK_REQUEST_GB = 120
 
     # Share of a node's raw disk that Kubernetes will actually allocate. Measured, not assumed: a
@@ -1258,6 +1263,36 @@ class KubernetesComputeProvider(ComputeProvider):
         # MULTIQC ext.args (the --title from params.multiqc_title); the QC
         # dashboard does not depend on the report title.
         lines.append("process { withName: 'MULTIQC' { ext.args = '--export' } }")
+
+        # Cap STAR's BAM sort buffer well below the pod's memory limit.
+        #
+        # nf-core derives `--limitBAMsortRAM` from `task.memory`, so STAR was handed
+        # 118111600640 bytes on run 46: exactly 110 GiB, the pod's ENTIRE allowance. It
+        # also holds the genome index resident for the whole step, so the sum could
+        # never fit and the kernel killed it 103 times in 9 hours, roughly one every
+        # five minutes. (Spot preemption yields the same exit 137 but nothing like that
+        # rate; the frequency is what identifies this as a deterministic crash.)
+        #
+        # Sized as memory minus the index reserve, and never more than half the pod. A
+        # plain fraction breaks down on smaller machines, where the index is a large
+        # share of total RAM: half of 55 GiB is 27, and 27 plus a 30 GB index still does
+        # not fit. Whatever STAR cannot hold in the buffer it spills to disk, which is
+        # slower but survivable, and what the 120 GB ephemeral request is there for.
+        # `ext.args` REPLACES the pipeline's value rather than appending, and
+        # nf-core/scrnaseq puts every STAR flag in that one string. Setting only the
+        # sort limit would drop `--readFilesCommand zcat` (the reads are gzipped) and
+        # `--outSAMtype BAM SortedByCoordinate` (no BAM for anything downstream), so
+        # the upstream flags are carried here verbatim. They mirror
+        # conf/modules.config in nf-core/scrnaseq 4.1.0 and should be re-checked when
+        # the pipeline version moves.
+        sort_ram_gb = max(4, min(mem_gb // 2, mem_gb - KubernetesComputeProvider._GENOME_INDEX_RESERVE_GB))
+        sort_ram_bytes = sort_ram_gb * 1024**3
+        star_args = (
+            "--readFilesCommand zcat --runDirPerm All_RWX --outWigType bedGraph "
+            "--twopassMode Basic --outSAMtype BAM SortedByCoordinate "
+            f"--limitBAMsortRAM {sort_ram_bytes}"
+        )
+        lines.append(f"process {{ withName: 'STAR_ALIGN' {{ ext.args = '{star_args}' }} }}")
 
         return "\n".join(lines)
 
