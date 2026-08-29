@@ -480,3 +480,53 @@ def _pipeline_pool_block(main_tf: str) -> str:
     start = main_tf.index('resource "google_container_node_pool" "pipelines"')
     nxt = main_tf.find('resource "google_container_node_pool"', start + 10)
     return main_tf[start : nxt if nxt > 0 else len(main_tf)]
+
+
+def test_workload_node_pools_are_private():
+    """Nodes must not hold public IPs.
+
+    Every GKE node was taking a regional external address against a quota of 8, so
+    the pipeline pool could never exceed 3-4 nodes no matter what disk or CPU quota
+    allowed. Scale-up failed with QUOTA_EXCEEDED on
+    `compute.googleapis.com/regional_in_use_addresses`, which is a constraint nothing
+    in the product measured or reported.
+
+    Raising that quota moves the ceiling. Private nodes remove it, and a compute node
+    has no business being reachable from the internet in the first place.
+    """
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    # Every pool block must turn private nodes on.
+    pool_blocks = re.split(r'resource "google_container_node_pool"', main_tf)[1:]
+    assert pool_blocks, "expected node pool resources"
+    for block in pool_blocks:
+        name = re.search(r'"(\w+)"', block).group(1)
+        assert "enable_private_nodes" in block, f"node pool {name} still gets a public IP"
+
+
+def test_private_nodes_have_egress_through_cloud_nat():
+    """Private nodes with no NAT have NO outbound internet, which breaks everything:
+    container image pulls, the Ensembl reference downloads the pipeline fetches by
+    URL, and nf-core itself being cloned from GitHub.
+
+    NAT is not an optimisation here. Enabling private nodes without it converts a
+    quota ceiling into a total outage.
+    """
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+
+    assert 'resource "google_compute_router"' in main_tf, "Cloud NAT needs a Cloud Router"
+    assert 'resource "google_compute_router_nat"' in main_tf, "private nodes need Cloud NAT for egress"
+
+    nat = main_tf.split('resource "google_compute_router_nat"')[1]
+    assert "ALL_SUBNETWORKS_ALL_IP_RANGES" in nat, "NAT must cover the subnets the nodes sit in"
+    assert "AUTO_ONLY" in nat, "let GCP allocate the NAT addresses"
+
+
+def test_node_pools_are_created_after_nat_exists():
+    """Ordering is the difference between a working change and an outage: a private
+    node that comes up before NAT cannot pull its own container images."""
+    main_tf = (COMPUTE_MODULE_DIR / "main.tf").read_text()
+    pool_blocks = re.split(r'resource "google_container_node_pool"', main_tf)[1:]
+    for block in pool_blocks:
+        name = re.search(r'"(\w+)"', block).group(1)
+        assert "google_compute_router_nat" in block, f"node pool {name} must depend on NAT"

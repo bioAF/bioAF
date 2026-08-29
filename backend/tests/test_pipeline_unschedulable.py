@@ -255,3 +255,64 @@ class TestUnschedulableReasonIsNeverUnknown:
         assert result["reason"] != FAILURE_REASON_UNKNOWN
         assert result["reason"] == "resource_exhausted"
         assert "ephemeral-storage" in result["message"]
+
+
+# -- failing a run must actually stop it -------------------------------------
+
+
+class TestFailingARunStopsIt:
+    """Run 45 was marked `failed` and its Kubernetes Job kept running for 23 HOURS.
+
+    Marking a row in the database terminates nothing. The head pod held a node the
+    whole time, its unschedulable task pods stayed Pending, and the pool could not
+    scale to zero. "Terminal, so it stops spend" was false: it stopped nothing.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_compute_job_is_cancelled_when_the_run_is_failed(self, session, running_k8s_run):
+        started = datetime.now(timezone.utc) - timedelta(seconds=UNSCHEDULABLE_GRACE_SECONDS + 60)
+        running_k8s_run.provider_metadata = {"unschedulable_since": started.isoformat()}
+        adapter = _adapter(_unschedulable())
+        adapter.cancel_job = AsyncMock()
+
+        with patch(
+            "app.services.pipeline_monitor_service.get_compute_adapter",
+            return_value=adapter,
+        ):
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+
+        assert running_k8s_run.status == "failed"
+        adapter.cancel_job.assert_awaited_once()
+        assert adapter.cancel_job.await_args.args[0] == running_k8s_run.compute_job_ref
+
+    @pytest.mark.asyncio
+    async def test_a_cancel_failure_still_leaves_the_run_failed(self, session, running_k8s_run):
+        """The run IS dead. If the cluster cannot be reached to clean up, recording
+        that it is dead still matters more than the cleanup succeeding."""
+        started = datetime.now(timezone.utc) - timedelta(seconds=UNSCHEDULABLE_GRACE_SECONDS + 60)
+        running_k8s_run.provider_metadata = {"unschedulable_since": started.isoformat()}
+        adapter = _adapter(_unschedulable())
+        adapter.cancel_job = AsyncMock(side_effect=RuntimeError("cluster unreachable"))
+
+        with patch(
+            "app.services.pipeline_monitor_service.get_compute_adapter",
+            return_value=adapter,
+        ):
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+
+        assert running_k8s_run.status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_is_not_failed_is_never_cancelled(self, session, running_k8s_run):
+        """Under the grace period the run is still alive and must be left alone."""
+        adapter = _adapter(_unschedulable())
+        adapter.cancel_job = AsyncMock()
+
+        with patch(
+            "app.services.pipeline_monitor_service.get_compute_adapter",
+            return_value=adapter,
+        ):
+            await PipelineMonitorService._sync_k8s_run(session, running_k8s_run, "bioaf-pipeline-44")
+
+        assert running_k8s_run.status == "running"
+        adapter.cancel_job.assert_not_awaited()

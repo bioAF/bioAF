@@ -285,6 +285,21 @@ class PipelineMonitorService:
         metadata.pop("unschedulable_since", None)
         run.provider_metadata = metadata
 
+        # Marking the row terminates NOTHING. Run 45 was flagged failed and its
+        # Kubernetes Job kept running for 23 hours: the head pod held a node, its
+        # unschedulable tasks stayed Pending, and the pool could not scale to zero.
+        # The cancel is what makes "terminal" true.
+        #
+        # A cancel that fails must not undo the verdict. The run is dead either way,
+        # and recording that matters more than the cleanup succeeding; the operator
+        # can see a stuck job, but not a run that silently never ended.
+        job_ref = run.compute_job_ref
+        if job_ref:
+            try:
+                await compute_adapter.cancel_job(job_ref)
+            except Exception as exc:
+                logger.warning("Could not cancel job %s for unschedulable run %d: %s", job_ref, run.id, exc)
+
         await PipelineMonitorService._handle_completion(session, run)
         return True
 
