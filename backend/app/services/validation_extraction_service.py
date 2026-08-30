@@ -14,6 +14,7 @@ production seam.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +32,8 @@ from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
+
+logger = logging.getLogger("bioaf.validation_extraction")
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
@@ -129,14 +132,42 @@ _REFERENCE_GENOME_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
-def _normalize_reference_genome(raw) -> str | None:
+def _builds_named_in(raw) -> list[str]:
+    """Every assembly ``raw`` names, in the order the PAPER names them.
+
+    Scanning the alias table in declaration order made bioAF's own row ordering decide the answer.
+    A real paper (10.1038/s41598-023-33729-4) writes "Human hg19, UCSC (RNA-seq annotation); hg38
+    implied for EPIC array", and the plan recorded GRCh38 because GRCh38 is the first row. Nothing
+    about the paper said so.
+
+    Ordering by position in the TEXT is a claim about the paper instead: a methods section states
+    the build it primarily worked in before the ones it mentions in passing. Two spellings of one
+    assembly ("GRCh38 (hg38)") collapse to a single entry, so they are never a disagreement.
+    """
     text = str(raw or "").lower()
     if not text.strip():
-        return None
+        return []
+    found: list[tuple[int, str]] = []
     for needles, token in _REFERENCE_GENOME_ALIASES:
-        if any(n in text for n in needles):
-            return token
-    return None
+        positions = [text.index(n) for n in needles if n in text]
+        if positions:
+            found.append((min(positions), token))
+    return [token for _at, token in sorted(found)]
+
+
+def _normalize_reference_genome(raw) -> str | None:
+    """The assembly the paper names FIRST, or None when it names none bioAF recognizes."""
+    builds = _builds_named_in(raw)
+    return builds[0] if builds else None
+
+
+def reference_genome_alternatives(raw) -> list[str]:
+    """The other assemblies the paper named, which the run will NOT align against.
+
+    A multi-assay paper naming a build per assay is the normal case, and one of them is about to be
+    chosen for a run that costs money. Empty when the paper names one assembly, or none.
+    """
+    return _builds_named_in(raw)[1:]
 
 
 async def scoped_library_strategy(study: ValidationStudy) -> str | None:
@@ -153,12 +184,31 @@ async def scoped_library_strategy(study: ValidationStudy) -> str | None:
     """
     requested = (study.source_accession or "").strip()
     if not requested:
+        logger.info("study %s: no accession scoped, so the paper's own words decide the pipeline", study.id)
         return None
     try:
         manifest = await AccessionManifestService.fetch_manifest(requested)
     except Exception:  # fetch_manifest documents never-raises; a regression there must not error a study
+        logger.warning("study %s: reading %s to learn its library strategy failed", study.id, requested, exc_info=True)
         return None
-    return dominant_library_strategy(manifest.samples)
+
+    strategy = dominant_library_strategy(manifest.samples)
+    if strategy:
+        logger.info("study %s: %s is deposited as %r", study.id, requested, strategy)
+    else:
+        declared = sorted({(s.get("library_strategy") or "").strip() for s in manifest.samples} - {""})
+        why = (
+            f"its runs declare more than one ({', '.join(declared)})"
+            if len(declared) > 1
+            else (manifest.unavailable_reason or "its runs declare no library strategy")
+        )
+        logger.info(
+            "study %s: %s says nothing usable about what it is (%s), so the paper's own words decide",
+            study.id,
+            requested,
+            why,
+        )
+    return strategy
 
 
 def _str_or_none(value) -> str | None:
@@ -333,11 +383,22 @@ class ValidationExtractionService:
             blockers.append("no data accession found in the paper")
 
         raw_genome = method.get("reference_build")
-        reference_genome = _normalize_reference_genome(raw_genome)
+        named_builds = _builds_named_in(raw_genome)
+        reference_genome = named_builds[0] if named_builds else None
         if raw_genome and reference_genome is None:
             blockers.append(
                 f"could not map the paper's reference genome '{raw_genome}' to a known assembly; "
                 "the analysis run will use a default"
+            )
+        # A paper that ran several assays names a build per assay, and only one of them can be what
+        # this run aligns against. Say which was taken and which were not, because the choice is
+        # made from word order in a methods section and a scientist can see in one glance whether
+        # it is the build their own dataset used.
+        if len(named_builds) > 1:
+            blockers.append(
+                f"The paper names more than one reference genome ({', '.join(named_builds)}). "
+                f"{named_builds[0]} was taken, because the paper names it first. Confirm it is the build "
+                f"this dataset was aligned to before approving."
             )
 
         plan = await ReproductionPlanService.create_plan(
@@ -370,6 +431,9 @@ class ValidationExtractionService:
             blockers=blockers,
             extractor_model=cfg.model,
             extractor_provider=cfg.provider,
+            # Audited, so the deposit's own declaration is on the record even when it agreed with the
+            # paper and left no other trace.
+            library_strategy=library_strategy,
         )
 
         targets = []

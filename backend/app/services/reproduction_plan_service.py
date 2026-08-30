@@ -118,6 +118,7 @@ class ReproductionPlanService:
         blockers: list | None = None,
         extractor_model: str | None = None,
         extractor_provider: str | None = None,
+        library_strategy: str | None = None,
     ) -> ReproductionPlan:
         """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
         plan = ReproductionPlan(
@@ -154,6 +155,12 @@ class ReproductionPlanService:
                 "pipeline_key": pipeline_key,
                 "mapping_confidence": mapping_confidence,
                 "accession_count": len(plan.accessions_json or []),
+                # What the deposited accession declared itself to be, which is what chose the
+                # pipeline whenever it disagreed with the paper. Always recorded, including as None:
+                # a strategy that AGREED with the prose leaves no other trace anywhere, so without
+                # this nothing could answer "was the deposit read for this study, and what did it
+                # say". None means unread or ambiguous, which is a different state from absent.
+                "library_strategy": library_strategy,
             },
         )
         return plan

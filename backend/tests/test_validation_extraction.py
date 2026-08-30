@@ -667,3 +667,128 @@ async def test_a_contradicted_plan_still_reaches_the_gate_rather_than_early_exit
 
     assert plan.pipeline_key is not None
     assert _early_exit_classification(plan) is None
+
+
+# ---- the deposit's strategy is recorded, not just acted on (2026-08-30) ----
+#
+# It decides which pipeline a study runs, and until now the only trace it left was a sentence in
+# mapping_notes, and only when it OVERRODE the paper. A strategy that agreed with the prose left no
+# record at all, so nothing could answer "was the deposit even read for this study".
+
+
+async def _audit_details(session, plan_id):
+    from app.models.audit_log import AuditLog
+
+    row = (
+        (
+            await session.execute(
+                select(AuditLog)
+                .where(AuditLog.entity_type == "reproduction_plan", AuditLog.entity_id == plan_id)
+                .order_by(AuditLog.id.desc())
+            )
+        )
+        .scalars()
+        .first()
+    )
+    return (row.details_json if row else None) or {}
+
+
+@pytest.mark.asyncio
+async def test_the_audit_trail_records_the_strategy_that_chose_the_pipeline(session, admin_user, monkeypatch):
+    await _methylseq_in_registry(session)
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    details = await _audit_details(session, plan.id)
+    assert details["library_strategy"] == "Bisulfite-Seq"
+    assert details["pipeline_key"] == "nf-core/methylseq"
+
+
+@pytest.mark.asyncio
+async def test_the_audit_trail_records_a_strategy_that_merely_agreed(session, admin_user, monkeypatch):
+    """The case with no other trace. The deposit said RNA-Seq, the paper said RNA-seq, nothing was
+    overridden, and the record must still show the deposit was read."""
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0002"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+    _serve_ena(
+        monkeypatch,
+        "SRP0002",
+        "run_accession\texperiment_accession\tsample_accession\tsample_title\texperiment_title\tlibrary_strategy\n"
+        "SRR1\tSRX1\tSRS1\tA\t\tRNA-Seq\n",
+    )
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert plan.pipeline_key == "nf-core/rnaseq"
+    assert (await _audit_details(session, plan.id))["library_strategy"] == "RNA-Seq"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_deposit_is_recorded_as_null_not_omitted(session, admin_user, monkeypatch):
+    """Absent and unread are different states and the record has to tell them apart."""
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0003"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)  # conftest leaves the manifest fetch offline
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    details = await _audit_details(session, plan.id)
+    assert "library_strategy" in details
+    assert details["library_strategy"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_run_log_names_the_accession_and_what_it_declares(session, admin_user, monkeypatch, caplog):
+    await _methylseq_in_registry(session)
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    with caplog.at_level("INFO", logger="bioaf.validation_extraction"):
+        await ValidationExtractionService.extract(
+            session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+        )
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "SRP0001" in logged
+    assert "Bisulfite-Seq" in logged
+
+
+@pytest.mark.asyncio
+async def test_the_run_log_says_why_a_deposit_yielded_nothing(session, admin_user, monkeypatch, caplog):
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0003"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+
+    with caplog.at_level("INFO", logger="bioaf.validation_extraction"):
+        await ValidationExtractionService.extract(
+            session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+        )
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "SRP0003" in logged

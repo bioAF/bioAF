@@ -23,7 +23,10 @@ import pathlib
 import pytest
 
 from app.services.pipeline_run_service import _ASSEMBLY_ALIASES, _ENSEMBL_REFERENCE_BY_GENOME
-from app.services.validation_extraction_service import _normalize_reference_genome
+from app.services.validation_extraction_service import (
+    _normalize_reference_genome,
+    reference_genome_alternatives,
+)
 
 _MIGRATIONS = pathlib.Path(__file__).resolve().parents[1] / "alembic" / "versions"
 
@@ -144,3 +147,50 @@ def test_every_launchable_assembly_is_in_the_seeded_vocabulary():
     assert seeded, "no reference_genome vocabulary found in the migrations"
     missing = sorted(set(_ENSEMBL_REFERENCE_BY_GENOME) - seeded)
     assert not missing, missing
+
+
+# ---- which assembly, when a paper names more than one (2026-08-30) ----
+#
+# Found re-planning 10.1038/s41598-023-33729-4. Its extracted reference_build is
+# "Human hg19, UCSC (RNA-seq annotation); hg38 implied for EPIC array (not explicitly stated)" and
+# the plan recorded GRCh38, because the alias table is scanned in DECLARATION order and GRCh38 is
+# declared first. Nothing about the paper said hg38; bioAF's own table ordering did. A multi-assay
+# paper naming a build per assay is the normal case, not an exotic one.
+
+
+def test_the_build_the_paper_names_first_wins_not_the_one_bioaf_declares_first():
+    build = "Human hg19, UCSC (RNA-seq annotation); hg38 implied for EPIC array (not explicitly stated)"
+    assert _normalize_reference_genome(build) == "GRCh37"
+
+
+def test_declaration_order_no_longer_decides_anything():
+    """Both orderings of the same two builds resolve to whichever the text puts first, so the
+    answer comes from the paper rather than from where a maintainer happened to add a row."""
+    assert _normalize_reference_genome("aligned to mm10, then lifted to GRCh38") == "GRCm38"
+    assert _normalize_reference_genome("aligned to GRCh38, then lifted to mm10") == "GRCh38"
+
+
+def test_a_single_build_is_unaffected_however_it_is_spelled():
+    for prose, expected in (
+        ("GRCh38 / Gencode 29", "GRCh38"),
+        ("reads were mapped to hg19", "GRCh37"),
+        ("mouse reference GRCm39 (Ensembl 112)", "GRCm39"),
+        ("TAIR10 with Araport11 annotation", "TAIR10"),
+    ):
+        assert _normalize_reference_genome(prose) == expected, prose
+
+
+def test_two_spellings_of_the_SAME_build_are_not_a_disagreement():
+    assert _normalize_reference_genome("GRCh38 (hg38)") == "GRCh38"
+    assert reference_genome_alternatives("GRCh38 (hg38)") == []
+
+
+def test_the_builds_that_lost_are_reported_so_a_human_can_correct_it():
+    build = "Human hg19, UCSC (RNA-seq annotation); hg38 implied for EPIC array"
+    assert reference_genome_alternatives(build) == ["GRCh38"]
+
+
+def test_a_paper_naming_one_build_reports_no_alternatives():
+    assert reference_genome_alternatives("GRCh38 / Gencode 29") == []
+    assert reference_genome_alternatives("") == []
+    assert reference_genome_alternatives(None) == []
