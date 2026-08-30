@@ -22,6 +22,10 @@ from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services import llm_provider_config_service
+from app.services.literature.accession_manifest_service import (
+    AccessionManifestService,
+    dominant_library_strategy,
+)
 from app.services.llm_provider_clients import get_client
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -118,6 +122,28 @@ def _normalize_reference_genome(raw) -> str | None:
         if any(n in text for n in needles):
             return token
     return None
+
+
+async def scoped_library_strategy(study: ValidationStudy) -> str | None:
+    """What the accession this study was scoped to says its data actually IS, or None.
+
+    The paper is prose and prose is compound: a methods section saying "RRBS and RNA-seq" gives the
+    mapper one string naming two assays, and the first declared marker wins. The deposit is not
+    prose. ENA records a controlled ``library_strategy`` per run, chosen by the depositor, and where
+    it contradicts the prose it is the better evidence.
+
+    Best-effort in both directions. Nothing is fetched when no accession has been scoped, and an
+    unreachable or multi-assay deposit yields None, which leaves the paper's own words deciding
+    exactly as they did before. A study is never blocked on this lookup.
+    """
+    requested = (study.source_accession or "").strip()
+    if not requested:
+        return None
+    try:
+        manifest = await AccessionManifestService.fetch_manifest(requested)
+    except Exception:  # fetch_manifest documents never-raises; a regression there must not error a study
+        return None
+    return dominant_library_strategy(manifest.samples)
 
 
 def _str_or_none(value) -> str | None:
@@ -236,15 +262,19 @@ class ValidationExtractionService:
         parsed = parse_extraction(output)
 
         method = parsed["method"]
-        # Declared routes first; anything else is matched against the pipelines this instance
-        # can actually run, so a lab that installed the right pipeline is not told its paper is
-        # unreproducible. A fallback match is capped at Level-2 by having no _WIRING entry.
+        # Declared routes first, corrected by what the scoped accession says its data is; anything
+        # else is matched against the pipelines this instance can actually run, so a lab that
+        # installed the right pipeline is not told its paper is unreproducible. A fallback match is
+        # capped at Level-2 by having no _WIRING entry.
         mapping = await resolve_pipeline_for_assay(
             session,
             org_id,
             method.get("assay"),
             method.get("tools"),
             method.get("reference_build"),
+            # What the scoped deposit declares itself to be. It outranks the paper's prose where the
+            # two disagree, which is the only reason a multi-assay paper can reach the right pipeline.
+            library_strategy=await scoped_library_strategy(study),
         )
 
         blockers = list(parsed["blockers"]) + list(mapping.blockers)

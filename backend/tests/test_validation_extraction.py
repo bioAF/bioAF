@@ -495,3 +495,111 @@ async def test_extract_honours_a_requested_accession_the_extractor_missed(sessio
     await session.commit()
 
     assert plan.accessions_json == ["GSE157174"]
+
+
+# ---- the scoped accession's own library strategy routes the plan (plan_4 step 1) ----
+
+_COMPOUND = """```json
+{"accessions": ["GSE228658"],
+ "sample_structure": {"organism": "Homo sapiens", "sample_count": 6},
+ "method": {"assay": "RRBS and RNA-seq", "tools": ["Bismark"], "reference_build": "GRCh38"},
+ "differential_design": {"contrasts": [], "thresholds": {}},
+ "claims": [], "data_availability": "deposited", "blockers": []}
+```"""
+
+_BISULFITE_ENA = (
+    "run_accession\texperiment_accession\tsample_accession\tsample_title\texperiment_title\tlibrary_strategy\n"
+    "SRR1\tSRX1\tSRS1\tMeth 1\t\tBisulfite-Seq\n"
+    "SRR2\tSRX2\tSRS2\tMeth 2\t\tBisulfite-Seq\n"
+)
+
+
+def _serve_ena(monkeypatch, accession, tsv):
+    from app.services.literature import accession_manifest_service as ams
+
+    async def _fetch(url: str) -> str:
+        if url == ams._ena_filereport_url(accession):
+            return tsv
+        raise RuntimeError(f"unexpected fetch {url}")
+
+    monkeypatch.setattr(ams, "_http_fetch_text", _fetch)
+
+
+async def _methylseq_in_registry(session):
+    from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
+
+    session.add(
+        NfCoreRegistryPipeline(
+            name="methylseq",
+            full_name="nf-core/methylseq",
+            description="Methylation (Bisulfite-Sequencing) analysis pipeline",
+            topics=["methylation", "bisulfite-sequencing"],
+            releases_json=[{"tag_name": "2.6.0"}],
+            latest_release="2.6.0",
+        )
+    )
+    await session.flush()
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_bisulfite_accession_plans_methylseq_not_rnaseq(session, admin_user, monkeypatch):
+    """Studies 14 and 15, in one test. Both papers say "RRBS and RNA-seq" or its equivalent, both
+    were scoped to a Bisulfite-Seq accession, and both were planned against the pipeline the prose
+    named first and declined."""
+    await _methylseq_in_registry(session)
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    assert plan.pipeline_key == "nf-core/methylseq"
+    assert plan.pipeline_version == "2.6.0"
+    assert "Bisulfite-Seq" in (plan.mapping_notes or "")
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_deposit_leaves_the_paper_to_decide(session, admin_user, monkeypatch):
+    """The strategy lookup is evidence, not a gate. ENA being down must not stop a study being
+    planned, and it must not change the plan it would otherwise have produced."""
+    await _methylseq_in_registry(session)
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)  # conftest leaves the manifest fetch offline
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    assert plan.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_an_unscoped_study_never_fetches_a_manifest(session, admin_user, monkeypatch):
+    """With no source_accession there is nothing to read a strategy from, so the read path must not
+    spend a round trip finding that out."""
+    calls: list[str] = []
+    from app.services.literature import accession_manifest_service as ams
+
+    async def _record(url: str) -> str:
+        calls.append(url)
+        raise RuntimeError("offline")
+
+    monkeypatch.setattr(ams, "_http_fetch_text", _record)
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    assert plan.pipeline_key == "nf-core/rnaseq"
+    assert calls == []
