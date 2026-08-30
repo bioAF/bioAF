@@ -11,6 +11,7 @@ Shared with ai_pipeline_run (recommend-pipeline); keep it side-effect free.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 
@@ -168,6 +169,90 @@ _ROUTES: tuple[AssayRoute, ...] = (
         markers=("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq"),
     ),
 )
+
+
+# ---- what the DEPOSITED DATA says it is, as opposed to what the paper's prose says ----
+#
+# A paper is prose, and prose is compound. "RRBS and RNA-seq" names two assays; `_match_route`
+# returns the first marker hit in declaration order, and `rna-seq` is a declared marker, so any
+# modern paper that also ran RNA-seq routed to rnaseq no matter which dataset was scoped. Two real
+# papers (GSE213770 and GSE228658, both Bisulfite-Seq) were planned against atacseq and rnaseq on
+# exactly that mechanism and declined.
+#
+# The accession a study was scoped to is not prose. ENA records a controlled `library_strategy` per
+# run, chosen by the depositor from a fixed vocabulary, and that is a statement about the data
+# itself rather than a reading of a methods section. Where the two disagree, the data wins.
+#
+# Two separate declarations per strategy, because they answer two different questions:
+#
+#   `pipeline_key`  which pipeline to ROUTE to. None for a strategy too broad to decide on: ENA
+#                   files bulk, single-cell, total and ribo-depleted RNA under one `RNA-Seq` value,
+#                   so routing on it would send every scRNA-seq study to bulk rnaseq. Worse than
+#                   the prose it would be overriding.
+#   `compatible`    every pipeline that legitimately consumes this strategy, which is what says a
+#                   prose route may STAND. ENA has no CUT&RUN value, so CUT&RUN and CUT&Tag runs are
+#                   deposited as `ChIP-Seq`; without this, routing on the strategy would silently
+#                   undo the deliberate cutandrun-above-chipseq ordering above.
+#
+# Only strategies someone has reasoned about are declared. An undeclared strategy has NO OPINION
+# (the prose route stands untouched), which is what keeps this from becoming a second, worse mapper.
+
+
+@dataclass(frozen=True)
+class LibraryStrategyRoute:
+    """One INSDC ``library_strategy`` value, and what it says about which pipeline may run."""
+
+    strategy: str
+    pipeline_key: str | None
+    compatible: tuple[str, ...]
+
+
+def _strategy_key(strategy: str | None) -> str:
+    """Fold an INSDC strategy to a comparable token: ``Bisulfite-Seq`` and ``bisulfite seq`` agree."""
+    return re.sub(r"[^a-z0-9]+", "", (strategy or "").lower())
+
+
+_RNA_PIPELINES: tuple[str, ...] = (
+    "nf-core/rnaseq",
+    "nf-core/scrnaseq",
+    "nf-core/smrnaseq",
+    "nf-core/rnasplice",
+    "nf-core/rnafusion",
+    "nf-core/circrna",
+    "nf-core/dualrnaseq",
+    "nf-core/isoseq",
+    "nf-core/differentialabundance",
+    "nf-core/spatialvi",
+)
+
+_LIBRARY_STRATEGY_ROUTES: tuple[LibraryStrategyRoute, ...] = (
+    LibraryStrategyRoute("ATAC-seq", "nf-core/atacseq", ("nf-core/atacseq",)),
+    LibraryStrategyRoute("DNase-Hypersensitivity", "nf-core/atacseq", ("nf-core/atacseq",)),
+    LibraryStrategyRoute("Bisulfite-Seq", "nf-core/methylseq", ("nf-core/methylseq",)),
+    # ENA has no CUT&RUN or CUT&Tag value; those runs are deposited as ChIP-Seq.
+    LibraryStrategyRoute("ChIP-Seq", "nf-core/chipseq", ("nf-core/chipseq", "nf-core/cutandrun")),
+    LibraryStrategyRoute("Hi-C", "nf-core/hic", ("nf-core/hic",)),
+    LibraryStrategyRoute("ChIA-PET", "nf-core/hic", ("nf-core/hic",)),
+    LibraryStrategyRoute("miRNA-Seq", "nf-core/smrnaseq", ("nf-core/smrnaseq",)),
+    # An amplicon library is defined by its primers, not its subject: 16S microbiome, a CRISPR edit
+    # site and a targeted panel are all AMPLICON. ampliseq is the default because a 16S study is the
+    # common case, and a paper whose prose already reached crisprseq or ampliseq keeps it.
+    LibraryStrategyRoute("AMPLICON", "nf-core/ampliseq", ("nf-core/ampliseq", "nf-core/crisprseq")),
+    # Declared but deliberately unrouted: too broad to decide on, still useful to the guard.
+    LibraryStrategyRoute("RNA-Seq", None, _RNA_PIPELINES),
+    LibraryStrategyRoute("ssRNA-seq", None, _RNA_PIPELINES),
+    LibraryStrategyRoute("ncRNA-Seq", None, _RNA_PIPELINES),
+)
+
+
+def library_strategy_routes() -> dict[str, LibraryStrategyRoute]:
+    """Every declared strategy, keyed by its folded token."""
+    return {_strategy_key(r.strategy): r for r in _LIBRARY_STRATEGY_ROUTES}
+
+
+def route_for_library_strategy(strategy: str | None) -> LibraryStrategyRoute | None:
+    """What a deposited ``library_strategy`` says about pipeline choice, or None for no opinion."""
+    return library_strategy_routes().get(_strategy_key(strategy))
 
 
 @dataclass

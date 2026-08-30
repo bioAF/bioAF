@@ -8,7 +8,12 @@ a hand-maintained list, so a route added tomorrow is covered the moment it is de
 """
 
 from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
-from app.services.pipeline_mapper import _ROUTES, map_method
+from app.services.pipeline_mapper import (
+    _ROUTES,
+    library_strategy_routes,
+    map_method,
+    route_for_library_strategy,
+)
 from app.services.qc.templates import TEMPLATES
 from app.services.validation_level3_service import _WIRING
 
@@ -219,3 +224,66 @@ def test_the_common_small_rna_abbreviations_do_not_fall_through_to_bulk():
     confident answer to a question nobody asked."""
     for assay in ("sRNA-seq", "sRNAseq", "sRNA sequencing", "tsRNA profiling", "piRNA sequencing"):
         assert map_method(assay).pipeline_key == "nf-core/smrnaseq", assay
+
+
+# ---- routing on the deposited data's own library strategy (plan_4 step 1) ----
+#
+# A paper is prose and prose is compound: "RRBS and RNA-seq" names two assays and the marker table
+# returns the first one it hits. The accession the study was scoped to is not prose. ENA records a
+# controlled `library_strategy` per run, and that is a statement about the data itself.
+
+
+def test_a_bisulfite_accession_routes_to_methylseq():
+    route = route_for_library_strategy("Bisulfite-Seq")
+    assert route is not None
+    assert route.pipeline_key == "nf-core/methylseq"
+
+
+def test_library_strategy_matching_ignores_punctuation_and_case():
+    for spelling in ("Bisulfite-Seq", "BISULFITE-SEQ", "bisulfite seq", " bisulfiteseq "):
+        route = route_for_library_strategy(spelling)
+        assert route is not None and route.pipeline_key == "nf-core/methylseq", spelling
+
+
+def test_the_strategies_plan_4_names_all_route():
+    expected = {
+        "ATAC-seq": "nf-core/atacseq",
+        "Bisulfite-Seq": "nf-core/methylseq",
+        "ChIP-Seq": "nf-core/chipseq",
+        "Hi-C": "nf-core/hic",
+        "miRNA-Seq": "nf-core/smrnaseq",
+        "AMPLICON": "nf-core/ampliseq",
+    }
+    for strategy, pipeline_key in expected.items():
+        route = route_for_library_strategy(strategy)
+        assert route is not None and route.pipeline_key == pipeline_key, strategy
+
+
+def test_rna_seq_is_declared_but_does_not_route():
+    """ENA files bulk, single-cell, total and ribo-depleted RNA under one `RNA-Seq` value. Routing
+    on it would send every scRNA-seq study to bulk rnaseq, which is worse than the prose it would be
+    overriding. It is still DECLARED, so the guard can tell an RNA pipeline from a wrong one."""
+    route = route_for_library_strategy("RNA-Seq")
+    assert route is not None
+    assert route.pipeline_key is None
+    assert "nf-core/scrnaseq" in route.compatible
+    assert "nf-core/rnaseq" in route.compatible
+
+
+def test_an_unknown_strategy_has_no_opinion():
+    for strategy in ("OTHER", "WGS", "", None, "Tn-Seq"):
+        assert route_for_library_strategy(strategy) is None, strategy
+
+
+def test_a_chip_strategy_still_admits_cutandrun():
+    """ENA has no CUT&RUN value, so CUT&RUN and CUT&Tag runs are deposited as `ChIP-Seq`. The
+    marker table puts cutandrun ABOVE chipseq on purpose; the strategy must not undo that."""
+    route = route_for_library_strategy("ChIP-Seq")
+    assert route is not None
+    assert "nf-core/cutandrun" in route.compatible
+
+
+def test_every_strategy_route_is_compatible_with_its_own_strategy():
+    for strategy, route in library_strategy_routes().items():
+        if route.pipeline_key is not None:
+            assert route.pipeline_key in route.compatible, strategy
