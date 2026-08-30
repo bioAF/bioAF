@@ -28,6 +28,7 @@ from app.services.literature.accession_manifest_service import (
 )
 from app.services.llm_provider_clients import get_client
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
+from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
 
@@ -262,6 +263,7 @@ class ValidationExtractionService:
         parsed = parse_extraction(output)
 
         method = parsed["method"]
+        library_strategy = await scoped_library_strategy(study)
         # Declared routes first, corrected by what the scoped accession says its data is; anything
         # else is matched against the pipelines this instance can actually run, so a lab that
         # installed the right pipeline is not told its paper is unreproducible. A fallback match is
@@ -274,10 +276,20 @@ class ValidationExtractionService:
             method.get("reference_build"),
             # What the scoped deposit declares itself to be. It outranks the paper's prose where the
             # two disagree, which is the only reason a multi-assay paper can reach the right pipeline.
-            library_strategy=await scoped_library_strategy(study),
+            library_strategy=library_strategy,
         )
 
         blockers = list(parsed["blockers"]) + list(mapping.blockers)
+
+        # The deposit could not be honoured: `resolve_pipeline_for_assay` can only offer a pipeline
+        # this instance is able to run, so where the right one is neither installed nor in the
+        # registry cache the paper's prose route stands and would read the wrong data. Record it as a
+        # blocker rather than as a classification: the study is still reproducible, this instance
+        # just cannot do it yet, and the C1 gate is where a human decides what to do about that.
+        conflict = library_strategy_conflict(mapping.pipeline_key, library_strategy)
+        if conflict:
+            blockers.append(conflict)
+
         if parsed["parse_failure"]:
             blockers.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]

@@ -255,6 +255,42 @@ def route_for_library_strategy(strategy: str | None) -> LibraryStrategyRoute | N
     return library_strategy_routes().get(_strategy_key(strategy))
 
 
+# The stable signal a caller keys off to recognize this blocker among a plan's others, mirroring how
+# `_early_exit_classification` keys off "insufficient method detail". It is deliberately a phrase
+# from the sentence rather than a code, so the blocker stays one readable sentence for a scientist.
+LIBRARY_STRATEGY_CONFLICT_MARKER = "does not consume"
+
+
+def library_strategy_conflict(pipeline_key: str | None, strategy: str | None) -> str | None:
+    """Why ``pipeline_key`` must not be run against data deposited as ``strategy``, or None.
+
+    A guard, not a router. ``resolve_pipeline_for_assay`` already prefers the deposit where it can,
+    but it can only offer a pipeline this instance is able to run; where it cannot, the prose route
+    stands and the plan still names a pipeline that would read the wrong data and answer
+    confidently. Study 14 was planned as nf-core/atacseq over Bisulfite-Seq at
+    ``mapping_confidence: exact`` and nothing objected.
+
+    Silence is not evidence: a strategy nobody has reasoned about, or a plan with no pipeline at
+    all, yields None rather than a block.
+    """
+    if not pipeline_key:
+        return None
+    route = route_for_library_strategy(strategy)
+    if route is None or pipeline_key in route.compatible:
+        return None
+    remedy = f" {route.pipeline_key} is the pipeline for {route.strategy} data." if route.pipeline_key else ""
+    return (
+        f"{pipeline_key} {LIBRARY_STRATEGY_CONFLICT_MARKER} {route.strategy} data, and the accession "
+        f"this study was scoped to is deposited as {route.strategy}. Running it would spend the "
+        f"compute and answer confidently about the wrong thing.{remedy}"
+    )
+
+
+def is_library_strategy_conflict(blocker: str | None) -> bool:
+    """Whether a recorded plan blocker is the deposit-contradicts-pipeline refusal above."""
+    return LIBRARY_STRATEGY_CONFLICT_MARKER in (blocker or "")
+
+
 @dataclass
 class PipelineMapping:
     pipeline_key: str | None

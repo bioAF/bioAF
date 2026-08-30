@@ -8,6 +8,8 @@ audited.
 import pytest
 from fastapi import HTTPException
 
+from app.services.pipeline_mapper import library_strategy_conflict
+from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_study_service import ValidationStudyService
 
 _TO_PLAN_READY = ["acquiring_text", "reading", "plan_ready"]
@@ -177,3 +179,88 @@ async def test_the_driver_never_retries_a_study_by_itself(session, admin_user):
     from app.services.validation_driver_service import _ACTIVE_BACK_HALF_STATES
 
     assert "error" not in _ACTIVE_BACK_HALF_STATES
+
+
+# ---- a plan the deposited data contradicts cannot be approved (plan_4 step 2) ----
+#
+# Approving is what spends real money. Study 14 was planned as nf-core/atacseq over Bisulfite-Seq
+# data at `mapping_confidence: exact`, and nothing between the plan and the fetch objected.
+
+
+async def _study_with_plan(session, admin_user, *, pipeline_key, blockers):
+    study = await _study_at_plan_ready(session, admin_user)
+    await ReproductionPlanService.create_plan(
+        session,
+        study,
+        admin_user.id,
+        accessions=["SRP0001"],
+        pipeline_key=pipeline_key,
+        pipeline_version="1.0.0",
+        blockers=blockers,
+    )
+    await session.flush()
+    return study
+
+
+@pytest.mark.asyncio
+async def test_approving_a_plan_the_deposit_contradicts_is_refused(session, admin_user):
+    conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
+
+    with pytest.raises(HTTPException) as ei:
+        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+
+    assert ei.value.status_code == 400
+    # Names both sides, so the refusal is actionable rather than merely a stop.
+    assert "nf-core/atacseq" in ei.value.detail
+    assert "Bisulfite-Seq" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_refused_approval_leaves_the_study_at_the_gate(session, admin_user):
+    conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
+
+    with pytest.raises(HTTPException):
+        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+
+    assert study.state == "plan_ready"
+    assert study.approved_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_contradicted_study_can_still_be_declined(session, admin_user):
+    """The guard must not be a dead end. Declining is the human's way out, and it stays open."""
+    conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
+
+    declined = await ValidationStudyService.decline_plan(
+        session, study.id, admin_user.organization_id, admin_user.id, reason="wrong pipeline for the data"
+    )
+    assert declined.state == "plan_declined"
+
+
+@pytest.mark.asyncio
+async def test_an_ordinary_blocker_never_blocks_approval(session, admin_user):
+    """Plans carry blockers routinely (a second accession the paper names, a genome that did not
+    resolve) and those are advisory. Only the deposit contradiction refuses."""
+    study = await _study_with_plan(
+        session,
+        admin_user,
+        pipeline_key="nf-core/rnaseq",
+        blockers=["could not map the paper's reference genome 'hg18' to a known assembly"],
+    )
+
+    approved = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id
+    )
+    assert approved.state == "acquiring_data"
+
+
+@pytest.mark.asyncio
+async def test_a_study_with_no_plan_at_all_still_approves(session, admin_user):
+    study = await _study_at_plan_ready(session, admin_user)
+    approved = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id
+    )
+    assert approved.state == "acquiring_data"

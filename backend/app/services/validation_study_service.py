@@ -18,6 +18,8 @@ from app.models.validation_study import (
     next_states,
 )
 from app.services.audit_service import log_action
+from app.services.pipeline_mapper import is_library_strategy_conflict
+from app.services.reproduction_plan_service import ReproductionPlanService
 
 
 async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None) -> bool:
@@ -222,6 +224,19 @@ class ValidationStudyService:
                 400,
                 f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
             )
+
+        # The one blocker that refuses rather than advises. Every other blocker a plan carries is
+        # information for the scientist ratifying it; this one says the plan names a pipeline that
+        # cannot read the data the study is scoped to, and approving is what spends the money.
+        # Recorded by the extractor, which is where the deposit was read; re-deriving it here would
+        # put a network fetch in the way of every approval and let an outage decide the answer.
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        conflict = next(
+            (b for b in ((plan.blockers_json if plan else None) or []) if is_library_strategy_conflict(b)), None
+        )
+        if conflict:
+            raise HTTPException(400, conflict)
+
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
         old_state = study.state

@@ -12,7 +12,7 @@ from sqlalchemy import select
 
 from app.models.comparison_target import ComparisonTarget
 from app.services import validation_extraction_service as ext
-from app.services.pipeline_mapper import map_method
+from app.services.pipeline_mapper import is_library_strategy_conflict, map_method
 from app.services.validation_extraction_service import (
     ValidationExtractionService,
     build_extraction_prompt,
@@ -603,3 +603,69 @@ async def test_an_unscoped_study_never_fetches_a_manifest(session, admin_user, m
 
     assert plan.pipeline_key == "nf-core/rnaseq"
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_plan_the_deposit_contradicts_records_it_as_a_blocker(session, admin_user, monkeypatch):
+    """methylseq is neither installed nor in the registry cache, so step 1 has nothing to offer and
+    the prose route stands. The plan must say, in the scientist's own gate, that the pipeline it
+    names cannot read the data this study is scoped to."""
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    assert plan.pipeline_key == "nf-core/rnaseq"
+    conflicts = [b for b in (plan.blockers_json or []) if is_library_strategy_conflict(b)]
+    assert len(conflicts) == 1, plan.blockers_json
+    assert "nf-core/rnaseq" in conflicts[0]
+    assert "Bisulfite-Seq" in conflicts[0]
+    assert "nf-core/methylseq" in conflicts[0]
+
+
+@pytest.mark.asyncio
+async def test_a_plan_the_deposit_agrees_with_records_no_conflict(session, admin_user, monkeypatch):
+    await _methylseq_in_registry(session)
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    assert plan.pipeline_key == "nf-core/methylseq"
+    assert not [b for b in (plan.blockers_json or []) if is_library_strategy_conflict(b)]
+
+
+@pytest.mark.asyncio
+async def test_a_contradicted_plan_still_reaches_the_gate_rather_than_early_exiting(
+    session, admin_user, monkeypatch
+):
+    """The blocker is a refusal to RUN, not a verdict on the paper. `not_reproducible` would be a
+    terminal claim about the science, when what actually happened is that this instance cannot run
+    the pipeline the data needs."""
+    study = await ValidationStudyService.create_study(
+        session, admin_user.organization_id, admin_user.id, source_accession="SRP0001"
+    )
+    await session.flush()
+    _patch_llm(monkeypatch, _COMPOUND)
+    _serve_ena(monkeypatch, "SRP0001", _BISULFITE_ENA)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT ...", admin_user.organization_id, admin_user.id
+    )
+
+    from app.services.validation_driver_service import _early_exit_classification
+
+    assert plan.pipeline_key is not None
+    assert _early_exit_classification(plan) is None

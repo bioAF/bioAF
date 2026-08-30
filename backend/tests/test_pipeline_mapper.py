@@ -10,6 +10,8 @@ a hand-maintained list, so a route added tomorrow is covered the moment it is de
 from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
 from app.services.pipeline_mapper import (
     _ROUTES,
+    is_library_strategy_conflict,
+    library_strategy_conflict,
     library_strategy_routes,
     map_method,
     route_for_library_strategy,
@@ -287,3 +289,53 @@ def test_every_strategy_route_is_compatible_with_its_own_strategy():
     for strategy, route in library_strategy_routes().items():
         if route.pipeline_key is not None:
             assert route.pipeline_key in route.compatible, strategy
+
+
+# ---- refusing a pipeline the deposited data cannot be fed to (plan_4 step 2) ----
+#
+# Study 14 reached nf-core/atacseq on Bisulfite-Seq data at `mapping_confidence: exact`, and nothing
+# objected. Routing on the deposit (step 1) fixes that where the right pipeline is reachable; this is
+# the guard for where it is not, so a wrong-pipeline run cannot be approved at all.
+
+
+def test_a_pipeline_that_cannot_read_the_deposited_data_is_a_conflict():
+    conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    assert conflict is not None
+    assert "nf-core/atacseq" in conflict
+    assert "Bisulfite-Seq" in conflict
+    assert is_library_strategy_conflict(conflict)
+
+
+def test_the_conflict_names_the_pipeline_the_data_does_need():
+    conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    assert "nf-core/methylseq" in conflict
+
+
+def test_a_conflict_on_a_strategy_with_no_route_still_refuses():
+    """RNA-Seq is too broad to route on, and it is still enough to know that an ATAC pipeline
+    must not read it."""
+    conflict = library_strategy_conflict("nf-core/atacseq", "RNA-Seq")
+    assert conflict is not None
+    assert is_library_strategy_conflict(conflict)
+
+
+def test_a_pipeline_the_strategy_admits_is_not_a_conflict():
+    assert library_strategy_conflict("nf-core/cutandrun", "ChIP-Seq") is None
+    assert library_strategy_conflict("nf-core/chipseq", "ChIP-Seq") is None
+    assert library_strategy_conflict("nf-core/scrnaseq", "RNA-Seq") is None
+    assert library_strategy_conflict("nf-core/methylseq", "Bisulfite-Seq") is None
+
+
+def test_an_undeclared_strategy_never_contradicts_anything():
+    """A strategy nobody has reasoned about must not block a study. Silence is not evidence."""
+    for strategy in ("OTHER", "WGS", "Tn-Seq", "", None):
+        assert library_strategy_conflict("nf-core/atacseq", strategy) is None, strategy
+
+
+def test_a_plan_with_no_pipeline_has_nothing_to_contradict():
+    assert library_strategy_conflict(None, "Bisulfite-Seq") is None
+
+
+def test_an_ordinary_blocker_is_not_read_as_a_conflict():
+    for blocker in ("no data accession found in the paper", "insufficient method detail to identify an assay", ""):
+        assert not is_library_strategy_conflict(blocker), blocker
