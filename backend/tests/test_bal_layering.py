@@ -47,6 +47,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 # Top-level packages no non-adapter module may import. boto3/botocore are
 # forbidden pre-emptively: there is no AWS code yet, so it costs nothing now and
 # prevents the leak from ever taking root.
@@ -529,9 +531,45 @@ def test_shell_cli_allowlist_count_is_pinned():
 GS_URI_LITERAL_ALLOWLIST: set[str] = set()
 
 
+def _uri_literal_in_source(source: str, scheme: str) -> bool:
+    """True if ``source`` MINTS a ``scheme`` URI, as opposed to writing about one.
+
+    A plain substring scan cannot tell the two apart, and bioAF's code spans both clouds, so it
+    must: `pipeline_run_service` quotes `star_index: s3://ngi-igenomes/...` in a docstring because
+    that is the literal string Nextflow's own params dump recorded when iGenomes hijacked a run.
+    Explaining an AWS path is how a GCP-only reader learns why the guard exists; it is not a leak,
+    and flagging it teaches people to delete the explanation rather than the coupling.
+
+    So: parse, and look only at string values the program actually USES. Comments never reach the
+    AST at all, and a bare string expression statement is documentation by construction (module,
+    class, function and attribute docstrings alike), so both drop out. An f-string still fails,
+    because its literal half is a real Constant: ``f"{scheme}{bucket}/{key}"`` mints a URI.
+
+    Unparseable source falls back to the substring scan. A file this cannot read is a file this
+    cannot vouch for, and the guard fails closed.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return scheme in source
+
+    documentation = {
+        id(node.value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+    }
+    return any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and scheme in node.value
+        and id(node) not in documentation
+        for node in ast.walk(tree)
+    )
+
+
 def _gs_uri_in_source(source: str) -> bool:
-    """True if ``source`` contains a hardcoded ``gs://`` literal."""
-    return "gs://" in source
+    """True if ``source`` mints a hardcoded ``gs://`` URI."""
+    return _uri_literal_in_source(source, "gs://")
 
 
 def test_gs_uri_detector_matches_only_gcs_scheme():
@@ -611,14 +649,59 @@ S3_URI_LITERAL_ALLOWLIST: set[str] = set()
 
 
 def _s3_uri_in_source(source: str) -> bool:
-    """True if ``source`` contains a hardcoded ``s3://`` literal."""
-    return "s3://" in source
+    """True if ``source`` mints a hardcoded ``s3://`` URI."""
+    return _uri_literal_in_source(source, "s3://")
 
 
 def test_s3_uri_detector_matches_only_s3_scheme():
     assert _s3_uri_in_source('uri = "s3://bucket/key"') is True
     assert _s3_uri_in_source('uri = "gs://bucket/key"') is False
     assert _s3_uri_in_source("path = '/local/s3/file'") is False
+
+
+# --- Both guards read code, not prose ----------------------------------------
+#
+# bioAF runs on GCP and on AWS from one codebase, so a module explaining an S3 behaviour to a GCP
+# reader, or a GCS behaviour to an AWS reader, is the codebase working as intended. The guard is
+# about who MINTS a URI, and prose mints nothing.
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_a_scheme_named_in_a_docstring_is_not_a_leak(detector, scheme):
+    source = f'''
+def why_igenomes_is_disabled():
+    """Nextflow's params dump recorded `star_index: {scheme}://ngi-igenomes/igenomes/`."""
+    return True
+'''
+    assert detector(source) is False
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_a_scheme_named_in_a_comment_is_not_a_leak(detector, scheme):
+    assert detector(f"# the adapter mints {scheme}://bucket/key for us\nvalue = 1\n") is False
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_a_scheme_a_module_docstring_names_is_not_a_leak(detector, scheme):
+    assert detector(f'"""Storage URIs look like {scheme}://bucket/key."""\n\nX = 1\n') is False
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_an_f_string_that_mints_a_uri_is_still_a_leak(detector, scheme):
+    """The half that matters is a real string constant, and the result is a real URI."""
+    assert detector(f'uri = f"{scheme}://{{bucket}}/{{key}}"\n') is True
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_a_scheme_in_an_argument_or_a_constant_is_still_a_leak(detector, scheme):
+    assert detector(f'PREFIX = "{scheme}://bioaf-results"\n') is True
+    assert detector(f'download("{scheme}://bucket/key")\n') is True
+
+
+@pytest.mark.parametrize("detector,scheme", [(_gs_uri_in_source, "gs"), (_s3_uri_in_source, "s3")])
+def test_source_this_cannot_parse_fails_closed(detector, scheme):
+    """A file the guard cannot read is a file it cannot vouch for."""
+    assert detector(f'def broken(:\n    uri = "{scheme}://bucket/key"\n') is True
 
 
 def test_no_s3_uri_literals_outside_adapters():
