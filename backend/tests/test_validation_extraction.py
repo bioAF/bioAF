@@ -648,9 +648,7 @@ async def test_a_plan_the_deposit_agrees_with_records_no_conflict(session, admin
 
 
 @pytest.mark.asyncio
-async def test_a_contradicted_plan_still_reaches_the_gate_rather_than_early_exiting(
-    session, admin_user, monkeypatch
-):
+async def test_a_contradicted_plan_still_reaches_the_gate_rather_than_early_exiting(session, admin_user, monkeypatch):
     """The blocker is a refusal to RUN, not a verdict on the paper. `not_reproducible` would be a
     terminal claim about the science, when what actually happened is that this instance cannot run
     the pipeline the data needs."""

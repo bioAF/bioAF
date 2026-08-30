@@ -106,12 +106,26 @@ def _to_float(value) -> float | None:
 # plan.reference_genome must be a controlled-vocabulary token or launch_run 422s at the setup gate and
 # errors the study. Map common aliases to the canonical assembly token; an unrecognized build resolves
 # to None (the launch picks a default) rather than a value guaranteed to fail validation.
+#
+# Only the CURRENT assembly of each organism is recognized, and deliberately: Zv9 is not GRCz11 and
+# Rnor_6.0 is not mRatBN7.2, so folding an older spelling onto the current token would align against
+# a genome the paper never used and report the difference as biology. An unrecognized build resolves
+# to None and the plan carries a blocker saying so.
 _REFERENCE_GENOME_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("grch38", "hg38"), "GRCh38"),
     (("grch37", "hg19"), "GRCh37"),
     (("grcm39", "mm39"), "GRCm39"),
     (("grcm38", "mm10"), "GRCm38"),
     (("t2t", "chm13"), "T2T-CHM13"),
+    (("grcz11", "danrer11"), "GRCz11"),
+    (("mratbn7", "rn7"), "mRatBN7.2"),
+    # BDGP6 is the assembly FAMILY: Ensembl publishes point releases (BDGP6.32, BDGP6.46) that share
+    # a coordinate system and differ in annotation. The token names the family and the launch pins
+    # one release, exactly as GRCh38 pins Ensembl 112; `reference_build` keeps the paper's own words
+    # beside it so an annotation-driven divergence can still be attributed.
+    (("bdgp6", "dm6"), "BDGP6"),
+    (("wbcel235", "ce11"), "WBcel235"),
+    (("tair10",), "TAIR10"),
 )
 
 

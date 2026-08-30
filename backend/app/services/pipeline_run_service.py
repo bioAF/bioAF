@@ -108,6 +108,9 @@ _MACS_GSIZE_BY_GENOME: dict[str, float] = {
 # not carry it in this layout, and a missing entry is what makes a pinned pipeline refuse rather
 # than quietly align against whatever it was seeded with.
 _ENSEMBL = "https://ftp.ensembl.org/pub"
+# Ensembl Genomes is a SEPARATE site with its own release numbering. Plants, fungi, protists and
+# metazoa that the main site does not carry live here; Arabidopsis is the first bioAF needs.
+_ENSEMBL_PLANTS = "https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants"
 _ENSEMBL_REFERENCE_BY_GENOME: dict[str, tuple[str, str]] = {
     "GRCh38": (
         f"{_ENSEMBL}/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
@@ -124,6 +127,36 @@ _ENSEMBL_REFERENCE_BY_GENOME: dict[str, tuple[str, str]] = {
     "GRCh37": (
         f"{_ENSEMBL}/grch37/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh37.dna.primary_assembly.fa.gz",
         f"{_ENSEMBL}/grch37/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh37.87.gtf.gz",
+    ),
+    # Past human and mouse. Every URL below was fetched (HTTP 206 on a range request) on 2026-08-30,
+    # and three of the five do not follow the layout the first four do:
+    #
+    #   * rat, C. elegans and Drosophila publish NO `dna.primary_assembly` file. Only zebrafish and
+    #     the mammals above do, so the obvious pattern 404s at runtime, inside Nextflow, after the
+    #     fetch has been paid for.
+    #   * Drosophila's assembly carries a point release in the filename (BDGP6.46), which the
+    #     `BDGP6` token deliberately does not.
+    #   * Arabidopsis is not on the main FTP site at all. It lives on Ensembl Plants, which is a
+    #     different host with its own release numbering (59, not 112).
+    "GRCz11": (
+        f"{_ENSEMBL}/release-112/fasta/danio_rerio/dna/Danio_rerio.GRCz11.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/danio_rerio/Danio_rerio.GRCz11.112.gtf.gz",
+    ),
+    "mRatBN7.2": (
+        f"{_ENSEMBL}/release-112/fasta/rattus_norvegicus/dna/Rattus_norvegicus.mRatBN7.2.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/rattus_norvegicus/Rattus_norvegicus.mRatBN7.2.112.gtf.gz",
+    ),
+    "WBcel235": (
+        f"{_ENSEMBL}/release-112/fasta/caenorhabditis_elegans/dna/Caenorhabditis_elegans.WBcel235.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/caenorhabditis_elegans/Caenorhabditis_elegans.WBcel235.112.gtf.gz",
+    ),
+    "BDGP6": (
+        f"{_ENSEMBL}/release-112/fasta/drosophila_melanogaster/dna/Drosophila_melanogaster.BDGP6.46.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/drosophila_melanogaster/Drosophila_melanogaster.BDGP6.46.112.gtf.gz",
+    ),
+    "TAIR10": (
+        f"{_ENSEMBL_PLANTS}/release-59/fasta/arabidopsis_thaliana/dna/Arabidopsis_thaliana.TAIR10.dna.toplevel.fa.gz",
+        f"{_ENSEMBL_PLANTS}/release-59/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.59.gtf.gz",
     ),
 }
 
@@ -146,6 +179,15 @@ _ASSEMBLY_ALIASES: dict[str, str] = {
     "mm10": "GRCm38",
     "t2t-chm13": "T2T-CHM13",
     "chm13": "T2T-CHM13",
+    "grcz11": "GRCz11",
+    "danrer11": "GRCz11",
+    "mratbn7.2": "mRatBN7.2",
+    "rn7": "mRatBN7.2",
+    "wbcel235": "WBcel235",
+    "ce11": "WBcel235",
+    "bdgp6": "BDGP6",
+    "dm6": "BDGP6",
+    "tair10": "TAIR10",
 }
 
 

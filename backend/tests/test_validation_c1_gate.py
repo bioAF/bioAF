@@ -251,16 +251,12 @@ async def test_an_ordinary_blocker_never_blocks_approval(session, admin_user):
         blockers=["could not map the paper's reference genome 'hg18' to a known assembly"],
     )
 
-    approved = await ValidationStudyService.approve_plan(
-        session, study.id, admin_user.organization_id, admin_user.id
-    )
+    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
     assert approved.state == "acquiring_data"
 
 
 @pytest.mark.asyncio
 async def test_a_study_with_no_plan_at_all_still_approves(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
-    approved = await ValidationStudyService.approve_plan(
-        session, study.id, admin_user.organization_id, admin_user.id
-    )
+    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
     assert approved.state == "acquiring_data"
