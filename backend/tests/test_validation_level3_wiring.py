@@ -962,3 +962,27 @@ def test_ampliseq_offers_a_gene_finding_set_at_the_gate():
     from app.services.validation_level3_service import supported_finding_kinds
 
     assert supported_finding_kinds("nf-core/ampliseq") == ["gene"]
+
+
+@pytest.mark.asyncio
+async def test_peak_matrix_resolves_past_the_featurecounts_summary_sidecar(session, admin_user, chip_run, da_template):
+    """featureCounts always writes `<matrix>.summary` beside its matrix, and it is not a matrix.
+
+    Both files contain "consensus", "featurecounts" and ".mlb.", so the contains-rule matched the
+    pair and Level 3 refused with `ambiguous_input_file`. That is what happened on study 13, the
+    first real ATAC-seq Level-3 attempt, AFTER the full 12-sample pipeline had already succeeded:
+    the run cost ~10 hours of compute and was thrown away at the last step by a sidecar file.
+    """
+    matrix = await _count_matrix_file(session, admin_user, chip_run, filename=_NFCORE_CONSENSUS)
+    await _count_matrix_file(session, admin_user, chip_run, filename=f"{_NFCORE_CONSENSUS}.summary")
+    study, plan = await _study_with_plan(
+        session,
+        admin_user,
+        chip_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
+    )
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None, "the summary sidecar must not make the real matrix ambiguous"
+    assert level3["input_file_ids"] == [matrix.id]

@@ -96,10 +96,17 @@ _SALMON_GENE_COUNTS = "salmon.merged.gene_counts.tsv"
 # differential design names libraries, so mLb is the correct one. mRp is the fallback for a run that
 # published only that.
 _CONSENSUS_PEAKS = ("consensus", "featurecounts")
+# featureCounts writes `<matrix>.summary` beside every matrix it produces: same directory, same
+# stem, and it carries the per-sample assignment counts rather than the peaks. It therefore contains
+# every token the matrix does, so the contains-rules matched the PAIR and Level 3 refused with
+# `ambiguous_input_file`. Study 13 hit this on the first real ATAC-seq Level-3 attempt, after the
+# full 12-sample pipeline had already succeeded, so ~10 hours of compute was discarded at the last
+# step by a sidecar. Excluded on every rule rather than the first, because any of them can match it.
+_SIDECAR_EXCLUDES = (".summary",)
 _PEAK_INPUT_RULES = (
-    InputRule(filename_contains=(*_CONSENSUS_PEAKS, ".mlb.")),
-    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=(".mrp.",)),
-    InputRule(filename_contains=_CONSENSUS_PEAKS),
+    InputRule(filename_contains=(*_CONSENSUS_PEAKS, ".mlb."), filename_excludes=_SIDECAR_EXCLUDES),
+    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=(".mrp.", *_SIDECAR_EXCLUDES)),
+    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=_SIDECAR_EXCLUDES),
 )
 
 # The template is keyed by its exact notebook_path, NOT by category: the `differential_expression`
