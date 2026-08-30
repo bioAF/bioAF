@@ -6,9 +6,11 @@ nf-core catalog is neither: a lab can install any of ~120 pipelines, and before 
 outside the declared table ended at ``not_reproducible`` before any compute, even when the lab had
 already installed exactly the right pipeline and used it every week.
 
-So: declared route first, always. When none matches, score the assay (and the paper's own named
-tools) against what the org has installed and what the registry cache knows about, and offer the
-winner. The offer is weaker than a route in three ways, all structural rather than advisory:
+So: declared route first, corrected by the deposit. A paper is prose and prose is compound, so
+"RRBS and RNA-seq" routes on whichever marker is declared first; the accession the study was scoped
+to is not prose, and where its own ``library_strategy`` contradicts the prose route, the data wins.
+When no route matches at all, score the assay (and the paper's own named tools) against what the org
+has installed and what the registry cache knows about, and offer the winner. The offer is weaker than a route in three ways, all structural rather than advisory:
 
 * its ``mapping_confidence`` is never ``exact``, so ``_attribute`` cannot clear our side of a
   divergence and a pipeline substitution stays a live explanation;
@@ -31,7 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
-from app.services.pipeline_mapper import PipelineMapping, map_method
+from app.services.pipeline_mapper import (
+    LibraryStrategyRoute,
+    PipelineMapping,
+    declared_route_version,
+    map_method,
+    route_for_library_strategy,
+)
 
 logger = logging.getLogger("bioaf.pipeline_assay_fallback")
 
@@ -206,27 +214,101 @@ async def _candidates(session: AsyncSession, org_id: int) -> list[_Candidate]:
     return out
 
 
+async def _offer_for_strategy(
+    session: AsyncSession,
+    org_id: int,
+    route: LibraryStrategyRoute,
+    strategy: str,
+    assay: str | None,
+    displaced: PipelineMapping,
+) -> PipelineMapping | None:
+    """Route on what the deposit declares it is, or None when this instance cannot run that pipeline.
+
+    Returning None matters as much as returning a mapping: with no version to pin there is no route
+    to offer, and inventing one would put an uninstallable pipeline into an approved plan. The prose
+    route then stands and the C1 guard is what refuses it, which is a refusal a human can act on.
+    """
+    pipeline_key = route.pipeline_key
+    assert pipeline_key is not None  # callers check; a strategy with no route never gets here
+
+    version = declared_route_version(pipeline_key)
+    where = "a hand-verified route"
+    if version is None:
+        candidate = next((c for c in await _candidates(session, org_id) if c.pipeline_key == pipeline_key), None)
+        if candidate is None:
+            logger.info(
+                "org %d: deposit declares %r but %s is neither installed nor in the registry cache",
+                org_id,
+                strategy,
+                pipeline_key,
+            )
+            return None
+        version = candidate.version
+        where = "installed on this bioAF" if candidate.installed else "available from the nf-core registry"
+
+    logger.info(
+        "org %d: library_strategy %r routed to %s (over %s)", org_id, strategy, pipeline_key, displaced.pipeline_key
+    )
+    would_have = displaced.pipeline_key or "no pipeline at all"
+    return PipelineMapping(
+        pipeline_key=pipeline_key,
+        pipeline_version=version,
+        # Never `exact`. `exact` is what lets `_attribute` clear a pipeline substitution as an
+        # explanation for a divergence, and a pipeline chosen BECAUSE the deposit contradicted the
+        # paper is the last mapping that should be able to do that.
+        mapping_confidence="partial",
+        mapping_notes=(
+            f"The accession this study was scoped to is deposited as '{strategy}', so that is what "
+            f"the data actually is. The paper's own words ('{assay}') would have selected "
+            f"{would_have}, which does not consume {strategy} data. Routed to {pipeline_key} "
+            f"{version} ({where}) on the deposit's own declaration rather than on the paper's prose."
+        ),
+    )
+
+
 async def resolve_pipeline_for_assay(
     session: AsyncSession,
     org_id: int,
     assay: str | None,
     tools: list[str] | None = None,
     reference_build: str | None = None,
+    library_strategy: str | None = None,
 ) -> PipelineMapping:
-    """``map_method``, widened to everything this instance can run.
+    """``map_method``, widened to everything this instance can run, and corrected by the deposit.
 
-    Returns the declared route when one matches. Otherwise the best-scoring installable pipeline,
-    or the unchanged ``not_reproducible`` / ``missing_methods`` blocker when nothing does.
+    Returns the declared route when one matches and the scoped accession's own ``library_strategy``
+    does not contradict it. Otherwise the pipeline that strategy names, then the best-scoring
+    installable pipeline, then the unchanged ``not_reproducible`` / ``missing_methods`` blocker.
     """
     tools = tools or []
     declared = map_method(assay, tools, reference_build)
-    if declared.pipeline_key is not None:
-        return declared
 
     # An assay too thin to identify is a different failure with a different remedy, and it must not
-    # reach the matcher: with nothing to match on, "no candidate scored" would be reported as an
-    # unsupported assay rather than as a paper whose methods need reading again.
+    # reach any matcher: with nothing to match on, "no candidate scored" would be reported as an
+    # unsupported assay rather than as a paper whose methods need reading again. A deposit's
+    # strategy does not rescue it either, because a paper nobody can read carries no claim to
+    # reproduce.
     if not (assay or "").strip():
+        return declared
+
+    # The paper is prose and prose is compound: "RRBS and RNA-seq" names two assays and the marker
+    # table returns whichever is declared first. The accession the study was scoped to is not prose,
+    # so where the two disagree the deposit wins -- but only where they genuinely disagree. A prose
+    # route the strategy admits (cutandrun under ChIP-Seq, scrnaseq under RNA-Seq) is the more
+    # specific answer and stands.
+    strategy_route = route_for_library_strategy(library_strategy)
+    if (
+        strategy_route is not None
+        and strategy_route.pipeline_key is not None
+        and declared.pipeline_key not in strategy_route.compatible
+    ):
+        offered = await _offer_for_strategy(
+            session, org_id, strategy_route, str(library_strategy).strip(), assay, declared
+        )
+        if offered is not None:
+            return offered
+
+    if declared.pipeline_key is not None:
         return declared
 
     haystack = " ".join([assay or "", *[t or "" for t in tools]]).lower()

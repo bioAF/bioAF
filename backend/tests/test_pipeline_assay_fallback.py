@@ -260,3 +260,163 @@ async def test_the_pipelines_own_name_in_the_methods_is_enough_on_its_own(sessio
     )
 
     assert mapping.pipeline_key == "nf-core/methylseq"
+
+
+# ---- the scoped accession's library strategy outranks the paper's prose (plan_4 step 1) ----
+#
+# The registry fallback above works and nothing could reach it. A real paper is almost never
+# single-assay, the extractor emits ONE compound assay string, and `_match_route` returns the first
+# marker hit in declaration order, so anything that also mentions RNA-seq routed to rnaseq. Two real
+# Bisulfite-Seq studies (GSE213770, GSE228658) were planned against atacseq and rnaseq and declined.
+
+
+@pytest_asyncio.fixture
+async def methyl_registry(session, admin_user):
+    await _registry(
+        session,
+        "methylseq",
+        "Methylation (Bisulfite-Sequencing) analysis pipeline",
+        ["methylation", "bisulfite-sequencing", "wgbs", "rrbs"],
+        latest="2.6.0",
+    )
+    return session
+
+
+@pytest.mark.asyncio
+async def test_without_a_strategy_a_compound_assay_still_routes_on_its_first_marker(
+    session, admin_user, methyl_registry
+):
+    """The defect this step exists to fix, pinned so the fix cannot be mistaken for a coincidence."""
+    mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "RRBS and RNA-seq", tools=[])
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_the_deposits_strategy_beats_the_papers_prose(session, admin_user, methyl_registry):
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "RRBS and RNA-seq",
+        tools=[],
+        library_strategy="Bisulfite-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/methylseq"
+    assert mapping.pipeline_version == "2.6.0"
+    assert mapping.blockers == []
+    assert "Bisulfite-Seq" in mapping.mapping_notes
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_routes_where_the_prose_matched_nothing_at_all(session, admin_user, methyl_registry):
+    """The prose route and the fallback both come up empty, and the deposit still knows."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "a bespoke cytosine conversion protocol",
+        tools=[],
+        library_strategy="Bisulfite-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/methylseq"
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_routed_pipeline_takes_its_declared_pin_when_it_has_one(session, admin_user, catalog):
+    """Routing on the strategy must not demote a hand-verified route to a registry guess: the plan
+    records the pinned version, and the Level-3 wiring is keyed on the pipeline."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "ChIP-seq and RNA-seq",
+        tools=[],
+        library_strategy="ATAC-seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/atacseq"
+    assert mapping.pipeline_version == "2.1.2"
+
+
+@pytest.mark.asyncio
+async def test_a_declared_route_the_strategy_admits_is_left_alone(session, admin_user, catalog):
+    """ENA has no CUT&RUN value, so CUT&RUN runs are deposited as ChIP-Seq. The marker table puts
+    cutandrun above chipseq deliberately; overriding it here would silently run the wrong pipeline
+    on every CUT&RUN paper."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "CUT&RUN for H3K27me3",
+        tools=[],
+        library_strategy="ChIP-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/cutandrun"
+    assert mapping.pipeline_version == "3.2.2"
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_too_broad_to_decide_on_never_overrides_the_prose(session, admin_user, catalog):
+    """ENA files bulk, single-cell and total RNA under one RNA-Seq value. Routing on it would send
+    every scRNA-seq study to bulk rnaseq."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "single-cell RNA-seq of PBMCs",
+        tools=[],
+        library_strategy="RNA-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/scrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_this_instance_cannot_run_leaves_the_prose_route_alone(session, admin_user, catalog):
+    """No methylseq in the registry cache and none installed, so there is no version to pin and no
+    route to offer. The prose route stands and the C1 guard is what refuses it."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "RRBS and RNA-seq",
+        tools=[],
+        library_strategy="Bisulfite-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_an_undeclared_strategy_has_no_opinion(session, admin_user, catalog):
+    for strategy in ("OTHER", "WGS", "", None):
+        mapping = await resolve_pipeline_for_assay(
+            session, admin_user.organization_id, "bulk RNA-seq", tools=[], library_strategy=strategy
+        )
+        assert mapping.pipeline_key == "nf-core/rnaseq", strategy
+
+
+@pytest.mark.asyncio
+async def test_a_strategy_route_is_never_exact(session, admin_user, methyl_registry):
+    """`exact` is what lets `_attribute` clear a pipeline substitution as an explanation for a
+    divergence. A pipeline chosen because the DEPOSIT disagreed with the paper is the last mapping
+    that should be able to do that, even when the paper names nf-core."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "RRBS and RNA-seq",
+        tools=["nf-core/rnaseq"],
+        library_strategy="Bisulfite-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/methylseq"
+    assert mapping.mapping_confidence == "partial"
+
+
+@pytest.mark.asyncio
+async def test_thin_methods_stay_thin_methods_even_with_a_strategy(session, admin_user, methyl_registry):
+    """A paper whose methods cannot be read has a different remedy (read them again) from a paper
+    routed to the wrong pipeline, and the classifier keys off that distinction."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "", tools=[], library_strategy="Bisulfite-Seq"
+    )
+
+    assert mapping.pipeline_key is None
+    assert any("insufficient method detail" in b.lower() for b in mapping.blockers)

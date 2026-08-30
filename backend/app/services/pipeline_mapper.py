@@ -268,6 +268,20 @@ def _mentions_nf_core(tools: list[str]) -> bool:
     return any("nf-core" in (t or "").lower() or "nfcore" in (t or "").lower() for t in tools)
 
 
+def declared_route_version(pipeline_key: str | None) -> str | None:
+    """The version a hand-verified route pins for ``pipeline_key``, or None when none declares it.
+
+    A pipeline can be selected by something other than its markers (the deposit's own library
+    strategy, say). When it is one this table already covers, the plan must still record the PINNED
+    version: it is what the catalog installs, what Level-3 wiring was verified against, and what a
+    rerun reproduces.
+    """
+    for route in _ROUTES:
+        if route.pipeline_key == pipeline_key:
+            return route.pipeline_version
+    return None
+
+
 def _match_route(assay: str) -> AssayRoute | None:
     """The first declared route whose marker appears in ``assay``, or None."""
     for route in _ROUTES:
