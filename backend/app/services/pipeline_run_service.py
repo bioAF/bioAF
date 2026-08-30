@@ -535,6 +535,28 @@ class PipelineRunService:
         return published.is_empty
 
     @staticmethod
+    async def samplesheet_contract(session, org_id: int, pipeline_key: str, experiment_id: int | None = None):
+        """The contract a launch of ``pipeline_key`` would be judged against, resolved without launching.
+
+        For callers that must fill a samplesheet column BEFORE building the launch request, which the
+        launch grid does by asking the scientist and the lit_validation driver cannot, since it
+        launches with no form at all.
+
+        A pipeline this org's catalog does not hold yields an empty contract rather than an error:
+        resolving a contract must never become a second way for a launch to fail, and refusing to run
+        an uninstalled pipeline is ``launch_run``'s own job, with its own message.
+        """
+        from app.services.samplesheet_schema import parse_contract
+
+        pipeline = await PipelineCatalogService.get_pipeline(session, org_id, pipeline_key)
+        if pipeline is None:
+            return parse_contract(None)
+        contract, _mapping, _scope = await PipelineRunService._effective_contract(
+            session, pipeline, org_id, experiment_id
+        )
+        return contract
+
+    @staticmethod
     async def _effective_contract(
         session, pipeline, org_id: int, experiment_id: int | None, declared: list[dict] | None = None
     ):

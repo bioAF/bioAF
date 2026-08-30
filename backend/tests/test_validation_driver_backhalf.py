@@ -908,3 +908,110 @@ async def test_extracting_activates_level3_for_an_scrnaseq_study(session, admin_
     assert level3["transform"] == "pseudobulk"
     assert len(level3["parameters"]["counts_paths"].split(",")) == 4
     assert level3["parameters"]["test_samples"] == "D1_stim,D2_stim"
+
+
+# ---- the ratified design answers the pipeline's design columns (plan_4 step 3) ----
+
+
+_CUTANDRUN_SCHEMA = {
+    "items": {
+        "type": "object",
+        "properties": {
+            "group": {"type": "string", "pattern": "^[a-zA-Z0-9_]+$"},
+            "replicate": {"type": "integer"},
+            "fastq_1": {"type": "string", "format": "file-path"},
+        },
+        "required": ["group", "replicate", "fastq_1"],
+    }
+}
+
+
+async def _installed_pipeline(session, user, pipeline_key, schema):
+    from app.models.pipeline_catalog_entry import PipelineCatalogEntry
+
+    entry = PipelineCatalogEntry(
+        organization_id=user.organization_id,
+        pipeline_key=pipeline_key,
+        name=pipeline_key,
+        description="",
+        source_type="nf-core",
+        source_url=f"https://github.com/{pipeline_key}",
+        version="3.2.2",
+        is_builtin=False,
+        enabled=True,
+        input_schema_json=schema,
+        input_schema_version="3.2.2",
+    )
+    session.add(entry)
+    await session.flush()
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_setup_answers_the_design_columns_from_the_ratified_contrast(session, admin_user, monkeypatch):
+    """The driver launches with no form, so every column describing experimental design was
+    unanswered and the launch was refused. The contrast the scientist ratified is the answer."""
+    spy = _LaunchSpy(status="running")
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+
+    exp_id = await _experiment_id(session, admin_user)
+    await _installed_pipeline(session, admin_user, "nf-core/cutandrun", _CUTANDRUN_SCHEMA)
+    study = await _study(session, admin_user, state="setup", experiment_id=exp_id, pipeline_key="nf-core/cutandrun")
+    a = await _make_runnable_sample(session, admin_user, exp_id, external_id="SRX1")
+    b = await _make_runnable_sample(session, admin_user, exp_id, external_id="SRX2")
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [
+            {
+                "test_condition": "H3K27me3",
+                "reference_condition": "IgG",
+                "test_samples": ["SRX1"],
+                "reference_samples": ["SRX2"],
+                "subjects": {},
+            }
+        ]
+    }
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    assert len(spy.calls) == 1
+    values = spy.calls[0].sample_values
+    assert values[str(a.id)] == {"group": "H3K27me3", "replicate": "1"}
+    assert values[str(b.id)] == {"group": "IgG", "replicate": "1"}
+
+
+@pytest.mark.asyncio
+async def test_setup_says_nothing_for_a_qc_only_study(session, admin_user, monkeypatch):
+    """No contrast means no statement of arm membership, and inventing one is the guess this path
+    exists to avoid. The launch is refused and names the column, as it was before."""
+    spy = _LaunchSpy(status="running")
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+
+    exp_id = await _experiment_id(session, admin_user)
+    await _installed_pipeline(session, admin_user, "nf-core/cutandrun", _CUTANDRUN_SCHEMA)
+    await _study(session, admin_user, state="setup", experiment_id=exp_id, pipeline_key="nf-core/cutandrun")
+    await _make_runnable_sample(session, admin_user, exp_id, external_id="SRX1")
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    assert spy.calls[0].sample_values == {}
+
+
+@pytest.mark.asyncio
+async def test_setup_still_launches_a_pipeline_that_is_not_in_the_catalog(session, admin_user, monkeypatch):
+    """Resolving the contract must not become a second way for a launch to fail. A pipeline the
+    catalog does not hold is launch_run's refusal to make, with its own message."""
+    spy = _LaunchSpy(status="running")
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+
+    exp_id = await _experiment_id(session, admin_user)
+    await _study(session, admin_user, state="setup", experiment_id=exp_id, pipeline_key="nf-core/notinstalled")
+    await _make_runnable_sample(session, admin_user, exp_id, external_id="SRX1")
+    await session.flush()
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    assert len(spy.calls) == 1
+    assert spy.calls[0].sample_values == {}

@@ -237,6 +237,28 @@ def _compiled_matches(pattern: str, value: str) -> bool:
     return True if regex is None else bool(regex.match(value))
 
 
+def acceptable_spelling(value: str, pattern: str | None) -> str | None:
+    """The most faithful spelling of ``value`` a column's regex accepts, or None if there is none.
+
+    ``_recommendation`` answers a different question (what to SUGGEST when the scientist's own value
+    is rejected) and deliberately returns None when the value already fits. This answers "what should
+    bioAF write here", for the values bioAF derives rather than the ones a scientist typed, so an
+    already-valid value comes back unchanged.
+
+    None is a real answer: no rearrangement of punctuation turns a condition name into a GCA
+    accession, and writing something that merely looks right would name the wrong thing.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if not pattern:
+        return text
+    for candidate in _candidates(text):
+        if candidate and _compiled_matches(pattern, candidate):
+            return candidate
+    return None
+
+
 def _recommendation(value: str, pattern: str | None) -> str | None:
     """A spelling of ``value`` this column would accept, or None if there is none.
 
