@@ -171,6 +171,10 @@ BUILTIN_TEMPLATES = [
             "output_path": "/outputs/da_results.csv",
             "test_samples": "",
             "reference_samples": "",
+            # Declared because the driver PASSES it for a paired design. It was absent here and
+            # unread by the notebook, so an ATAC/ChIP study whose plan declared matched pairs was
+            # analysed unpaired and nothing said so.
+            "block_labels": "",
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
         },

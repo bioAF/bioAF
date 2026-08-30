@@ -161,8 +161,14 @@ async def test_reproducing_completed_scores_concordance_and_advances(session, ad
         # our reproduced set recovers all three of the paper's genes with concordant direction
         return _paper_genes()
 
+    async def _output(_session, cs):
+        # A scored comparison requires the notebook to have PRODUCED something; an absent output is
+        # now a Level-3 failure rather than an empty result set.
+        return "gene,log2FoldChange,padj\n"
+
     monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
     monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+    monkeypatch.setattr(ValidationDriverService, "_read_reproduction_output", _output)
     monkeypatch.setattr(ValidationDriverService, "_extract_reproduced_set", _extract)
 
     level3 = {"template_id": 1, "kind": "gene", "paper_finding_set": _paper_genes().to_dict(), "universe": 20000}
@@ -334,3 +340,43 @@ async def test_comparing_explains_a_tool_pair_divergence_end_to_end(session, adm
     assert result["divergence_attribution"]["cell_count"]["our_tool"] == "STARsolo"
     assert "CellRanger" in result["reasoning"]
     assert study.state == "comparing"  # held for a human, never auto-finalized
+
+
+@pytest.mark.asyncio
+async def test_reproducing_completed_with_no_output_degrades_instead_of_scoring_zero(session, admin_user, monkeypatch):
+    """A headless notebook that RAISED still exits the pod cleanly, so bioAF called it `completed`.
+
+    Study 13, the first real ATAC-seq Level-3 attempt: `da_peaks_deseq2.ipynb` aborted on
+    `stop("samples not in matrix")`, wrote nothing, and the compute session recorded
+    status=completed, failure_reason=None. The empty result was then scored as a real comparison and
+    reported `not_computed` with `our_n: 0` against the paper's 5,607, which reads as "we looked and
+    found nothing" rather than "the reproduction never ran".
+
+    A completed run that produced NO output is a failure of the reproduction, and must degrade to
+    Level 2 naming that, so the next failure is diagnosable instead of silent.
+    """
+
+    async def _load(_session, sid):
+        return SimpleNamespace(id=sid, status="completed")
+
+    async def _poll(_session, cs):
+        return SimpleNamespace(status="completed")
+
+    async def _no_output(_session, cs):
+        return None  # nothing registered as an output file
+
+    monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+    monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+    monkeypatch.setattr(ValidationDriverService, "_read_reproduction_output", _no_output)
+
+    study = await _study_in(
+        session, admin_user, "reproducing", evidence={**_level3_evidence(), "level3_run_session_id": 777}
+    )
+    await ValidationDriverService._handle_reproducing(session, study)
+
+    assert study.state == "comparing"
+    failed = study.evidence_json.get("level3_failed")
+    assert failed, "a completed-but-empty reproduction must be recorded as a Level-3 failure"
+    assert "no output" in failed["reason"].lower() or "produced no" in failed["reason"].lower()
+    # and it must NOT masquerade as a computed comparison
+    assert "level3_result" not in study.evidence_json
