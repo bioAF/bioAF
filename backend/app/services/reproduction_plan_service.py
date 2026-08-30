@@ -89,6 +89,14 @@ def validate_paired_designs(design: dict) -> list[str]:
     return errors
 
 
+def _clamp(value, limit: int):
+    """``value`` cut to what its column holds, or None. Never raises on a long string."""
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= limit else text[:limit]
+
+
 class ReproductionPlanService:
     @staticmethod
     async def create_plan(
@@ -154,7 +162,15 @@ class ReproductionPlanService:
     async def add_comparison_targets(
         session: AsyncSession, plan: ReproductionPlan, targets: list[dict]
     ) -> list[ComparisonTarget]:
-        """Attach the paper's quantitative claims (B2d) to ``plan`` as ComparisonTargets."""
+        """Attach the paper's quantitative claims (B2d) to ``plan`` as ComparisonTargets.
+
+        Every text field is clamped to its column. These values are a model's reading of a methods
+        section rather than a controlled vocabulary, so their length is not something bioAF gets to
+        assume: one over-long unit raised inside the insert, rolled the whole extraction back, and
+        left a real paper unplannable behind a 500 (10.1038/s41598-023-33729-4, 2026-08-30). A
+        clipped unit is a worse record of a claim than a full one; it is a far better one than no
+        plan at all.
+        """
         created: list[ComparisonTarget] = []
         for t in targets:
             metric_key = (t.get("metric_key") or "").strip()
@@ -162,11 +178,11 @@ class ReproductionPlanService:
                 continue
             target = ComparisonTarget(
                 reproduction_plan_id=plan.id,
-                metric_key=metric_key,
+                metric_key=_clamp(metric_key, 100),
                 claimed_value=t.get("claimed_value"),
-                unit=t.get("unit"),
+                unit=_clamp(t.get("unit"), 255),
                 tolerance=t.get("tolerance"),
-                source_locator=t.get("source_locator"),
+                source_locator=_clamp(t.get("source_locator"), 255),
             )
             session.add(target)
             created.append(target)

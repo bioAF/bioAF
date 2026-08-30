@@ -115,3 +115,55 @@ async def test_create_plan_records_blockers_for_unmappable_method(session, admin
     await session.commit()
     assert plan.pipeline_key is None
     assert plan.blockers_json == ["no nf-core equivalent for 10x Flex chemistry"]
+
+
+# ---- a paper's own words cannot 500 the read (found by plan_4's final verification, 2026-08-30) ----
+#
+# Re-planning 10.1038/s41598-023-33729-4 against the live demo raised
+# StringDataRightTruncationError and rolled the whole extraction back, leaving the study unplannable.
+# The extractor had faithfully captured a claim whose unit is "genes (NOTCH4, JAG1, LIFR, CCNA2,
+# CCND2, RB1, SMAD4, JUND, CREBBP)", 66 characters into a 50-character column. The values here come
+# from a model reading a methods section, so their length is not something bioAF gets to assume.
+
+
+@pytest.mark.asyncio
+async def test_a_long_unit_is_kept_not_crashed_on(session, admin_user):
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    plan = await ReproductionPlanService.create_plan(session, study, admin_user.id)
+
+    unit = "genes (NOTCH4, JAG1, LIFR, CCNA2, CCND2, RB1, SMAD4, JUND, CREBBP)"
+    targets = await ReproductionPlanService.add_comparison_targets(
+        session,
+        plan,
+        [{"metric_key": "genes_increased_methylation_by_both_agents", "claimed_value": 9.0, "unit": unit}],
+    )
+    await session.commit()
+
+    assert targets[0].unit == unit
+
+
+@pytest.mark.asyncio
+async def test_a_value_longer_than_its_column_is_clamped_rather_than_raised(session, admin_user):
+    """Widening a column answers today's paper. Clamping answers the next one: an extraction that
+    raises rolls back the whole plan, so a study whose paper wrote a long enough phrase cannot be
+    planned at all, and the failure is a 500 rather than anything a scientist can act on."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    plan = await ReproductionPlanService.create_plan(session, study, admin_user.id)
+
+    targets = await ReproductionPlanService.add_comparison_targets(
+        session,
+        plan,
+        [
+            {
+                "metric_key": "k" * 400,
+                "claimed_value": 1.0,
+                "unit": "u" * 400,
+                "source_locator": "s" * 400,
+            }
+        ],
+    )
+    await session.commit()
+
+    assert len(targets[0].metric_key) <= 100
+    assert len(targets[0].unit) <= 255
+    assert len(targets[0].source_locator) <= 255
