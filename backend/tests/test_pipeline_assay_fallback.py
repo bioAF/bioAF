@@ -16,7 +16,7 @@ import pytest_asyncio
 
 from app.models.nf_core_registry_pipeline import NfCoreRegistryPipeline
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
-from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
+from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay, split_assay
 
 
 async def _registry(session, name, description, topics, latest="1.0.0"):
@@ -420,3 +420,106 @@ async def test_thin_methods_stay_thin_methods_even_with_a_strategy(session, admi
 
     assert mapping.pipeline_key is None
     assert any("insufficient method detail" in b.lower() for b in mapping.blockers)
+
+
+# ---- a compound assay string is read as the several assays it names (plan_4 step 6) ----
+#
+# Redundant where an accession is scoped, since the deposit's own strategy is the stronger signal.
+# This is for the paper with nothing to key on: study 15's extracted assay was
+# 'High-throughput fluorescence imaging (MBD foci), DNA methylation array (EPIC BeadChip), targeted
+# RNA-seq, RRBS', four assays in one string, and `_match_route` answered with whichever marker was
+# declared first.
+#
+# The rule is deliberately narrow, because the demo's own studies show what a looser one would
+# break: 'bulk RNA-seq and ChIP-seq' (study 4, ran to completion), 'single-cell multiome (scRNA-seq
+# + scATAC-seq)' (study 7) and 'bulk RNA-seq and small RNA-seq' (study 9) are all compound and all
+# routed correctly by declaration order. A split only overrides that when the fragments AGREE, by
+# more than one, on a pipeline the whole string did not choose.
+
+
+def test_a_single_assay_string_is_not_split():
+    assert split_assay("bulk RNA-seq") == ["bulk RNA-seq"]
+    assert split_assay("assay for transposase-accessible chromatin") == ["assay for transposase-accessible chromatin"]
+
+
+def test_the_connectives_papers_write_are_split_on():
+    assert split_assay("RRBS and RNA-seq") == ["RRBS", "RNA-seq"]
+    assert split_assay("Hi-C, RNA-seq; ATAC-seq") == ["Hi-C", "RNA-seq", "ATAC-seq"]
+    assert split_assay("WGBS plus scRNA-seq") == ["WGBS", "scRNA-seq"]
+    assert split_assay("ChIP-seq followed by RNA-seq") == ["ChIP-seq", "RNA-seq"]
+
+
+def test_an_ampersand_is_never_a_separator():
+    """CUT&RUN and CUT&Tag are assay NAMES. Splitting on the ampersand turns 'CUT&RUN for H3K27me3'
+    into 'CUT' and 'RUN for H3K27me3', and the second half carries the chipseq marker."""
+    assert split_assay("CUT&RUN for H3K27me3") == ["CUT&RUN for H3K27me3"]
+    assert split_assay("CUT & Tag") == ["CUT & Tag"]
+
+
+@pytest.mark.asyncio
+async def test_the_assay_the_paper_names_most_wins_over_declaration_order(session, admin_user, methyl_registry):
+    """Study 15, in one test. Two of its four fragments identify a methylation assay and one
+    identifies RNA-seq, and the answer was RNA-seq because that marker is declared first."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "High-throughput fluorescence imaging (MBD foci), whole-genome bisulfite sequencing, "
+        "targeted RNA-seq, reduced-representation bisulfite sequencing",
+        tools=[],
+    )
+
+    assert mapping.pipeline_key == "nf-core/methylseq"
+    assert "bisulfite" in mapping.mapping_notes.lower()
+
+
+@pytest.mark.asyncio
+async def test_two_assays_that_disagree_keep_the_declared_order_answer(session, admin_user, catalog):
+    """Study 4 and study 9. One fragment each, nothing to prefer, and declaration order is a
+    considered ranking rather than an accident. Overriding it on a coin toss would refuse or
+    re-route studies that already run correctly."""
+    four = await resolve_pipeline_for_assay(session, admin_user.organization_id, "bulk RNA-seq and ChIP-seq", tools=[])
+    assert four.pipeline_key == "nf-core/chipseq"
+
+    nine = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "bulk RNA-seq and small RNA-seq (exosomal miRNA-seq)",
+        tools=[],
+    )
+    assert nine.pipeline_key == "nf-core/smrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_multiome_paper_still_routes_to_single_cell(session, admin_user, catalog):
+    """Study 7. A spaced plus IS a separator, and the two halves disagree, so declaration order
+    stands and single-cell wins as it did."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "single-cell multiome (scRNA-seq + scATAC-seq)", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/scrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_cut_and_run_paper_spelled_out_is_not_torn_in_half(session, admin_user, catalog):
+    """'cut and run' contains the connective. One fragment resolving is not a compound assay, so
+    the whole string's answer stands."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "CUT and RUN for H3K27me3", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/cutandrun"
+
+
+@pytest.mark.asyncio
+async def test_the_deposits_strategy_still_outranks_the_vote(session, admin_user, methyl_registry):
+    """Prose counting is the weakest of the three signals and must never displace the deposit."""
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "bisulfite sequencing, RRBS, and targeted RNA-seq",
+        tools=[],
+        library_strategy="RNA-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"

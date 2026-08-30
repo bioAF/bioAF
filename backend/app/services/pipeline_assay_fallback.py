@@ -6,9 +6,15 @@ nf-core catalog is neither: a lab can install any of ~120 pipelines, and before 
 outside the declared table ended at ``not_reproducible`` before any compute, even when the lab had
 already installed exactly the right pipeline and used it every week.
 
-So: declared route first, corrected by the deposit. A paper is prose and prose is compound, so
-"RRBS and RNA-seq" routes on whichever marker is declared first; the accession the study was scoped
-to is not prose, and where its own ``library_strategy`` contradicts the prose route, the data wins.
+So: declared route first, corrected by the deposit and then by the paper's own emphasis. A paper
+is prose and prose is compound, so "RRBS and RNA-seq" routes on whichever marker is declared first.
+Two things outrank that reading, in order of how much they know:
+
+* the accession the study was scoped to is not prose, so where its own ``library_strategy``
+  contradicts the prose route, the data wins;
+* where there is no such accession, the compound string is split and each fragment resolved on its
+  own, and a pipeline more than one fragment names beats the one the first marker chose.
+
 When no route matches at all, score the assay (and the paper's own named tools) against what the org
 has installed and what the registry cache knows about, and offer the winner. The offer is weaker than a route in three ways, all structural rather than advisory:
 
@@ -26,6 +32,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -214,6 +221,83 @@ async def _candidates(session: AsyncSession, org_id: int) -> list[_Candidate]:
     return out
 
 
+# What a methods section writes between two assay names. Deliberately short, and two obvious
+# separators are deliberately missing:
+#
+#   `&`  CUT&RUN and CUT&Tag are assay NAMES. Splitting on the ampersand turns "CUT&RUN for H3K27me3"
+#        into "CUT" and "RUN for H3K27me3", and the second half carries the chipseq marker `h3k`.
+#   `/`  papers write "10x/Chromium" and "Salmon/Alevin" as single names at least as often as they
+#        write it between two assays.
+#
+# " and " is here despite "cut and run" containing it, because the two-fragment rule below is what
+# makes that safe: "cut" identifies nothing, so the split yields one assay, not two.
+_ASSAY_SEPARATORS = re.compile(
+    r"\s*(?:,|;|\+|\band\b|\bplus\b|\bas well as\b|\bcombined with\b|\bfollowed by\b)\s*",
+    re.IGNORECASE,
+)
+
+
+def split_assay(assay: str | None) -> list[str]:
+    """The pieces of a compound methods string, or the whole string when it names one assay."""
+    parts = [p.strip() for p in _ASSAY_SEPARATORS.split(assay or "") if p and p.strip()]
+    return parts or ([assay.strip()] if (assay or "").strip() else [])
+
+
+def _fallback_match(candidates: list[_Candidate], haystack: str) -> tuple[_Candidate, list[str]] | None:
+    """The single best-scoring candidate for ``haystack``, or None when nothing clears the bar or
+    two candidates tie. Shared by the whole-string match and the per-fragment vote so both agree."""
+    haystack_tokens = _tokens(haystack)
+    scored = [
+        (score, candidate, why)
+        for candidate in candidates
+        if (result := _score(candidate, haystack, haystack_tokens)) and (score := result[0]) >= _MIN_SCORE
+        for why in [result[1]]
+    ]
+    if not scored:
+        return None
+    # Installed beats not-installed at equal score: what a lab has installed is a statement about
+    # what that lab does. Ties break on the pipeline key so a rerun resolves identically.
+    scored.sort(key=lambda item: (item[0], item[1].installed, item[1].pipeline_key), reverse=True)
+    best_score, best, why = scored[0]
+    if [c for s, c, _ in scored[1:] if s == best_score and c.installed == best.installed]:
+        return None
+    return best, why
+
+
+def _fragment_pipeline(candidates: list[_Candidate], fragment: str) -> str | None:
+    """Which pipeline one fragment of a compound assay identifies, on its own, or None."""
+    route = map_method(fragment, [], None)
+    if route.pipeline_key is not None:
+        return route.pipeline_key
+    match = _fallback_match(candidates, fragment.lower())
+    return match[0].pipeline_key if match else None
+
+
+def _majority_assay(candidates: list[_Candidate], assay: str, declared_key: str | None) -> tuple[str, list[str]] | None:
+    """The pipeline a compound assay string names MORE THAN ONCE, when one does and it is not the
+    answer declaration order already gave. Otherwise None, and today's answer stands.
+
+    Narrow on purpose. `_match_route` returns the first marker hit in DECLARATION order, which is a
+    considered ranking rather than an accident: "bulk RNA-seq and ChIP-seq" resolves to chipseq and
+    that is right. So a split only overrides it when the fragments AGREE, by more than one, on
+    something else. Two fragments pointing two ways is a real ambiguity that counting cannot settle,
+    and the ranking is a better tie-break than a coin toss.
+    """
+    fragments = split_assay(assay)
+    if len(fragments) < 2:
+        return None
+    named = [(f, key) for f in fragments if (key := _fragment_pipeline(candidates, f))]
+    # One fragment identifying anything is not a compound assay: it is one assay written beside prose
+    # the mapper cannot read ("CUT and RUN for H3K27me3").
+    if len(named) < 2:
+        return None
+    counts = Counter(key for _f, key in named)
+    winner, votes = counts.most_common(1)[0]
+    if votes < 2 or list(counts.values()).count(votes) > 1 or winner == declared_key:
+        return None
+    return winner, [f for f, key in named if key == winner]
+
+
 async def _offer_for_strategy(
     session: AsyncSession,
     org_id: int,
@@ -266,6 +350,51 @@ async def _offer_for_strategy(
     )
 
 
+async def _offer_by_key(
+    session: AsyncSession, org_id: int, candidates: list[_Candidate], pipeline_key: str
+) -> tuple[str, str] | None:
+    """``(pipeline_key, version)`` for a pipeline this instance can run, or None when it cannot.
+
+    The declared pin wins where there is one: it is what the catalog installs, what the Level-3
+    wiring was verified against, and what a rerun reproduces.
+    """
+    version = declared_route_version(pipeline_key)
+    if version is not None:
+        return pipeline_key, version
+    candidate = next((c for c in candidates if c.pipeline_key == pipeline_key), None)
+    return (pipeline_key, candidate.version) if candidate else None
+
+
+def _no_single_fallback(
+    candidates: list[_Candidate], haystack: str, assay: str | None, declared: PipelineMapping
+) -> PipelineMapping:
+    """Either nothing scored, which leaves the unchanged blocker, or two candidates tied, which is
+    refused BY NAME. This is a screening tool for papers of unknown validity: silently picking one of
+    two equally plausible pipelines spends real compute on a guess and reports the result as an
+    answer."""
+    haystack_tokens = _tokens(haystack)
+    scored = [
+        (result[0], candidate)
+        for candidate in candidates
+        if (result := _score(candidate, haystack, haystack_tokens))[0] >= _MIN_SCORE
+    ]
+    if not scored:
+        return declared
+    top = max(s for s, _ in scored)
+    installed = any(c.installed for s, c in scored if s == top)
+    names = ", ".join(sorted({c.pipeline_key for s, c in scored if s == top and c.installed == installed}))
+    return PipelineMapping(
+        pipeline_key=None,
+        pipeline_version=None,
+        mapping_confidence="none",
+        mapping_notes=(
+            f"Assay '{assay}' matches more than one installable pipeline equally well ({names}). "
+            "Choosing one would spend compute on a guess, so none was selected."
+        ),
+        blockers=[f"more than one nf-core pipeline matches this assay equally well: {names}"],
+    )
+
+
 async def resolve_pipeline_for_assay(
     session: AsyncSession,
     org_id: int,
@@ -308,41 +437,42 @@ async def resolve_pipeline_for_assay(
         if offered is not None:
             return offered
 
+    candidates = await _candidates(session, org_id)
+
+    # A paper is one string naming as many assays as it ran. Where its own fragments agree, by more
+    # than one, on a pipeline that declaration order did not choose, that agreement is the better
+    # reading of the paper than whichever marker happens to be declared first.
+    majority = _majority_assay(candidates, assay or "", declared.pipeline_key)
+    if majority is not None:
+        winner, saying_so = majority
+        pinned = await _offer_by_key(session, org_id, candidates, winner)
+        if pinned is not None:
+            pinned_key, pinned_version = pinned
+            named = ", ".join(f"'{f}'" for f in saying_so)
+            return PipelineMapping(
+                pipeline_key=pinned_key,
+                pipeline_version=pinned_version,
+                mapping_confidence="partial",
+                mapping_notes=(
+                    f"The paper's methods name several assays ('{assay}'). More of them identify "
+                    f"{pinned_key} than anything else ({named}), so that is what was planned rather "
+                    f"than {declared.pipeline_key or 'no pipeline'}, which is what the first "
+                    "recognized assay name alone would have selected. Reading prose is weaker than "
+                    "reading the deposit: scoping this study to the accession it should reproduce "
+                    "settles it outright."
+                ),
+            )
+
     if declared.pipeline_key is not None:
         return declared
 
     haystack = " ".join([assay or "", *[t or "" for t in tools]]).lower()
-    haystack_tokens = _tokens(haystack)
+    match = _fallback_match(candidates, haystack)
+    if match is None:
+        return _no_single_fallback(candidates, haystack, assay, declared)
 
-    scored: list[tuple[int, _Candidate, list[str]]] = []
-    for candidate in await _candidates(session, org_id):
-        score, why = _score(candidate, haystack, haystack_tokens)
-        if score >= _MIN_SCORE:
-            scored.append((score, candidate, why))
-
-    if not scored:
-        return declared
-
-    # Installed beats not-installed at equal score: what a lab has installed is a statement about
-    # what that lab does. Ties break on the pipeline key so a rerun resolves identically.
-    scored.sort(key=lambda item: (item[0], item[1].installed, item[1].pipeline_key), reverse=True)
-    best_score, best, why = scored[0]
-
-    rivals = [c for s, c, _ in scored[1:] if s == best_score and c.installed == best.installed]
-    if rivals:
-        names = ", ".join(sorted([best.pipeline_key, *[c.pipeline_key for c in rivals]]))
-        return PipelineMapping(
-            pipeline_key=None,
-            pipeline_version=None,
-            mapping_confidence="none",
-            mapping_notes=(
-                f"Assay '{assay}' matches more than one installable pipeline equally well ({names}). "
-                "Choosing one would spend compute on a guess, so none was selected."
-            ),
-            blockers=[f"more than one nf-core pipeline matches this assay equally well: {names}"],
-        )
-
-    logger.info("org %d: assay %r resolved to %s by fallback (score %d)", org_id, assay, best.pipeline_key, best_score)
+    best, why = match
+    logger.info("org %d: assay %r resolved to %s by fallback", org_id, assay, best.pipeline_key)
     where = "installed on this bioAF" if best.installed else "available from the nf-core registry"
     return PipelineMapping(
         pipeline_key=best.pipeline_key,
