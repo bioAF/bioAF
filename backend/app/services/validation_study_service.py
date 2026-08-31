@@ -5,7 +5,8 @@ Experiment/Sample ``update_status`` convention (same "Cannot transition ... Next
 shape) and delegates the allowed edges to ``app.models.validation_study``.
 """
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -18,8 +19,71 @@ from app.models.validation_study import (
     next_states,
 )
 from app.services.audit_service import log_action
+from app.services.event_bus import event_bus
+from app.services.event_types import VALIDATION_STUDY_ERROR
 from app.services.pipeline_mapper import is_library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
+
+logger = logging.getLogger("bioaf.validation_study")
+
+# How long a stopped study's fetched data is kept so a retry can reuse it.
+#
+# Longer than the Nextflow work dir's two days (`work_dir_reaper`), because that data is
+# recomputable and this is not: re-fetching a study is a paid, multi-hour download from ENA. Short
+# enough that a study nobody came back to stops being billed. `validation_fetch_reaper` acts on the
+# deadline this constant sets; the API hands the deadline itself to the UI, so the window is decided
+# here once rather than restated in the frontend.
+VALIDATION_FETCH_RETENTION_DAYS = 3
+
+
+def _study_label(study: ValidationStudy) -> str:
+    """What to call the study in a notification: what it reproduces, never a bare id."""
+    return study.source_doi or study.source_accession or f"Study #{study.id}"
+
+
+async def record_study_error(study: ValidationStudy) -> None:
+    """Stamp a study that has just stopped, and tell the person who asked for it.
+
+    Two things a stopped study owes a human. **When it stopped**, which is what dates the retry
+    window: nothing else on the row records it (``updated_at`` moves for any write), and the reaper
+    needs a time it can prove. And **that it stopped at all**, because `error` is an infrastructure
+    failure with a manual way back, and the only account of one used to be a badge on a page nobody
+    had open.
+
+    The notification is best-effort: recording the failure is the point, announcing it is on top.
+    """
+    now = datetime.now(timezone.utc)
+    evidence = dict(study.evidence_json or {})
+    evidence["error_at"] = now.isoformat()
+    evidence["fetch_reap_after"] = (now + timedelta(days=VALIDATION_FETCH_RETENTION_DAYS)).isoformat()
+    # A fresh dict, because evidence_json is a plain (non-Mutable) JSONB column and an in-place
+    # mutation of the same reference goes untracked.
+    study.evidence_json = evidence
+
+    label = _study_label(study)
+    reason = study.failure_reason or "the reproduction could not be completed"
+    try:
+        await event_bus.emit(
+            VALIDATION_STUDY_ERROR,
+            {
+                "event_type": VALIDATION_STUDY_ERROR,
+                "org_id": study.organization_id,
+                "user_id": study.requested_by_user_id,
+                "target_user_id": study.requested_by_user_id,
+                "entity_type": "validation_study",
+                "entity_id": study.id,
+                "title": "A validation study stopped on a technical failure",
+                "message": (
+                    f"{label} stopped: {reason}. This is not a result about the paper. Retry it within "
+                    f"{VALIDATION_FETCH_RETENTION_DAYS} days and the data already downloaded is reused; "
+                    "after that the data is deleted and a retry downloads it again."
+                ),
+                "severity": "warning",
+                "summary": f"Validation study {study.id} stopped: {reason}",
+            },
+        )
+    except Exception:
+        logger.exception("validation study %d: could not announce the error", study.id)
 
 
 async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None) -> bool:
@@ -131,7 +195,10 @@ class ValidationStudyService:
 
         study.analysis_run_id = None
         evidence = dict(study.evidence_json or {})
-        for key in ("level3_run_session_id", "level3", "qc", "acquire_retry_at"):
+        # `error_at` / `fetch_reap_after` are the retry window, and a retry is what that window was
+        # waiting for. Left in place, a study back in flight still carries a countdown against data
+        # it is actively using.
+        for key in ("level3_run_session_id", "level3", "qc", "acquire_retry_at", "error_at", "fetch_reap_after"):
             evidence.pop(key, None)
         study.evidence_json = evidence or None
         study.failure_reason = None
@@ -188,6 +255,8 @@ class ValidationStudyService:
 
         old_state = study.state
         study.state = new_state
+        if new_state == "error":
+            await record_study_error(study)
         await session.flush()
 
         await log_action(

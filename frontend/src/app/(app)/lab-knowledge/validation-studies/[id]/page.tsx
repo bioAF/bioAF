@@ -251,6 +251,8 @@ export default function ValidationStudyPage() {
             <RetryNotice
               studyId={study.id}
               failureReason={study.failure_reason}
+              reapAfter={study.evidence?.fetch_reap_after as string | undefined}
+              dataDeleted={!!study.evidence?.fetch_reaped}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
             />
           </section>

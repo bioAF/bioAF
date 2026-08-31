@@ -56,6 +56,11 @@ export interface Evidence {
   data_run_id?: number | null;
   analysis_run_id?: number | null;
   qc_dashboard_id?: number | null;
+  // The retry window on a stopped study: when it stopped, when its downloaded data stops being kept
+  // for a retry, and what was freed once that passed.
+  error_at?: string | null;
+  fetch_reap_after?: string | null;
+  fetch_reaped?: { at?: string | null; objects?: number | null; bytes?: number | null } | null;
 }
 
 const VERDICT_META: Record<string, { label: string; cls: string }> = {

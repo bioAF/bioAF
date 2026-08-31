@@ -20,10 +20,17 @@ import { Button } from "@/components/ui/Button";
 export function RetryNotice({
   studyId,
   failureReason,
+  reapAfter,
+  dataDeleted,
   onChanged,
 }: {
   studyId: number;
   failureReason?: string | null;
+  // When the study's downloaded data stops being kept for a retry (ISO 8601, set by the server so
+  // the retention window is not restated here).
+  reapAfter?: string | null;
+  // The window has already closed and the data is gone, so a retry re-downloads rather than resumes.
+  dataDeleted?: boolean;
   onChanged: (updated: unknown) => void;
 }) {
   const { canAccess } = usePermissions();
@@ -51,6 +58,17 @@ export function RetryNotice({
         picks up from the work already done: data that was already downloaded is reused, and only the
         steps that failed run again.
       </p>
+      {dataDeleted ? (
+        <p className="mt-2 text-xs text-gray-600">
+          The data downloaded for this study has been deleted to free storage. You can still retry it, and
+          it will download the data again.
+        </p>
+      ) : reapAfter ? (
+        <p className="mt-2 text-xs text-gray-600">
+          The data downloaded for this study is kept until {new Date(reapAfter).toLocaleDateString()}. Retry
+          before then and it is reused; after that it is deleted and a retry downloads it again.
+        </p>
+      ) : null}
       {canAccess("lit_validation", "approve") && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button busy={busy} busyLabel="Retrying..." onClick={retry}>

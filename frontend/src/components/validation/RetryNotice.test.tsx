@@ -57,3 +57,29 @@ test("hides the control from someone who cannot approve compute", () => {
   // The explanation still shows: a viewer should understand why the study stopped.
   expect(screen.getByText(/analysis run failed/i)).toBeInTheDocument();
 });
+
+// The retry window is what makes retry a real choice rather than an open-ended one: the fetched
+// data is kept for a few days and then deleted, so the notice has to say which side of that line
+// the study is on.
+
+test("says how long the downloaded data will still be there", () => {
+  const reapAfter = "2026-09-05T10:00:00+00:00";
+  render(
+    <RetryNotice studyId={11} failureReason={REASON} reapAfter={reapAfter} onChanged={jest.fn()} />,
+  );
+  const deadline = new Date(reapAfter).toLocaleDateString();
+  expect(screen.getByText(new RegExp(deadline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))).toBeInTheDocument();
+});
+
+test("says plainly when the data is already gone, so a retry is not mistaken for a resume", () => {
+  render(
+    <RetryNotice studyId={11} failureReason={REASON} dataDeleted onChanged={jest.fn()} />,
+  );
+  expect(screen.getByText(/has been deleted/i)).toBeInTheDocument();
+  expect(screen.getByText(/download the data again/i)).toBeInTheDocument();
+});
+
+test("says nothing about a deadline when there is no data to expire", () => {
+  render(<RetryNotice studyId={11} failureReason={REASON} onChanged={jest.fn()} />);
+  expect(screen.queryByText(/deleted/i)).not.toBeInTheDocument();
+});

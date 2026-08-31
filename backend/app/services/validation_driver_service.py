@@ -49,7 +49,7 @@ from app.services.validation_concordance_service import compare_gene_sets, compa
 from app.services.validation_extraction_service import ValidationExtractionService
 from app.services.validation_sample_values import sample_values_from_design
 from app.services.validation_level3_service import resolve_level3
-from app.services.validation_study_service import ValidationStudyService
+from app.services.validation_study_service import ValidationStudyService, record_study_error
 
 logger = logging.getLogger("bioaf.validation_driver")
 
@@ -886,4 +886,8 @@ class ValidationDriverService:
         if study is not None and study.state not in VALIDATION_STUDY_TERMINAL_STATES:
             study.state = "error"
             study.failure_reason = (reason or "")[:2000]
+            # Same stamp and same announcement as the guarded path: this one sets the state directly
+            # because the handler that raised may have left an illegal transition behind, but it is
+            # still a study stopping and a human still has to hear about it.
+            await record_study_error(study)
             await session.flush()
