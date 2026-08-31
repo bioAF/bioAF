@@ -303,7 +303,11 @@ export default function ValidationStudyPage() {
 
         <section className="mb-6">
           <ValidationStudyActions
-            study={{ id: study.id, state: study.state }}
+            study={{
+              id: study.id,
+              state: study.state,
+              evidence: { awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval },
+            }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
             suggestedClassification={study.evidence?.classification_result?.classification}
           />

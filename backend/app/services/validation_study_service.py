@@ -200,6 +200,12 @@ class ValidationStudyService:
         # it is actively using.
         for key in ("level3_run_session_id", "level3", "qc", "acquire_retry_at", "error_at", "fetch_reap_after"):
             evidence.pop(key, None)
+        if not resumable:
+            # Landing at `plan_ready` is what makes the re-fetch a decision rather than a side
+            # effect of clicking Retry, and today that intent lives only in the target state. Say it
+            # on the study instead: the C1 gate warns that approving downloads the data again, and
+            # anything that later advances `plan_ready` on its own has something to refuse on.
+            evidence["awaiting_refetch_approval"] = True
         study.evidence_json = evidence or None
         study.failure_reason = None
         await session.flush()
@@ -308,6 +314,10 @@ class ValidationStudyService:
 
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
+        # The person this study was waiting for has now decided.
+        evidence = dict(study.evidence_json or {})
+        if evidence.pop("awaiting_refetch_approval", None) is not None:
+            study.evidence_json = evidence
         old_state = study.state
         study.state = "acquiring_data"
         await session.flush()

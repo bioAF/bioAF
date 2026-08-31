@@ -156,3 +156,39 @@ class TestTheEventIsAFirstClassNotification:
         """An event with no severity defaults silently, and one with no toggle cannot be turned off."""
         assert EVENT_SEVERITY[VALIDATION_STUDY_ERROR] == "warning"
         assert VALIDATION_STUDY_ERROR in USER_CONFIGURABLE_EVENT_TYPES
+
+
+class TestARetryCannotQuietlyPayTwice:
+    """`retry_study` sends a study with nothing fetched back to `plan_ready` rather than `setup`,
+    "so a human approves the re-fetch rather than a button quietly starting a 122 GB download".
+    That intent lives only in where the retry lands, and plan_5 step 3 hands `plan_ready` to the
+    driver to approve on its own. A mark on the study is what survives that change: the study says
+    it is waiting on a person, instead of the state having to carry the meaning by itself.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_retry_with_nothing_fetched_says_it_is_waiting_on_a_person(self, session, admin_user):
+        study = await _study(session, admin_user, "running")
+
+        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+            await ValidationStudyService.transition(
+                session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
+            )
+        study = await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id, admin_user.id)
+
+        assert study.state == "plan_ready"
+        assert (study.evidence_json or {})["awaiting_refetch_approval"] is True
+
+    @pytest.mark.asyncio
+    async def test_approving_clears_it_because_the_person_has_now_decided(self, session, admin_user):
+        study = await _study(session, admin_user, "running")
+
+        with patch("app.services.validation_study_service.event_bus.emit", AsyncMock()):
+            await ValidationStudyService.transition(
+                session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
+            )
+        await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id, admin_user.id)
+        study = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+
+        assert study.state == "acquiring_data"
+        assert "awaiting_refetch_approval" not in (study.evidence_json or {})

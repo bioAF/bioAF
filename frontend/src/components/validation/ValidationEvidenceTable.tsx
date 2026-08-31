@@ -61,6 +61,9 @@ export interface Evidence {
   error_at?: string | null;
   fetch_reap_after?: string | null;
   fetch_reaped?: { at?: string | null; objects?: number | null; bytes?: number | null } | null;
+  // Set when a retry left the study at the approval gate with nothing to reuse: approving pays for
+  // the download a second time, so the gate says so.
+  awaiting_refetch_approval?: boolean | null;
 }
 
 const VERDICT_META: Record<string, { label: string; cls: string }> = {

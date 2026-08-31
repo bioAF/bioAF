@@ -47,3 +47,22 @@ test("an approval the server accepts hands back the updated study", async () => 
 
   await waitFor(() => expect(onChanged).toHaveBeenCalledWith({ id: 7, state: "acquiring_data" }));
 });
+
+// A study back at the approval gate after a retry is not the same decision as a first approval:
+// its data was already downloaded once and deleted, so approving pays for the download again.
+
+test("warns that approving re-downloads when the study is back from a retry", () => {
+  render(
+    <ValidationStudyActions
+      study={{ id: 7, state: "plan_ready", evidence: { awaiting_refetch_approval: true } }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.getByText(/download/i)).toBeInTheDocument();
+  expect(screen.getByText(/again/i)).toBeInTheDocument();
+});
+
+test("says nothing about re-downloading on a study that never ran", () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "plan_ready" }} onChanged={jest.fn()} />);
+  expect(screen.queryByText(/download the data again/i)).not.toBeInTheDocument();
+});

@@ -16,7 +16,13 @@ export function ValidationStudyActions({
   onChanged,
   suggestedClassification,
 }: {
-  study: { id: number; state: string };
+  study: {
+    id: number;
+    state: string;
+    // Set when the study reached `plan_ready` from a retry with nothing left to reuse, so approving
+    // pays for the download a second time.
+    evidence?: { awaiting_refetch_approval?: boolean | null } | null;
+  };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
   // human ratifies with one click (or overrides).
@@ -111,6 +117,12 @@ export function ValidationStudyActions({
         <p className="text-xs text-gray-500">
           Approving spends compute: it fetches the data and runs the reproduction pipeline.
         </p>
+        {study.evidence?.awaiting_refetch_approval && (
+          <p className="text-xs text-amber-800">
+            This study ran before and its downloaded data is no longer here, so approving will
+            download the data again.
+          </p>
+        )}
         <ConfirmDialog
           open={showApprove}
           title="Approve this plan?"
@@ -121,6 +133,12 @@ export function ValidationStudyActions({
                 That spends compute on your cloud account, and the spend cannot be
                 recovered once the run starts.
               </p>
+              {study.evidence?.awaiting_refetch_approval && (
+                <p>
+                  This study has run before. The data it downloaded is no longer here, so this
+                  downloads it again.
+                </p>
+              )}
               <p>The study stays held until you approve, so nothing has been charged yet.</p>
             </>
           }
