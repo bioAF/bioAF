@@ -83,3 +83,11 @@ test("says nothing about a deadline when there is no data to expire", () => {
   render(<RetryNotice studyId={11} failureReason={REASON} onChanged={jest.fn()} />);
   expect(screen.queryByText(/deleted/i)).not.toBeInTheDocument();
 });
+
+test("stops promising reuse once the data is gone", () => {
+  // The two sentences contradicted each other on a reaped study: one said the downloaded data is
+  // reused, the next said it had been deleted.
+  render(<RetryNotice studyId={11} failureReason={REASON} dataDeleted onChanged={jest.fn()} />);
+  expect(screen.queryByText(/is reused/i)).not.toBeInTheDocument();
+  expect(screen.getByText(/from the start/i)).toBeInTheDocument();
+});

@@ -54,9 +54,10 @@ export function RetryNotice({
       <h3 className="text-sm font-semibold text-amber-800">This study stopped on a technical failure</h3>
       <p className="mt-1 text-sm text-gray-700">{failureReason || "The reproduction could not be completed."}</p>
       <p className="mt-1 text-xs text-gray-600">
-        This is not a result about the paper and not a verdict on whether its finding reproduces. Retrying
-        picks up from the work already done: data that was already downloaded is reused, and only the
-        steps that failed run again.
+        This is not a result about the paper and not a verdict on whether its finding reproduces.{" "}
+        {dataDeleted
+          ? "Retrying runs this study again from the start."
+          : "Retrying picks up from the work already done: data that was already downloaded is reused, and only the steps that failed run again."}
       </p>
       {dataDeleted ? (
         <p className="mt-2 text-xs text-gray-600">
