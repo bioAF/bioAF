@@ -289,6 +289,7 @@ async def lifespan(app: FastAPI):
     background_tasks.append(asyncio.create_task(_storage_stats_refresh_loop()))
     background_tasks.append(asyncio.create_task(_notification_cleanup_loop()))
     background_tasks.append(asyncio.create_task(_work_dir_reaper_loop()))
+    background_tasks.append(asyncio.create_task(_validation_fetch_reaper_loop()))
     background_tasks.append(asyncio.create_task(_backup_health_check_loop()))
     background_tasks.append(asyncio.create_task(_postgres_backup_loop()))
     background_tasks.append(asyncio.create_task(_config_backup_loop()))
@@ -487,6 +488,34 @@ async def _work_dir_reaper_loop():
             break
         except Exception as e:
             logger.error("Work dir reaper error: %s", e)
+
+
+async def _validation_fetch_reaper_loop():
+    """Free the downloaded data of stopped validation studies nobody retried, once daily.
+
+    A study in `error` keeps its fetch so a retry can reuse it, and nothing ever deleted it: the
+    fetch is a completed run, which no reaper covered. Past the retry window the objects and the
+    rows that point at them go together, so a later retry returns to the approval gate rather than
+    relaunching against files that are gone.
+    """
+    from app.database import async_session_factory
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services.validation_fetch_reaper import ValidationFetchReaper
+
+    while True:
+        try:
+            await asyncio.sleep(86400)  # 24 hours
+            async with async_session_factory() as session:
+                raw_bucket = await PlatformConfigService.get(session, "raw_bucket_name")
+                if raw_bucket:
+                    reaped = await ValidationFetchReaper.reap(session, raw_bucket=raw_bucket)
+                    await session.commit()
+                    if reaped:
+                        logger.info("Reaped fetched data for validation studies: %s", reaped)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error("Validation fetch reaper error: %s", e)
 
 
 async def _idempotency_cleanup_loop():
