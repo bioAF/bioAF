@@ -274,3 +274,42 @@ class TestRunningItAnyway:
             .all()
         )
         assert "deposit_conflict_overridden" in actions
+
+
+class TestTheGateLearnsTheDecisionWasMade:
+    """Found by driving it in the browser: the override recorded, and the gate went on refusing.
+
+    `deposit_conflict` was computed from the plan alone, so the panel still rendered and Approve
+    stayed hidden while the backend would happily have accepted it. The scientist had said the one
+    thing that resolves it and the app did not notice.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_conflict_carries_the_override_that_answered_it(self, client, admin_token, session, admin_user):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        study, _ = await _conflicted(session, admin_user)
+        await ValidationStudyService.override_deposit_conflict(
+            session, study.id, admin_user.organization_id, admin_user.id, reason="the depositor labelled it wrong"
+        )
+        await session.commit()
+
+        r = await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        conflict = r.json()["plan"]["deposit_conflict"]
+        # Still reported, because the plan still contradicts the deposit and the run will carry that.
+        assert conflict is not None
+        # But answered, which is what lets the gate offer Approve again.
+        assert conflict["override"]["reason"] == "the depositor labelled it wrong"
+        assert conflict["override"]["user_id"] == admin_user.id
+
+    @pytest.mark.asyncio
+    async def test_an_unanswered_conflict_carries_no_override(self, client, admin_token, session, admin_user):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        study, _ = await _conflicted(session, admin_user)
+        await session.commit()
+
+        r = await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert r.json()["plan"]["deposit_conflict"]["override"] is None

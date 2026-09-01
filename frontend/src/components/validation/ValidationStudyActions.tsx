@@ -24,7 +24,9 @@ export function ValidationStudyActions({
     evidence?: { awaiting_refetch_approval?: boolean | null } | null;
     // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
     // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
-    plan?: { deposit_conflict?: unknown | null } | null;
+    plan?: {
+      deposit_conflict?: { message?: string; override?: unknown | null } | null;
+    } | null;
   };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
@@ -91,7 +93,9 @@ export function ValidationStudyActions({
       </div>
     );
   } else if (study.state === "plan_ready" && canApprove) {
-    const blocked = !!study.plan?.deposit_conflict;
+    // Answered by an override is not blocked: the backend accepts the approval, so the gate
+    // must offer it. Leaving it hidden made the override do nothing at all.
+    const blocked = !!study.plan?.deposit_conflict && !study.plan.deposit_conflict.override;
     controls = (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">

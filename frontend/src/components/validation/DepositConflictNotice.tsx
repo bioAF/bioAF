@@ -13,6 +13,9 @@ export interface DepositConflict {
   // only way on is the override.
   suggested_pipeline_key?: string | null;
   library_strategy?: string | null;
+  // Set once someone has answered the conflict by overruling the record. The conflict is still
+  // reported, because the run really does carry it, but it stops asking.
+  override?: { user_id?: number | null; at?: string | null; reason?: string | null } | null;
 }
 
 /**
@@ -47,6 +50,7 @@ export function DepositConflictNotice({
 
   const canApprove = canAccess("lit_validation", "approve");
   const suggested = conflict.suggested_pipeline_key;
+  const answered = conflict.override ?? null;
 
   async function run(path: string, body?: unknown) {
     setBusy(true);
@@ -65,7 +69,13 @@ export function DepositConflictNotice({
     <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-4">
       <h3 className="text-sm font-semibold text-amber-800">This plan might run the wrong tool on this data</h3>
       <p className="mt-1 text-sm text-gray-700">{conflict.message}</p>
-      {canApprove && (
+      {answered && (
+        <p className="mt-2 text-sm text-gray-700">
+          Running anyway{answered.at ? ` on ${new Date(answered.at).toLocaleDateString()}` : ""}:{" "}
+          {answered.reason}
+        </p>
+      )}
+      {canApprove && !answered && (
         <>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {suggested && (

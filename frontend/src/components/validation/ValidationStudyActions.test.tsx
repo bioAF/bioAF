@@ -79,3 +79,17 @@ test("does not offer Approve while the plan might run the wrong tool", () => {
   expect(screen.queryByRole("button", { name: /approve plan/i })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /decline/i })).toBeInTheDocument();
 });
+
+test("offers Approve again once the conflict has been answered", () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "plan_ready",
+        plan: { deposit_conflict: { message: "x", override: { reason: "mislabelled" } } },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.getByRole("button", { name: /approve plan/i })).toBeInTheDocument();
+});

@@ -51,9 +51,17 @@ router = APIRouter(
 )
 
 
-async def _plan_response(session: AsyncSession, plan, org_id: int) -> ReproductionPlanResponse | None:
+async def _plan_response(
+    session: AsyncSession, plan, org_id: int, *, deposit_override: dict | None = None
+) -> ReproductionPlanResponse | None:
     if plan is None:
         return None
+    # The conflict stays reported after an override, because the run really will carry it and the
+    # verdict has to be readable against that. What changes is that it is ANSWERED: the gate offers
+    # Approve again, and the panel becomes the record of who decided and why.
+    conflict = deposit_conflict(plan.blockers_json, plan.library_strategy)
+    if conflict is not None:
+        conflict["override"] = deposit_override
     return ReproductionPlanResponse(
         id=plan.id,
         accessions=plan.accessions_json,
@@ -72,7 +80,7 @@ async def _plan_response(session: AsyncSession, plan, org_id: int) -> Reproducti
         extractor_model=plan.extractor_model,
         extractor_provider=plan.extractor_provider,
         supported_finding_kinds=supported_finding_kinds(plan.pipeline_key),
-        deposit_conflict=deposit_conflict(plan.blockers_json, plan.library_strategy),
+        deposit_conflict=conflict,
         pipeline_installed=await _is_pipeline_installed(session, org_id, plan.pipeline_key),
         pipeline_registry_name=_registry_name(plan.pipeline_key),
         comparison_targets=[
@@ -161,7 +169,9 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         reproduction_plan_id=study.reproduction_plan_id,
         approved_by_user_id=study.approved_by_user_id,
         failure_reason=study.failure_reason,
-        plan=await _plan_response(session, plan, org_id),
+        plan=await _plan_response(
+            session, plan, org_id, deposit_override=(study.evidence_json or {}).get("deposit_override")
+        ),
         evidence=study.evidence_json,
     )
 

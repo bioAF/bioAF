@@ -92,3 +92,18 @@ test("surfaces a failed correction instead of looking like it worked", async () 
 
   expect(await screen.findByText(/no version of it to move to/i)).toBeInTheDocument();
 });
+
+test("becomes the record of the decision once it has been answered", () => {
+  // Found in the browser: the override recorded and the panel went on offering the same two
+  // choices, with Approve still hidden. Answered means answered.
+  render(
+    <DepositConflictNotice
+      studyId={7}
+      conflict={{ ...CONFLICT, override: { user_id: 3, at: "2026-08-31T12:00:00+00:00", reason: "mislabelled series" } }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.getByText(/mislabelled series/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /run it anyway/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /use nf-core/i })).not.toBeInTheDocument();
+});
