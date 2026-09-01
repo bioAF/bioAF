@@ -45,6 +45,8 @@ from app.services.pipeline_mapper import (
     PipelineMapping,
     declared_route_version,
     map_method,
+    marker_matches,
+    match_route,
     route_for_library_strategy,
 )
 
@@ -53,6 +55,13 @@ logger = logging.getLogger("bioaf.pipeline_assay_fallback")
 # Words that appear in nearly every assay string and nearly every pipeline description. Matching on
 # them would score every candidate equally and turn the tie rule into the only thing that ever
 # fires.
+#
+# The tail of this set is the plumbing every nf-core pipeline runs. A methods section lists its
+# plumbing alongside its science, and a paper naming samtools has named what every workflow here
+# uses to read a BAM. They are here rather than in a list of their own because this is already the
+# list of words that do not discriminate, and because `_tool_phrases` and `_matched_topics` both
+# consult it: nf-core/hgtseq declares `fastqc`, `multiqc` and `samtools` as its own TOPICS, and a
+# paper listing its QC tools was routed to a horizontal-gene-transfer pipeline on them.
 _STOPWORDS = frozenset(
     {
         "the",
@@ -104,6 +113,22 @@ _STOPWORDS = frozenset(
         "genomics",
         "bioinformatics",
         "quantification",
+        # the plumbing
+        "samtools",
+        "bcftools",
+        "htslib",
+        "bedtools",
+        "picard",
+        "fastqc",
+        "multiqc",
+        "fastp",
+        "trimmomatic",
+        "cutadapt",
+        "seqtk",
+        "bwa",
+        "bowtie",
+        "bowtie2",
+        "nextflow",
     }
 )
 
@@ -134,21 +159,93 @@ def _tokens(text: str) -> set[str]:
     return {t for t in re.split(r"[^a-z0-9]+", (text or "").lower()) if len(t) > 2 and t not in _STOPWORDS}
 
 
-def _phrase(topic: str) -> str:
-    """A registry topic as it would be written in prose: ``amplicon-sequencing`` -> ``amplicon sequencing``."""
-    return re.sub(r"[^a-z0-9]+", " ", (topic or "").lower()).strip()
+def _phrase(text: str) -> str:
+    """Punctuation folded to single spaces: ``amplicon-sequencing`` -> ``amplicon sequencing``.
+
+    Applied to BOTH sides. Folding only the topic was measured to under-credit the very pipeline a
+    paper is about: nf-core/rnaseq declares `rna-seq`, which folds to "rna seq", and a paper writing
+    "total RNA-seq" does not contain that string. The floor then scored almost nothing and was
+    displaced by whatever shared a description word with it.
+    """
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _matched_topics(candidate: _Candidate, haystack: str) -> list[str]:
+    """Every topic ``candidate`` declares that the paper's text actually writes.
+
+    A topic has to START a word, the same rule the assay markers follow. Plain containment matches
+    `rna seq` inside `scrna seq`, which is how a single-cell paper scored the bulk pipeline's topics.
+
+    A topic that is a `_STOPWORDS` entry is skipped, which is what stops a pipeline declaring its own
+    plumbing (`fastqc`, `multiqc`, `samtools`) from winning a paper that merely listed its QC tools.
+
+    Two SPELLINGS of one word count once. nf-core/bactmap declares both `bacteria` and `bacterial`,
+    which are one word to any paper that writes either, and counting each put a mapping-and-phylogeny
+    pipeline above nf-core/bacass on a bacterial ASSEMBLY paper.
+
+    Deliberately narrow: only a single word that begins another single word, never a phrase. A
+    general topic and a compound built from it (`spatial` beside `spatial-transcriptomics`, `rna`
+    beside `rna-seq`) are two real claims, and merging those was measured to reward a pipeline for
+    declaring two vague topics over one that declares the exact one.
+    """
+    folded = _phrase(haystack)
+    matched = [t for t in candidate.topics if (p := _phrase(t)) and p not in _STOPWORDS and marker_matches(p, folded)]
+
+    def is_spelling_of(topic: str, other: str) -> bool:
+        a, b = _phrase(topic), _phrase(other)
+        return " " not in a and " " not in b and a != b and b.startswith(a)
+
+    return [t for t in matched if not any(o is not t and is_spelling_of(t, o) for o in matched)]
+
+
+def _diagnostic_topics(topics: list[str], family: tuple[str, ...]) -> list[str]:
+    """The topics in ``topics`` that say something the floor's own family vocabulary does not.
+
+    ``family`` is the floor route's declared contextual markers, which is exactly the list of words
+    that are true of the whole subfield. A topic those words already cover is not evidence against
+    the floor: nf-core/denovotranscript declares `transcriptome` and `rna-seq`, and "total RNA-seq
+    transcriptome profiling" is ordinary bulk RNA-seq no matter how few pipelines declare
+    `transcriptome`. Rarity in the CATALOG is not the same as rarity in a methods section, and this
+    is where the two come apart.
+    """
+    folded_family = [_phrase(marker) for marker in family]
+    return [t for t in topics if not any(marker_matches(m, _phrase(t)) for m in folded_family)]
+
+
+def _tool_phrases(tools: list[str] | None) -> list[str]:
+    """The paper's tool names, folded, deduplicated, and with the plumbing dropped.
+
+    What is dropped is the point: `_STOPWORDS` carries samtools, fastqc and multiqc, so they never
+    reach the haystack. A paper naming them has named what every workflow here runs, and
+    nf-core/hgtseq declares all three as its own TOPICS, so a paper listing its QC tools was routed
+    to a horizontal-gene-transfer pipeline.
+    """
+    seen: list[str] = []
+    for tool in tools or []:
+        phrase = _phrase(tool)
+        if len(phrase) > 2 and phrase not in _STOPWORDS and phrase not in seen:
+            seen.append(phrase)
+    return seen
 
 
 def _score(candidate: _Candidate, haystack: str, haystack_tokens: set[str]) -> tuple[int, list[str]]:
-    """How well ``candidate`` explains the paper's text, and which fields said so."""
+    """How well ``candidate`` explains the paper's text, and which fields said so.
+
+    The paper's own tool list is part of ``haystack``, so a tool reaches this through the topic and
+    description matching that is already here. A separate tool signal was measured against the live
+    registry and moved no answer: nf-core descriptions name Salmon, Bismark and DADA2, but not
+    Arriba, rMATS, STAR-Fusion or Space Ranger, so there is little for it to match on.
+    """
     score = 0
     why: list[str] = []
 
-    if candidate.name in haystack_tokens or candidate.name in haystack:
+    # The name has to start a word too: "rnaseq" appears inside "scrnaseq" and inside "dualrnaseq",
+    # and scoring the bulk pipeline 4 on a single-cell paper is the same defect one layer down.
+    if candidate.name in haystack_tokens or marker_matches(candidate.name, haystack):
         score += _SCORE_NAME
         why.append(f"the paper names {candidate.name}")
 
-    matched_topics = [t for t in candidate.topics if (p := _phrase(t)) and p in haystack]
+    matched_topics = _matched_topics(candidate, haystack)
     if matched_topics:
         score += _SCORE_TOPIC * len(matched_topics)
         why.append("declared topics " + ", ".join(sorted(matched_topics)))
@@ -395,6 +492,91 @@ def _no_single_fallback(
     )
 
 
+def _offer_over_floor(
+    candidates: list[_Candidate],
+    haystack: str,
+    assay: str | None,
+    floor: PipelineMapping,
+    strategy_route: LibraryStrategyRoute | None,
+    family: tuple[str, ...],
+) -> PipelineMapping:
+    """What wins when a contextual route has to defend itself: the floor re-stated, or its displacer.
+
+    Never a refusal. The floor answered this paper before the registry was consulted and must keep
+    answering it, because a paper writing only "RNA sequencing" carries nothing that separates
+    nf-core/rnaseq from nf-core/rnasplice, and no scorer can rank what was never mentioned.
+
+    Displacing takes two things. A higher total is not enough on its own: a candidate can out-total
+    the floor on description words and on the very family words that put the floor there. It must
+    also declare a topic the paper wrote that the floor's own family vocabulary does not cover.
+    `fusion`, `alternative-splicing`, `artic` and `spatial` are each such a word; `transcriptome`
+    beside a bulk RNA-seq floor is not, however few pipelines declare it.
+
+    Only pipelines the scoped deposit ADMITS may compete. A strategy that is declared but
+    deliberately unrouted (ENA files bulk, single-cell, total and ribo-depleted RNA under one
+    `RNA-Seq` value) still says what must not run: a compound paper reading "bisulfite sequencing,
+    RRBS, and targeted RNA-seq" over an RNA-Seq deposit would otherwise be displaced onto methylseq,
+    which the C1 gate would then refuse outright.
+    """
+    floor_key = floor.pipeline_key
+    assert floor_key is not None  # only called with a declared route in hand
+
+    if strategy_route is not None:
+        candidates = [c for c in candidates if c.pipeline_key in strategy_route.compatible]
+
+    match = _fallback_match(candidates, haystack) if candidates else None
+    if match is not None:
+        best, why = match
+        tokens = _tokens(haystack)
+        floor_candidate = next((c for c in candidates if c.pipeline_key == floor_key), None)
+        floor_score = _score(floor_candidate, haystack, tokens)[0] if floor_candidate else 0
+        beats_floor = best.pipeline_key != floor_key and _score(best, haystack, tokens)[0] > floor_score
+        if beats_floor and _diagnostic_topics(_matched_topics(best, haystack), family):
+            logger.info("assay %r displaced the contextual floor %s -> %s", assay, floor_key, best.pipeline_key)
+            where = "installed on this bioAF" if best.installed else "available from the nf-core registry"
+            return PipelineMapping(
+                pipeline_key=best.pipeline_key,
+                pipeline_version=best.version,
+                # Never `exact`. A match made from a topic list is a plausible equivalent, not a
+                # verified one, so `_attribute` must keep a pipeline substitution on the table as an
+                # explanation for any divergence.
+                mapping_confidence="partial",
+                mapping_notes=(
+                    f"The paper's assay ('{assay}') names {floor_key} only in the sense that its "
+                    f"whole subfield does. Weighed against every pipeline this bioAF can run, "
+                    f"{best.pipeline_key} {best.version} ({where}) is the more specific answer, on "
+                    f"{'; '.join(why)}. bioAF has not verified what this pipeline emits, so the "
+                    "study is limited to QC-level evidence and cannot reproduce the paper's "
+                    "finding set."
+                ),
+            )
+
+    # The floor stands, re-stated as the considered answer it now is. The route's OWN confidence is
+    # carried through: weighing a floor and finding nothing better says nothing about how good the
+    # route was, and `exact` (the paper's own methods name nf-core) is the only value `_attribute`
+    # accepts to clear a pipeline substitution as the explanation for a divergence.
+    runner_up = match[0].pipeline_key if match else None
+    weighed = (
+        f" The nearest alternative the registry offered was {runner_up}, which carries no evidence "
+        "more specific than that."
+        if runner_up and runner_up != floor_key
+        else " Nothing else in the registry cleared the bar."
+    )
+    return PipelineMapping(
+        pipeline_key=floor.pipeline_key,
+        pipeline_version=floor.pipeline_version,
+        mapping_confidence=floor.mapping_confidence,
+        mapping_notes=(
+            f"The paper's assay ('{assay}') identifies a family rather than a pipeline: the words it "
+            f"uses are as true of its neighbours as of {floor_key}. It was weighed against every "
+            f"pipeline this bioAF can run and {floor_key} stands as the answer of last resort for "
+            f"that family.{weighed} Scoping this study to the accession it should reproduce is what "
+            "settles it outright, because a deposit's declared library strategy is not prose."
+        ),
+        blockers=list(floor.blockers),
+    )
+
+
 async def resolve_pipeline_for_assay(
     session: AsyncSession,
     org_id: int,
@@ -463,10 +645,26 @@ async def resolve_pipeline_for_assay(
                 ),
             )
 
+    # The paper's own tools are part of what is matched against, but only the ones that mean
+    # something: plumbing in the haystack is plumbing scored as a declared topic.
+    tool_phrases = _tool_phrases(tools)
+    haystack = " ".join([(assay or "").lower(), *tool_phrases])
+
+    # A declared route that was chosen by CONTEXTUAL evidence is a floor, not an answer. `rna-seq`
+    # is as true of gene fusion, alternative splicing and dual host-pathogen work as it is of bulk
+    # RNA-seq, and returning on it stopped every one of those pipelines from being considered at
+    # all. So the registry gets to compete, and the floor stands unless something more specific than
+    # it wins.
+    #
+    # Diagnostic routes never reach here: they are the paper identifying its own assay, and the
+    # registry has nothing to add to that.
+    evidence = match_route((assay or "").lower())
+    if declared.pipeline_key is not None and evidence is not None and not evidence[1]:
+        return _offer_over_floor(candidates, haystack, assay, declared, strategy_route, evidence[0].contextual_markers)
+
     if declared.pipeline_key is not None:
         return declared
 
-    haystack = " ".join([assay or "", *[t or "" for t in tools]]).lower()
     match = _fallback_match(candidates, haystack)
     if match is None:
         return _no_single_fallback(candidates, haystack, assay, declared)
