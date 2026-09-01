@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ValidationStudyRequest(BaseModel):
@@ -22,6 +22,17 @@ class ReadRequest(BaseModel):
 
 class DeclineRequest(BaseModel):
     reason: str | None = None
+
+
+class DepositOverrideRequest(BaseModel):
+    """ "Run it anyway" at the C1 gate, when the deposit's declared data type contradicts the plan.
+
+    The reason is required and has a floor, because a one-click override becomes the default action
+    and then the guard means nothing. It is kept on the study so a divergent verdict can be argued
+    against the choice that produced it.
+    """
+
+    reason: str = Field(min_length=3, max_length=1000)
 
 
 class ClassifyRequest(BaseModel):
@@ -106,6 +117,11 @@ class ReproductionPlanResponse(BaseModel):
     # could paste a DEG table for an ATAC study and spend hours of compute to learn there was never a
     # route. Empty means the pipeline maps, launches and produces QC, but reproduces no finding.
     supported_finding_kinds: list[str] = []
+    # Computed, not stored: the ONE blocker that refuses approval, and the pipeline that would
+    # resolve it. A plan's blockers are mostly advisory (two reference builds named, sample ids
+    # missing) and exactly one is fatal; rendered as one bullet among the rest, a scientist learned
+    # which by clicking Approve and reading a 400. None when the plan carries no such conflict.
+    deposit_conflict: dict | None = None
     # Computed, not stored: whether this org's catalog actually holds the plan's pipeline. Install
     # state changes under a plan's feet, so storing it would go stale. None when the plan names no
     # pipeline, because "not installed" would be a wrong answer to a question nobody asked.

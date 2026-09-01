@@ -21,7 +21,7 @@ from app.models.validation_study import (
 from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import VALIDATION_STUDY_ERROR
-from app.services.pipeline_mapper import is_library_strategy_conflict
+from app.services.pipeline_mapper import deposit_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
 
 logger = logging.getLogger("bioaf.validation_study")
@@ -306,11 +306,11 @@ class ValidationStudyService:
         # Recorded by the extractor, which is where the deposit was read; re-deriving it here would
         # put a network fetch in the way of every approval and let an outage decide the answer.
         plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
-        conflict = next(
-            (b for b in ((plan.blockers_json if plan else None) or []) if is_library_strategy_conflict(b)), None
-        )
-        if conflict:
-            raise HTTPException(400, conflict)
+        conflict = deposit_conflict(plan.blockers_json if plan else None, plan.library_strategy if plan else None)
+        # Two ways past it, both deliberate: re-point the plan at the pipeline the deposit names
+        # (which clears the blocker), or record why the deposit itself is wrong. Neither is implicit.
+        if conflict and not (study.evidence_json or {}).get("deposit_override"):
+            raise HTTPException(400, conflict["message"])
 
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
@@ -329,6 +329,61 @@ class ValidationStudyService:
             action="plan_approved",
             details={"state": "acquiring_data"},
             previous_value={"state": old_state},
+        )
+        return study
+
+    @staticmethod
+    async def override_deposit_conflict(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str
+    ) -> ValidationStudy:
+        """ "The deposit is mislabelled, run it anyway": the second way out of the C1 refusal.
+
+        The deposit is usually right, which is why refusing is the default. But a depositor can
+        label a series wrong, and before this the scientist's only remaining control was Decline,
+        which is terminal. So the way through exists and costs something: a stated reason, recorded
+        with who gave it, kept on the study so a verdict that later diverges can be argued against
+        the choice that produced it rather than being merely surprising.
+
+        Re-pointing the plan is the other way out and it is the primary one. An override that is
+        easier to click than the correction becomes the default action, and then the guard that
+        caught study 14 running atacseq over Bisulfite-Seq means nothing.
+        """
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if study.state != "plan_ready":
+            raise HTTPException(
+                400,
+                f"Cannot override the deposit from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        if not (reason or "").strip():
+            raise HTTPException(400, "Say why the deposit should be overruled; the reason goes on the record.")
+
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        conflict = deposit_conflict(plan.blockers_json if plan else None, plan.library_strategy if plan else None)
+        if conflict is None:
+            raise HTTPException(400, "This plan does not contradict what the deposit says its data is.")
+
+        study.evidence_json = {
+            **(study.evidence_json or {}),
+            "deposit_override": {
+                "user_id": user_id,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "reason": reason.strip(),
+                "pipeline_key": plan.pipeline_key if plan else None,
+                "library_strategy": conflict["library_strategy"],
+            },
+        }
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study_id,
+            action="deposit_conflict_overridden",
+            details={
+                "reason": reason.strip(),
+                "pipeline_key": plan.pipeline_key if plan else None,
+                "library_strategy": conflict["library_strategy"],
+            },
         )
         return study
 

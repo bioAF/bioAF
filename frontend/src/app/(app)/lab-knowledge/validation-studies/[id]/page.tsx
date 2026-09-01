@@ -15,6 +15,7 @@ import {
   type FindingClaim,
 } from "@/components/validation/Level3Gate";
 import { PipelineInstallNotice } from "@/components/validation/PipelineInstallNotice";
+import { DepositConflictNotice, type DepositConflict } from "@/components/validation/DepositConflictNotice";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
 import { RetryNotice } from "@/components/validation/RetryNotice";
 import { SamplesMismatchNotice } from "@/components/validation/SamplesMismatchNotice";
@@ -51,6 +52,9 @@ interface ReproductionPlanView {
   // approving it.
   pipeline_installed?: boolean | null;
   pipeline_registry_name?: string | null;
+  // The one blocker that refuses approval, and the pipeline that would resolve it. Computed per
+  // request, so a plan corrected in another tab stops showing it.
+  deposit_conflict?: DepositConflict | null;
 }
 
 interface ValidationStudy {
@@ -246,6 +250,16 @@ export default function ValidationStudyPage() {
           </section>
         )}
 
+        {study.state === "plan_ready" && plan?.deposit_conflict && (
+          <section className="mb-6">
+            <DepositConflictNotice
+              studyId={study.id}
+              conflict={plan.deposit_conflict}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
         {study.state === "error" && (
           <section className="mb-6">
             <RetryNotice
@@ -307,6 +321,7 @@ export default function ValidationStudyPage() {
               id: study.id,
               state: study.state,
               evidence: { awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval },
+              plan: { deposit_conflict: plan?.deposit_conflict ?? null },
             }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
             suggestedClassification={study.evidence?.classification_result?.classification}

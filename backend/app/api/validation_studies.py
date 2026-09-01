@@ -19,6 +19,7 @@ from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
+    DepositOverrideRequest,
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
@@ -37,6 +38,7 @@ from app.services.literature.ground_truth_fetch_service import GroundTruthFetchS
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
+from app.services.pipeline_mapper import deposit_conflict
 from app.services.validation_level3_service import supported_finding_kinds
 from app.services.validation_study_service import ValidationStudyService
 
@@ -70,6 +72,7 @@ async def _plan_response(session: AsyncSession, plan, org_id: int) -> Reproducti
         extractor_model=plan.extractor_model,
         extractor_provider=plan.extractor_provider,
         supported_finding_kinds=supported_finding_kinds(plan.pipeline_key),
+        deposit_conflict=deposit_conflict(plan.blockers_json, plan.library_strategy),
         pipeline_installed=await _is_pipeline_installed(session, org_id, plan.pipeline_key),
         pipeline_registry_name=_registry_name(plan.pipeline_key),
         comparison_targets=[
@@ -378,6 +381,47 @@ async def override_samples(
         entity_type="validation_study",
         entity_id=study_id,
         action="samples_override_approved",
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/use-deposit-pipeline", response_model=ValidationStudyResponse)
+async def use_deposit_pipeline(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Re-point a conflicted plan at the pipeline the deposit's own strategy names.
+
+    The primary way out of the deposit-contradicts-pipeline refusal, because it fixes the cause: the
+    paper's prose chose a pipeline that cannot read the deposited data, and the deposit names the one
+    that can. Approve-gated, since it decides what the compute will run.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await _load(session, study_id, org_id)
+    await ReproductionPlanService.use_deposit_pipeline(session, study_id, org_id, user_id)
+    study = await _load(session, study_id, org_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/override-deposit", response_model=ValidationStudyResponse)
+async def override_deposit(
+    study_id: int,
+    data: DepositOverrideRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """ "The deposit is mislabelled, run it anyway": the second way out, kept deliberately harder.
+
+    Records who decided and why, so a verdict that later diverges can be argued against the choice
+    that produced it. Approve-gated, like the samples override it mirrors."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.override_deposit_conflict(
+        session, study_id, org_id, user_id, reason=data.reason
     )
     await session.commit()
     return await _study_response(session, study, org_id)

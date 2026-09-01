@@ -22,6 +22,9 @@ export function ValidationStudyActions({
     // Set when the study reached `plan_ready` from a retry with nothing left to reuse, so approving
     // pays for the download a second time.
     evidence?: { awaiting_refetch_approval?: boolean | null } | null;
+    // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
+    // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
+    plan?: { deposit_conflict?: unknown | null } | null;
   };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
@@ -88,16 +91,19 @@ export function ValidationStudyActions({
       </div>
     );
   } else if (study.state === "plan_ready" && canApprove) {
+    const blocked = !!study.plan?.deposit_conflict;
     controls = (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            className={`${btn} bg-green-600 text-white hover:bg-green-700`}
-            disabled={busy}
-            onClick={() => setShowApprove(true)}
-          >
-            {busy ? "Working..." : "Approve plan"}
-          </button>
+          {!blocked && (
+            <button
+              className={`${btn} bg-green-600 text-white hover:bg-green-700`}
+              disabled={busy}
+              onClick={() => setShowApprove(true)}
+            >
+              {busy ? "Working..." : "Approve plan"}
+            </button>
+          )}
           <input aria-label="Reason (optional)"
             value={declineReason}
             onChange={(e) => setDeclineReason(e.target.value)}

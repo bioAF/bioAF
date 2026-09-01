@@ -66,3 +66,16 @@ test("says nothing about re-downloading on a study that never ran", () => {
   render(<ValidationStudyActions study={{ id: 7, state: "plan_ready" }} onChanged={jest.fn()} />);
   expect(screen.queryByText(/download the data again/i)).not.toBeInTheDocument();
 });
+
+test("does not offer Approve while the plan might run the wrong tool", () => {
+  // Approve used to be enabled here, and clicking it returned a 400 the scientist could do nothing
+  // about. The conflict notice carries the two ways out; this control waits for them.
+  render(
+    <ValidationStudyActions
+      study={{ id: 7, state: "plan_ready", plan: { deposit_conflict: { message: "x" } } }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.queryByRole("button", { name: /approve plan/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /decline/i })).toBeInTheDocument();
+});

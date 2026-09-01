@@ -291,6 +291,30 @@ def is_library_strategy_conflict(blocker: str | None) -> bool:
     return LIBRARY_STRATEGY_CONFLICT_MARKER in (blocker or "")
 
 
+def deposit_conflict(blockers: list | None, library_strategy: str | None) -> dict | None:
+    """The plan's fatal blocker and the pipeline that would resolve it, or None.
+
+    A plan carries blockers of two kinds and they used to be indistinguishable. Most are advisory:
+    the paper named two reference builds, the sample ids are not listed. Exactly one refuses the
+    approval outright. Rendered as one bullet among the others, the scientist learned which was
+    which by clicking Approve and reading a 400, with no control anywhere that resolved it.
+
+    ``suggested_pipeline_key`` is None when the deposited strategy is declared but deliberately
+    unrouted (RNA-Seq is too broad to name one pipeline for), which is honest rather than empty: the
+    deposit can refuse a plan without being able to propose the replacement, and the gate then has
+    only the override to offer.
+    """
+    message = next((b for b in (blockers or []) if is_library_strategy_conflict(b)), None)
+    if message is None:
+        return None
+    route = route_for_library_strategy(library_strategy)
+    return {
+        "message": message,
+        "suggested_pipeline_key": route.pipeline_key if route else None,
+        "library_strategy": (library_strategy or "").strip() or None,
+    }
+
+
 @dataclass
 class PipelineMapping:
     pipeline_key: str | None

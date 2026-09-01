@@ -57,6 +57,14 @@ class ReproductionPlan(Base):
     # NULL means "extracted before this was kept"; [] means "the paper named no tools".
     tools_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # What the accession this study was scoped to declares its data actually IS (the INSDC
+    # `library_strategy`: Bisulfite-Seq, ChIP-Seq, ATAC-seq, ...). The deposit is not prose, so where
+    # it disagrees with the paper's methods section it is the better evidence and it chooses the
+    # pipeline. Kept because the C1 gate has to name it when it refuses a plan, and re-deriving it
+    # means an ENA/GEO fetch on every page load. NULL means no accession was scoped, the deposit
+    # declared nothing usable, or the plan predates this column.
+    library_strategy: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     # B3 mapping rationale: how confident the method -> nf-core mapping is, and why.
     mapping_confidence: Mapped[str | None] = mapped_column(String(20), nullable=True)  # exact | partial | none
     mapping_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
