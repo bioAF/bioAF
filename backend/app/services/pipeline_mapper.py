@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,22 @@ class AssayRoute:
 
     pipeline_key: str
     pipeline_version: str
-    # Lowercased substrings looked for in the paper's assay string. Keep them specific: a marker
-    # broad enough to appear in a neighbouring subfield's prose mis-routes that subfield's papers.
+    # DIAGNOSTIC markers: lowercased, each anchored at its START (see `_marker_pattern`), and each
+    # one enough to identify the assay on its own. Keep them specific: a marker broad enough to
+    # appear in a neighbouring subfield's prose mis-routes that subfield's papers.
     markers: tuple[str, ...]
+    # CONTEXTUAL markers: true of this assay and equally true of its neighbours. `rna-seq` is as
+    # true of gene fusion, alternative splicing and dual RNA-seq as it is of bulk RNA-seq, so a
+    # paper carrying nothing else has named a FAMILY, not a pipeline.
+    #
+    # This is a demotion, never a deletion. A contextual match is the family's answer of last
+    # resort -- read `rna-seq` as "nf-core/rnaseq unless something else earns it" -- and it is what
+    # a paper that says only "RNA sequencing" should still get, because such a paper genuinely
+    # carries no evidence separating rnaseq from rnasplice. Rarity cannot rank what was never
+    # mentioned. What the demotion buys is that genuinely diagnostic evidence (a rare registry
+    # topic, a tool the paper named) is now ALLOWED TO COMPETE, where before the marker returned
+    # first and the registry fallback never ran at all.
+    contextual_markers: tuple[str, ...] = ()
 
 
 # ORDER IS LAW. Routes are tried top to bottom and the first marker hit wins, so a narrow assay
@@ -42,7 +56,11 @@ _ROUTES: tuple[AssayRoute, ...] = (
     AssayRoute(
         pipeline_key="nf-core/scrnaseq",
         pipeline_version="2.7.1",
-        markers=("single-cell", "single cell", "scrna", "sc-rna", "snrna", "10x", "chromium", "cell ranger"),
+        markers=("single-cell", "single cell", "scrna", "sc-rna", "snrna", "chromium", "cell ranger"),
+        # 10x sells the chemistry for spatial (Visium) and for single-cell ATAC as well as for
+        # scRNA-seq, so "10x" names the vendor rather than the assay. It captured every spatial
+        # transcriptomics paper for scrnaseq.
+        contextual_markers=("10x",),
     ),
     # ATAC before ChIP: an ATAC paper won't say rna-seq, but both call peaks with MACS2, and
     # "chromatin" appears in both subfields' prose.
@@ -53,6 +71,12 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "atac-seq",
             "atac seq",
             "atacseq",
+            # scATAC-seq and snATAC-seq carried `atac-seq` mid-word and matched on containment
+            # alone. Anchoring the marker drops them unless the spellings are declared, and a paper
+            # writes them exactly this way. Both still lose to the single-cell route above when the
+            # paper spells "single-cell" out, which is what a multiome paper does and is unchanged.
+            "scatac",
+            "snatac",
             "transposase-accessible",
             "transposase accessible",
             "assay for transposase",
@@ -104,8 +128,10 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "chromatin immunoprecipitation",
             "histone mark",
             "histone modification",
-            "h3k",
         ),
+        # A histone mark is the TARGET, and ChIP-seq, CUT&RUN, CUT&Tag and ChIP-exo all read it.
+        # Naming one says which protein was profiled, not which protocol did the profiling.
+        contextual_markers=("h3k",),
     ),
     # Amplicon microbiome work. Markers name the amplicon, never the field: "microbiome" and
     # "metagenomics" belong equally to nf-core/mag (shotgun), which has a different output, and
@@ -128,9 +154,11 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "its1",
             "its2",
             "metabarcoding",
-            "amplicon sequencing",
-            "amplicon-sequencing",
         ),
+        # An amplicon library is defined by its primers, not its subject. SARS-CoV-2 ARTIC tiling is
+        # amplicon sequencing and belongs to nf-core/viralrecon; a CRISPR edit site is amplicon
+        # sequencing and belongs to nf-core/crisprseq. 16S is merely the commonest case.
+        contextual_markers=("amplicon sequencing", "amplicon-sequencing"),
     ),
     # Small RNA before bulk: "small RNA-seq" contains "rna-seq". Markers name the molecule
     # (mirna/microrna) or qualify the RNA (small/smrna), never bare "rna", which would swallow the
@@ -155,6 +183,10 @@ _ROUTES: tuple[AssayRoute, ...] = (
             # assay sRNAseq throughout, and without this it would have launched a bulk
             # quantification against 20 bp reads and answered confidently.
             "srna",
+            # tRNA-derived small RNA, which carried `srna` mid-word until the marker was anchored.
+            # A real assay a paper names in its own methods, so it is declared rather than caught by
+            # accident.
+            "tsrna",
             "sncrna",
             "small non-coding",
             "mirna",
@@ -166,7 +198,14 @@ _ROUTES: tuple[AssayRoute, ...] = (
     AssayRoute(
         pipeline_key="nf-core/rnaseq",
         pipeline_version="3.14.0",
-        markers=("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq"),
+        # `lncrna` names the molecule, the way smrnaseq's markers do. Long non-coding RNA-seq IS
+        # bulk RNA-seq and nf-core/rnaseq is the right pipeline for it; it reached that answer only
+        # because "lncRNA-seq" contains "rna-seq", and anchoring the marker would have refused it.
+        markers=("bulk rna", "mrna-seq", "lncrna"),
+        # The four measured mis-routers. Gene fusion, alternative splicing, dual host-pathogen and
+        # metatranscriptomics papers all say "RNA-seq" and all mean a different pipeline, and every
+        # one of those pipelines has no declared route, so no reordering of this table can help.
+        contextual_markers=("rna-seq", "rnaseq", "transcriptom"),
     ),
 )
 
@@ -342,12 +381,58 @@ def declared_route_version(pipeline_key: str | None) -> str | None:
     return None
 
 
-def _match_route(assay: str) -> AssayRoute | None:
-    """The first declared route whose marker appears in ``assay``, or None."""
+# A marker must BEGIN a word, and may end in the middle of one.
+#
+# Matching was plain substring containment, and `transcriptom` therefore matched inside
+# `metatranscriptomics`, capturing every metatranscriptomics paper for nf-core/rnaseq. A declared
+# route short-circuits everything (`_match_route` returns the first hit and the registry fallback
+# never runs), so that did not out-score nf-core/metatdenovo, it stopped metatdenovo from ever being
+# considered.
+#
+# Anchoring BOTH ends is the obvious fix and was measured to be the wrong one. Several markers are
+# deliberate stems: `transcriptom` is one marker covering transcriptome, transcriptomic and
+# transcriptomics, and requiring a word boundary after it refuses all three. So the anchor is a
+# prefix check only: a non-word character (or the start of the string) has to come before the
+# marker, and the word may run on after it.
+#
+# The check is on the character BEFORE the marker, never inside it, so a marker's own punctuation is
+# untouched: `cut&run`, `atac-seq` and `16s` all match as written.
+
+
+@lru_cache(maxsize=512)
+def _marker_pattern(marker: str) -> re.Pattern[str]:
+    return re.compile(r"(?<![a-z0-9])" + re.escape(marker))
+
+
+def marker_matches(marker: str, assay: str) -> bool:
+    """Whether ``marker`` starts a word in ``assay``."""
+    return _marker_pattern(marker).search(assay) is not None
+
+
+def match_route(assay: str) -> tuple[AssayRoute, bool] | None:
+    """The declared route ``assay`` names, and whether it named it DIAGNOSTICALLY.
+
+    The flag is what a caller keys off to decide whether the route may short-circuit. A diagnostic
+    match is an answer. A contextual match is a FLOOR: the family's answer of last resort, which
+    stands unless something genuinely diagnostic displaces it.
+
+    Diagnostic markers are swept across every route BEFORE any contextual marker is considered, so
+    a paper that identifies its assay outright is never answered by a word that merely describes its
+    family. Within each tier, declaration order is still law.
+    """
     for route in _ROUTES:
-        if any(marker in assay for marker in route.markers):
-            return route
+        if any(marker_matches(marker, assay) for marker in route.markers):
+            return route, True
+    for route in _ROUTES:
+        if any(marker_matches(marker, assay) for marker in route.contextual_markers):
+            return route, False
     return None
+
+
+def _match_route(assay: str) -> AssayRoute | None:
+    """The route ``assay`` names on any evidence, diagnostic or contextual, or None."""
+    match = match_route(assay)
+    return match[0] if match else None
 
 
 def map_method(
