@@ -10,6 +10,7 @@ a hand-maintained list, so a route added tomorrow is covered the moment it is de
 from app.services.nf_core_registry_service import QC_TEMPLATE_MAP
 from app.services.pipeline_mapper import (
     _ROUTES,
+    match_route,
     is_library_strategy_conflict,
     library_strategy_conflict,
     library_strategy_routes,
@@ -141,6 +142,95 @@ def test_the_anchor_is_a_prefix_check_and_not_a_word_boundary():
     assert map_method("ATAC-seq of sorted nuclei").pipeline_key == "nf-core/atacseq"
     assert map_method("16S rRNA amplicon sequencing").pipeline_key == "nf-core/ampliseq"
     assert map_method("ChIP-seq for H3K27ac").pipeline_key == "nf-core/chipseq"
+
+
+# ---- a marker is diagnostic or contextual, and it has to say which (plan_5.1 step 2) ----
+#
+# Today's markers are two different kinds of claim wearing one name. A DIAGNOSTIC marker identifies
+# the assay on its own: `bulk rna`, `scrna`, `16s`, `chip-seq`. A CONTEXTUAL marker is true of the
+# assay and equally true of its neighbours: `rna-seq` is as true of fusion, splicing and dual
+# RNA-seq as it is of bulk, and it is the reason declaration order had to be load-bearing.
+#
+# A contextual marker is demoted, never discarded. It is the answer of LAST RESORT for its family:
+# read `rna-seq` as "nf-core/rnaseq unless something else earns it". Demoting it without a floor was
+# measured against the live registry and is worse than doing nothing, because a paper that says only
+# "RNA sequencing" genuinely carries no evidence separating rnaseq from rnasplice.
+
+
+def test_a_diagnostic_marker_identifies_the_assay_on_its_own():
+    for assay, pipeline_key in (
+        ("bulk RNA-seq", "nf-core/rnaseq"),
+        ("scRNA-seq", "nf-core/scrnaseq"),
+        ("ChIP-seq", "nf-core/chipseq"),
+        ("ATAC-seq", "nf-core/atacseq"),
+        ("16S rRNA gene sequencing", "nf-core/ampliseq"),
+        ("miRNA-seq", "nf-core/smrnaseq"),
+    ):
+        match = match_route(assay.lower())
+        assert match is not None, assay
+        assert match.diagnostic, f"{assay} should be diagnostic evidence for {pipeline_key}"
+        assert match.route.pipeline_key == pipeline_key, assay
+
+
+def test_a_contextual_marker_is_evidence_of_a_family_and_says_so():
+    """These are the four markers measured to be mis-routing: `rna-seq` and `transcriptom` took
+    fusion, splicing, dual and metatranscriptomics papers; `10x` took spatial; `amplicon sequencing`
+    took viral amplicon; `h3k` is true of every histone assay there is."""
+    for assay in (
+        "RNA-seq of primary hepatocytes",
+        "transcriptome analysis",
+        "10x Visium spatial transcriptomics",
+        "amplicon sequencing of the V4 region",
+        "H3K27me3 profiling",
+    ):
+        match = match_route(assay.lower())
+        assert match is not None, assay
+        assert not match.diagnostic, f"{assay} carries contextual evidence only"
+
+
+def test_no_marker_is_declared_both_diagnostic_and_contextual():
+    """The two tiers are a classification, not two lists that happen to overlap. A marker in both
+    would be diagnostic in practice and read as demoted."""
+    for route in _ROUTES:
+        overlap = set(route.markers) & set(route.contextual_markers)
+        assert not overlap, f"{route.pipeline_key} declares {sorted(overlap)} as both kinds"
+
+
+def test_every_route_maps_every_contextual_marker_it_claims():
+    """The floor has to hold. A contextual marker that no longer reaches its own route is not a
+    demotion, it is a deletion, and the paper it used to answer becomes a refusal."""
+    for route in _ROUTES:
+        for marker in route.contextual_markers:
+            match = match_route(marker)
+            assert match is not None, f"{route.pipeline_key} claims {marker!r}, which now matches nothing"
+            assert match.route.pipeline_key == route.pipeline_key, (
+                f"{route.pipeline_key} claims the contextual marker {marker!r}, which reaches "
+                f"{match.route.pipeline_key} instead"
+            )
+
+
+def test_no_two_routes_claim_the_same_marker_of_either_kind():
+    """The same word cannot mean two pipelines, whichever tier it is declared in."""
+    claimed: dict[str, str] = {}
+    for route in _ROUTES:
+        for marker in (*route.markers, *route.contextual_markers):
+            assert marker not in claimed, f"{marker!r} is claimed by both {claimed[marker]} and {route.pipeline_key}"
+            claimed[marker] = route.pipeline_key
+
+
+def test_the_floor_still_answers_every_paper_it_answered_before():
+    """Step 2 declares the tiers and changes no answer. Demoting `rna-seq` and `transcriptom`
+    without a scorer that can replace them turns ordinary bulk RNA-seq papers into refusals."""
+    for assay in (
+        "RNA-seq",
+        "RNA-seq of primary hepatocytes",
+        "transcriptomic profiling of liver tissue",
+        "transcriptome analysis",
+        "RNA-seq for gene fusion detection",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/rnaseq", assay
+    assert map_method("10x Visium spatial transcriptomics").pipeline_key == "nf-core/scrnaseq"
+    assert map_method("viral amplicon sequencing (ARTIC protocol)").pipeline_key == "nf-core/ampliseq"
 
 
 # ---- the four proven assays are unchanged ----
