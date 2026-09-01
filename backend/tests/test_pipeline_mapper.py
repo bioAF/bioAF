@@ -168,8 +168,9 @@ def test_a_diagnostic_marker_identifies_the_assay_on_its_own():
     ):
         match = match_route(assay.lower())
         assert match is not None, assay
-        assert match.diagnostic, f"{assay} should be diagnostic evidence for {pipeline_key}"
-        assert match.route.pipeline_key == pipeline_key, assay
+        route, diagnostic = match
+        assert diagnostic, f"{assay} should be diagnostic evidence for {pipeline_key}"
+        assert route.pipeline_key == pipeline_key, assay
 
 
 def test_a_contextual_marker_is_evidence_of_a_family_and_says_so():
@@ -185,7 +186,7 @@ def test_a_contextual_marker_is_evidence_of_a_family_and_says_so():
     ):
         match = match_route(assay.lower())
         assert match is not None, assay
-        assert not match.diagnostic, f"{assay} carries contextual evidence only"
+        assert not match[1], f"{assay} carries contextual evidence only"
 
 
 def test_no_marker_is_declared_both_diagnostic_and_contextual():
@@ -203,9 +204,9 @@ def test_every_route_maps_every_contextual_marker_it_claims():
         for marker in route.contextual_markers:
             match = match_route(marker)
             assert match is not None, f"{route.pipeline_key} claims {marker!r}, which now matches nothing"
-            assert match.route.pipeline_key == route.pipeline_key, (
+            assert match[0].pipeline_key == route.pipeline_key, (
                 f"{route.pipeline_key} claims the contextual marker {marker!r}, which reaches "
-                f"{match.route.pipeline_key} instead"
+                f"{match[0].pipeline_key} instead"
             )
 
 

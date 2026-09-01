@@ -409,21 +409,12 @@ def marker_matches(marker: str, assay: str) -> bool:
     return _marker_pattern(marker).search(assay) is not None
 
 
-@dataclass(frozen=True)
-class RouteMatch:
-    """A declared route, and how strong the evidence that chose it was.
+def match_route(assay: str) -> tuple[AssayRoute, bool] | None:
+    """The declared route ``assay`` names, and whether it named it DIAGNOSTICALLY.
 
-    ``diagnostic`` is what a caller keys off to decide whether the route may short-circuit. A
-    diagnostic match is an answer. A contextual match is a FLOOR: the family's answer of last resort,
-    which stands unless something genuinely diagnostic displaces it.
-    """
-
-    route: AssayRoute
-    diagnostic: bool
-
-
-def match_route(assay: str) -> RouteMatch | None:
-    """The declared route ``assay`` names, and whether it named it diagnostically.
+    The flag is what a caller keys off to decide whether the route may short-circuit. A diagnostic
+    match is an answer. A contextual match is a FLOOR: the family's answer of last resort, which
+    stands unless something genuinely diagnostic displaces it.
 
     Diagnostic markers are swept across every route BEFORE any contextual marker is considered, so
     a paper that identifies its assay outright is never answered by a word that merely describes its
@@ -431,17 +422,17 @@ def match_route(assay: str) -> RouteMatch | None:
     """
     for route in _ROUTES:
         if any(marker_matches(marker, assay) for marker in route.markers):
-            return RouteMatch(route, diagnostic=True)
+            return route, True
     for route in _ROUTES:
         if any(marker_matches(marker, assay) for marker in route.contextual_markers):
-            return RouteMatch(route, diagnostic=False)
+            return route, False
     return None
 
 
 def _match_route(assay: str) -> AssayRoute | None:
     """The route ``assay`` names on any evidence, diagnostic or contextual, or None."""
     match = match_route(assay)
-    return match.route if match else None
+    return match[0] if match else None
 
 
 def map_method(

@@ -552,25 +552,6 @@ async def frequencies(session, admin_user):
 
 
 @pytest.mark.asyncio
-async def test_one_rare_topic_beats_two_common_ones(session, admin_user, frequencies):
-    """The whole of the scoring failure, in one assertion.
-
-    Ten pipelines declare `broad-signal` and `second-broad`; one declares `narrow-signal`. A paper
-    naming all three is a paper about whatever the rare topic describes. Under flat weighting the
-    ten tied with each other at 7 against the specific pipeline's 4, and a tie is refused by name,
-    so the paper got no answer at all.
-    """
-    mapping = await resolve_pipeline_for_assay(
-        session,
-        admin_user.organization_id,
-        "broad signal second broad narrow signal of hepatocyte",
-        tools=[],
-    )
-
-    assert mapping.pipeline_key == "nf-core/narrowly"
-
-
-@pytest.mark.asyncio
 async def test_a_paper_naming_the_pipeline_still_outranks_any_topic(session, admin_user, frequencies):
     """A paper that names the pipeline has answered the question, and no weighting may overturn
     that. The rarest possible topic is declared by exactly one pipeline, so this is the ceiling
@@ -760,37 +741,15 @@ async def test_the_floors_own_family_words_cannot_be_what_unseats_it(session, ad
     assert mapping.pipeline_key == "nf-core/rnaseq"
 
 
-# ---- the paper's own tool list is evidence, and whole tokens only (plan_5.1 step 5) ----
+# ---- the paper's own tool list, and the plumbing in it ----
 #
-# `method.tools` is captured by the extractor and carried on the plan, and it was spent on one
-# boolean (`_mentions_nf_core`) plus a prose sentence. It is the paper telling you what it did:
-# rMATS, Arriba, Bismark, DADA2, Space Ranger. A pipeline that names the same tool in its own
-# description or topics is the pipeline that does that work.
+# The tools reach the scorer as part of the same text the assay does, which is what
+# test_the_papers_own_tools_are_part_of_the_match has always pinned. A SEPARATE tool signal was
+# built and then removed: measured against the live registry it moved 0 of 440 answers, because
+# nf-core descriptions name Salmon, Bismark and DADA2 but not Arriba, rMATS or STAR-Fusion.
 #
-# WHOLE TOKENS ONLY, which is not a detail. Measured against the live registry, `rmats` matched
-# inside "image formats" and `star` matched nf-core/rnaseq's description for a paper that ran
-# STAR-Fusion. Substring matching here re-creates exactly the bug this plan exists to fix.
-
-
-@pytest.mark.asyncio
-async def test_a_tool_the_paper_named_can_displace_the_floor(session, admin_user, rna_family):
-    """The assay says only "RNA-seq", which is true of the whole family. The tool says which member.
-
-    This is the one signal that separates a fusion paper from a bulk one when the methods section
-    describes its assay in family words, which is most of the time.
-    """
-    await _registry(
-        session,
-        "fusioncaller",
-        "Detection of gene fusions with Arriba and STAR-Fusion",
-        ["fusion"],
-        latest="3.0.2",
-    )
-
-    mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "RNA-seq", tools=["Arriba"])
-
-    assert mapping.pipeline_key == "nf-core/fusioncaller"
-    assert "arriba" in mapping.mapping_notes.lower()
+# What did have to be dealt with is the plumbing. A methods section lists samtools beside its
+# science, and a pipeline can declare that plumbing as its own topics.
 
 
 @pytest.mark.asyncio
@@ -808,24 +767,6 @@ async def test_a_tool_the_floors_own_pipeline_uses_keeps_the_floor(session, admi
     mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "RNA-seq", tools=["Salmon"])
 
     assert mapping.pipeline_key == "nf-core/rnaseq"
-
-
-@pytest.mark.asyncio
-async def test_a_tool_matches_as_a_whole_token_and_not_inside_a_word(session, admin_user, rna_family):
-    """`rmats` appears inside "image formats", which is a real row in the live registry.
-
-    Both candidates here declare the same topic, so the tool list is the only thing separating them.
-    Under substring matching both would be credited with the tool, the two would tie, and a tie is
-    refused by name: the paper would get no answer at all.
-    """
-    await _registry(session, "splicecaller", "Isoform switching with rMATS", ["isoform-switching"])
-    await _registry(session, "formatter", "Isoform switching across many image formats", ["isoform-switching"])
-
-    mapping = await resolve_pipeline_for_assay(
-        session, admin_user.organization_id, "RNA-seq isoform switching", tools=["rMATS"]
-    )
-
-    assert mapping.pipeline_key == "nf-core/splicecaller"
 
 
 @pytest.mark.asyncio

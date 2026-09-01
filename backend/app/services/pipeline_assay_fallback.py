@@ -31,11 +31,9 @@ twice, and ``mapping_notes`` says which fields matched.
 from __future__ import annotations
 
 import logging
-import math
 import re
 from collections import Counter
 from dataclasses import dataclass
-from typing import Mapping
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -57,6 +55,13 @@ logger = logging.getLogger("bioaf.pipeline_assay_fallback")
 # Words that appear in nearly every assay string and nearly every pipeline description. Matching on
 # them would score every candidate equally and turn the tie rule into the only thing that ever
 # fires.
+#
+# The tail of this set is the plumbing every nf-core pipeline runs. A methods section lists its
+# plumbing alongside its science, and a paper naming samtools has named what every workflow here
+# uses to read a BAM. They are here rather than in a list of their own because this is already the
+# list of words that do not discriminate, and because `_tool_phrases` and `_matched_topics` both
+# consult it: nf-core/hgtseq declares `fastqc`, `multiqc` and `samtools` as its own TOPICS, and a
+# paper listing its QC tools was routed to a horizontal-gene-transfer pipeline on them.
 _STOPWORDS = frozenset(
     {
         "the",
@@ -108,19 +113,7 @@ _STOPWORDS = frozenset(
         "genomics",
         "bioinformatics",
         "quantification",
-    }
-)
-
-# Tools every pipeline in the catalog runs. A methods section lists its plumbing alongside its
-# science, and the plumbing says nothing about which pipeline to run: a paper naming samtools has
-# named what every workflow here uses to read a BAM.
-#
-# Rarity cannot catch these on its own, and that was measured rather than assumed. nf-core/hgtseq
-# declares `fastqc`, `multiqc` and `samtools` as its own TOPICS, so those words are rare in the
-# registry even though they are universal in practice, and a paper listing its QC tools was routed
-# to a horizontal-gene-transfer pipeline. Frequency in a topic list is not frequency in the world.
-_UBIQUITOUS_TOOLS = frozenset(
-    {
+        # the plumbing
         "samtools",
         "bcftools",
         "htslib",
@@ -131,18 +124,11 @@ _UBIQUITOUS_TOOLS = frozenset(
         "fastp",
         "trimmomatic",
         "cutadapt",
-        "trim galore",
         "seqtk",
         "bwa",
-        "bwa mem",
         "bowtie",
         "bowtie2",
         "nextflow",
-        "docker",
-        "singularity",
-        "conda",
-        "python",
-        "r",
     }
 )
 
@@ -154,45 +140,9 @@ _UBIQUITOUS_TOOLS = frozenset(
 _MIN_SCORE = 4
 
 _SCORE_NAME = 4  # the pipeline's own name appears in the paper's text
+_SCORE_TOPIC = 3  # a declared topic appears as a phrase
 _SCORE_DESCRIPTION = 1  # a distinctive word shared with the description
 _MAX_DESCRIPTION_SCORE = 2
-
-# A tool the paper's methods named, which the candidate names too. Weighted by rarity like a topic,
-# because "STAR" is used by half the RNA catalog and "Bismark" is used by one pipeline.
-#
-# Capped, because a methods section lists every tool it touched. Eight generic ones agreeing is not
-# eight times the evidence, and an uncapped sum would let a toolbox description out-argue the assay.
-_MAX_TOOL_SCORE = 4.0
-
-# ---- what a declared topic is worth, which is what its RARITY says it is worth ----
-#
-# Every topic used to score a flat 3, so two topics a tenth of the catalog declares (`rna-seq` by
-# 10 of 143, `rna` by 10, `single-cell` by 9) beat one topic that exactly one pipeline declares
-# (`alternative-splicing`, `fusion`, `circrna`, `metatranscriptomics`). That is backwards. The rare
-# topic is the discriminating evidence; the common ones are what a whole subfield shares.
-#
-# Inverse document frequency over the registry itself, so the weighting is DATA and not a
-# hand-maintained table of exceptions: a registry refresh re-derives every weight.
-#
-# The denominator is NOT the catalog size. No topic is declared by anything near 143 pipelines, so
-# log(143/count) would spend its whole range on distinctions that never occur and compress the ones
-# that do. `_COMMON_TOPIC_SHARE` is where "common" starts (~7% of the catalog, which is 10 of 143,
-# which is exactly `rna-seq`), and the scale runs from there up to a topic nobody else declares.
-# A frequency counted over a handful of pipelines is noise, not evidence: on a registry of four,
-# "two of them declare it" would read as common when it means nothing at all. Below this many, the
-# catalog is too small for its own frequencies and the scale is held at a fixed width.
-_COMMON_TOPIC_SHARE = 0.07
-_COMMON_TOPIC_MINIMUM = 8
-_TOPIC_WEIGHT_CEILING = 3.9  # declared by exactly one pipeline
-_TOPIC_WEIGHT_FLOOR = 1.5  # declared by `_COMMON_TOPIC_SHARE` of the catalog or more
-
-# Two properties hold this calibration together, and changing any constant above has to keep both:
-#
-#   ceiling < _SCORE_NAME       a paper that names the pipeline has answered the question, and no
-#                               topic may overturn that.
-#   ceiling > 2 * floor         one diagnostic topic outweighs two generic ones, which is the whole
-#                               point. It also keeps `_MIN_SCORE` meaning what its comment says:
-#                               one topic alone, however rare, is still not enough.
 
 
 @dataclass(frozen=True)
@@ -226,9 +176,12 @@ def _matched_topics(candidate: _Candidate, haystack: str) -> list[str]:
     A topic has to START a word, the same rule the assay markers follow. Plain containment matches
     `rna seq` inside `scrna seq`, which is how a single-cell paper scored the bulk pipeline's topics.
 
+    A topic that is a `_STOPWORDS` entry is skipped, which is what stops a pipeline declaring its own
+    plumbing (`fastqc`, `multiqc`, `samtools`) from winning a paper that merely listed its QC tools.
+
     Two SPELLINGS of one word count once. nf-core/bactmap declares both `bacteria` and `bacterial`,
-    which are one word to any paper that writes either, and collecting a rarity bonus for each put a
-    mapping-and-phylogeny pipeline above nf-core/bacass on a bacterial ASSEMBLY paper.
+    which are one word to any paper that writes either, and counting each put a mapping-and-phylogeny
+    pipeline above nf-core/bacass on a bacterial ASSEMBLY paper.
 
     Deliberately narrow: only a single word that begins another single word, never a phrase. A
     general topic and a compound built from it (`spatial` beside `spatial-transcriptomics`, `rna`
@@ -236,7 +189,7 @@ def _matched_topics(candidate: _Candidate, haystack: str) -> list[str]:
     declaring two vague topics over one that declares the exact one.
     """
     folded = _phrase(haystack)
-    matched = [t for t in candidate.topics if (p := _phrase(t)) and marker_matches(p, folded)]
+    matched = [t for t in candidate.topics if (p := _phrase(t)) and p not in _STOPWORDS and marker_matches(p, folded)]
 
     def is_spelling_of(topic: str, other: str) -> bool:
         a, b = _phrase(topic), _phrase(other)
@@ -259,89 +212,31 @@ def _diagnostic_topics(topics: list[str], family: tuple[str, ...]) -> list[str]:
     return [t for t in topics if not any(marker_matches(m, _phrase(t)) for m in folded_family)]
 
 
-def _candidate_text(candidate: _Candidate) -> str:
-    """Everything the registry says about a pipeline, folded: its name, its topics, its description."""
-    return _phrase(" ".join([candidate.name, *candidate.topics, candidate.description]))
-
-
 def _tool_phrases(tools: list[str] | None) -> list[str]:
-    """The paper's tool names, folded and kept WHOLE.
+    """The paper's tool names, folded, deduplicated, and with the plumbing dropped.
 
-    Never split. "STAR-Fusion" folds to "star fusion" and stays one phrase, because splitting it
-    yields "star", which nf-core/rnaseq's own description names, and the fusion paper would score
-    the bulk pipeline. That is the same defect as matching `transcriptom` inside
-    `metatranscriptomics`, one field along.
+    What is dropped is the point: `_STOPWORDS` carries samtools, fastqc and multiqc, so they never
+    reach the haystack. A paper naming them has named what every workflow here runs, and
+    nf-core/hgtseq declares all three as its own TOPICS, so a paper listing its QC tools was routed
+    to a horizontal-gene-transfer pipeline.
     """
     seen: list[str] = []
     for tool in tools or []:
         phrase = _phrase(tool)
-        if len(phrase) > 2 and phrase not in _STOPWORDS and phrase not in _UBIQUITOUS_TOOLS and phrase not in seen:
+        if len(phrase) > 2 and phrase not in _STOPWORDS and phrase not in seen:
             seen.append(phrase)
     return seen
 
 
-def _named_tools(candidate: _Candidate, tool_phrases: list[str]) -> list[str]:
-    """Which of the paper's tools this candidate names, matched as whole tokens at both ends.
-
-    The trailing anchor is what the leading one alone does not give: `rmats` starts a word inside
-    nothing, but a paper naming "STAR" would otherwise be credited to every pipeline whose
-    description says "STARsolo". The leading anchor is what keeps `rmats` out of "image formats".
-    """
-    text = _candidate_text(candidate)
-    return [t for t in tool_phrases if re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", text)]
-
-
-def _weights_by_frequency(counts: Counter, population: int) -> dict[str, float]:
-    """Inverse document frequency over ``population`` candidates, bounded to the topic scale."""
-    common = max(_COMMON_TOPIC_MINIMUM, round(population * _COMMON_TOPIC_SHARE))
-    span = math.log(common)
-    return {
-        key: _TOPIC_WEIGHT_FLOOR
-        + (_TOPIC_WEIGHT_CEILING - _TOPIC_WEIGHT_FLOOR) * max(0.0, min(1.0, math.log(common / count) / span))
-        for key, count in counts.items()
-    }
-
-
-def _tool_weights(candidates: list[_Candidate], tool_phrases: list[str]) -> dict[str, float]:
-    """What each of the paper's tools is worth, from how many pipelines name it.
-
-    Same rarity rule as a topic, and for the same reason: half the RNA catalog names STAR and one
-    pipeline names Bismark, so the two cannot count the same.
-    """
-    if not tool_phrases:
-        return {}
-    counts = Counter()
-    for candidate in candidates:
-        for tool in _named_tools(candidate, tool_phrases):
-            counts[tool] += 1
-    return _weights_by_frequency(counts, len(candidates))
-
-
-def _topic_weights(candidates: list[_Candidate]) -> dict[str, float]:
-    """How much each declared topic is worth, from how many pipelines declare it.
-
-    Counted once per resolution over the same candidate list the scoring runs against, so the
-    weights and the candidates can never be out of step with each other.
-    """
-    counts = Counter(topic for candidate in candidates for topic in set(candidate.topics))
-    return _weights_by_frequency(counts, len(candidates))
-
-
-def _score(
-    candidate: _Candidate,
-    haystack: str,
-    haystack_tokens: set[str],
-    weights: Mapping[str, float],
-    tool_phrases: list[str] | None = None,
-    tool_weights: Mapping[str, float] | None = None,
-) -> tuple[float, list[str]]:
+def _score(candidate: _Candidate, haystack: str, haystack_tokens: set[str]) -> tuple[int, list[str]]:
     """How well ``candidate`` explains the paper's text, and which fields said so.
 
-    Rounded, because the topic weights are floats and two candidates matching different topics of
-    the same rarity have to compare EQUAL: a tie is refused by name, and a tie that float error
-    turned into a hairline win would be answered instead.
+    The paper's own tool list is part of ``haystack``, so a tool reaches this through the topic and
+    description matching that is already here. A separate tool signal was measured against the live
+    registry and moved no answer: nf-core descriptions name Salmon, Bismark and DADA2, but not
+    Arriba, rMATS, STAR-Fusion or Space Ranger, so there is little for it to match on.
     """
-    score = 0.0
+    score = 0
     why: list[str] = []
 
     # The name has to start a word too: "rnaseq" appears inside "scrnaseq" and inside "dualrnaseq",
@@ -352,22 +247,15 @@ def _score(
 
     matched_topics = _matched_topics(candidate, haystack)
     if matched_topics:
-        score += sum(weights.get(t, _TOPIC_WEIGHT_CEILING) for t in matched_topics)
-        rare = sorted(matched_topics, key=lambda t: -weights.get(t, _TOPIC_WEIGHT_CEILING))
-        why.append("declared topics " + ", ".join(rare))
+        score += _SCORE_TOPIC * len(matched_topics)
+        why.append("declared topics " + ", ".join(sorted(matched_topics)))
 
     shared = _tokens(candidate.description) & haystack_tokens
     if shared:
         score += min(_SCORE_DESCRIPTION * len(shared), _MAX_DESCRIPTION_SCORE)
         why.append("description terms " + ", ".join(sorted(shared)))
 
-    # A tool already credited as a topic is not two pieces of evidence wearing two hats.
-    named = [t for t in _named_tools(candidate, tool_phrases or []) if t not in {_phrase(m) for m in matched_topics}]
-    if named:
-        score += min(sum((tool_weights or {}).get(t, _TOPIC_WEIGHT_CEILING) for t in named), _MAX_TOOL_SCORE)
-        why.append("the paper's own tools " + ", ".join(sorted(named)))
-
-    return round(score, 3), why
+    return score, why
 
 
 async def _candidates(session: AsyncSession, org_id: int) -> list[_Candidate]:
@@ -452,19 +340,14 @@ def split_assay(assay: str | None) -> list[str]:
     return parts or ([assay.strip()] if (assay or "").strip() else [])
 
 
-def _fallback_match(
-    candidates: list[_Candidate], haystack: str, tool_phrases: list[str] | None = None
-) -> tuple[_Candidate, list[str]] | None:
+def _fallback_match(candidates: list[_Candidate], haystack: str) -> tuple[_Candidate, list[str]] | None:
     """The single best-scoring candidate for ``haystack``, or None when nothing clears the bar or
     two candidates tie. Shared by the whole-string match and the per-fragment vote so both agree."""
     haystack_tokens = _tokens(haystack)
-    weights = _topic_weights(candidates)
-    tool_weights = _tool_weights(candidates, tool_phrases or [])
     scored = [
         (score, candidate, why)
         for candidate in candidates
-        if (result := _score(candidate, haystack, haystack_tokens, weights, tool_phrases, tool_weights))
-        and (score := result[0]) >= _MIN_SCORE
+        if (result := _score(candidate, haystack, haystack_tokens)) and (score := result[0]) >= _MIN_SCORE
         for why in [result[1]]
     ]
     if not scored:
@@ -580,24 +463,17 @@ async def _offer_by_key(
 
 
 def _no_single_fallback(
-    candidates: list[_Candidate],
-    haystack: str,
-    assay: str | None,
-    declared: PipelineMapping,
-    tool_phrases: list[str] | None = None,
+    candidates: list[_Candidate], haystack: str, assay: str | None, declared: PipelineMapping
 ) -> PipelineMapping:
     """Either nothing scored, which leaves the unchanged blocker, or two candidates tied, which is
     refused BY NAME. This is a screening tool for papers of unknown validity: silently picking one of
     two equally plausible pipelines spends real compute on a guess and reports the result as an
     answer."""
     haystack_tokens = _tokens(haystack)
-    weights = _topic_weights(candidates)
-    tool_weights = _tool_weights(candidates, tool_phrases or [])
     scored = [
         (result[0], candidate)
         for candidate in candidates
-        if (result := _score(candidate, haystack, haystack_tokens, weights, tool_phrases, tool_weights))[0]
-        >= _MIN_SCORE
+        if (result := _score(candidate, haystack, haystack_tokens))[0] >= _MIN_SCORE
     ]
     if not scored:
         return declared
@@ -616,41 +492,6 @@ def _no_single_fallback(
     )
 
 
-def _displaces_floor(
-    best: _Candidate,
-    best_score: float,
-    floor_key: str,
-    floor_score: float,
-    family: tuple[str, ...],
-    haystack: str,
-    tool_phrases: list[str],
-    tool_weights: Mapping[str, float],
-) -> bool:
-    """Whether ``best`` has earned the right to overrule a contextual match.
-
-    Two things have to be true, and the second is what stops this from being a re-run of the bug it
-    replaces. A higher total is not enough on its own: a candidate can out-total the floor on
-    description words and on the very family words that put the floor there, and sharing vocabulary
-    with a paper is not the same as identifying its assay.
-
-    So ``best`` must also declare a topic the paper wrote that the floor's own family vocabulary does
-    not cover. `fusion`, `alternative-splicing`, `artic` and `spatial` are each such a word, and a
-    paper writing one has said something `rna-seq` and `amplicon sequencing` cannot say. A paper
-    that writes only "RNA sequencing" has not, and the floor is the honest answer for it.
-    """
-    if best.pipeline_key == floor_key or best_score <= floor_score:
-        return False
-    if _diagnostic_topics(_matched_topics(best, haystack), family):
-        return True
-    # A tool the paper itself named is the paper saying what it did, which is at least as specific
-    # as a topic somebody wrote on a pipeline's README. It has to be a DISCRIMINATING tool, though,
-    # by the same rarity rule the topics follow: samtools and fastqc are named by nearly every
-    # pipeline there is, and a paper listing its plumbing has not said which pipeline to run.
-    return any(
-        tool_weights.get(t, _TOPIC_WEIGHT_CEILING) > _TOPIC_WEIGHT_FLOOR for t in _named_tools(best, tool_phrases)
-    )
-
-
 def _offer_over_floor(
     candidates: list[_Candidate],
     haystack: str,
@@ -658,85 +499,67 @@ def _offer_over_floor(
     floor: PipelineMapping,
     strategy_route: LibraryStrategyRoute | None,
     family: tuple[str, ...],
-    tool_phrases: list[str],
-) -> PipelineMapping | None:
-    """What wins when a contextual route has to defend itself, or None to leave the floor untouched.
+) -> PipelineMapping:
+    """What wins when a contextual route has to defend itself: the floor re-stated, or its displacer.
 
-    Returns the floor's own mapping re-stated (so the plan records that a choice was made and what
-    it was weighed against) or the candidate that displaced it. Never a refusal: the floor answered
-    this paper before and must keep answering it.
+    Never a refusal. The floor answered this paper before the registry was consulted and must keep
+    answering it, because a paper writing only "RNA sequencing" carries nothing that separates
+    nf-core/rnaseq from nf-core/rnasplice, and no scorer can rank what was never mentioned.
+
+    Displacing takes two things. A higher total is not enough on its own: a candidate can out-total
+    the floor on description words and on the very family words that put the floor there. It must
+    also declare a topic the paper wrote that the floor's own family vocabulary does not cover.
+    `fusion`, `alternative-splicing`, `artic` and `spatial` are each such a word; `transcriptome`
+    beside a bulk RNA-seq floor is not, however few pipelines declare it.
 
     Only pipelines the scoped deposit ADMITS may compete. A strategy that is declared but
     deliberately unrouted (ENA files bulk, single-cell, total and ribo-depleted RNA under one
-    `RNA-Seq` value, so no one pipeline can be named for it) still says plenty about what must not
-    run: a compound paper reading "bisulfite sequencing, RRBS, and targeted RNA-seq" over an RNA-Seq
-    deposit would otherwise be displaced onto methylseq, which the C1 gate would then refuse outright.
-    Weights are counted over the same admissible set, so rarity means "rare among the pipelines that
-    could actually run this data".
+    `RNA-Seq` value) still says what must not run: a compound paper reading "bisulfite sequencing,
+    RRBS, and targeted RNA-seq" over an RNA-Seq deposit would otherwise be displaced onto methylseq,
+    which the C1 gate would then refuse outright.
     """
     floor_key = floor.pipeline_key
     assert floor_key is not None  # only called with a declared route in hand
 
     if strategy_route is not None:
         candidates = [c for c in candidates if c.pipeline_key in strategy_route.compatible]
-        if not candidates:
-            return _floor_stands(floor, assay, floor_key, weighed_against=None)
 
-    weights = _topic_weights(candidates)
-    tool_weights = _tool_weights(candidates, tool_phrases)
-    tokens = _tokens(haystack)
+    match = _fallback_match(candidates, haystack) if candidates else None
+    if match is not None:
+        best, why = match
+        tokens = _tokens(haystack)
+        floor_candidate = next((c for c in candidates if c.pipeline_key == floor_key), None)
+        floor_score = _score(floor_candidate, haystack, tokens)[0] if floor_candidate else 0
+        beats_floor = best.pipeline_key != floor_key and _score(best, haystack, tokens)[0] > floor_score
+        if beats_floor and _diagnostic_topics(_matched_topics(best, haystack), family):
+            logger.info("assay %r displaced the contextual floor %s -> %s", assay, floor_key, best.pipeline_key)
+            where = "installed on this bioAF" if best.installed else "available from the nf-core registry"
+            return PipelineMapping(
+                pipeline_key=best.pipeline_key,
+                pipeline_version=best.version,
+                # Never `exact`. A match made from a topic list is a plausible equivalent, not a
+                # verified one, so `_attribute` must keep a pipeline substitution on the table as an
+                # explanation for any divergence.
+                mapping_confidence="partial",
+                mapping_notes=(
+                    f"The paper's assay ('{assay}') names {floor_key} only in the sense that its "
+                    f"whole subfield does. Weighed against every pipeline this bioAF can run, "
+                    f"{best.pipeline_key} {best.version} ({where}) is the more specific answer, on "
+                    f"{'; '.join(why)}. bioAF has not verified what this pipeline emits, so the "
+                    "study is limited to QC-level evidence and cannot reproduce the paper's "
+                    "finding set."
+                ),
+            )
 
-    def score_of(candidate: _Candidate) -> float:
-        return _score(candidate, haystack, tokens, weights, tool_phrases, tool_weights)[0]
-
-    floor_candidate = next((c for c in candidates if c.pipeline_key == floor_key), None)
-    floor_score = score_of(floor_candidate) if floor_candidate else 0.0
-
-    match = _fallback_match(candidates, haystack, tool_phrases)
-    if match is None:
-        return _floor_stands(floor, assay, floor_key, weighed_against=None)
-
-    best, why = match
-    if not _displaces_floor(best, score_of(best), floor_key, floor_score, family, haystack, tool_phrases, tool_weights):
-        return _floor_stands(floor, assay, floor_key, weighed_against=best.pipeline_key)
-
-    logger.info(
-        "org-independent: assay %r displaced the contextual floor %s -> %s", assay, floor_key, best.pipeline_key
-    )
-    where = "installed on this bioAF" if best.installed else "available from the nf-core registry"
-    return PipelineMapping(
-        pipeline_key=best.pipeline_key,
-        pipeline_version=best.version,
-        # Never `exact`. A match made from a topic list is a plausible equivalent, not a verified
-        # one, so `_attribute` must keep a pipeline substitution on the table as an explanation for
-        # any divergence.
-        mapping_confidence="partial",
-        mapping_notes=(
-            f"The paper's assay ('{assay}') names {floor_key} only in the sense that its whole "
-            f"subfield does. Weighed against every pipeline this bioAF can run, "
-            f"{best.pipeline_key} {best.version} ({where}) is the more specific answer, on "
-            f"{'; '.join(why)}. bioAF has not verified what this pipeline emits, so the study is "
-            "limited to QC-level evidence and cannot reproduce the paper's finding set."
-        ),
-    )
-
-
-def _floor_stands(
-    floor: PipelineMapping, assay: str | None, floor_key: str, weighed_against: str | None
-) -> PipelineMapping:
-    """The contextual route, re-stated as the considered answer it now is.
-
-    The route's OWN confidence is carried through untouched. Weighing a floor against the registry
-    and finding nothing better is not new information about how good the route is, and hardcoding
-    `partial` here silently downgraded the best evidence there is: `exact` is set when the paper's
-    own methods name nf-core, and it is the only value `_attribute` accepts to clear a pipeline
-    substitution as the explanation for a divergence. A paper that says it ran nf-core/rnaseq would
-    have had every later divergence blamed in part on a substitution that never happened.
-    """
-    runner_up = (
-        f" The nearest alternative the registry offered was {weighed_against}, which carries no "
-        "evidence more specific than that."
-        if weighed_against and weighed_against != floor_key
+    # The floor stands, re-stated as the considered answer it now is. The route's OWN confidence is
+    # carried through: weighing a floor and finding nothing better says nothing about how good the
+    # route was, and `exact` (the paper's own methods name nf-core) is the only value `_attribute`
+    # accepts to clear a pipeline substitution as the explanation for a divergence.
+    runner_up = match[0].pipeline_key if match else None
+    weighed = (
+        f" The nearest alternative the registry offered was {runner_up}, which carries no evidence "
+        "more specific than that."
+        if runner_up and runner_up != floor_key
         else " Nothing else in the registry cleared the bar."
     )
     return PipelineMapping(
@@ -747,8 +570,8 @@ def _floor_stands(
             f"The paper's assay ('{assay}') identifies a family rather than a pipeline: the words it "
             f"uses are as true of its neighbours as of {floor_key}. It was weighed against every "
             f"pipeline this bioAF can run and {floor_key} stands as the answer of last resort for "
-            f"that family.{runner_up} Scoping this study to the accession it should reproduce is "
-            "what settles it outright, because a deposit's declared library strategy is not prose."
+            f"that family.{weighed} Scoping this study to the accession it should reproduce is what "
+            "settles it outright, because a deposit's declared library strategy is not prose."
         ),
         blockers=list(floor.blockers),
     )
@@ -836,25 +659,15 @@ async def resolve_pipeline_for_assay(
     # Diagnostic routes never reach here: they are the paper identifying its own assay, and the
     # registry has nothing to add to that.
     evidence = match_route((assay or "").lower())
-    if declared.pipeline_key is not None and evidence is not None and not evidence.diagnostic:
-        offered = _offer_over_floor(
-            candidates,
-            haystack,
-            assay,
-            declared,
-            strategy_route,
-            evidence.route.contextual_markers,
-            tool_phrases,
-        )
-        if offered is not None:
-            return offered
+    if declared.pipeline_key is not None and evidence is not None and not evidence[1]:
+        return _offer_over_floor(candidates, haystack, assay, declared, strategy_route, evidence[0].contextual_markers)
 
     if declared.pipeline_key is not None:
         return declared
 
-    match = _fallback_match(candidates, haystack, tool_phrases)
+    match = _fallback_match(candidates, haystack)
     if match is None:
-        return _no_single_fallback(candidates, haystack, assay, declared, tool_phrases)
+        return _no_single_fallback(candidates, haystack, assay, declared)
 
     best, why = match
     logger.info("org %d: assay %r resolved to %s by fallback", org_id, assay, best.pipeline_key)
