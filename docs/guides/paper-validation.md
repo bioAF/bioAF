@@ -41,23 +41,13 @@ These are verified: someone read the pipeline's source and confirmed what it pro
 | Assay | Pipeline | 1 | 2 | 3 | 4 | Ceiling |
 |---|---|:--:|:--:|:--:|:--:|:--:|
 | Bulk RNA-seq | `nf-core/rnaseq` | ✓ | ✓ | ✓ | ✓ | 4 |
-| ATAC-seq | `nf-core/atacseq` | ✓ | ✓ | ✓ | - | 4 |
+| ATAC-seq | `nf-core/atacseq` | ✓ | ✓ | ✓ | ✓ | 4 |
 | ChIP-seq | `nf-core/chipseq` | ✓ | ✓ | - | - | 4 |
 | Single-cell RNA-seq | `nf-core/scrnaseq` | ✓ | - | - | - | 4 |
 | Small RNA-seq | `nf-core/smrnaseq` | ✓ | - | - | - | 4 |
 | Amplicon / 16S | `nf-core/ampliseq` | ✓ | | - | - | 4 |
 | DNase-seq | `nf-core/atacseq` | - | | | | 4 |
 | CUT&RUN / CUT&Tag | `nf-core/cutandrun` | ✓ | | - | | 3 |
-
-**Bulk RNA-seq is the only assay proven at every level.**
-
-## Also supported, capped at Level 3
-
-A paper outside the list above is matched against the nf-core registry. If the pipeline it needs is
-not installed, the plan offers to install it before you approve. These routes stop at Level 3
-because bioAF has not verified what they publish.
-
-| Assay | Pipeline | 1 | 2 | 3 | 4 | Ceiling |
 |---|---|:--:|:--:|:--:|:--:|:--:|
 | WGBS / RRBS | `nf-core/methylseq` | ✓ | ✓ | - | | 3 |
 | Hi-C | `nf-core/hic` | - | | | | 3 |
@@ -73,10 +63,13 @@ because bioAF has not verified what they publish.
 | Bacterial isolate assembly | `nf-core/bacass` | - | | | | 3 |
 | Spatial transcriptomics (Xenium) | `nf-core/spatialaxe` | - | | | | 3 |
 
+**Bulk RNA-seq and ATAC-seq are the only assays fully proven at every level.**
+
 ## Known limitations
 
-**Some assays still pick the wrong pipeline, and some decline.** Check the pipeline named on the
-plan before approving, and decline if it is wrong.
+**Some assays currently pick the wrong pipeline and a few others decline to run altogether.** 
+These will prompt the user before running. 
+Check the pipeline named on the plan before approving, and decline if it is wrong.
 
 | Assay | Should use | Does today |
 |---|---|---|
