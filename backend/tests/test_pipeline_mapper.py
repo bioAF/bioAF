@@ -88,6 +88,61 @@ def test_every_tailored_qc_template_is_registered():
         )
 
 
+# ---- a marker is anchored at its START, so it cannot match inside a longer word (plan_5.1 step 1) ----
+#
+# Markers were matched with plain substring containment, so `transcriptom` also matched inside
+# `metatranscriptomics`. A declared route short-circuits everything: `_match_route` returns the
+# first marker hit and the registry fallback never runs at all, so this did not merely out-score
+# nf-core/metatdenovo, it stopped metatdenovo from ever being considered.
+
+
+def test_a_marker_does_not_match_inside_a_longer_word():
+    """Metatranscriptomics is its own assay with its own pipeline, and `transcriptom` was eating it.
+
+    Answering nothing here is the fix, not a loss: no declared route covers metatranscriptomics, so
+    the resolver's registry fallback is what should decide, and it never got the chance.
+    """
+    assert map_method("metatranscriptome de novo assembly").pipeline_key is None
+    assert map_method("metatranscriptomics of the gut microbiome").pipeline_key is None
+
+
+def test_a_marker_is_still_a_stem_at_its_end():
+    """The other half of the guard, and the reason a full word boundary is the wrong fix.
+
+    Several markers are deliberate stems: `transcriptom` exists to catch transcriptome,
+    transcriptomic and transcriptomics in one. Anchoring both ends was measured to refuse all three
+    and take ordinary bulk RNA-seq with them.
+    """
+    for assay in (
+        "transcriptomic profiling of liver tissue",
+        "transcriptome analysis",
+        "transcriptomics of whole blood",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/rnaseq", assay
+
+
+def test_the_assays_that_carried_a_marker_mid_word_are_declared_markers_now():
+    """Anchoring drops every assay name that carried a marker mid-word, and three real ones did.
+
+    scATAC-seq and snATAC-seq matched `atac-seq` inside a prefix; tsRNA matched `srna` inside one.
+    Each is a real assay a paper writes, so each is declared rather than left to substring luck.
+    """
+    assert map_method("scATAC-seq").pipeline_key == "nf-core/atacseq"
+    assert map_method("snATAC-seq").pipeline_key == "nf-core/atacseq"
+    assert map_method("scATACseq").pipeline_key == "nf-core/atacseq"
+    assert map_method("tsRNA profiling").pipeline_key == "nf-core/smrnaseq"
+    assert map_method("lncRNA-seq").pipeline_key == "nf-core/rnaseq"
+
+
+def test_the_anchor_is_a_prefix_check_and_not_a_word_boundary():
+    """A marker's own punctuation is part of it. `cut&run`, `atac-seq` and `16s` all contain a
+    character that a word-boundary anchor would break in the middle."""
+    assert map_method("CUT&RUN for H3K27me3").pipeline_key == "nf-core/cutandrun"
+    assert map_method("ATAC-seq of sorted nuclei").pipeline_key == "nf-core/atacseq"
+    assert map_method("16S rRNA amplicon sequencing").pipeline_key == "nf-core/ampliseq"
+    assert map_method("ChIP-seq for H3K27ac").pipeline_key == "nf-core/chipseq"
+
+
 # ---- the four proven assays are unchanged ----
 
 

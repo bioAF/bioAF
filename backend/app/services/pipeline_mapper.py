@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 
 
 @dataclass(frozen=True)
@@ -28,8 +29,9 @@ class AssayRoute:
 
     pipeline_key: str
     pipeline_version: str
-    # Lowercased substrings looked for in the paper's assay string. Keep them specific: a marker
-    # broad enough to appear in a neighbouring subfield's prose mis-routes that subfield's papers.
+    # Lowercased markers looked for in the paper's assay string, each anchored at its START (see
+    # `_marker_pattern`). Keep them specific: a marker broad enough to appear in a neighbouring
+    # subfield's prose mis-routes that subfield's papers.
     markers: tuple[str, ...]
 
 
@@ -53,6 +55,12 @@ _ROUTES: tuple[AssayRoute, ...] = (
             "atac-seq",
             "atac seq",
             "atacseq",
+            # scATAC-seq and snATAC-seq carried `atac-seq` mid-word and matched on containment
+            # alone. Anchoring the marker drops them unless the spellings are declared, and a paper
+            # writes them exactly this way. Both still lose to the single-cell route above when the
+            # paper spells "single-cell" out, which is what a multiome paper does and is unchanged.
+            "scatac",
+            "snatac",
             "transposase-accessible",
             "transposase accessible",
             "assay for transposase",
@@ -155,6 +163,10 @@ _ROUTES: tuple[AssayRoute, ...] = (
             # assay sRNAseq throughout, and without this it would have launched a bulk
             # quantification against 20 bp reads and answered confidently.
             "srna",
+            # tRNA-derived small RNA, which carried `srna` mid-word until the marker was anchored.
+            # A real assay a paper names in its own methods, so it is declared rather than caught by
+            # accident.
+            "tsrna",
             "sncrna",
             "small non-coding",
             "mirna",
@@ -166,7 +178,10 @@ _ROUTES: tuple[AssayRoute, ...] = (
     AssayRoute(
         pipeline_key="nf-core/rnaseq",
         pipeline_version="3.14.0",
-        markers=("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq"),
+        # `lncrna` names the molecule, the way smrnaseq's markers do. Long non-coding RNA-seq IS
+        # bulk RNA-seq and nf-core/rnaseq is the right pipeline for it; it reached that answer only
+        # because "lncRNA-seq" contains "rna-seq", and anchoring the marker would have refused it.
+        markers=("rna-seq", "rnaseq", "bulk rna", "transcriptom", "mrna-seq", "lncrna"),
     ),
 )
 
@@ -342,10 +357,38 @@ def declared_route_version(pipeline_key: str | None) -> str | None:
     return None
 
 
+# A marker must BEGIN a word, and may end in the middle of one.
+#
+# Matching was plain substring containment, and `transcriptom` therefore matched inside
+# `metatranscriptomics`, capturing every metatranscriptomics paper for nf-core/rnaseq. A declared
+# route short-circuits everything (`_match_route` returns the first hit and the registry fallback
+# never runs), so that did not out-score nf-core/metatdenovo, it stopped metatdenovo from ever being
+# considered.
+#
+# Anchoring BOTH ends is the obvious fix and was measured to be the wrong one. Several markers are
+# deliberate stems: `transcriptom` is one marker covering transcriptome, transcriptomic and
+# transcriptomics, and requiring a word boundary after it refuses all three. So the anchor is a
+# prefix check only: a non-word character (or the start of the string) has to come before the
+# marker, and the word may run on after it.
+#
+# The check is on the character BEFORE the marker, never inside it, so a marker's own punctuation is
+# untouched: `cut&run`, `atac-seq` and `16s` all match as written.
+
+
+@lru_cache(maxsize=512)
+def _marker_pattern(marker: str) -> re.Pattern[str]:
+    return re.compile(r"(?<![a-z0-9])" + re.escape(marker))
+
+
+def marker_matches(marker: str, assay: str) -> bool:
+    """Whether ``marker`` starts a word in ``assay``."""
+    return _marker_pattern(marker).search(assay) is not None
+
+
 def _match_route(assay: str) -> AssayRoute | None:
-    """The first declared route whose marker appears in ``assay``, or None."""
+    """The first declared route whose marker starts a word in ``assay``, or None."""
     for route in _ROUTES:
-        if any(marker in assay for marker in route.markers):
+        if any(marker_matches(marker, assay) for marker in route.markers):
             return route
     return None
 
