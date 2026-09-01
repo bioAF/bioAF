@@ -191,3 +191,92 @@ def test_compute_quality_flags_no_peaks_as_concerning():
     assert chipseq.compute_quality({"peak_count": 0, "frip": 0.0}) == "concerning"
     assert chipseq.compute_quality({"frip": 0.05, "reads_mapped_genome": 0.9, "peak_count": 20_000}) == "good"
     assert chipseq.compute_quality({}) == "pending_review"
+
+
+# ---- nf-core/cutandrun (plan_1 step 3): the same peak QC under different section ids ----
+
+# cutandrun reports its peak metrics to MultiQC as custom content, and the header files declare the
+# section ids: `primary_peak_counts`, `consensus_peak_counts` and `primary_frip_score`
+# (assets/multiqc/peak_counts_header.txt, peak_counts_consensus_header.txt, frip_score_header.txt
+# @ 3.2.2). The raw-data key is that id plus `-plot` for a bargraph, which is the rule the real
+# chipseq fixture proves: its header declares `#id: 'peak_count'` and the report carries
+# `multiqc_peak_count-plot`. The values are per-sample, shaped {sample: {series: value}}.
+#
+# Derived, not observed: no real cutandrun report has been captured yet, so the parser accepts the
+# bare id as well as the `-plot` form rather than pinning one exact key.
+_CUTANDRUN_MULTIQC = {
+    "report_saved_raw_data": {
+        "multiqc_fastqc": {
+            "S1": {"Total Sequences": 10_000_000.0, "%GC": 44.0, "avg_sequence_length": 50.0},
+            "S2": {"Total Sequences": 12_000_000.0, "%GC": 45.0, "avg_sequence_length": 50.0},
+        },
+        "multiqc_samtools_flagstat": {
+            "S1": {"mapped_passed_pct": 98.0},
+            "S2": {"mapped_passed_pct": 94.0},
+        },
+        "multiqc_primary_peak_counts-plot": {
+            "S1": {"S1": 12_000.0},
+            "S2": {"S2": 8_000.0},
+        },
+        # The across-replicate figure. A different question from the per-sample count, and never
+        # blended with it.
+        "multiqc_consensus_peak_counts-plot": {
+            "consensus": {"consensus": 6_000.0},
+        },
+        "multiqc_primary_frip_score-plot": {
+            "S1": {"S1": 0.30},
+            "S2": {"S2": 0.20},
+        },
+    },
+    "report_general_stats_data": [],
+}
+
+
+def test_cutandrun_peak_count_is_the_per_sample_count():
+    """A CUT&RUN paper's headline claim is a peak count, and peak_count is the one finding-tier
+    scalar, so this single number is what lets a cutandrun study reach `validated` with no matrix
+    and no notebook. Per-sample mean, the basis every other peak-calling assay is compared on."""
+    metrics = chipseq.read_multiqc_metrics(json.dumps(_CUTANDRUN_MULTIQC))
+    assert metrics["peak_count"] == 10_000  # mean(12000, 8000), not the 6000 consensus
+    assert metrics["frip"] == 0.25
+
+
+def test_cutandrun_falls_back_to_the_consensus_count_when_that_is_all_there_is():
+    """A run configured to report only the consensus still yields a peak count rather than None.
+    The number means something different, but it is a real number and the alternative is silence."""
+    report = json.loads(json.dumps(_CUTANDRUN_MULTIQC))
+    del report["report_saved_raw_data"]["multiqc_primary_peak_counts-plot"]
+    metrics = chipseq.read_multiqc_metrics(json.dumps(report))
+    assert metrics["peak_count"] == 6_000
+
+
+def test_cutandrun_peak_sections_do_not_disturb_chipseq_parsing():
+    """Regression: the added candidate ids must not change what a real nf-core/chipseq report
+    yields."""
+    metrics = chipseq.read_multiqc_metrics(json.dumps(_MULTIQC))
+    assert metrics["peak_count"] == 25_000  # mean(30000, 20000) from multiqc_macs2_peak_count
+
+
+def test_cutandrun_peak_count_is_found_under_the_anchor_spelling_too():
+    """The one thing the real fixtures cannot settle.
+
+    Across both captured reports the raw-data key is `multiqc_<id>-plot`, where `<id>` is the
+    header's declared `#id`: chipseq declares `peak_count` and carries `multiqc_peak_count-plot`;
+    atacseq declares `mlib_peak_count` and carries `multiqc_mlib_peak_count-plot`. But both
+    pipelines set `#id` and `#anchor` to the SAME string, so neither fixture can say which of the
+    two names the key.
+
+    cutandrun is the first case where they differ: `#id: 'primary_peak_counts'` against
+    `#anchor: 'primary_peakcounts'`. Rather than bet on one reading of MultiQC's internals, accept
+    both. The cost of a spare candidate is nothing; the cost of guessing wrong is a peak_count of
+    None, which silently caps every cutandrun study at inconclusive."""
+    report = {
+        "report_saved_raw_data": {
+            "multiqc_primary_peakcounts-plot": {"S1": {"S1": 12_000.0}, "S2": {"S2": 8_000.0}},
+            "multiqc_primary_fripscore-plot": {"S1": {"S1": 0.30}, "S2": {"S2": 0.20}},
+        },
+        "report_general_stats_data": [],
+    }
+    metrics = chipseq.read_multiqc_metrics(json.dumps(report))
+    assert metrics["peak_count"] == 10_000
+    assert metrics["frip"] == 0.25

@@ -47,12 +47,26 @@ def test_invalid_transitions_are_rejected():
     assert not can_transition("setup", "classified")
 
 
-def test_terminal_states_have_no_outbound_transitions():
-    for terminal in ("classified", "plan_declined", "error"):
+def test_a_closed_verdict_has_no_outbound_transitions():
+    """`classified` and `plan_declined` are judgments. Nothing follows them."""
+    for terminal in ("classified", "plan_declined"):
         assert terminal in VALIDATION_STUDY_TERMINAL_STATES
         assert next_states(terminal) == []
         assert is_terminal(terminal)
     assert not is_terminal("reading")
+
+
+def test_error_is_parked_rather_than_closed():
+    """`error` is an INFRA failure, not a judgment on the paper -- the model has said "retryable" in
+    a comment since it was written, while the transition table said otherwise, so a wrong reference
+    or a dead node cost the whole fetch and there was no way back.
+
+    It stays TERMINAL, which is what stops the background driver touching it: a study that failed
+    must never re-launch itself on a tick, or one broken parameter becomes a spend loop. Retrying is
+    a human act, and these are the two places a human can send it."""
+    assert is_terminal("error")
+    assert "error" in VALIDATION_STUDY_TERMINAL_STATES
+    assert set(next_states("error")) == {"setup", "plan_ready"}
 
 
 def test_early_exit_to_classified_before_running():

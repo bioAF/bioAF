@@ -367,6 +367,17 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
     # older names + the general-stats scan. Only the IP samples appear here (controls have no peaks).
     # chipseq names the section `multiqc_peak_count-plot`; atacseq prefixes it `_mlib_` (merged library),
     # verified against real run-22 (chipseq) + run-24 (atacseq) output. Accept both.
+    #
+    # nf-core/cutandrun reports the same two metrics under its own custom-content ids, declared in
+    # assets/multiqc/{peak_counts,peak_counts_consensus,frip_score}_header.txt @ 3.2.2. The
+    # per-sample count is `primary_peak_counts` and is preferred; `consensus_peak_counts` is the
+    # across-replicate figure, a different question, taken only when it is all the run reported.
+    # The `multiqc_<id>-plot` rule is proven twice over: chipseq declares `#id: peak_count` and its
+    # real report carries `multiqc_peak_count-plot`; atacseq declares `mlib_peak_count` and carries
+    # `multiqc_mlib_peak_count-plot`. What neither fixture can settle is whether the key follows
+    # `#id` or `#anchor`, because both pipelines set them to the same string. cutandrun is the first
+    # case where they diverge (`primary_peak_counts` vs `primary_peakcounts`), so both spellings are
+    # listed. A spare candidate costs nothing; guessing wrong costs a silent `inconclusive`.
     peaks = _plot_values(
         _find_section(
             raw,
@@ -374,6 +385,12 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
             "multiqc_mlib_peak_count-plot",
             "multiqc_macs2_peak_count",
             "macs2_peak_count",
+            "multiqc_primary_peak_counts-plot",
+            "multiqc_primary_peakcounts-plot",
+            "multiqc_primary_peak_counts",
+            "multiqc_consensus_peak_counts-plot",
+            "multiqc_consensus_peakcounts-plot",
+            "multiqc_consensus_peak_counts",
         )
     )
     if not peaks:
@@ -383,7 +400,14 @@ def read_multiqc_metrics(multiqc_json_text: str, *, run_roster: Roster | None = 
 
     frip = _plot_values(
         _find_section(
-            raw, "multiqc_frip_score-plot", "multiqc_mlib_frip_score-plot", "multiqc_frip_score", "frip_score"
+            raw,
+            "multiqc_frip_score-plot",
+            "multiqc_mlib_frip_score-plot",
+            "multiqc_frip_score",
+            "frip_score",
+            "multiqc_primary_frip_score-plot",
+            "multiqc_primary_fripscore-plot",
+            "multiqc_primary_frip_score",
         )
     )
     if not frip:

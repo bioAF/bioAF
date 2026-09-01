@@ -196,3 +196,13 @@ class TestGcpTerraformCloud:
         # unchanged from the previous hardcoded "{module}/default.tflock".
         assert self.cloud.lock_object_path("compute") == "compute/default.tflock"
         assert self.cloud.lock_object_path(None) is None
+
+
+def test_the_disk_settings_are_read_back_with_the_other_pool_settings():
+    """`config_keys` is what the Components page reads. A key missing here is a control the page
+    cannot render even once the API and terraform both support it."""
+    from app.services.terraform_cloud import GcpTerraformCloud
+
+    keys = GcpTerraformCloud().config_keys()
+    assert "k8s_pipeline_disk_size_gb" in keys
+    assert "k8s_pipeline_disk_type" in keys

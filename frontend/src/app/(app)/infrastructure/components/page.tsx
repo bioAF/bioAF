@@ -22,6 +22,13 @@ import { logError } from "@/lib/errorReporting";
 import { invalidateComponentCache } from "@/hooks/useComponents";
 import { useConfirm } from "@/hooks/useConfirm";
 import { notebookSupportForMachine } from "@/lib/notebookCapacity";
+import { DISK_TYPE_OPTIONS, describeDiskFor } from "./clusterDiskOptions";
+import {
+  applyIsBlocked,
+  describePoolCapacity,
+  describeVerdict,
+  type QuotaVerdict,
+} from "./clusterQuotaVerdict";
 import { Button } from "@/components/ui/Button";
 import {
   INTERACTIVE_MACHINE_OPTIONS,
@@ -101,8 +108,13 @@ interface ClusterConfig {
   k8s_pipeline_machine_type: string;
   k8s_pipeline_max_nodes: number;
   k8s_pipeline_use_spot: boolean;
+  k8s_pipeline_disk_size_gb: number;
+  k8s_pipeline_disk_type: string;
   k8s_interactive_machine_type: string;
   k8s_interactive_max_nodes: number;
+  // What the CURRENT pool can build. Terraform reporting success and GKE reporting
+  // RUNNING were both true of a pool with zero capacity; this is what tells them apart.
+  pipeline_pool_quota?: QuotaVerdict | null;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -151,6 +163,7 @@ export default function InfraComponentsPage() {
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [showSpotTooltip, setShowSpotTooltip] = useState(false);
   const [configEdits, setConfigEdits] = useState<Partial<ClusterConfig>>({});
+  const [quotaVerdict, setQuotaVerdict] = useState<QuotaVerdict | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
   const [showRedeployConfirm, setShowRedeployConfirm] = useState(false);
   const [configError, setConfigError] = useState("");
@@ -555,13 +568,54 @@ export default function InfraComponentsPage() {
   }
 
   /**
-   * True when the pending edits replace a machine type, which is the only
-   * change that recreates a node pool. Scaling max_nodes or flipping spot does
-   * not destroy running work, so the confirmation must not claim it does.
+   * Price the pending edits against the region's live quota.
+   *
+   * Debounced because it runs on every keystroke in the disk-size field, and it is a cloud
+   * round-trip. With no pending edits the panel falls back to the verdict for the CURRENT pool,
+   * which is what the capacity line reports.
+   *
+   * A failed preflight clears the verdict rather than blocking: the whole design fails open, and
+   * an operator must never be stopped by a call that did not answer.
+   */
+  useEffect(() => {
+    if (!showConfigPanel) return;
+    if (Object.keys(configEdits).length === 0) {
+      setQuotaVerdict(clusterConfig?.pipeline_pool_quota ?? null);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const verdict = await api.post<QuotaVerdict>(
+          "/api/v1/infrastructure/cluster/config/preflight",
+          configEdits,
+        );
+        if (!cancelled) setQuotaVerdict(verdict);
+      } catch (e) {
+        logError("cluster config quota preflight", e);
+        if (!cancelled) setQuotaVerdict(null);
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [configEdits, showConfigPanel, clusterConfig]);
+
+  /**
+   * True when the pending edits change something in a pool's `node_config`,
+   * which is what forces GKE to recreate the pool: the machine type, or the
+   * node disk's size or type. Scaling max_nodes or flipping spot does not
+   * destroy running work, so the confirmation must not claim it does.
    */
   function redeployRecreatesAPool(): boolean {
     return (
       configEdits.k8s_pipeline_machine_type !== undefined ||
+      // A disk change recreates the node pool, exactly like a machine-type change.
+      configEdits.k8s_pipeline_disk_size_gb !== undefined ||
+      configEdits.k8s_pipeline_disk_type !== undefined ||
       configEdits.k8s_interactive_machine_type !== undefined
     );
   }
@@ -835,6 +889,12 @@ export default function InfraComponentsPage() {
                           {/* Pipeline Nodes column */}
                           <div className="space-y-3">
                             <h5 className="text-sm font-medium text-gray-700">Pipeline Nodes</h5>
+                            <p data-testid="pipeline-pool-capacity" className="text-xs text-gray-500">
+                              {describePoolCapacity(
+                                clusterConfig.pipeline_pool_quota,
+                                clusterConfig.k8s_pipeline_max_nodes,
+                              )}
+                            </p>
                             <div>
                               <label htmlFor="machine-size" className="text-xs text-gray-500">Machine Size</label>
                               <select id="machine-size"
@@ -862,6 +922,44 @@ export default function InfraComponentsPage() {
                               />
                             </div>
                             )}
+                            <div>
+                              <label htmlFor="pipeline-disk-size" className="text-xs text-gray-500">
+                                Node Disk (GB)
+                              </label>
+                              <input id="pipeline-disk-size"
+                                type="number"
+                                min={50}
+                                max={1000}
+                                value={configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb}
+                                onChange={(e) =>
+                                  setConfigEdits({ ...configEdits, k8s_pipeline_disk_size_gb: Number(e.target.value) })
+                                }
+                                className="w-full border rounded px-2 py-1 text-sm mt-1"
+                                disabled={configSaving}
+                              />
+                              <p className="mt-1 text-xs text-gray-500">
+                                {describeDiskFor(
+                                  configEdits.k8s_pipeline_disk_size_gb ?? clusterConfig.k8s_pipeline_disk_size_gb,
+                                )}
+                              </p>
+                            </div>
+                            <div>
+                              <label htmlFor="pipeline-disk-type" className="text-xs text-gray-500">
+                                Node Disk Type
+                              </label>
+                              <select id="pipeline-disk-type"
+                                value={configEdits.k8s_pipeline_disk_type ?? clusterConfig.k8s_pipeline_disk_type}
+                                onChange={(e) => setConfigEdits({ ...configEdits, k8s_pipeline_disk_type: e.target.value })}
+                                className="w-full border rounded px-2 py-1 text-sm mt-1 bg-white"
+                                disabled={configSaving}
+                              >
+                                {DISK_TYPE_OPTIONS.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
                             {has("spot_retry") && (
                             <div className="flex items-center gap-2">
                               <label className="text-xs text-gray-500">Spot Instances</label>
@@ -960,9 +1058,34 @@ export default function InfraComponentsPage() {
                           machine type recreates its node pool, which stops pipelines and notebooks
                           running on it.
                         </p>
+                        {(() => {
+                          // What this region's quota allows for the pending edits. A config that
+                          // could not build one node is refused here rather than accepted, applied,
+                          // reported RUNNING, and discovered as a run whose pods never schedule.
+                          const display = describeVerdict(quotaVerdict);
+                          if (!display) return null;
+                          const tone =
+                            display.tone === "error"
+                              ? "text-red-700 bg-red-50 border-red-200"
+                              : display.tone === "warning"
+                                ? "text-amber-700 bg-amber-50 border-amber-200"
+                                : "text-gray-600 bg-gray-50 border-gray-200";
+                          return (
+                            <p
+                              data-testid="cluster-quota-verdict"
+                              className={`text-xs border rounded px-3 py-2 mt-2 ${tone}`}
+                            >
+                              {display.text}
+                            </p>
+                          );
+                        })()}
                         <div className="flex gap-2 mt-4">
                           <button
-                            disabled={configSaving || Object.keys(configEdits).length === 0}
+                            disabled={
+                              configSaving ||
+                              Object.keys(configEdits).length === 0 ||
+                              applyIsBlocked(quotaVerdict)
+                            }
                             onClick={() => setShowRedeployConfirm(true)}
                             className="px-3 py-1 text-sm bg-bioaf-600 text-white rounded hover:bg-bioaf-700 disabled:opacity-50"
                           >

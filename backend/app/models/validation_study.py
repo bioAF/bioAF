@@ -61,7 +61,13 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "comparing": ["classified", "error"],
     "classified": [],
     "plan_declined": [],
-    "error": [],
+    # `error` is an INFRA failure, not a judgment on the paper, and it stays in
+    # VALIDATION_STUDY_TERMINAL_STATES so the background driver never touches it: a study that
+    # failed must not re-launch itself on a tick, or one broken parameter becomes a spend loop.
+    # Retrying is a human act. A study whose data was already fetched resumes at `setup` and
+    # relaunches the analysis against it; one with nothing fetched goes back to the C1 gate, so a
+    # human approves the re-fetch rather than a button quietly starting a 122 GB download.
+    "error": ["setup", "plan_ready"],
 }
 
 # Terminal classification buckets (spec-03). The classifier states facts; there is no "bad" label.

@@ -102,6 +102,11 @@ LITERATURE_AUTO_REVIEW_RECOMMENDATIONS = "literature.auto_review_recommendations
 LITERATURE_COMMENT_REPLIED = "literature.comment_replied"
 LITERATURE_PAPER_DISMISSED = "literature.paper_dismissed"
 
+# Validation study events (lit_validation). `error` is an infrastructure failure, not a verdict on
+# the paper, and the only way out of it is a human clicking Retry. Nobody can click what nobody is
+# told about, and the study's fetched data is deleted once the retry window closes.
+VALIDATION_STUDY_ERROR = "validation.study_error"
+
 # Public LIMS integration events (ADR-051). Project events are internal-only
 # in v1; webhook subscribers only see the experiment/sample/file vocabulary.
 INTEGRATION_PROJECT_CREATED = "integration.project.created"
@@ -208,6 +213,7 @@ ALL_EVENT_TYPES = [
     LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
     LITERATURE_COMMENT_REPLIED,
     LITERATURE_PAPER_DISMISSED,
+    VALIDATION_STUDY_ERROR,
 ]
 
 # Every event type a user can actually be notified about, and therefore every one that must have a
@@ -273,4 +279,7 @@ EVENT_SEVERITY = {
     LITERATURE_AUTO_REVIEW_RECOMMENDATIONS: "info",
     LITERATURE_COMMENT_REPLIED: "info",
     LITERATURE_PAPER_DISMISSED: "info",
+    # Warning, not critical: the science is untouched and the work so far survives. It needs a
+    # human, but within days rather than minutes.
+    VALIDATION_STUDY_ERROR: "warning",
 }

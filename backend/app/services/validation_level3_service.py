@@ -83,6 +83,11 @@ class Level3Wiring:
     # Recorded on the bundle so a verdict can say how its matrix was built.
     transform: str | None = None
     id_column: str | None = None
+    # The template parameter that receives the gene-id namespace the pseudobulk matrix should be
+    # keyed by. Only nf-core/scrnaseq has the choice: its h5ad carries BOTH namespaces, so which one
+    # to emit is decided per study, from the paper. Every other route's matrix has one id column and
+    # no choice to make, and their templates do not declare the parameter.
+    namespace_parameter: str | None = None
 
 
 _SALMON_GENE_COUNTS = "salmon.merged.gene_counts.tsv"
@@ -91,10 +96,17 @@ _SALMON_GENE_COUNTS = "salmon.merged.gene_counts.tsv"
 # differential design names libraries, so mLb is the correct one. mRp is the fallback for a run that
 # published only that.
 _CONSENSUS_PEAKS = ("consensus", "featurecounts")
+# featureCounts writes `<matrix>.summary` beside every matrix it produces: same directory, same
+# stem, and it carries the per-sample assignment counts rather than the peaks. It therefore contains
+# every token the matrix does, so the contains-rules matched the PAIR and Level 3 refused with
+# `ambiguous_input_file`. Study 13 hit this on the first real ATAC-seq Level-3 attempt, after the
+# full 12-sample pipeline had already succeeded, so ~10 hours of compute was discarded at the last
+# step by a sidecar. Excluded on every rule rather than the first, because any of them can match it.
+_SIDECAR_EXCLUDES = (".summary",)
 _PEAK_INPUT_RULES = (
-    InputRule(filename_contains=(*_CONSENSUS_PEAKS, ".mlb.")),
-    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=(".mrp.",)),
-    InputRule(filename_contains=_CONSENSUS_PEAKS),
+    InputRule(filename_contains=(*_CONSENSUS_PEAKS, ".mlb."), filename_excludes=_SIDECAR_EXCLUDES),
+    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=(".mrp.", *_SIDECAR_EXCLUDES)),
+    InputRule(filename_contains=_CONSENSUS_PEAKS, filename_excludes=_SIDECAR_EXCLUDES),
 )
 
 # The template is keyed by its exact notebook_path, NOT by category: the `differential_expression`
@@ -137,6 +149,49 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         path_parameter="counts_paths",
         multiple=True,
         transform="pseudobulk",
+        namespace_parameter="gene_id_namespace",
+    ),
+    # A microbiome finding is "these taxa changed", which is an id with a direction and a
+    # significance: the same comparison family a DEG list is, so E6 needs no new code and the kind
+    # stays `gene`.
+    #
+    # Verified from the source: DADA2_MERGE publishes into `${outdir}/dada2` (conf/modules.config
+    # @ 2.18.0, lines 265-271) and emits `path("ASV_table.tsv")` (modules/local/dada2_merge.nf). The
+    # script transposes the DADA2 sequence table, keys each row by an md5 of its sequence, reorders
+    # to [ASV_ID, samples..., sequence], drops `sequence`, and writes tab-separated with
+    # `row.names = FALSE`.
+    #
+    # `DADA2_table.tsv` is that same table WITH the trailing `sequence` column of raw nucleotides,
+    # published beside it by the same process. Handed to DESeq2 as a matrix it would coerce that
+    # column to NA and analyse a phantom sample, so the filename is matched exactly.
+    #
+    # Caveat, recorded rather than hidden: DESeq2 on ASV counts is defensible and widely done, but
+    # it is not the microbiome field's consensus (compositional data and zero inflation are why
+    # ANCOM-BC and ALDEx2 exist). A divergence here can be the method rather than the paper.
+    ("nf-core/ampliseq", "gene"): Level3Wiring(
+        template_notebook_path="notebooks/de_bulk_deseq2.ipynb",
+        input_rules=(InputRule(filename_exact="ASV_table.tsv", path_segment="dada2"),),
+        id_column="ASV_ID",
+    ),
+    # nf-core/smrnaseq needs no new notebook: `mirna.tsv` is a `miRNA` column followed by
+    # per-sample integer counts, which is the shape de_bulk_deseq2 already consumes. Nothing in that
+    # notebook is RNA-specific; it reads `counts_path`, takes `id_column`, and selects the named
+    # sample columns.
+    #
+    # Verified against the source, not the output docs: `DATATABLE_MERGE` publishes into
+    # `mirna_quant/mirtop/` with `pattern: "*.tsv"` (conf/modules.config @ 2.4.1, lines 485-491) and
+    # emits exactly `path "mirna.tsv"` (modules/local/datatable_merge/main.nf), written by
+    # `bin/collapse_mirtop.r` as `mirna = counts[, lapply(.SD, sum), by = miRNA]` with
+    # `sep = "\t", row.names = FALSE`.
+    #
+    # The filename must be matched EXACTLY: two sibling processes publish into the same directory,
+    # `PIVOT_WIDER` (`*joined_samples_mirtop.tsv`, long-form input to the merge) and `MIRTOP_EXPORT`
+    # (`*_rawData.tsv`, per-sample). Neither has samples for columns, so a "*.tsv under mirtop" rule
+    # would hand DESeq2 a table it would happily analyse and get wrong.
+    ("nf-core/smrnaseq", "gene"): Level3Wiring(
+        template_notebook_path="notebooks/de_bulk_deseq2.ipynb",
+        input_rules=(InputRule(filename_exact="mirna.tsv", path_segment="mirtop"),),
+        id_column="miRNA",
     ),
     ("nf-core/atacseq", "interval"): Level3Wiring(
         template_notebook_path="notebooks/da_peaks_deseq2.ipynb",
@@ -147,6 +202,23 @@ _WIRING: dict[tuple[str, str], Level3Wiring] = {
         input_rules=_PEAK_INPUT_RULES,
     ),
 }
+
+
+# FindingSet spells the namespaces one way and the pseudobulk template spells them another, because
+# one is a taxonomy over deposited tables and the other is a switch between two columns of an h5ad.
+_PAPER_NAMESPACE_TO_MATRIX = {"symbol": "symbol", "ensembl_gene": "ensembl"}
+
+
+def matrix_namespace_for(paper_namespace: str | None) -> str:
+    """Which namespace to key the reproduction matrix by, given the paper's confirmed finding set.
+
+    nf-core/scrnaseq's h5ad carries exactly two: Ensembl ids as the matrix rownames and symbols in
+    ``rowData$gene_symbol``. A paper in a THIRD namespace (entrez, miRBase) can be served by neither,
+    and guessing a mapping here would manufacture agreement out of an id translation nobody checked;
+    symbols are the honest attempt, and the concordance service's namespace guard is what refuses the
+    comparison when the attempt does not match.
+    """
+    return _PAPER_NAMESPACE_TO_MATRIX.get((paper_namespace or "").strip().lower(), "symbol")
 
 
 def supported_finding_kinds(pipeline_key: str | None) -> list[str]:
@@ -274,6 +346,11 @@ async def resolve_level3(
     }
     if wiring.id_column:
         parameters["id_column"] = wiring.id_column
+    # Ask the matrix for the namespace the PAPER used. Left unsent, the template's own default
+    # decided, so a symbol-keyed paper met an Ensembl-keyed reproduction: zero overlap, refused by
+    # the concordance's namespace guard, for a reason that has nothing to do with the science.
+    if wiring.namespace_parameter:
+        parameters[wiring.namespace_parameter] = matrix_namespace_for(finding_set.get("namespace"))
 
     # Matched-pairs / blocked design (ADR-069 item #2): flatten the per-sample subject map to a comma
     # list ALIGNED to the notebook's sample order (test then reference) so the DE template can build

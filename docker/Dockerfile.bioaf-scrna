@@ -67,6 +67,38 @@ RUN R -e "req <- c('Seurat','SeuratObject','hdf5r','harmony','presto','SingleCel
 # Verify the key Python imports resolve too
 RUN python -c "import scanpy, anndata, scvi, muon, harmonypy, scanorama, scrublet, celltypist, decoupler, gseapy, scvelo; print('Python deps ok')"
 
+# Build zellkonverter's basilisk environment HERE, not in the pod at runtime.
+#
+# `readH5AD` is how every Level-3 scRNA reproduction reads its input, and its default reader is a
+# PYTHON one: basilisk stands up a private conda environment the first time it is called. Nothing
+# called it during the build, so the guard above only proved the package was INSTALLED, and every
+# run paid a full conda solve inside its own pod -- uncached, and an undeclared hard dependency on
+# conda-forge being reachable from the cluster.
+#
+# BASILISK_USE_SYSTEM_DIR puts the environment in the R library rather than a per-user cache, so the
+# jovyan user finds the one built here instead of building its own.
+#
+# Reading a real file is also the only thing that proves the reader WORKS, which package presence
+# never did. The h5ad written here mirrors what `mtx_to_h5ad_star.py` emits (obs["sample"], a
+# `count` layer, symbols in var["gene_symbol"], Ensembl ids as the index) so a shape change upstream
+# fails the build rather than a study.
+ENV BASILISK_USE_SYSTEM_DIR=1
+RUN python -c "\
+import anndata as ad, numpy as np; \
+from scipy.sparse import csr_matrix; \
+a = ad.AnnData(X=csr_matrix(np.ones((4, 3), dtype='float32'))); \
+a.obs['sample'] = 'PREWARM'; \
+a.layers['count'] = a.X.copy(); \
+a.var['gene_symbol'] = ['A', 'B', 'C']; \
+a.var['gene_ids'] = ['ENSG1.1', 'ENSG2.1', 'ENSG3.1']; \
+a.var.index = ['ENSG1', 'ENSG2', 'ENSG3']; \
+a.write_h5ad('/tmp/prewarm.h5ad')"
+RUN R -e "sce <- zellkonverter::readH5AD('/tmp/prewarm.h5ad', use_hdf5 = FALSE); \
+stopifnot('sample' %in% colnames(SummarizedExperiment::colData(sce))); \
+stopifnot('gene_symbol' %in% colnames(SummarizedExperiment::rowData(sce))); \
+cat('zellkonverter readH5AD ok; assays:', paste(SummarizedExperiment::assayNames(sce), collapse=','), '\\n')" \
+    && rm -f /tmp/prewarm.h5ad
+
 # RStudio Server (jammy build, matching the base image)
 RUN apt-get update && apt-get install -y --no-install-recommends gdebi-core wget \
     && wget -q https://download2.rstudio.org/server/jammy/amd64/rstudio-server-2024.04.2-764-amd64.deb \

@@ -196,3 +196,53 @@ def test_generate_sheet_routes_atacseq():
     params = {"input_paths": {"1": ["/d/a_R1.fastq.gz", ""]}}
     result = SampleSheetService.generate_sheet("nf-core/atacseq", [a], params)
     assert result.splitlines()[0].strip() == "sample,fastq_1,fastq_2,replicate"
+
+
+# ---- ChIP sheet defects found by staging a real differential-binding study ----
+
+
+def test_chipseq_antibody_label_survives_an_underscore_after_the_mark():
+    """`H3K27ac_ChIP` must yield `H3K27ac`.
+
+    Real titles (GSE287761: `H3K27ac_DMSO4h`, `H3K4me3_DMSO4h`; GSE260807:
+    `WT H3K27ac_ChIP_rep1`) put an underscore straight after the mark. `_` is a word character, so
+    the trailing `\\b` never fired and the mark was missed, dropping every such sample to the
+    per-sample fallback name.
+    """
+    a = _chip_sample(1, "SRX_A", "strategy=ChIP-Seq title=H3K27ac_DMSO4h")
+    b = _chip_sample(2, "SRX_B", "strategy=ChIP-Seq title=H3K4me3_ChIP_rep1")
+    c = _chip_sample(3, "SRX_C", "strategy=ChIP-Seq title=Input_DMSO4h")
+    params = {"input_paths": {str(i): [f"/d/{i}_R1.fq.gz", ""] for i in (1, 2, 3)}}
+    rows = _rows_by_sample(SampleSheetService.generate_chipseq_sheet([a, b, c], params))
+    assert rows["SRX_A"][4] == "H3K27ac"
+    assert rows["SRX_B"][4] == "H3K4me3"
+
+
+def test_chipseq_pairs_each_ip_with_the_control_from_its_own_condition():
+    """GSE287761 deposits one input PER CONDITION (`Input_DMSO4h`, `Input_dTAG4h`).
+
+    Every IP used to point at `controls[0]`, so the dTAG IP had the DMSO input subtracted from it.
+    That biases exactly the comparison a differential-binding study exists to make.
+    """
+    dmso = _chip_sample(1, "SRX_A", "strategy=ChIP-Seq title=H3K27ac_DMSO4h")
+    dtag = _chip_sample(2, "SRX_B", "strategy=ChIP-Seq title=H3K27ac_dTAG4h")
+    in_dmso = _chip_sample(3, "SRX_C", "strategy=ChIP-Seq title=RUN1_Input_DMSO4h")
+    in_dtag = _chip_sample(4, "SRX_D", "strategy=ChIP-Seq title=RUN1_Input_dTAG4h")
+    params = {"input_paths": {str(i): [f"/d/{i}_R1.fq.gz", ""] for i in (1, 2, 3, 4)}}
+    rows = _rows_by_sample(SampleSheetService.generate_chipseq_sheet([dmso, dtag, in_dmso, in_dtag], params))
+
+    assert rows["SRX_A"][5] == "SRX_C"  # DMSO IP -> DMSO input
+    assert rows["SRX_B"][5] == "SRX_D"  # dTAG IP -> dTAG input
+    # Both are still the same antibody group, which is what consensus peak calling needs.
+    assert rows["SRX_A"][4] == rows["SRX_B"][4] == "H3K27ac"
+
+
+def test_chipseq_single_pooled_control_still_serves_every_ip():
+    """GSE260807 deposits ONE pooled input for all conditions, and that must keep working."""
+    wt = _chip_sample(1, "SRX_A", "strategy=ChIP-Seq title=WT H3K27ac_ChIP_rep1")
+    ko = _chip_sample(2, "SRX_B", "strategy=ChIP-Seq title=Irf2KO H3K27ac_ChIP_rep1")
+    pooled = _chip_sample(3, "SRX_C", "strategy=ChIP-Seq title=WT Pooled_Input")
+    params = {"input_paths": {str(i): [f"/d/{i}_R1.fq.gz", ""] for i in (1, 2, 3)}}
+    rows = _rows_by_sample(SampleSheetService.generate_chipseq_sheet([wt, ko, pooled], params))
+    assert rows["SRX_A"][5] == rows["SRX_B"][5] == "SRX_C"
+    assert rows["SRX_A"][4] == rows["SRX_B"][4] == "H3K27ac"

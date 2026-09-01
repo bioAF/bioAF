@@ -222,6 +222,8 @@ class GcpTerraformCloud(TerraformCloud):
             "k8s_pipeline_machine_type",
             "k8s_pipeline_max_nodes",
             "k8s_pipeline_use_spot",
+            "k8s_pipeline_disk_size_gb",
+            "k8s_pipeline_disk_type",
             "k8s_interactive_machine_type",
             "k8s_interactive_max_nodes",
         ]

@@ -102,6 +102,22 @@ def test_dockerfile_pins_python_package_versions():
     assert "scvi-tools==" in DOCKERFILE_CONTENT
 
 
+def test_dockerfile_prewarms_zellkonverters_python_environment():
+    """`readH5AD` is how every Level-3 scRNA reproduction reads its input, and zellkonverter's default
+    reader is a PYTHON one: basilisk stands up a private conda environment the first time it is
+    called. Nothing here called it, so the build guard only proved the package was installed, and the
+    environment was built at RUNTIME, inside the pod, on every single run -- an uncached cost and an
+    undeclared hard dependency on conda-forge being reachable from the cluster.
+
+    Observed on the demo 2026-08-25: a diagnostic pod's log is a full conda solve and install before
+    `readH5AD` returns anything.
+
+    Building it here bakes it into the image, and calling `readH5AD` for real is also the only thing
+    that proves the reader works at all -- which the package-presence guard never did."""
+    assert "readH5AD" in DOCKERFILE_CONTENT
+    assert "BASILISK_USE_SYSTEM_DIR" in DOCKERFILE_CONTENT
+
+
 def test_dockerfile_builds_hdf5r_against_system_hdf5():
     """hdf5r must link the system HDF5 (libhdf5-dev, on the runtime linker path),
     not the base image's conda HDF5 (libhdf5_hl.so.310, which is not). Building it

@@ -61,9 +61,11 @@ _SRP_RE = re.compile(r"(SR|ER|DR)P\d+", re.IGNORECASE)
 class ManifestResult:
     """A study's per-sample manifest, or an explicit unavailable reason (never an exception).
 
-    Each entry is ``{experiment_accession, run_accession, sample_accession, title, condition}``. The
-    picker stores ``experiment_accession`` as the scientist's stable pick; ``title`` + ``condition`` are
-    the recognition signal; ``run_accession`` / ``sample_accession`` are informational.
+    Each entry is ``{experiment_accession, run_accession, sample_accession, title, condition,
+    library_strategy}``. The picker stores ``experiment_accession`` as the scientist's stable pick;
+    ``title`` + ``condition`` are the recognition signal; ``run_accession`` / ``sample_accession`` are
+    informational; ``library_strategy`` is the depositor's own controlled statement of what the data
+    IS, which is what routes a plan when the paper's prose names more than one assay.
     """
 
     samples: list[dict] = field(default_factory=list)
@@ -116,7 +118,8 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
     """Parse a GEO series-matrix into (samples, series_sra_accession).
 
     ``samples`` is one entry per sample column: ``{title, condition, experiment_accession,
-    sample_accession, run_accession}`` (run_accession is "" here; the caller fills it from ENA).
+    sample_accession, run_accession, library_strategy}`` (the last two are "" here; the caller fills
+    them from ENA).
     ``series_sra_accession`` is the study-level SRA/BioProject accession from ``!Series_relation``
     (SRA study preferred), used to resolve run accessions. Samples are COLUMNS in a series matrix.
     """
@@ -166,9 +169,28 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
                 "experiment_accession": _first_match(_SRX_RE, sra_relation[i]) if i < len(sra_relation) else "",
                 "sample_accession": _first_match(_SAM_RE, biosample_relation[i]) if i < len(biosample_relation) else "",
                 "run_accession": "",
+                # A series matrix does not record the assay; the ENA join below fills it.
+                "library_strategy": "",
             }
         )
     return samples, series_sra
+
+
+def dominant_library_strategy(samples: list[dict]) -> str | None:
+    """The one ``library_strategy`` an accession's samples agree on, or None.
+
+    A deposit carrying two assays is exactly as compound as the paper prose it would be overriding
+    (GSE213770 deposits Bisulfite-Seq beside RNA-Seq), so disagreement yields no answer rather than
+    whichever run happened to be listed first. Blanks are absent evidence, not a third opinion.
+    """
+    seen: dict[str, str] = {}
+    for sample in samples or []:
+        raw = str((sample or {}).get("library_strategy") or "").strip()
+        if raw:
+            seen.setdefault(raw.lower(), raw)
+    if len(seen) != 1:
+        return None
+    return next(iter(seen.values()))
 
 
 async def _http_fetch_text(url: str) -> str:
@@ -212,6 +234,7 @@ def _entries_from_ena_rows(rows: list[dict]) -> list[dict]:
                 "sample_accession": sample,
                 "title": title,
                 "condition": "",
+                "library_strategy": (row.get("library_strategy") or "").strip(),
             }
         )
     return entries
@@ -267,14 +290,18 @@ class AccessionManifestService:
             try:
                 tsv = await fetch(_ena_filereport_url(series_sra))
                 run_by_exp: dict[str, str] = {}
+                strategy_by_exp: dict[str, str] = {}
                 for row in parse_ena_filereport(tsv):
                     exp = (row.get("experiment_accession") or "").strip()
                     if exp and exp not in run_by_exp:
                         run_by_exp[exp] = (row.get("run_accession") or "").strip()
+                        strategy_by_exp[exp] = (row.get("library_strategy") or "").strip()
                 for sample in samples:
                     exp = sample["experiment_accession"]
                     if not sample["run_accession"] and exp in run_by_exp:
                         sample["run_accession"] = run_by_exp[exp]
+                    if not sample["library_strategy"]:
+                        sample["library_strategy"] = strategy_by_exp.get(exp, "")
             except Exception as exc:
                 logger.info("GEO->ENA run-accession enrichment failed for %s: %s", accession, exc)
 

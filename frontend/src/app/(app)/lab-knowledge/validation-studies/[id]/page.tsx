@@ -14,7 +14,10 @@ import {
   type DifferentialDesign,
   type FindingClaim,
 } from "@/components/validation/Level3Gate";
+import { PipelineInstallNotice } from "@/components/validation/PipelineInstallNotice";
+import { DepositConflictNotice, type DepositConflict } from "@/components/validation/DepositConflictNotice";
 import { Level3ResultPanel } from "@/components/validation/Level3ResultPanel";
+import { RetryNotice } from "@/components/validation/RetryNotice";
 import { SamplesMismatchNotice } from "@/components/validation/SamplesMismatchNotice";
 import { ProvenanceExportMenu } from "@/components/shared/ProvenanceExportMenu";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -44,6 +47,14 @@ interface ReproductionPlanView {
   // The tools the paper's own methods named, and which finding kinds this pipeline can reproduce.
   tools?: string[] | null;
   supported_finding_kinds?: string[] | null;
+  // Whether this bioAF actually holds the plan's pipeline, and the bare registry name to install it
+  // by. Computed server-side per request: a pipeline can be installed between writing a plan and
+  // approving it.
+  pipeline_installed?: boolean | null;
+  pipeline_registry_name?: string | null;
+  // The one blocker that refuses approval, and the pipeline that would resolve it. Computed per
+  // request, so a plan corrected in another tab stops showing it.
+  deposit_conflict?: DepositConflict | null;
 }
 
 interface ValidationStudy {
@@ -239,12 +250,46 @@ export default function ValidationStudyPage() {
           </section>
         )}
 
+        {study.state === "plan_ready" && plan?.deposit_conflict && (
+          <section className="mb-6">
+            <DepositConflictNotice
+              studyId={study.id}
+              conflict={plan.deposit_conflict}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
+        {study.state === "error" && (
+          <section className="mb-6">
+            <RetryNotice
+              studyId={study.id}
+              failureReason={study.failure_reason}
+              reapAfter={study.evidence?.fetch_reap_after as string | undefined}
+              dataDeleted={!!study.evidence?.fetch_reaped}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
         {study.state === "samples_mismatch" && (
           <section className="mb-6">
             <SamplesMismatchNotice
               studyId={study.id}
               failureReason={study.failure_reason}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          </section>
+        )}
+
+        {study.state === "plan_ready" && (
+          <section className="mb-6">
+            <PipelineInstallNotice
+              pipelineKey={plan?.pipeline_key}
+              pipelineVersion={plan?.pipeline_version}
+              registryName={plan?.pipeline_registry_name}
+              installed={plan?.pipeline_installed}
+              onInstalled={refresh}
             />
           </section>
         )}
@@ -272,7 +317,12 @@ export default function ValidationStudyPage() {
 
         <section className="mb-6">
           <ValidationStudyActions
-            study={{ id: study.id, state: study.state }}
+            study={{
+              id: study.id,
+              state: study.state,
+              evidence: { awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval },
+              plan: { deposit_conflict: plan?.deposit_conflict ?? null },
+            }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
             suggestedClassification={study.evidence?.classification_result?.classification}
           />

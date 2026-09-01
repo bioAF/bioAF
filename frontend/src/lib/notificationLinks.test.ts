@@ -100,3 +100,14 @@ describe("notificationHref", () => {
     expect(notificationHref({ event_type: "x", metadata_json: null })).toBeNull();
   });
 });
+
+test("a stopped validation study links to the study that stopped", () => {
+  // The notification exists to get a human to the Retry control. A notification that renders as
+  // plain text leaves them to find the study themselves.
+  expect(
+    notificationHref({
+      event_type: "validation.study_error",
+      metadata_json: { entity_type: "validation_study", entity_id: 17 },
+    }),
+  ).toBe("/lab-knowledge/validation-studies/17");
+});

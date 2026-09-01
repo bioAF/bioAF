@@ -20,6 +20,12 @@ QC_TEMPLATE_MAP: dict[str, str] = {
     "rnaseq": "bulk_rnaseq",
     "chipseq": "chipseq",
     "atacseq": "atacseq",
+    # CUT&RUN and CUT&Tag are peak-calling assays and reuse the ChIP-seq dashboard: bowtie2 +
+    # samtools alignment, Picard duplication, and a peak count + FRiP, which the chipseq extractor
+    # already reads under cutandrun's own custom-content section ids. Left on "generic" the
+    # dashboard would carry no peak count at all, because the generic MultiQC engine registers no
+    # peak-calling module, and peak_count is the one finding-tier scalar.
+    "cutandrun": "chipseq",
 }
 
 

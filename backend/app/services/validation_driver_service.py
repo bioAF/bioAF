@@ -47,8 +47,9 @@ from app.services.result_set_normalizer import FindingSet, normalize_gene_table,
 from app.services.validation_classifier_service import classify_study
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
+from app.services.validation_sample_values import sample_values_from_design
 from app.services.validation_level3_service import resolve_level3
-from app.services.validation_study_service import ValidationStudyService
+from app.services.validation_study_service import ValidationStudyService, record_study_error
 
 logger = logging.getLogger("bioaf.validation_driver")
 
@@ -412,11 +413,27 @@ class ValidationDriverService:
         if plan is None or not plan.pipeline_key:
             return await ValidationDriverService._fail(session, study, "no pipeline in the approved plan")
 
+        # Imported here for the same reason `_launch` does: `pipeline_run_service` is a heavy leaf
+        # of the service graph and a module-level import ties this driver's import order to it.
+        from app.services.pipeline_run_service import PipelineRunService
+
+        # Answer the pipeline's own design columns from the contrast the scientist ratified. bioAF
+        # cannot derive these from a sample (cutandrun's `group`, atacseq's `replicate`), the driver
+        # launches with no form to ask through, and the plan already says which arm each sample is
+        # in. Anything the design does not state stays unanswered and `launch_run` still refuses.
+        contract = await PipelineRunService.samplesheet_contract(
+            session, study.organization_id, plan.pipeline_key, study.experiment_id
+        )
+        sample_values = sample_values_from_design(
+            plan.differential_design_json, await _load_runnable_samples(session, study.experiment_id), contract
+        )
+
         launch = PipelineRunLaunchRequest(
             pipeline_key=plan.pipeline_key,
             experiment_id=study.experiment_id,
             parameters=dict(plan.parameters_json or {}),
             reference_genome=plan.reference_genome,
+            sample_values=sample_values,
             # The fetched FASTQ are the fetchngs run's outputs, so they are pipeline_output (derived)
             # files. launch_run's per-sample gate filters derived inputs OUT by default, which would
             # drop every fetched sample as "lacking input files"; opt in so the analysis run consumes
@@ -577,6 +594,23 @@ class ValidationDriverService:
             return False  # still running
 
         params = level3.get("parameters") or {}
+
+        # A headless notebook that RAISED still exits its pod cleanly, so the session reports
+        # `completed` with no failure_reason. Study 13 (first real ATAC-seq Level-3 attempt) aborted
+        # on `stop("samples not in matrix")`, wrote nothing, and the empty result was scored as a
+        # real comparison: `not_computed`, our_n 0 against the paper's 5,607. That reads as "we
+        # looked and found nothing" when the truth is "the reproduction never ran".
+        #
+        # Checked BEFORE extraction, because an absent output is a failed reproduction rather than an
+        # empty finding set, and only the failure path leaves a reason a human can act on.
+        if await ValidationDriverService._read_reproduction_output(session, cs) is None:
+            return await ValidationDriverService._degrade_to_level2(
+                session,
+                study,
+                evidence,
+                "the differential reproduction notebook completed but produced no output file",
+            )
+
         our_fs = await ValidationDriverService._extract_reproduced_set(
             session,
             cs,
@@ -852,4 +886,8 @@ class ValidationDriverService:
         if study is not None and study.state not in VALIDATION_STUDY_TERMINAL_STATES:
             study.state = "error"
             study.failure_reason = (reason or "")[:2000]
+            # Same stamp and same announcement as the guarded path: this one sets the state directly
+            # because the handler that raised may have left an illegal transition behind, but it is
+            # still a study stopping and a human still has to hear about it.
+            await record_study_error(study)
             await session.flush()

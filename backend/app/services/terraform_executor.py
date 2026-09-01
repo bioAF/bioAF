@@ -1029,6 +1029,13 @@ class TerraformExecutor:
                 tfvars["k8s_pipeline_max_nodes"] = int(config["k8s_pipeline_max_nodes"])
             if config.get("k8s_pipeline_use_spot"):
                 tfvars["k8s_pipeline_use_spot"] = config["k8s_pipeline_use_spot"] == "true"
+            # The node's ephemeral storage. A task that outgrows what is left is EVICTED by kubelet
+            # rather than failed by the tool, so this bounds how large a single step's intermediates
+            # can get -- which is what stopped run 43, on the one pool setting that had no plumbing.
+            if config.get("k8s_pipeline_disk_size_gb"):
+                tfvars["k8s_pipeline_disk_size_gb"] = int(config["k8s_pipeline_disk_size_gb"])
+            if config.get("k8s_pipeline_disk_type"):
+                tfvars["k8s_pipeline_disk_type"] = config["k8s_pipeline_disk_type"]
             if config.get("k8s_interactive_machine_type"):
                 tfvars["k8s_interactive_machine_type"] = config["k8s_interactive_machine_type"]
             if config.get("k8s_interactive_max_nodes"):

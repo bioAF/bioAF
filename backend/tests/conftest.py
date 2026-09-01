@@ -11,6 +11,7 @@ os.environ.setdefault(
 
 from contextlib import asynccontextmanager  # noqa: E402
 
+import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine  # noqa: E402
@@ -320,3 +321,21 @@ async def viewer_api_key(session, admin_user):
     )
     await session.commit()
     return {"sa": sa, "secret": secret, "headers": {"Authorization": f"Bearer {secret}"}}
+
+
+@pytest.fixture(autouse=True)
+def _no_accession_manifest_network(monkeypatch):
+    """No test reaches ENA or GEO for a study's sample manifest.
+
+    The reproduction-plan extractor reads the scoped accession's own ``library_strategy`` to decide
+    which pipeline a multi-assay paper should run. That is a real network fetch on the read path, so
+    it is stubbed to fail here: ``fetch_manifest`` never raises, so an unreachable deposit yields no
+    strategy and the paper's prose decides, exactly as it did before. A test that wants a strategy
+    supplies its own fetcher.
+    """
+    from app.services.literature import accession_manifest_service
+
+    async def _offline(url: str) -> str:
+        raise RuntimeError(f"tests do not fetch {url}")
+
+    monkeypatch.setattr(accession_manifest_service, "_http_fetch_text", _offline)

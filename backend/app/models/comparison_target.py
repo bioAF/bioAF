@@ -23,7 +23,10 @@ class ComparisonTarget(Base):
 
     metric_key: Mapped[str] = mapped_column(String(100), nullable=False)
     claimed_value: Mapped[float | None] = mapped_column(Float, nullable=True)
-    unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # 255, matching `source_locator`: these are a model's reading of a methods section, not a
+    # controlled vocabulary, and a real paper wrote "genes (NOTCH4, JAG1, LIFR, CCNA2, CCND2, RB1,
+    # SMAD4, JUND, CREBBP)" as the unit of one of its claims.
+    unit: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Relative fraction by default (e.g. 0.05 = 5%); the comparison engine (E2) applies the policy.
     tolerance: Mapped[float | None] = mapped_column(Float, nullable=True)
     source_locator: Mapped[str | None] = mapped_column(String(255), nullable=True)

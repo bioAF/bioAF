@@ -20,7 +20,29 @@ import re
 from dataclasses import dataclass, field
 
 # candidate column names across DESeq2 / edgeR / limma depositor conventions
-_LFC_COLS = ["log2foldchange", "log2fc", "logfc", "log2.fold.change", "lfc", "coef", "logfoldchange"]
+# Seurat's `FindMarkers` spellings are listed explicitly because `_squash` cannot reach them:
+# matching compares the WHOLE squashed name, and these are the canonical name with an affix
+# (`avg_log2FC`, `p_val_adj`) rather than a punctuation variant of it. Seurat is the dominant
+# single-cell analysis tool, so this is the most common shape a scRNA-seq paper deposits, and
+# missing it failed the same silent way the punctuation defect did: table parses, every row read,
+# zero entities out. `avg_logFC` is the v3-and-earlier spelling, still in the literature.
+_LFC_COLS = [
+    "log2foldchange",
+    "log2fc",
+    "logfc",
+    "log2.fold.change",
+    "lfc",
+    "coef",
+    "logfoldchange",
+    "avg_log2fc",
+    "avg_logfc",
+    # DiffBind's spelling, and it IS log2: `dba.report` emits `Fold` alongside the log2 `Conc_*`
+    # group means it is the difference of (GSE157174 S1: 7.7 - 4.62 = 3.08). Last in the list so a
+    # table carrying both an explicit `log2FoldChange` and a `Fold` still prefers the explicit one.
+    # `_pick` matches a whole squashed header cell, never a substring, so this cannot capture a
+    # linear `Fold_Change` column (which squashes to "foldchange").
+    "fold",
+]
 _PADJ_COLS = [
     "padj",
     "adj.p.val",
@@ -32,12 +54,21 @@ _PADJ_COLS = [
     "p.adjust",
     "adj_pval",
     "adj.pvalue",
+    # Last: a Seurat table carries `p_val` too, and this must never be reached for that one.
+    "p_val_adj",
 ]
 _PVAL_COLS = ["pvalue", "p.value", "pval", "p_val"]
 # Order encodes PREFERENCE (_pick returns the first of these present in the header), so gene-symbol
 # aliases come before Ensembl aliases: our nf-core/salmon output is symbol-keyed, and a table that
 # carries both (e.g. MDPI-SI DESeq2 exports with GeneSymbol + ENSG) should match on the symbol.
 _ID_COLS = [
+    # miRNA identifiers first: a column literally named `mirna` is a stronger declaration than the
+    # generic `id`/`feature`, and small-RNA tables often carry both.
+    "mirna",
+    "mirna_id",
+    "mir",
+    "mature_mirna",
+    "mirna_name",
     "gene",
     "gene_id",
     "geneid",
@@ -73,7 +104,7 @@ class FindingEntity:
 @dataclass
 class FindingSet:
     kind: str  # "gene" | "interval"
-    namespace: str  # "symbol" | "ensembl_gene" | "entrez" | "interval" | "unknown"
+    namespace: str  # "symbol" | "ensembl_gene" | "entrez" | "mirbase" | "interval" | "unknown"
     entities: list[FindingEntity] = field(default_factory=list)
     n_tested: int = 0
     parse_notes: list[str] = field(default_factory=list)
@@ -134,23 +165,62 @@ def _to_float(v: str) -> float | None:
         return None
 
 
+# miRBase names a mature miRNA as <3-4 letter species>-<miR|mir|let>-<number>, optionally with an
+# arm suffix (-5p / -3p) that makes it a different molecule from its partner. They are NOT gene
+# symbols: a paper depositing HGNC symbols (MIR21) and a run reporting miRBase ids (hsa-miR-21-5p)
+# share no identifier at all, so calling both "symbol" turns an unmapped namespace into a false
+# divergence. Named honestly, the concordance service's existing namespace guard refuses instead.
+_MIRBASE_RE = re.compile(r"[a-z]{3,4}-(mir|let)-?\d", re.IGNORECASE)
+
+
 def _detect_namespace(ids: list[str]) -> str:
     sample = [i for i in ids[:200] if i]
     if not sample:
         return "unknown"
     ens = sum(1 for i in sample if re.match(r"ENS[A-Z]*G\d{6,}", i))
     entrez = sum(1 for i in sample if re.fullmatch(r"\d+", i))
+    mirbase = sum(1 for i in sample if _MIRBASE_RE.match(i))
     if ens > len(sample) * 0.5:
         return "ensembl_gene"
     if entrez > len(sample) * 0.5:
         return "entrez"
+    if mirbase > len(sample) * 0.5:
+        return "mirbase"
     return "symbol"
 
 
+def _squash(name: str) -> str:
+    """A column name reduced to its letters and digits, so punctuation cannot hide it.
+
+    Real deposited tables spell the same column every way there is: `log2(Fold_change)`,
+    `log2.fold.change`, `log2FoldChange`; `p-value`, `p.value`, `p_val`. Exact matching on the
+    lowercased header missed all the variants nobody had happened to enumerate, and the failure was
+    silent: the table parsed, every row was read, and zero entities came out.
+
+    Found by taking a real GEO deposit (GSE327014) to a verdict rather than by unit testing.
+    """
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
 def _pick(cands: list[str], header_lc: list[str]) -> int | None:
+    """The index of the first candidate present in the header, punctuation ignored.
+
+    Order encodes preference, so an exact pass runs first: a table carrying BOTH a nominal and an
+    adjusted p must still match the adjusted one on its own name rather than on whichever squashes
+    to the same string first.
+    """
     for c in cands:
         if c in header_lc:
             return header_lc.index(c)
+    squashed = [_squash(h) for h in header_lc]
+    for c in cands:
+        target = _squash(c)
+        # An empty candidate is the unnamed-index convention and must keep matching only a
+        # genuinely empty header cell, never every punctuation-only one.
+        if not target:
+            continue
+        if target in squashed:
+            return squashed.index(target)
     return None
 
 
@@ -183,12 +253,38 @@ def _count_contrast_groups(header: list[str]) -> int:
     return len(labels)
 
 
+def _populated(row: list[str]) -> int:
+    """How many cells in a row actually carry a value."""
+    return sum(1 for c in row if _clean(c))
+
+
+def _strip_leading_title_rows(rows: list[list[str]]) -> list[list[str]]:
+    """Drop the title banner journals put above the real header of a supplementary table.
+
+    GSE157174's Supplementary Table S1 opens with `"Table S1 - 5,607 differentially accessible
+    peaks ",,,,,,,,,,,` and only then the header. Taken verbatim, that banner WAS the header, so
+    not even chrom/start/end could be located and the table yielded nothing.
+
+    Deliberately narrow: a row is a banner only if it carries at most one value AND some later row
+    carries more. A genuinely single-column table therefore keeps all of its rows.
+    """
+    best = max((_populated(r) for r in rows), default=0)
+    if best <= 1:
+        return rows
+    i = 0
+    while i < len(rows) and _populated(rows[i]) <= 1:
+        i += 1
+    return rows[i:]
+
+
 def _read_rows(text: str) -> tuple[list[str], list[list[str]]]:
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    first_line = text.split("\n", 1)[0]
-    delim = _sniff_delim(first_line)
+    lines = [ln for ln in text.split("\n") if ln.strip()]
+    # Sniff on the widest of the first few lines, not blindly on the first: a title banner can be
+    # comma-padded while the table below it is tab-separated.
+    delim = _sniff_delim(max(lines[:5], key=len)) if lines else ","
     rdr = csv.reader(io.StringIO(text), delimiter=delim)
-    rows = [r for r in rdr if r]
+    rows = _strip_leading_title_rows([r for r in rdr if r])
     if not rows:
         return [], []
     return rows[0], rows[1:]

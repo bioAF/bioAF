@@ -9,6 +9,7 @@ gke_cluster_ca_cert) and a GCP access token from credential_injector
 (impersonated bootstrap on vm_default installs, JSON key on legacy installs).
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -19,6 +20,7 @@ from kubernetes import client
 
 from app.adapters.base import ComputeProvider
 from app.adapters.capabilities import ProviderCapabilities
+from app.platform.work_dir_layout import work_dir_key
 from app.adapters.compute.cluster_autoscaler import build_cluster_autoscaler_manifests
 from app.adapters.kubernetes.connection import GkeConnection
 from app.adapters.models import (
@@ -35,6 +37,7 @@ from app.adapters.models import (
     ProcessInfo,
     TerminationReason,
     to_job_state,
+    QuotaMetric,
 )
 from app.pipeline import nextflow_trace
 
@@ -202,6 +205,9 @@ class KubernetesComputeProvider(ComputeProvider):
         "raw_bucket_name",
         "results_bucket_name",
         "k8s_pipeline_machine_type",
+        # The pool's node disk. Read here so the generated nextflow.config can size its
+        # ephemeral-storage request against the disk the tasks will actually land on.
+        "k8s_pipeline_disk_size_gb",
     ]
 
     def __init__(self, session_factory=None):
@@ -269,6 +275,7 @@ class KubernetesComputeProvider(ComputeProvider):
             ssh_exec=True,
             spot_retry=True,
             job_report=True,
+            quota_introspection=True,
         )
 
     async def submit_job(self, job_spec: dict) -> JobSubmitResult:
@@ -825,6 +832,207 @@ class KubernetesComputeProvider(ComputeProvider):
             return container_v1.ClusterManagerClient()
         return container_v1.ClusterManagerClient(credentials=credentials)
 
+    def _get_gcp_credentials(self):
+        """GCP credentials for direct Compute API calls, via credential_injector."""
+        return _load_gcp_credentials(self._cluster_config or {})
+
+    def _fetch_regional_quotas(self, project_id: str, region: str) -> dict:
+        """Blocking Compute API read of one region's quotas. Called off-loop."""
+        from google.cloud import compute_v1
+
+        credentials = self._get_gcp_credentials()
+        client = compute_v1.RegionsClient(credentials=credentials)
+        region_info = client.get(project=project_id, region=region)
+
+        return {
+            quota.metric: QuotaMetric(
+                metric=quota.metric,
+                usage=float(quota.usage),
+                limit=float(quota.limit),
+            )
+            for quota in (region_info.quotas or [])
+        }
+
+    async def get_regional_quotas(self, region: str | None = None) -> dict | None:
+        """Read the region's quotas, or None when they cannot be determined.
+
+        This is what the Components page preflight runs on. Moving the pipeline
+        pool to pd-balanced at 500 GB was accepted by terraform and by GKE, and
+        produced zero schedulable nodes, because pd-balanced bills to
+        SSD_TOTAL_GB whose regional limit was 500 GB. Nothing in the product
+        could see that; this is the seam that lets it.
+
+        Every failure path returns None rather than raising. The most likely one
+        is a service account without `compute.regions.get`, and an install that
+        has not granted it must still be able to configure its cluster.
+        """
+        await self._ensure_cluster_config_fresh()
+        cfg = self._cluster_config or {}
+
+        project_id = _resolve_cfg(cfg, "gcp_project_id", "GCP_PROJECT_ID")
+        if not project_id:
+            return None
+        target_region = region or _resolve_cfg(cfg, "gcp_region", "GCP_REGION", default="us-central1")
+
+        try:
+            return await asyncio.to_thread(self._fetch_regional_quotas, project_id, target_region)
+        except Exception as exc:
+            # Debug, not warning: an install without the read permission would
+            # otherwise log this on every render of the Components page.
+            logger.debug("Regional quota read failed for %s/%s: %s", project_id, target_region, exc)
+            return None
+
+    # GKE stamps every node with the pool it belongs to. This is the label the
+    # cluster autoscaler and `kubectl get nodes -l` both key on.
+    _NODE_POOL_LABEL = "cloud.google.com/gke-nodepool"
+
+    def _count_pool_nodes(self, pool_name: str) -> int:
+        """Blocking count of the pool's nodes. Called off-loop."""
+        core_client = self._get_k8s_core_client()
+        nodes = core_client.list_node(label_selector=f"{self._NODE_POOL_LABEL}={pool_name}")
+        return len(nodes.items or [])
+
+    async def count_pool_nodes(self, pool_name: str) -> int | None:
+        """How many nodes the pool is currently running, or None if unknown.
+
+        Used to net a pool's own consumption out of the quota headroom it is
+        measured against, so re-applying an unchanged config on running nodes is
+        not blocked by those nodes.
+
+        This counts live nodes rather than reading ``NodePoolStatus.current_nodes``,
+        which is GKE's ``initial_node_count``: on an autoscaling pool that is the
+        seed value, not what is running.
+
+        None and 0 are different answers and callers must treat them so. Zero is
+        headroom that netting-out will hand back; unknown must not be.
+        """
+        try:
+            return await asyncio.to_thread(self._count_pool_nodes, pool_name)
+        except Exception as exc:
+            logger.debug("Node count failed for pool %s: %s", pool_name, exc)
+            return None
+
+    _RUN_ID_LABEL = "bioaf.io/run-id"
+
+    def _read_task_scheduling(self, run_id: int, namespace: str) -> dict:
+        """Blocking read of a run's task pods and whether they can be placed."""
+        from app.adapters.failure_classification import (
+            FAILURE_REASON_RESOURCE_EXHAUSTED,
+            FAILURE_REASON_UNKNOWN,
+            classify_pod_failure,
+        )
+
+        core_client = self._get_k8s_core_client()
+        pods = core_client.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"{self._RUN_ID_LABEL}={run_id}",
+        )
+
+        scheduled = 0
+        blocked_messages: list[str] = []
+
+        for pod in pods.items or []:
+            # A pod with a node assigned has been placed, whatever it does next.
+            if getattr(pod.spec, "node_name", None):
+                scheduled += 1
+                continue
+            if getattr(pod.status, "phase", "") != "Pending":
+                scheduled += 1
+                continue
+
+            # `PodScheduled=False, reason=Unschedulable` is the scheduler saying it
+            # cannot place this pod, as opposed to a pod merely starting up.
+            for condition in getattr(pod.status, "conditions", None) or []:
+                if (
+                    condition.type == "PodScheduled"
+                    and condition.status == "False"
+                    and (condition.reason or "") == "Unschedulable"
+                ):
+                    blocked_messages.append(condition.message or "")
+                    break
+
+        reason = ""
+        message = ""
+        if blocked_messages:
+            # Reuse the enum the notebook and work-node surfaces already report, so
+            # one vocabulary covers every "the cloud could not give us a machine".
+            joined = " | ".join(m for m in blocked_messages if m)
+            reason, message = classify_pod_failure([{"reason": "Unschedulable", "message": joined}])
+            # classify_pod_failure returns the literal string "unknown", not an empty one, so a
+            # falsy check never fires and run 45 recorded `failure_reason: unknown` for a pod whose
+            # cause was plainly stated ("Insufficient ephemeral-storage"). A pod the scheduler could
+            # not place has a known cause by definition: the cluster could not supply what it asked
+            # for. Naming that beats naming nothing, even when the message matches no known signal.
+            if not reason or reason == FAILURE_REASON_UNKNOWN:
+                reason = FAILURE_REASON_RESOURCE_EXHAUSTED
+            message = message or joined
+
+        return {
+            "tasks": len(pods.items or []),
+            "scheduled": scheduled,
+            "unschedulable": len(blocked_messages),
+            "reason": reason,
+            "message": message,
+        }
+
+    def _read_task_terminations(self, run_id: int, namespace: str) -> list[dict]:
+        """Blocking read of how this run's task containers died. Called off-loop."""
+        core_client = self._get_k8s_core_client()
+        pods = core_client.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"{self._RUN_ID_LABEL}={run_id}",
+        )
+
+        terminations = []
+        for pod in pods.items or []:
+            for cs in getattr(pod.status, "container_statuses", None) or []:
+                terminated = getattr(cs.state, "terminated", None)
+                if not terminated:
+                    continue
+                finished = getattr(terminated, "finished_at", None)
+                terminations.append(
+                    {
+                        "pod": pod.metadata.name,
+                        "container": cs.name,
+                        "exit_code": terminated.exit_code,
+                        "reason": terminated.reason or "",
+                        "finished_at": finished.isoformat() if finished else None,
+                    }
+                )
+        return terminations
+
+    async def get_task_terminations(self, run_id: int, namespace: str = "bioaf-pipelines") -> list | None:
+        """How this run's task containers died, or None if unknowable.
+
+        Exit 137 is SIGKILL, which OOM, disk eviction and Spot preemption all
+        produce, and Nextflow only ever sees the number. kubelet knows which it was
+        and records it in `containerStatuses[].state.terminated.reason`, but that
+        disappears with the pod, and a killed task's own logs can be truncated to
+        nothing because Fusion never flushes them.
+
+        Reading it while the pod still exists is what makes the difference between
+        diagnosing a failure and inferring one. Three runs were lost to that
+        distinction.
+        """
+        try:
+            return await asyncio.to_thread(self._read_task_terminations, run_id, namespace)
+        except Exception as exc:
+            logger.debug("Task termination read failed for run %s: %s", run_id, exc)
+            return None
+
+    async def get_task_scheduling(self, run_id: int, namespace: str = "bioaf-pipelines") -> dict | None:
+        """Whether this run's task pods can be placed, or None if unknowable.
+
+        None means the cluster could not be asked. It must not be read as "nothing
+        is wrong": the caller distinguishes it from a real answer of zero tasks,
+        because a monitoring failure must never itself fail a healthy run.
+        """
+        try:
+            return await asyncio.to_thread(self._read_task_scheduling, run_id, namespace)
+        except Exception as exc:
+            logger.debug("Task scheduling read failed for run %s: %s", run_id, exc)
+            return None
+
     NEXTFLOW_IMAGE = "nextflow/nextflow:25.10.4"
 
     @staticmethod
@@ -929,6 +1137,31 @@ class KubernetesComputeProvider(ComputeProvider):
     # Allocatable resources per GCP machine type (after system reservations).
     # Used to set Nextflow resourceLimits so retry escalation never exceeds
     # what a single node can provide.  See ADR-042.
+    # What one genome-scale step actually holds, plus margin. A STAR step on a human reference
+    # measured ~80 GB on run 43 (a ~30 GB index, 12-18 GB of reads, outputs and the Fusion cache).
+    @staticmethod
+    def scratch_work_dir_key(run_id: int) -> str:
+        """Where this run's Nextflow work dir lives under the raw bucket.
+
+        Delegates to the shared layout so the launcher and the reaper can never drift:
+        if they did, the reaper would delete nothing, which looks identical to having
+        nothing to delete.
+        """
+        return work_dir_key(run_id)
+
+    # RAM the genome index and STAR's own structures need alongside the BAM sort
+    # buffer. A human GRCh38 index is ~30 GB resident for the whole step; the rest is
+    # STAR's working set and headroom before the kernel intervenes.
+    _GENOME_INDEX_RESERVE_GB = 45
+
+    _STEP_DISK_REQUEST_GB = 120
+
+    # Share of a node's raw disk that Kubernetes will actually allocate. Measured, not assumed: a
+    # 500 GB pd-standard node reports 339 GiB allocatable against 488 GiB capacity. Deliberately
+    # below that ratio, because a request over allocatable schedules nowhere and the failure is
+    # silent (pods simply stay Pending).
+    _ALLOCATABLE_DISK_FRACTION = 0.6
+
     _MACHINE_ALLOCATABLE: dict[str, tuple[int, int]] = {
         # (cpus, memory_gb)
         "n2-highmem-16": (14, 110),
@@ -950,6 +1183,8 @@ class KubernetesComputeProvider(ComputeProvider):
         gcs_work_dir: str | None = None,
         pipeline_machine_type: str | None = None,
         ignore_igenomes_base: bool = False,
+        pipeline_disk_gb: int | None = None,
+        run_id: int | None = None,
     ) -> str:
         """Build a nextflow.config for K8s executor mode.
 
@@ -974,6 +1209,14 @@ class KubernetesComputeProvider(ComputeProvider):
             "k8s.serviceAccount = 'bioaf-pipeline-runner'",
         ]
 
+        # Stamp every task pod with the run that created it. Nextflow sets no bioAF
+        # labels of its own and several runs share this namespace, so without it a
+        # Pending pod cannot be attributed and `_k8s_get_job_status` sees only the
+        # HEAD pod (it selects on `job-name`). That is why run 44 reported `running`
+        # for 35 minutes while eleven tasks sat unschedulable.
+        if run_id is not None:
+            lines.append(f"process.pod = [[label: 'bioaf.io/run-id', value: '{run_id}']]")
+
         # Skip nf-schema's live S3 validation of the public igenomes_base default
         # (IRSA-signed reads 403 on ngi-igenomes). AWS-gated; GCP never sets this.
         if ignore_igenomes_base:
@@ -994,6 +1237,28 @@ class KubernetesComputeProvider(ComputeProvider):
         machine = pipeline_machine_type or "n2-highmem-16"
         cpus, mem_gb = KubernetesComputeProvider._MACHINE_ALLOCATABLE.get(machine, (14, 110))
         lines.append(f"process.resourceLimits = [cpus: {cpus}, memory: '{mem_gb}.GB']")
+
+        # Ephemeral storage, which nothing declared until run 43 was evicted for want of it:
+        # "The node was low on resource: ephemeral-storage ... Container was using 80520660Ki,
+        # request is 0". Nextflow's `disk` directive is what the k8s executor turns into an
+        # ephemeral-storage request, and with no request the scheduler packs two genome-scale steps
+        # onto one node and kubelet kills the larger of them, hours in.
+        #
+        # The request is CONSTANT across attempts. A retry processes the same data and has the same
+        # footprint, so it needs the same room. An earlier version multiplied it by `task.attempt`
+        # on the theory that an evicted task should come back asking for more; nothing about the
+        # workload justifies that, and it is what killed run 45. Attempt 2 asked for 480Gi against
+        # 339 GiB of allocatable, so every retry was unschedulable forever while the run hung.
+        #
+        # Sized against what a node can ALLOCATE, not its raw disk. A 500 GB GKE node reports
+        # 488 GiB of capacity and only 339 GiB allocatable: the OS, container images and kubelet's
+        # eviction threshold take roughly 30%, not the flat 20 GB the previous formula assumed. A
+        # request above allocatable schedules nowhere at all.
+        raw_disk_gb = pipeline_disk_gb or 100
+        allocatable_gb = int(raw_disk_gb * KubernetesComputeProvider._ALLOCATABLE_DISK_FRACTION)
+        disk_request_gb = max(10, min(KubernetesComputeProvider._STEP_DISK_REQUEST_GB, allocatable_gb))
+        lines.append(f'process.disk = {{ "{disk_request_gb}.GB" }}')
+
         lines.append("process.maxRetries = 3")
         # Exit 143 (SIGTERM) and 137 (SIGKILL) from Spot preemption: retry
         # without escalating. Other failures: escalate then finish.
@@ -1043,6 +1308,36 @@ class KubernetesComputeProvider(ComputeProvider):
         # MULTIQC ext.args (the --title from params.multiqc_title); the QC
         # dashboard does not depend on the report title.
         lines.append("process { withName: 'MULTIQC' { ext.args = '--export' } }")
+
+        # Cap STAR's BAM sort buffer well below the pod's memory limit.
+        #
+        # nf-core derives `--limitBAMsortRAM` from `task.memory`, so STAR was handed
+        # 118111600640 bytes on run 46: exactly 110 GiB, the pod's ENTIRE allowance. It
+        # also holds the genome index resident for the whole step, so the sum could
+        # never fit and the kernel killed it 103 times in 9 hours, roughly one every
+        # five minutes. (Spot preemption yields the same exit 137 but nothing like that
+        # rate; the frequency is what identifies this as a deterministic crash.)
+        #
+        # Sized as memory minus the index reserve, and never more than half the pod. A
+        # plain fraction breaks down on smaller machines, where the index is a large
+        # share of total RAM: half of 55 GiB is 27, and 27 plus a 30 GB index still does
+        # not fit. Whatever STAR cannot hold in the buffer it spills to disk, which is
+        # slower but survivable, and what the 120 GB ephemeral request is there for.
+        # `ext.args` REPLACES the pipeline's value rather than appending, and
+        # nf-core/scrnaseq puts every STAR flag in that one string. Setting only the
+        # sort limit would drop `--readFilesCommand zcat` (the reads are gzipped) and
+        # `--outSAMtype BAM SortedByCoordinate` (no BAM for anything downstream), so
+        # the upstream flags are carried here verbatim. They mirror
+        # conf/modules.config in nf-core/scrnaseq 4.1.0 and should be re-checked when
+        # the pipeline version moves.
+        sort_ram_gb = max(4, min(mem_gb // 2, mem_gb - KubernetesComputeProvider._GENOME_INDEX_RESERVE_GB))
+        sort_ram_bytes = sort_ram_gb * 1024**3
+        star_args = (
+            "--readFilesCommand zcat --runDirPerm All_RWX --outWigType bedGraph "
+            "--twopassMode Basic --outSAMtype BAM SortedByCoordinate "
+            f"--limitBAMsortRAM {sort_ram_bytes}"
+        )
+        lines.append(f"process {{ withName: 'STAR_ALIGN' {{ ext.args = '{star_args}' }} }}")
 
         return "\n".join(lines)
 
@@ -1269,8 +1564,19 @@ class KubernetesComputeProvider(ComputeProvider):
             raw_bucket = nf_cfg.get("raw_bucket_name", "")
             # Backend-neutral workDir URI (gs:// on GCS, s3:// on S3) via the
             # storage seam, instead of a hardcoded gs:// literal.
-            scratch_work_dir = get_storage_adapter().build_uri(raw_bucket, "nextflow-work") if raw_bucket else None
+            # Per-run, so an abandoned run's intermediates can be identified and deleted.
+            # A single shared directory accumulated 2.13 TB across five runs with nothing
+            # able to tell one run's garbage from another's live data.
+            scratch_work_dir = (
+                get_storage_adapter().build_uri(
+                    raw_bucket, KubernetesComputeProvider.scratch_work_dir_key(job_spec.get("run_id") or 0)
+                )
+                if raw_bucket
+                else None
+            )
             pipeline_machine = nf_cfg.get("k8s_pipeline_machine_type")
+            pipeline_disk_raw = (nf_cfg.get("k8s_pipeline_disk_size_gb") or "").strip()
+            pipeline_disk = int(pipeline_disk_raw) if pipeline_disk_raw.isdigit() else None
             # AWS runs use IRSA creds scoped to bioaf-*, so skip nf-schema's live
             # validation of the public igenomes_base default (it 403s). GCP omits.
             nf_config = self._build_nextflow_k8s_config(
@@ -1279,6 +1585,8 @@ class KubernetesComputeProvider(ComputeProvider):
                 scratch_work_dir,
                 pipeline_machine,
                 ignore_igenomes_base=bool(runner_role_arn and runner_role_arn != "null"),
+                pipeline_disk_gb=pipeline_disk,
+                run_id=job_spec.get("run_id") or None,
             )
             # Use heredoc to avoid shell escaping issues with single quotes
             # in Nextflow config values (e.g., 'k8s', 'bioaf-pipelines')

@@ -198,3 +198,50 @@ def test_pseudobulk_reports_the_namespace_it_actually_used():
     failure that looks like a scientific divergence while being purely technical."""
     _, src = _source(_PSEUDOBULK)
     assert "used_namespace" in src
+
+
+# --- what nf-core/scrnaseq's h5ad ACTUALLY carries (read from the module that writes the file) ---
+#
+# `mtx_to_h5ad_star.py` (the STARsolo template, which is the aligner bioAF launches scrnaseq with):
+#
+#   4.1.0  adata.var["gene_symbol"] = adata.var.index          # read_10x_mtx indexes by SYMBOL
+#          adata.var["gene_versions"] = adata.var["gene_ids"]  # ...so the ENSEMBL ids move in
+#          adata.var.index = <gene_versions stripped of ".N">  # and become the index
+#          adata.layers["count"] = adata.X.copy()              # SINGULAR
+#   2.7.1  adata.var_names = features.tsv column 0             # STARsolo writes the gene ID there
+#
+# So `rownames(sce)` is the ENSEMBL namespace in both, never the symbol namespace, and 4.x keeps the
+# symbols in `rowData$gene_symbol`. The notebook shipped with that backwards.
+
+
+def test_pseudobulk_reads_symbols_from_the_column_nfcore_writes_them_in():
+    """A paper's DEG list is overwhelmingly gene symbols. nf-core/scrnaseq keeps symbols in
+    `rowData$gene_symbol`, NOT in the matrix rownames, so reading rownames for a symbol request
+    emits Ensembl ids labelled 'symbol' and every scRNA concordance becomes a namespace mismatch
+    that reads as a scientific divergence."""
+    _, src = _source(_PSEUDOBULK)
+    assert "gene_symbol" in src
+
+
+def test_pseudobulk_treats_matrix_rownames_as_ensembl_not_symbol():
+    """The inverse of the above, asserted directly: rownames are what the pipeline puts the gene IDs
+    in, so the namespace reported for them must be ensembl."""
+    _, src = _source(_PSEUDOBULK)
+    assert 'used_namespace <- "ensembl"' in src
+
+
+def test_pseudobulk_sums_the_rows_that_share_a_gene_symbol():
+    """4.x makes only the ENSEMBL index unique (`var_names_make_unique`), never the symbol column, so
+    several rows can carry one symbol. Indexing by name keeps the FIRST and silently drops the rest,
+    which under-counts the gene. Summing them is the pseudobulk operation one level up."""
+    _, src = _source(_PSEUDOBULK)
+    assert "rowsum(" in src
+
+
+def test_pseudobulk_accepts_the_count_layer_nfcore_actually_writes():
+    """4.x copies the raw matrix into `layers["count"]`, singular; 2.7.x writes only X, which
+    zellkonverter surfaces as an assay named "X". Neither is the "counts" the notebook looked for, so
+    the lookup fell through to `assayNames(sce)[1]` and was right only by luck."""
+    _, src = _source(_PSEUDOBULK)
+    assert '"count"' in src
+    assert '"X"' in src

@@ -16,7 +16,18 @@ export function ValidationStudyActions({
   onChanged,
   suggestedClassification,
 }: {
-  study: { id: number; state: string };
+  study: {
+    id: number;
+    state: string;
+    // Set when the study reached `plan_ready` from a retry with nothing left to reuse, so approving
+    // pays for the download a second time.
+    evidence?: { awaiting_refetch_approval?: boolean | null } | null;
+    // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
+    // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
+    plan?: {
+      deposit_conflict?: { message?: string; override?: unknown | null } | null;
+    } | null;
+  };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
   // human ratifies with one click (or overrides).
@@ -82,16 +93,21 @@ export function ValidationStudyActions({
       </div>
     );
   } else if (study.state === "plan_ready" && canApprove) {
+    // Answered by an override is not blocked: the backend accepts the approval, so the gate
+    // must offer it. Leaving it hidden made the override do nothing at all.
+    const blocked = !!study.plan?.deposit_conflict && !study.plan.deposit_conflict.override;
     controls = (
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            className={`${btn} bg-green-600 text-white hover:bg-green-700`}
-            disabled={busy}
-            onClick={() => setShowApprove(true)}
-          >
-            {busy ? "Working..." : "Approve plan"}
-          </button>
+          {!blocked && (
+            <button
+              className={`${btn} bg-green-600 text-white hover:bg-green-700`}
+              disabled={busy}
+              onClick={() => setShowApprove(true)}
+            >
+              {busy ? "Working..." : "Approve plan"}
+            </button>
+          )}
           <input aria-label="Reason (optional)"
             value={declineReason}
             onChange={(e) => setDeclineReason(e.target.value)}
@@ -111,6 +127,12 @@ export function ValidationStudyActions({
         <p className="text-xs text-gray-500">
           Approving spends compute: it fetches the data and runs the reproduction pipeline.
         </p>
+        {study.evidence?.awaiting_refetch_approval && (
+          <p className="text-xs text-amber-800">
+            This study ran before and its downloaded data is no longer here, so approving will
+            download the data again.
+          </p>
+        )}
         <ConfirmDialog
           open={showApprove}
           title="Approve this plan?"
@@ -121,6 +143,12 @@ export function ValidationStudyActions({
                 That spends compute on your cloud account, and the spend cannot be
                 recovered once the run starts.
               </p>
+              {study.evidence?.awaiting_refetch_approval && (
+                <p>
+                  This study has run before. The data it downloaded is no longer here, so this
+                  downloads it again.
+                </p>
+              )}
               <p>The study stays held until you approve, so nothing has been charged yet.</p>
             </>
           }

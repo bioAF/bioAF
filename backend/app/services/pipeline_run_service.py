@@ -34,6 +34,55 @@ logger = logging.getLogger("bioaf.pipeline_runs")
 # (chipseq/atacseq). These are the standard MACS values: human ~2.7e9, mouse ~1.87e9. Keyed by the
 # controlled reference_genome vocabulary (+ common UCSC aliases). Unknown builds are left unset so
 # nf-core surfaces its own "specify --read_length or --macs_gsize" guidance rather than a wrong size.
+# nf-core/smrnaseq quantifies against miRBase, which is organised by 3-letter species code rather
+# than by genome build. The study already declares a reference build, so it can answer this.
+_MIRBASE_SPECIES_BY_GENOME: dict[str, str] = {
+    "GRCh38": "hsa",
+    "GRCh37": "hsa",
+    "hg38": "hsa",
+    "hg19": "hsa",
+    "T2T-CHM13": "hsa",
+    "GRCm39": "mmu",
+    "GRCm38": "mmu",
+    "mm10": "mmu",
+    "mm39": "mmu",
+    "Rnor_6.0": "rno",
+    "mRatBN7.2": "rno",
+    "rn6": "rno",
+    "GRCz11": "dre",
+    "danRer11": "dre",
+    "BDGP6": "dme",
+    "dm6": "dme",
+    "WBcel235": "cel",
+    "ce11": "cel",
+}
+
+# miRBase organises everything by species, and a paper states its organism far more reliably than
+# its reference build: the heatstroke study this was found on (GSE327014) names no genome anywhere.
+_MIRBASE_SPECIES_BY_ORGANISM: dict[str, str] = {
+    "homo sapiens": "hsa",
+    "human": "hsa",
+    "mus musculus": "mmu",
+    "mouse": "mmu",
+    "rattus norvegicus": "rno",
+    "rat": "rno",
+    "danio rerio": "dre",
+    "zebrafish": "dre",
+    "drosophila melanogaster": "dme",
+    "caenorhabditis elegans": "cel",
+    "gallus gallus": "gga",
+    "sus scrofa": "ssc",
+    "bos taurus": "bta",
+    "arabidopsis thaliana": "ath",
+}
+
+# miRBase's current release, which is what a real run must quantify against. smrnaseq 2.4.1 defaults
+# these to a handful of sequences from the nf-core CI test dataset (nextflow.config lines 20-21).
+# Its own usage docs claim the defaults are already these URLs; they are not. Left on the test
+# reference a run does not fail, it emits a mirna.tsv that looks exactly like a real one.
+_MIRBASE_MATURE_URL = "https://mirbase.org/download/mature.fa"
+_MIRBASE_HAIRPIN_URL = "https://mirbase.org/download/hairpin.fa"
+
 _MACS_GSIZE_BY_GENOME: dict[str, float] = {
     "GRCh38": 2.7e9,
     "GRCh37": 2.7e9,
@@ -46,7 +95,274 @@ _MACS_GSIZE_BY_GENOME: dict[str, float] = {
 }
 
 
+# The reference a run actually aligns against, keyed by the assembly a study declares.
+#
+# Ensembl is already the source the seeded scrnaseq defaults use, and its FTP layout is regular
+# enough to key by assembly -- but only if you check, which is why every URL below was fetched
+# (HTTP 206 on a range request) rather than pattern-matched from the human one. Two of the four do
+# not follow it: mouse moved to GRCm39 at release 104, so GRCm38 only exists in the older releases,
+# and GRCh37 lives under its own `/pub/grch37` tree with a GTF frozen at build 87. A single-release
+# pattern would have produced two 404s at runtime, inside Nextflow, after the fetch was paid for.
+#
+# T2T-CHM13 is deliberately ABSENT. The extractor normalizes papers onto it, Ensembl's main FTP does
+# not carry it in this layout, and a missing entry is what makes a pinned pipeline refuse rather
+# than quietly align against whatever it was seeded with.
+_ENSEMBL = "https://ftp.ensembl.org/pub"
+# Ensembl Genomes is a SEPARATE site with its own release numbering. Plants, fungi, protists and
+# metazoa that the main site does not carry live here; Arabidopsis is the first bioAF needs.
+_ENSEMBL_PLANTS = "https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants"
+_ENSEMBL_REFERENCE_BY_GENOME: dict[str, tuple[str, str]] = {
+    "GRCh38": (
+        f"{_ENSEMBL}/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh38.112.gtf.gz",
+    ),
+    "GRCm39": (
+        f"{_ENSEMBL}/release-112/fasta/mus_musculus/dna/Mus_musculus.GRCm39.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/mus_musculus/Mus_musculus.GRCm39.112.gtf.gz",
+    ),
+    "GRCm38": (
+        f"{_ENSEMBL}/release-102/fasta/mus_musculus/dna/Mus_musculus.GRCm38.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-102/gtf/mus_musculus/Mus_musculus.GRCm38.102.gtf.gz",
+    ),
+    "GRCh37": (
+        f"{_ENSEMBL}/grch37/release-112/fasta/homo_sapiens/dna/Homo_sapiens.GRCh37.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/grch37/release-112/gtf/homo_sapiens/Homo_sapiens.GRCh37.87.gtf.gz",
+    ),
+    # Past human and mouse. Every URL below was fetched (HTTP 206 on a range request) on 2026-08-30,
+    # and three of the five do not follow the layout the first four do:
+    #
+    #   * rat, C. elegans and Drosophila publish NO `dna.primary_assembly` file. Only zebrafish and
+    #     the mammals above do, so the obvious pattern 404s at runtime, inside Nextflow, after the
+    #     fetch has been paid for.
+    #   * Drosophila's assembly carries a point release in the filename (BDGP6.46), which the
+    #     `BDGP6` token deliberately does not.
+    #   * Arabidopsis is not on the main FTP site at all. It lives on Ensembl Plants, which is a
+    #     different host with its own release numbering (59, not 112).
+    "GRCz11": (
+        f"{_ENSEMBL}/release-112/fasta/danio_rerio/dna/Danio_rerio.GRCz11.dna.primary_assembly.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/danio_rerio/Danio_rerio.GRCz11.112.gtf.gz",
+    ),
+    "mRatBN7.2": (
+        f"{_ENSEMBL}/release-112/fasta/rattus_norvegicus/dna/Rattus_norvegicus.mRatBN7.2.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/rattus_norvegicus/Rattus_norvegicus.mRatBN7.2.112.gtf.gz",
+    ),
+    "WBcel235": (
+        f"{_ENSEMBL}/release-112/fasta/caenorhabditis_elegans/dna/Caenorhabditis_elegans.WBcel235.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/caenorhabditis_elegans/Caenorhabditis_elegans.WBcel235.112.gtf.gz",
+    ),
+    "BDGP6": (
+        f"{_ENSEMBL}/release-112/fasta/drosophila_melanogaster/dna/Drosophila_melanogaster.BDGP6.46.dna.toplevel.fa.gz",
+        f"{_ENSEMBL}/release-112/gtf/drosophila_melanogaster/Drosophila_melanogaster.BDGP6.46.112.gtf.gz",
+    ),
+    "TAIR10": (
+        f"{_ENSEMBL_PLANTS}/release-59/fasta/arabidopsis_thaliana/dna/Arabidopsis_thaliana.TAIR10.dna.toplevel.fa.gz",
+        f"{_ENSEMBL_PLANTS}/release-59/gtf/arabidopsis_thaliana/Arabidopsis_thaliana.TAIR10.59.gtf.gz",
+    ),
+}
+
+# The assembly names bioAF recognizes as a genome BUILD, folded onto the table keys above. A
+# `reference_genome` outside this set is an organization's own named reference dataset, not an
+# assembly, and it is left exactly as it was: the user owns that reference and
+# `_link_references_from_params` is what resolves it.
+#
+# Deliberately duplicated from the paper extractor's alias table rather than shared with it. That one
+# reads messy prose out of a methods section and may keep widening; this one decides what a launch
+# aligns against and must not move because a paper spelled something a new way.
+_ASSEMBLY_ALIASES: dict[str, str] = {
+    "grch38": "GRCh38",
+    "hg38": "GRCh38",
+    "grch37": "GRCh37",
+    "hg19": "GRCh37",
+    "grcm39": "GRCm39",
+    "mm39": "GRCm39",
+    "grcm38": "GRCm38",
+    "mm10": "GRCm38",
+    "t2t-chm13": "T2T-CHM13",
+    "chm13": "T2T-CHM13",
+    "grcz11": "GRCz11",
+    "danrer11": "GRCz11",
+    "mratbn7.2": "mRatBN7.2",
+    "rn7": "mRatBN7.2",
+    "wbcel235": "WBcel235",
+    "ce11": "WBcel235",
+    "bdgp6": "BDGP6",
+    "dm6": "BDGP6",
+    "tair10": "TAIR10",
+}
+
+
+# 10x Chromium chemistry as annotated on a sample, mapped to the `protocol` value STARsolo needs.
+#
+# This mirrors the frontend's `protocolDetection.ts`, which has derived it on the interactive launch
+# page since that page was built. The LAUNCH path never did, so an experiment annotated v2 was still
+# parsed as v3 -- and the lit_validation driver launches with no form at all, so for a validation
+# study it always was. 10XV2 is a 16bp barcode + a 10bp UMI and 10XV3 is 16 + 12, so reading one as
+# the other runs the UMI two bases past the end of the read, and STARsolo does not refuse it.
+#
+# Deliberately NOT shared with the frontend copy: one is a TypeScript module in the browser bundle
+# and the other decides what a run submits. Keeping them in step is a test's job, not an import's.
+_CHEMISTRY_TO_PROTOCOL: dict[str, str] = {
+    "v1": "10XV1",
+    "v2": "10XV2",
+    "v3": "10XV3",
+    "v3.1": "10XV3",
+    "nextgem v3.1": "10XV3",
+    "nextgem v3": "10XV3",
+    "10x chromium 3' v1": "10XV1",
+    "10x chromium 3' v2": "10XV2",
+    "10x chromium 3' v3": "10XV3",
+    "10x chromium 3' v3.1": "10XV3",
+    "10x chromium 5' v1": "10XV1",
+    "10x chromium 5' v2": "10XV2",
+    "10x chromium 5' v3": "10XV3",
+}
+
+
 class PipelineRunService:
+    @staticmethod
+    def _schema_declares(schema: object, name: str) -> bool:
+        """Whether a pipeline's own nextflow_schema declares a parameter, at any nesting."""
+        if not isinstance(schema, dict):
+            return False
+        if name in (schema.get("properties") or {}):
+            return True
+        for group in ((schema.get("$defs") or schema.get("definitions")) or {}).values():
+            if isinstance(group, dict) and name in (group.get("properties") or {}):
+                return True
+        return False
+
+    @staticmethod
+    def _should_ignore_igenomes(pipeline, merged_params: dict) -> bool:
+        """Whether iGenomes must be switched off because this run brings its OWN reference.
+
+        `--genome` does not override `--fasta`/`--gtf`. It supplies every reference attribute the
+        caller did NOT name, and nf-core assigns them in `main.nf`
+        (`params.star_index = getGenomeAttribute('star')`). So a run given an Ensembl fasta and an
+        Ensembl GTF, plus `genome: GRCh38`, silently receives iGenomes' NCBI-built STAR index for a
+        different build of the same assembly name -- and the index is what the aligner actually uses.
+
+        Confirmed on demo run 42: every STAR_ALIGN died in ~25s, no STAR_GENOMEGENERATE ever ran, and
+        Nextflow's own params dump recorded
+        `star_index: s3://ngi-igenomes/igenomes//Homo_sapiens/NCBI/GRCh38/Sequence/STARIndex/`.
+
+        Asked of the pipeline's own schema, never of its name, because passing a parameter a pipeline
+        does not declare is itself a launch failure. A pipeline with no stored schema falls back to
+        whether it is an nf-core pipeline, since the nf-core template always carries this parameter.
+        """
+        if not (merged_params.get("fasta") or merged_params.get("gtf")):
+            # Nothing of ours to protect: rnaseq, chipseq and atacseq rely on --genome for the whole
+            # reference set, and switching iGenomes off would leave them with no reference at all.
+            return False
+        schema = getattr(pipeline, "schema_json", None)
+        if isinstance(schema, dict) and schema:
+            return PipelineRunService._schema_declares(schema, "igenomes_ignore")
+        return (getattr(pipeline, "source_type", "") or "").lower() == "nf-core"
+
+    @staticmethod
+    def _apply_10x_protocol(merged_params: dict, caller_params: dict, samples: list) -> dict:
+        """Parse the reads with the chemistry the samples declare, rather than with a constant.
+
+        nf-core/scrnaseq's own default for `protocol` is 'auto', but its workflow errors with "Only
+        cellranger supports `protocol = 'auto'`" for any other aligner, and bioAF runs STARsolo. So
+        an explicit value has to come from somewhere, and it came from the seeded defaults: 10XV3,
+        for every run, forever.
+
+        Samples that disagree REFUSE. STARsolo takes one protocol for the whole run, so a v2 sample
+        and a v3 sample cannot both be parsed correctly by it; the frontend already answers this with
+        null ("no single right answer"), and the launch path answered it by silently parsing one of
+        them wrongly.
+
+        A chemistry nobody annotated leaves the seeded default alone. Fetched SRA samples carry no
+        chemistry, and refusing there would switch lit_validation's scRNA route off entirely, so the
+        remaining gap is real and it is plan_2 step 3.5's: the honest derivation is the R1 read
+        length (26 for v2, 28 for v3), which is in the FASTQ bioAF has already downloaded.
+        """
+        if "protocol" in caller_params:
+            return merged_params
+
+        declared = {(getattr(s, "chemistry_version", None) or "").strip().lower() for s in samples}
+        declared.discard("")
+        if not declared:
+            return merged_params
+
+        mapped = {_CHEMISTRY_TO_PROTOCOL.get(c) for c in declared}
+        if None in mapped:
+            # An annotation bioAF does not recognise is not a disagreement, and guessing from a
+            # spelling would be the very thing this method exists to stop.
+            return merged_params
+        if len(mapped) > 1:
+            names = ", ".join(sorted(m for m in mapped if m))
+            raise ValidationError(
+                f"These samples were prepared with different 10x chemistries ({names}), and a single "
+                "run is parsed with one protocol, so one of them would be read with the wrong barcode "
+                "and UMI lengths. Launch each chemistry as its own run, or set `protocol` explicitly "
+                "to state which one applies."
+            )
+        merged_params["protocol"] = mapped.pop()
+        return merged_params
+
+    @staticmethod
+    def _apply_reference(
+        pipeline_key: str,
+        merged_params: dict,
+        caller_params: dict,
+        requested_genome: str | None,
+    ) -> dict:
+        """Point the run at the reference the STUDY declares, not the one the pipeline was seeded with.
+
+        One precedence, in one place: **what the scientist stated beats the study's assembly, which
+        beats the pipeline's seeded default.** It used to be the reverse of the last two, in two
+        different ways, and both were silent:
+
+        - `nf-core/rnaseq` is seeded with `genome: GRCh38`, so the old `"genome" not in merged_params`
+          guard never fired and a mouse paper's `reference_genome` was captured, shown in the UI, and
+          discarded.
+        - `nf-core/scrnaseq` is seeded with literal human `fasta`/`gtf` URLs. Setting `genome` there
+          does nothing at all, because nf-core/scrnaseq's own `main.nf` states that manually provided
+          files are not overwritten by the genome attributes. So the human URLs won regardless.
+
+        Neither failed. Both produced a completed run and a plausible, near-empty matrix, which is the
+        worst outcome for a tool whose job is checking other people's numbers.
+
+        A pipeline pinned by explicit `fasta`/`gtf` and an assembly with no entry in the table is the
+        one case that REFUSES: there is no way to serve it, and launching would align against a
+        different organism. Pipelines driven by `--genome` alone are passed the assembly and left to
+        fail loudly in nf-core if their iGenomes has no such build -- a stated failure, not a wrong
+        answer, which is the line this refusal is drawn on.
+        """
+        if not requested_genome:
+            return merged_params
+
+        # A stated reference is a statement, not a default. Anything the caller sent wins outright.
+        if any(key in caller_params for key in ("genome", "fasta", "gtf")):
+            return merged_params
+
+        assembly = _ASSEMBLY_ALIASES.get(requested_genome.strip().lower())
+        if assembly is None:
+            # Not an assembly: an organization's own named reference. Untouched, and `genome` is
+            # filled only when nothing else claimed it, which is what this branch always did.
+            if "genome" not in merged_params:
+                merged_params["genome"] = requested_genome
+            return merged_params
+
+        pair = _ENSEMBL_REFERENCE_BY_GENOME.get(assembly)
+        pinned_by_files = "fasta" in merged_params or "gtf" in merged_params
+        if pinned_by_files:
+            if pair is None:
+                pinned = str(merged_params.get("fasta") or merged_params.get("gtf") or "")
+                named = next((g for g in _ENSEMBL_REFERENCE_BY_GENOME if g in pinned), "its seeded default")
+                raise ValidationError(
+                    f"{pipeline_key} has no reference for {assembly}, and it is pinned to "
+                    f"{named} by an explicit fasta/gtf that --genome cannot override. Running it "
+                    f"would align {assembly} reads against {named}. Supply fasta and gtf for "
+                    f"{assembly} explicitly, or pick an assembly bioAF carries: "
+                    f"{', '.join(sorted(_ENSEMBL_REFERENCE_BY_GENOME))}."
+                )
+            merged_params["fasta"], merged_params["gtf"] = pair
+
+        merged_params["genome"] = assembly
+        return merged_params
+
     @staticmethod
     def _requires_per_sample_fastq(pipeline, contract=None) -> bool:
         """Whether this pipeline consumes per-sample FASTQ input.
@@ -261,6 +577,28 @@ class PipelineRunService:
         return published.is_empty
 
     @staticmethod
+    async def samplesheet_contract(session, org_id: int, pipeline_key: str, experiment_id: int | None = None):
+        """The contract a launch of ``pipeline_key`` would be judged against, resolved without launching.
+
+        For callers that must fill a samplesheet column BEFORE building the launch request, which the
+        launch grid does by asking the scientist and the lit_validation driver cannot, since it
+        launches with no form at all.
+
+        A pipeline this org's catalog does not hold yields an empty contract rather than an error:
+        resolving a contract must never become a second way for a launch to fail, and refusing to run
+        an uninstalled pipeline is ``launch_run``'s own job, with its own message.
+        """
+        from app.services.samplesheet_schema import parse_contract
+
+        pipeline = await PipelineCatalogService.get_pipeline(session, org_id, pipeline_key)
+        if pipeline is None:
+            return parse_contract(None)
+        contract, _mapping, _scope = await PipelineRunService._effective_contract(
+            session, pipeline, org_id, experiment_id
+        )
+        return contract
+
+    @staticmethod
     async def _effective_contract(
         session, pipeline, org_id: int, experiment_id: int | None, declared: list[dict] | None = None
     ):
@@ -464,13 +802,12 @@ class PipelineRunService:
         merged_params = dict(pipeline.default_params_json or {})
         merged_params.update(data.parameters)
 
-        # reference_genome is the first-class control for the nf-core iGenomes `--genome` key. Translate
-        # it into the param so pipelines that don't hardcode a `genome` default still receive it: the
-        # built-in rnaseq defaults file sets genome, but registry-installed pipelines (chipseq, atacseq,
-        # ...) do not, so without this they launch with no genome and fail validation ("Missing --fasta").
-        # An explicit `genome` param (from defaults or the caller) wins.
-        if data.reference_genome and "genome" not in merged_params:
-            merged_params["genome"] = data.reference_genome
+        # reference_genome is the first-class control for the reference a run aligns against. See
+        # `_apply_reference`: the study's assembly beats the pipeline's seeded default, and anything
+        # the caller stated beats both.
+        merged_params = PipelineRunService._apply_reference(
+            pipeline.pipeline_key, merged_params, data.parameters, data.reference_genome
+        )
 
         # Peak-calling pipelines (chipseq/atacseq) need the mappable genome size for MACS; nf-core
         # fails ("specify --read_length or --macs_gsize") when neither is set and iGenomes doesn't
@@ -481,6 +818,51 @@ class PipelineRunService:
                 gsize = _MACS_GSIZE_BY_GENOME.get(merged_params.get("genome"))
                 if gsize is not None:
                     merged_params["macs_gsize"] = gsize
+
+        # A reference we supplied must not be half-replaced by iGenomes. Deliberately AFTER
+        # _apply_reference, so it sees the fasta/gtf that call may have just set, and gated on the
+        # caller never having stated it themselves.
+        if "igenomes_ignore" not in data.parameters and PipelineRunService._should_ignore_igenomes(
+            pipeline, merged_params
+        ):
+            merged_params["igenomes_ignore"] = True
+
+        # nf-core/scrnaseq's `protocol` decides how STARsolo splits the barcode read. Matched on the
+        # full key, not a substring: `scrnaseq` contains `rnaseq`.
+        if pipeline.pipeline_key.split("/")[-1] == "scrnaseq":
+            merged_params = PipelineRunService._apply_10x_protocol(merged_params, data.parameters, samples)
+
+        # nf-core/smrnaseq needs three things nothing else supplies, and each fails differently.
+        # Matched on the full key, not a substring: `smrnaseq` contains `rnaseq`.
+        #
+        #  - `mature`/`hairpin` default to the nf-core CI TEST dataset, so a run left on them
+        #    quantifies against a toy reference and still emits a plausible mirna.tsv.
+        #  - `mirtrace_species` is null, and it also selects the per-species miRBase GFF3, so
+        #    without it there is no miRNA annotation at all.
+        #  - without `three_prime_adapter` the pipeline refuses to start unless a profile set it,
+        #    and bioAF launches with no profile. `auto-detect` is what the docs name for an unknown
+        #    kit, which is always the case for somebody else's deposited data.
+        #
+        # All three are defaults, never policy: anything the scientist stated wins.
+        if pipeline.pipeline_key.split("/")[-1] == "smrnaseq":
+            merged_params.setdefault("mature", _MIRBASE_MATURE_URL)
+            merged_params.setdefault("hairpin", _MIRBASE_HAIRPIN_URL)
+            merged_params.setdefault("three_prime_adapter", "auto-detect")
+            # The genome is the more specific statement and the one the reads are aligned against,
+            # so it wins; the samples' organism is the fallback, and it is the one that actually
+            # answers for a paper that never named a build. Neither known means the parameter stays
+            # unset: a wrong species quantifies against the wrong miRBase and still produces a
+            # plausible-looking table.
+            species = _MIRBASE_SPECIES_BY_GENOME.get(merged_params.get("genome"))
+            if species is None:
+                organisms = {(s.organism or "").strip().lower() for s in samples}
+                codes = {_MIRBASE_SPECIES_BY_ORGANISM[o] for o in organisms if o in _MIRBASE_SPECIES_BY_ORGANISM}
+                # One unambiguous species only. A mixed-organism experiment is not a thing smrnaseq
+                # can be pointed at, and picking one of two would be a guess.
+                if len(codes) == 1:
+                    species = codes.pop()
+            if species is not None:
+                merged_params.setdefault("mirtrace_species", species)
 
         # 6b. Refuse a launch that cannot produce a valid samplesheet, while it
         # is still free to do so. Deliberately BEFORE the run row, the sample
