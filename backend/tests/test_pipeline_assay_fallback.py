@@ -862,3 +862,22 @@ async def test_a_pipeline_that_declares_its_plumbing_as_topics_does_not_win_on_i
     )
 
     assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_two_spellings_of_one_word_are_one_piece_of_evidence(session, admin_user, rna_family):
+    """Measured, and it produced a confidently wrong answer where there used to be an honest refusal.
+
+    nf-core/bactmap declares both `bacteria` and `bacterial`. They are one word to any paper that
+    writes either, and a rarity bonus for each put a mapping-and-phylogeny pipeline above an
+    assembler on an assembly paper. The narrowness matters as much as the rule: a general topic
+    beside a compound built from it is two real claims, not one.
+    """
+    await _registry(session, "mapper", "Phylogeny from bacterial whole genome sequences", ["bacteria", "bacterial"])
+    await _registry(session, "assembler", "Bacterial assembly and annotation", ["genome-assembly", "assembly"])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "bacterial isolate whole-genome assembly", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/assembler"

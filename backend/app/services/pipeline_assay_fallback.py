@@ -225,9 +225,24 @@ def _matched_topics(candidate: _Candidate, haystack: str) -> list[str]:
 
     A topic has to START a word, the same rule the assay markers follow. Plain containment matches
     `rna seq` inside `scrna seq`, which is how a single-cell paper scored the bulk pipeline's topics.
+
+    Two SPELLINGS of one word count once. nf-core/bactmap declares both `bacteria` and `bacterial`,
+    which are one word to any paper that writes either, and collecting a rarity bonus for each put a
+    mapping-and-phylogeny pipeline above nf-core/bacass on a bacterial ASSEMBLY paper.
+
+    Deliberately narrow: only a single word that begins another single word, never a phrase. A
+    general topic and a compound built from it (`spatial` beside `spatial-transcriptomics`, `rna`
+    beside `rna-seq`) are two real claims, and merging those was measured to reward a pipeline for
+    declaring two vague topics over one that declares the exact one.
     """
     folded = _phrase(haystack)
-    return [t for t in candidate.topics if (p := _phrase(t)) and marker_matches(p, folded)]
+    matched = [t for t in candidate.topics if (p := _phrase(t)) and marker_matches(p, folded)]
+
+    def is_spelling_of(topic: str, other: str) -> bool:
+        a, b = _phrase(topic), _phrase(other)
+        return " " not in a and " " not in b and a != b and b.startswith(a)
+
+    return [t for t in matched if not any(o is not t and is_spelling_of(t, o) for o in matched)]
 
 
 def _diagnostic_topics(topics: list[str], family: tuple[str, ...]) -> list[str]:
