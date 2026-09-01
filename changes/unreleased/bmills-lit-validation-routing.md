@@ -10,6 +10,12 @@
   alternative was, and that scoping the study to its accession would settle it
   outright.
 
+### Documentation
+
+- Add a Paper Validation guide covering the four levels, which assays are
+  verified against which pipeline, and which still route to the wrong one. Linked
+  from the docs index.
+
 ### Fixes
 
 - Stop capturing metatranscriptomics papers for `nf-core/rnaseq`. An assay
