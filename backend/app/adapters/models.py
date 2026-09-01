@@ -353,3 +353,18 @@ class CellxgeneInstance(BaseModel):
     status: ServiceState
     access_url: str | None = None
     provider_details: dict = Field(default_factory=dict)
+
+
+class QuotaMetric(BaseModel):
+    """One regional cloud quota: what is in use, and the ceiling.
+
+    Returned by ``ComputeProvider.get_regional_quotas`` keyed by the cloud's own
+    metric name (``SSD_TOTAL_GB``, ``CPUS``, ``N2_CPUS``). The names are passed
+    through rather than normalized: they are what the cloud's error messages and
+    quota-increase console use, so an operator told "SSD_TOTAL_GB" can act on it
+    directly.
+    """
+
+    metric: str
+    usage: float
+    limit: float

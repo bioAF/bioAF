@@ -24,6 +24,18 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("bioaf.pipeline_monitor")
 
+# How long a run's tasks may be continuously unschedulable before the run is failed.
+#
+# Pending is normal: a scaled-to-zero pool provisions nodes in about 90 seconds
+# (observed), and Spot capacity shortfalls make the autoscaler retry across zones,
+# which is slower still. Ten minutes is an order of magnitude above the healthy
+# case and far below the 35 minutes run 44 spent looking alive while eleven pods
+# could never be placed.
+#
+# Only CONTINUOUS unschedulability counts. Any pod being placed resets the clock,
+# so partial progress is never mistaken for a dead run.
+UNSCHEDULABLE_GRACE_SECONDS = 600
+
 
 # Matches `<link rel="icon" ...>` / `<link rel='shortcut icon' ...>` regardless
 # of attribute order. The Nextflow report's favicon points at nextflow.io,
@@ -207,6 +219,141 @@ class PipelineMonitorService:
             await PipelineMonitorService._handle_completion(session, run)
 
     @staticmethod
+    async def _record_task_terminations(session: AsyncSession, run: PipelineRun, compute_adapter) -> None:
+        """Persist how this run's task containers died, while the pods still exist.
+
+        Exit 137 is SIGKILL, and OOM, disk eviction and Spot preemption all produce
+        it. Nextflow only records the number, so three separate runs were diagnosed by
+        inference rather than evidence: kubelet's
+        `containerStatuses[].state.terminated.reason` says which it was, but it goes
+        away with the pod, and run 47's own task logs were 0 bytes because the kill
+        truncated them before Fusion flushed.
+
+        Recorded onto provider_metadata rather than a new column, deduplicated by pod
+        and container because the monitor polls every 30s while a failed pod lingers
+        for many cycles.
+        """
+        try:
+            terminations = await compute_adapter.get_task_terminations(run.id)
+        except Exception as exc:
+            logger.debug("Task terminations unavailable for run %d: %s", run.id, exc)
+            return
+
+        if not isinstance(terminations, list) or not terminations:
+            return
+
+        metadata = dict(run.provider_metadata or {})
+        existing = list(metadata.get("task_terminations") or [])
+        seen = {(t.get("pod"), t.get("container")) for t in existing}
+
+        added = False
+        for t in terminations:
+            key = (t.get("pod"), t.get("container"))
+            if key in seen:
+                continue
+            seen.add(key)
+            existing.append(t)
+            added = True
+            logger.info(
+                "Run %d task %s terminated: exit=%s reason=%s",
+                run.id,
+                t.get("pod"),
+                t.get("exit_code"),
+                t.get("reason") or "unrecorded",
+            )
+
+        if added:
+            # Bounded: a run with thousands of retries must not grow the row without
+            # limit. The most recent are the ones worth keeping.
+            metadata["task_terminations"] = existing[-50:]
+            run.provider_metadata = metadata
+
+    @staticmethod
+    async def _fail_if_unschedulable(session: AsyncSession, run: PipelineRun, compute_adapter) -> bool:
+        """Fail a run whose tasks can never be placed. Returns True if it did.
+
+        `_k8s_get_job_status` selects pods by `job-name`, which matches only the
+        Nextflow HEAD pod. The head stays healthy while its tasks sit Pending, so a
+        run against a pool that cannot create nodes is indistinguishable from a
+        working one. Run 44 spent 35 minutes that way and the only evidence was a
+        QUOTA_EXCEEDED line in the GCE audit log.
+
+        Three things this deliberately does NOT do:
+
+        - It does not act on `None`, which means the cluster could not be asked. A
+          monitoring failure must never fail a healthy run.
+        - It does not act when any task has been placed. Partial progress is a
+          working run, and Spot retries move across zones.
+        - It does not act on runs whose pods carry no run-id label (launched before
+          that shipped): they report zero tasks, and failing a run on evidence that
+          cannot be attributed to it would be worse than the blindness it replaces.
+        """
+        try:
+            scheduling = await compute_adapter.get_task_scheduling(run.id)
+        except Exception as exc:
+            logger.debug("Task scheduling unavailable for run %d: %s", run.id, exc)
+            return False
+
+        # Only a genuine answer is acted on. A backend that does not implement this,
+        # or returns something else, is "unknowable", which is not "fine": acting on
+        # it would let a monitoring gap fail a healthy run.
+        if not isinstance(scheduling, dict):
+            return False
+
+        metadata = dict(run.provider_metadata or {})
+        blocked = scheduling.get("unschedulable", 0)
+        placed = scheduling.get("scheduled", 0)
+
+        if blocked == 0 or placed > 0:
+            if metadata.pop("unschedulable_since", None) is not None:
+                run.provider_metadata = metadata
+            return False
+
+        since_raw = metadata.get("unschedulable_since")
+        now = datetime.now(timezone.utc)
+        if not since_raw:
+            metadata["unschedulable_since"] = now.isoformat()
+            run.provider_metadata = metadata
+            return False
+
+        try:
+            since = datetime.fromisoformat(since_raw)
+        except ValueError:
+            metadata["unschedulable_since"] = now.isoformat()
+            run.provider_metadata = metadata
+            return False
+
+        if (now - since).total_seconds() < UNSCHEDULABLE_GRACE_SECONDS:
+            return False
+
+        run.status = "failed"
+        run.completed_at = now
+        run.failure_reason = scheduling.get("reason") or "resource_exhausted"
+        minutes = int(UNSCHEDULABLE_GRACE_SECONDS // 60)
+        detail = scheduling.get("message") or "the scheduler could not place them"
+        run.error_message = f"No node could run this pipeline's tasks for over {minutes} minutes: {detail}"
+        metadata.pop("unschedulable_since", None)
+        run.provider_metadata = metadata
+
+        # Marking the row terminates NOTHING. Run 45 was flagged failed and its
+        # Kubernetes Job kept running for 23 hours: the head pod held a node, its
+        # unschedulable tasks stayed Pending, and the pool could not scale to zero.
+        # The cancel is what makes "terminal" true.
+        #
+        # A cancel that fails must not undo the verdict. The run is dead either way,
+        # and recording that matters more than the cleanup succeeding; the operator
+        # can see a stuck job, but not a run that silently never ended.
+        job_ref = run.compute_job_ref
+        if job_ref:
+            try:
+                await compute_adapter.cancel_job(job_ref)
+            except Exception as exc:
+                logger.warning("Could not cancel job %s for unschedulable run %d: %s", job_ref, run.id, exc)
+
+        await PipelineMonitorService._handle_completion(session, run)
+        return True
+
+    @staticmethod
     async def _sync_k8s_run(session: AsyncSession, run: PipelineRun, job_id: str) -> None:
         """Sync a K8s Job run by querying the compute adapter for job status.
 
@@ -229,6 +376,11 @@ class PipelineMonitorService:
             run.k8s_pod_name = pod_name
             # Mirror into the neutral provider_metadata (BAL Phase 4).
             run.provider_metadata = {**(run.provider_metadata or {}), "pod_name": pod_name}
+
+        await PipelineMonitorService._record_task_terminations(session, run, compute_adapter)
+
+        if await PipelineMonitorService._fail_if_unschedulable(session, run, compute_adapter):
+            return
 
         is_custom = run.custom_pipeline_version_id is not None
 

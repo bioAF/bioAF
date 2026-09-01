@@ -13,6 +13,7 @@ import pytest
 
 from app.services.literature.accession_manifest_service import (
     AccessionManifestService,
+    dominant_library_strategy,
     geo_series_matrix_url,
     parse_ena_filereport,
     parse_series_matrix,
@@ -188,3 +189,89 @@ async def test_fetch_manifest_unknown_accession_type_is_unavailable():
     result = await AccessionManifestService.fetch_manifest("not-an-accession", fetcher=_fake_fetcher({}))
     assert result.samples == []
     assert result.unavailable_reason
+
+
+# ---- the deposited data's own library strategy (plan_4 step 1) ----
+#
+# ENA has always been asked for `library_strategy` and the answer was thrown away. It is what tells
+# a plan that a paper saying "RRBS and RNA-seq" deposited Bisulfite-Seq, so the run does not go to
+# nf-core/rnaseq.
+
+_MIXED_ENA_TSV = (
+    "run_accession\texperiment_accession\tsample_accession\tsample_title\texperiment_title\tlibrary_strategy\n"
+    "SRR1\tSRX1\tSRS1\tMeth 1\t\tBisulfite-Seq\n"
+    "SRR2\tSRX2\tSRS2\tExpr 1\t\tRNA-Seq\n"
+)
+
+_BISULFITE_ENA_TSV = (
+    "run_accession\texperiment_accession\tsample_accession\tsample_title\texperiment_title\tlibrary_strategy\n"
+    "SRR1\tSRX1\tSRS1\tMeth 1\t\tBisulfite-Seq\n"
+    "SRR2\tSRX2\tSRS2\tMeth 2\t\tBisulfite-Seq\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_ena_manifest_entries_carry_the_library_strategy():
+    from app.services.literature.accession_manifest_service import _ena_filereport_url
+
+    pages = {_ena_filereport_url("SRP071965"): _ENA_TSV}
+    result = await AccessionManifestService.fetch_manifest("SRP071965", fetcher=_fake_fetcher(pages))
+
+    assert [s["library_strategy"] for s in result.samples] == ["RNA-Seq", "RNA-Seq", "RNA-Seq"]
+
+
+@pytest.mark.asyncio
+async def test_geo_manifest_fills_the_library_strategy_from_ena():
+    """A GEO series matrix does not carry the strategy; the ENA join that already fills run
+    accessions is where it comes from."""
+    from app.services.literature.accession_manifest_service import _ena_filereport_url
+
+    pages = {
+        geo_series_matrix_url("GSE71585"): _GEO_MATRIX,
+        _ena_filereport_url("SRP071965"): _GEO_ENA_TSV,
+    }
+    result = await AccessionManifestService.fetch_manifest("GSE71585", fetcher=_fake_fetcher(pages))
+
+    assert [s["library_strategy"] for s in result.samples] == ["RNA-Seq", "RNA-Seq", "RNA-Seq"]
+
+
+@pytest.mark.asyncio
+async def test_geo_manifest_without_ena_enrichment_has_no_strategy():
+    pages = {geo_series_matrix_url("GSE71585"): _GEO_MATRIX}
+    result = await AccessionManifestService.fetch_manifest("GSE71585", fetcher=_fake_fetcher(pages))
+
+    assert [s["library_strategy"] for s in result.samples] == ["", "", ""]
+
+
+def test_dominant_library_strategy_is_the_one_the_samples_agree_on():
+    samples = [{"library_strategy": "Bisulfite-Seq"}, {"library_strategy": "Bisulfite-Seq"}]
+    assert dominant_library_strategy(samples) == "Bisulfite-Seq"
+
+
+def test_dominant_library_strategy_ignores_case_and_blanks():
+    samples = [{"library_strategy": "bisulfite-seq"}, {"library_strategy": ""}, {"library_strategy": "Bisulfite-Seq"}]
+    assert dominant_library_strategy(samples) == "bisulfite-seq"
+
+
+def test_a_multi_assay_accession_has_no_dominant_strategy():
+    """An accession carrying two assays is as compound as the prose it would be overriding. No
+    answer is the honest one; the paper's own words decide."""
+    assert dominant_library_strategy([{"library_strategy": "Bisulfite-Seq"}, {"library_strategy": "RNA-Seq"}]) is None
+
+
+def test_no_samples_and_no_strategies_yield_nothing():
+    assert dominant_library_strategy([]) is None
+    assert dominant_library_strategy([{"library_strategy": ""}, {}]) is None
+
+
+@pytest.mark.asyncio
+async def test_a_single_assay_accession_reports_its_strategy_end_to_end():
+    from app.services.literature.accession_manifest_service import _ena_filereport_url
+
+    pages = {_ena_filereport_url("SRP0001"): _BISULFITE_ENA_TSV}
+    result = await AccessionManifestService.fetch_manifest("SRP0001", fetcher=_fake_fetcher(pages))
+    assert dominant_library_strategy(result.samples) == "Bisulfite-Seq"
+
+    pages = {_ena_filereport_url("SRP0002"): _MIXED_ENA_TSV}
+    mixed = await AccessionManifestService.fetch_manifest("SRP0002", fetcher=_fake_fetcher(pages))
+    assert dominant_library_strategy(mixed.samples) is None

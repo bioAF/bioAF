@@ -29,7 +29,11 @@ def _join(items) -> str:
 # on word-ish boundaries so "input" doesn't fire on "reinput" etc.
 _CONTROL_MARKERS = ("input", "igg", "mock", "control", "wce", "whole cell extract", "no antibody", "no-antibody")
 # A histone-mark antibody token (H3K4me3, H3K27ac, H3K9me2, ...); a clean, no-space antibody label.
-_HISTONE_MARK_RE = re.compile(r"\bH[1-4](?:K\d+)(?:me[1-3]|ac|ub)?\b", re.IGNORECASE)
+# Boundaries are spelled out rather than using \b because `_` IS a word character: the real titles
+# `H3K27ac_DMSO4h` (GSE287761) and `WT H3K27ac_ChIP_rep1` (GSE260807) put an underscore straight
+# after the mark, so a trailing \b never fired and every such sample silently fell through to the
+# per-sample fallback name.
+_HISTONE_MARK_RE = re.compile(r"(?<![A-Za-z0-9])H[1-4](?:K\d+)(?:me[1-3]|ac|ub)?(?![A-Za-z0-9])", re.IGNORECASE)
 
 # A sample name that is purely numeric (int or float). nf-core/nf-schema infers a
 # CSV column's type from its values, so such a name is typed as integer/number and
@@ -231,6 +235,28 @@ def _compiled_matches(pattern: str, value: str) -> bool:
     """
     regex = _compiled(pattern)
     return True if regex is None else bool(regex.match(value))
+
+
+def acceptable_spelling(value: str, pattern: str | None) -> str | None:
+    """The most faithful spelling of ``value`` a column's regex accepts, or None if there is none.
+
+    ``_recommendation`` answers a different question (what to SUGGEST when the scientist's own value
+    is rejected) and deliberately returns None when the value already fits. This answers "what should
+    bioAF write here", for the values bioAF derives rather than the ones a scientist typed, so an
+    already-valid value comes back unchanged.
+
+    None is a real answer: no rearrangement of punctuation turns a condition name into a GCA
+    accession, and writing something that merely looks right would name the wrong thing.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    if not pattern:
+        return text
+    for candidate in _candidates(text):
+        if candidate and _compiled_matches(pattern, candidate):
+            return candidate
+    return None
 
 
 def _recommendation(value: str, pattern: str | None) -> str | None:
@@ -579,6 +605,33 @@ def _is_chip_control(sample) -> bool:
     """True if a sample looks like a ChIP-seq control/input (IgG, input, mock, WCE)."""
     text = _sample_text(sample).lower()
     return any(m in text for m in _CONTROL_MARKERS)
+
+
+def _control_for(sample, controls: list) -> str:
+    """The control sample this IP should be normalized against, by metadata resemblance.
+
+    Every IP used to be pointed at ``controls[0]``. GSE287761 is the case that breaks: it deposits
+    one input PER CONDITION (``RUN1_Input_DMSO4h``, ``RUN1_Input_dTAG4h``), so the dTAG IP had the
+    DMSO input subtracted from it, biasing exactly the comparison a differential-binding study
+    exists to make.
+
+    Scored on shared tokens. The boilerplate every fetched sample carries (``strategy=ChIP-Seq``,
+    the organism, ...) is common to all controls, so it shifts every score equally and cannot decide
+    the winner; only the condition tokens can. A single pooled control (GSE260807) stays the answer
+    for every IP, and ``max`` keeps the first on a tie, so this is unchanged wherever it was already
+    right.
+    """
+    if not controls:
+        return ""
+    if len(controls) == 1:
+        return _safe_sample_name(controls[0])
+    mine = _text_tokens(sample)
+    return _safe_sample_name(max(controls, key=lambda c: len(mine & _text_tokens(c))))
+
+
+def _text_tokens(sample) -> set[str]:
+    """Lowercased alphanumeric tokens of a sample's identifying text."""
+    return {tok for tok in re.split(r"[^a-z0-9]+", _sample_text(sample).lower()) if tok}
 
 
 def _antibody_label(sample) -> str:
@@ -2093,7 +2146,6 @@ class SampleSheetService:
         input_paths = parameters.get("input_paths", {})
 
         controls = [s for s in samples if _is_chip_control(s)]
-        control_name = _safe_sample_name(controls[0]) if controls else ""
         if not controls:
             logger.info(
                 "chipseq sheet: no control/input sample identified among %d samples; IP samples will be "
@@ -2112,6 +2164,7 @@ class SampleSheetService:
             is_control = _is_chip_control(sample)
             # An IP sample gets an antibody only if there is a control to reference (schema: antibody
             # requires control). Control samples, and IP samples with no available control, go bare.
+            control_name = "" if is_control else _control_for(sample, controls)
             if is_control or not control_name:
                 antibody, control, control_replicate = "", "", ""
             else:

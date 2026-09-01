@@ -16,8 +16,10 @@ from app.api.dependencies import require_beta_feature, require_permission
 from app.api.provenance_reports import ReportFormat
 from app.database import get_session
 from app.models.literature import LiteraturePaper
+from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.schemas.validation_study import (
+    DepositOverrideRequest,
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
@@ -36,6 +38,7 @@ from app.services.literature.ground_truth_fetch_service import GroundTruthFetchS
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
+from app.services.pipeline_mapper import deposit_conflict
 from app.services.validation_level3_service import supported_finding_kinds
 from app.services.validation_study_service import ValidationStudyService
 
@@ -48,9 +51,17 @@ router = APIRouter(
 )
 
 
-def _plan_response(plan) -> ReproductionPlanResponse | None:
+async def _plan_response(
+    session: AsyncSession, plan, org_id: int, *, deposit_override: dict | None = None
+) -> ReproductionPlanResponse | None:
     if plan is None:
         return None
+    # The conflict stays reported after an override, because the run really will carry it and the
+    # verdict has to be readable against that. What changes is that it is ANSWERED: the gate offers
+    # Approve again, and the panel becomes the record of who decided and why.
+    conflict = deposit_conflict(plan.blockers_json, plan.library_strategy)
+    if conflict is not None:
+        conflict["override"] = deposit_override
     return ReproductionPlanResponse(
         id=plan.id,
         accessions=plan.accessions_json,
@@ -69,6 +80,9 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
         extractor_model=plan.extractor_model,
         extractor_provider=plan.extractor_provider,
         supported_finding_kinds=supported_finding_kinds(plan.pipeline_key),
+        deposit_conflict=conflict,
+        pipeline_installed=await _is_pipeline_installed(session, org_id, plan.pipeline_key),
+        pipeline_registry_name=_registry_name(plan.pipeline_key),
         comparison_targets=[
             ComparisonTargetResponse(
                 metric_key=t.metric_key,
@@ -80,6 +94,35 @@ def _plan_response(plan) -> ReproductionPlanResponse | None:
             for t in (plan.comparison_targets or [])
         ],
     )
+
+
+def _registry_name(pipeline_key: str | None) -> str | None:
+    """The bare nf-core name the install endpoint takes: ``nf-core/ampliseq`` -> ``ampliseq``."""
+    if not pipeline_key or not pipeline_key.startswith("nf-core/"):
+        return None
+    return pipeline_key.split("/", 1)[1] or None
+
+
+async def _is_pipeline_installed(session: AsyncSession, org_id: int, pipeline_key: str | None) -> bool | None:
+    """Whether this org's catalog holds ``pipeline_key`` and has it enabled.
+
+    Checked here, at read time, because a plan can be written long before it is approved and a
+    pipeline can be installed in between. Nothing checked it at all before, so an approved plan
+    naming a pipeline the instance lacked spent a whole fetchngs download before ``launch_run``
+    refused it.
+    """
+    if not pipeline_key:
+        return None
+    row = (
+        await session.execute(
+            select(PipelineCatalogEntry.id).where(
+                PipelineCatalogEntry.organization_id == org_id,
+                PipelineCatalogEntry.pipeline_key == pipeline_key,
+                PipelineCatalogEntry.enabled.is_(True),
+            )
+        )
+    ).first()
+    return row is not None
 
 
 def _study_title(study: ValidationStudy, paper_title: str | None) -> str:
@@ -126,7 +169,9 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         reproduction_plan_id=study.reproduction_plan_id,
         approved_by_user_id=study.approved_by_user_id,
         failure_reason=study.failure_reason,
-        plan=_plan_response(plan),
+        plan=await _plan_response(
+            session, plan, org_id, deposit_override=(study.evidence_json or {}).get("deposit_override")
+        ),
         evidence=study.evidence_json,
     )
 
@@ -351,6 +396,47 @@ async def override_samples(
     return await _study_response(session, study, org_id)
 
 
+@router.post("/{study_id}/use-deposit-pipeline", response_model=ValidationStudyResponse)
+async def use_deposit_pipeline(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Re-point a conflicted plan at the pipeline the deposit's own strategy names.
+
+    The primary way out of the deposit-contradicts-pipeline refusal, because it fixes the cause: the
+    paper's prose chose a pipeline that cannot read the deposited data, and the deposit names the one
+    that can. Approve-gated, since it decides what the compute will run.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    await _load(session, study_id, org_id)
+    await ReproductionPlanService.use_deposit_pipeline(session, study_id, org_id, user_id)
+    study = await _load(session, study_id, org_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/override-deposit", response_model=ValidationStudyResponse)
+async def override_deposit(
+    study_id: int,
+    data: DepositOverrideRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """ "The deposit is mislabelled, run it anyway": the second way out, kept deliberately harder.
+
+    Records who decided and why, so a verdict that later diverges can be argued against the choice
+    that produced it. Approve-gated, like the samples override it mirrors."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.override_deposit_conflict(
+        session, study_id, org_id, user_id, reason=data.reason
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
 @router.get("/{study_id}/finding-set/candidates")
 async def finding_set_candidates(
     study_id: int,
@@ -410,6 +496,26 @@ async def approve_plan(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     study = await ValidationStudyService.approve_plan(session, study_id, org_id, user_id)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/retry", response_model=ValidationStudyResponse)
+async def retry_study(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Retry a study that failed on infrastructure rather than on its paper.
+
+    Gated on ``lit_validation:approve`` rather than ``request`` because it spends compute: a study
+    whose data was already fetched resumes at ``setup`` and relaunches the analysis on the next tick.
+    One with nothing fetched returns to the C1 gate instead, so the re-fetch is approved by a human
+    rather than started by a button.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.retry_study(session, study_id, org_id, user_id)
     await session.commit()
     return await _study_response(session, study, org_id)
 

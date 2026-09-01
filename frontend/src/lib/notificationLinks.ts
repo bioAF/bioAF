@@ -73,6 +73,10 @@ export function notificationHref(n: NotificationLink): string | null {
       return fileId != null ? `/data/files?file=${fileId}` : null;
     case "reference_dataset":
       return entityId != null ? `/data/references/${entityId}` : null;
+    case "validation_study":
+      // A stopped study is announced so a human can retry it; the notification has to land on the
+      // page that carries the Retry control.
+      return entityId != null ? `/lab-knowledge/validation-studies/${entityId}` : null;
     default:
       return entityType ? SECTION_FOR_ENTITY[entityType] ?? null : null;
   }

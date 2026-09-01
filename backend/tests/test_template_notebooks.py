@@ -133,3 +133,51 @@ async def test_templates_ordered_by_sort_order(client, admin_token):
     assert notebooks[0]["category"] == "qc"
     expected = [t["name"] for t in sorted(BUILTIN_TEMPLATES, key=lambda t: t["sort_order"])]
     assert [n["name"] for n in notebooks] == expected
+
+
+# ---- Level-3 headless template contracts (study 13 regressions) ----
+#
+# Both defects below were found on the first real ATAC-seq Level-3 attempt, AFTER a 12-sample
+# pipeline had already succeeded, and neither surfaced as an error the platform could see.
+
+
+def _da_source() -> str:
+    import json
+    from pathlib import Path
+
+    from app.services import template_notebook_service as tns
+
+    nb = json.loads((Path(tns.PACKAGE_TEMPLATES_DIR) / "da_peaks_deseq2.ipynb").read_text())
+    return "\n".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "code")
+
+
+def test_da_template_resolves_sample_accessions_to_matrix_columns():
+    """A declared sample is an accession; nf-core names the column after the merged BAM.
+
+    `SRX9040493` vs `SRX9040493_REP1.mLb.clN.sorted.bam`. The notebook exact-matched, so all 12
+    samples were "missing" and it aborted on `stop("samples not in matrix")`, which is why
+    da_peaks_deseq2 had never once produced a result.
+    """
+    src = _da_source()
+    assert "resolve_col" in src, "the DA template must resolve accessions to matrix columns"
+    assert "startsWith(cols" in src, "resolution must be prefix-based, not exact"
+    # An ambiguous match must refuse rather than silently pick a column.
+    assert "cannot choose one" in src
+
+
+def test_da_template_honours_a_paired_design_like_the_bulk_template():
+    """`block_labels` was passed by the driver, declared nowhere, and read by nothing.
+
+    A plan declaring matched pairs (and passing validate_paired_designs) was analysed with
+    `~ condition`. The DA and bulk templates must agree on this, since both serve Level 3.
+    """
+    src = _da_source()
+    assert "block_labels" in src
+    assert "~ block + condition" in src
+
+    from app.services.template_notebook_service import BUILTIN_TEMPLATES
+
+    da = next(t for t in BUILTIN_TEMPLATES if t["local_file"] == "da_peaks_deseq2.ipynb")
+    parameters = da["parameters"]
+    assert isinstance(parameters, dict)
+    assert "block_labels" in parameters, "the driver passes block_labels; it must be declared"

@@ -737,6 +737,63 @@ async def test_scrnaseq_prefers_cellbender_over_plain_filtered(session, admin_us
 
 
 @pytest.mark.asyncio
+async def test_scrnaseq_asks_the_matrix_for_the_namespace_the_paper_deposited(
+    session, admin_user, scrna_run, pseudobulk_template
+):
+    """nf-core/scrnaseq's h5ad carries BOTH namespaces (Ensembl as the rownames, symbols in
+    `rowData$gene_symbol`), so which one the pseudobulk matrix should be keyed by is knowable: it is
+    the one the paper's confirmed finding set uses. Left unsent, the template's own default decided,
+    and a symbol-keyed paper met an Ensembl-keyed reproduction -- zero overlap, refused by the
+    concordance's namespace guard as `not_computed`, for a purely technical reason."""
+    await _h5ads(session, admin_user, scrna_run, ["SRX1_filtered_matrix.h5ad", "SRX2_filtered_matrix.h5ad"])
+    study, plan = await _scrna_study(session, admin_user, scrna_run)  # _CLAIM is namespace "symbol"
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["parameters"]["gene_id_namespace"] == "symbol"
+
+
+@pytest.mark.asyncio
+async def test_scrnaseq_asks_for_ensembl_when_the_paper_deposited_ensembl(
+    session, admin_user, scrna_run, pseudobulk_template
+):
+    """The FindingSet vocabulary spells it `ensembl_gene`; the template's parameter spells it
+    `ensembl`. Translating between them is this wiring's job, not the scientist's."""
+    claim = {
+        **_CLAIM,
+        "namespace": "ensembl_gene",
+        "finding_set": {
+            "kind": "gene",
+            "namespace": "ensembl_gene",
+            "n_sig": 1,
+            "entities": [{"id": "ENSG00000121410", "direction": "up"}],
+        },
+    }
+    await _h5ads(session, admin_user, scrna_run, ["SRX1_filtered_matrix.h5ad", "SRX2_filtered_matrix.h5ad"])
+    study, plan = await _study_with_plan(session, admin_user, scrna_run, claim=claim, pipeline_key="nf-core/scrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["parameters"]["gene_id_namespace"] == "ensembl"
+
+
+@pytest.mark.asyncio
+async def test_bulk_rnaseq_is_not_sent_a_namespace_it_does_not_declare(session, admin_user, analysis_run, de_template):
+    """The injector REBUILDS the parameters cell from the template's declared dict merged with the
+    overrides, so a parameter the bulk template never declares would be injected into an R cell that
+    does not read it. Only the route whose template declares it gets it."""
+    await _count_matrix_file(session, admin_user, analysis_run)
+    study, plan = await _study_with_plan(session, admin_user, analysis_run)
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert "gene_id_namespace" not in level3["parameters"]
+
+
+@pytest.mark.asyncio
 async def test_scrnaseq_supported_kinds_are_declared():
     from app.services.validation_level3_service import supported_finding_kinds
 
@@ -746,3 +803,186 @@ async def test_scrnaseq_supported_kinds_are_declared():
     assert supported_finding_kinds("nf-core/atacseq") == ["interval"]
     assert supported_finding_kinds("nf-core/fetchngs") == []
     assert supported_finding_kinds(None) == []
+
+
+# ---- nf-core/smrnaseq (plan_1 step 2): the same DESeq2 notebook, a different matrix ----
+
+# Everything nf-core/smrnaseq 2.4.1 publishes into `mirna_quant/mirtop/`. Only the first is a
+# features x samples matrix; the other two are the long-form and per-sample intermediates that
+# produced it, and a rule matching "*.tsv under mirtop" would take whichever the database yielded.
+_MIRNA_MATRIX = "mirna.tsv"
+_MIRTOP_JOINED = "joined_samples_mirtop.tsv"
+_MIRTOP_RAW = "SRX1_rawData.tsv"
+
+
+@pytest_asyncio.fixture
+async def smrna_run(session, admin_user):
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/smrnaseq",
+        pipeline_version="2.4.1",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_reproduces_a_gene_finding_from_the_mirtop_matrix(session, admin_user, smrna_run, de_template):
+    """smrnaseq needs no new notebook: `mirna.tsv` is a `miRNA` column plus per-sample integer
+    counts, which is exactly what the bulk DESeq2 template already consumes. The id column is the
+    only thing that differs, and it is declared rather than left to the column-0 fallback."""
+    f = await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRNA_MATRIX}", _MIRNA_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["template_id"] == de_template.id
+    assert level3["input_file_ids"] == [f.id]
+    assert level3["kind"] == "gene"
+    params = level3["parameters"]
+    assert params["counts_path"].endswith(_MIRNA_MATRIX)
+    assert params["id_column"] == "miRNA"
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_picks_the_merged_matrix_and_none_of_its_siblings(session, admin_user, smrna_run, de_template):
+    """Three .tsv files land in the same published directory. Two of them are intermediates whose
+    columns are not samples, so feeding either to DESeq2 would produce a confident wrong answer."""
+    joined = await _file_at(
+        session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_JOINED}", _MIRTOP_JOINED
+    )
+    raw = await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_RAW}", _MIRTOP_RAW)
+    matrix = await _file_at(
+        session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRNA_MATRIX}", _MIRNA_MATRIX
+    )
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [matrix.id]
+    assert joined.id not in level3["input_file_ids"]
+    assert raw.id not in level3["input_file_ids"]
+
+
+@pytest.mark.asyncio
+async def test_smrnaseq_declines_when_the_run_published_no_mirtop_matrix(session, admin_user, smrna_run, de_template):
+    """A run that produced only intermediates has nothing to reproduce from, and says so rather
+    than degrading to whichever table it can find."""
+    await _file_at(session, admin_user, smrna_run, f"gs://b/run/mirna_quant/mirtop/{_MIRTOP_JOINED}", _MIRTOP_JOINED)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    decision = await resolve_level3(session, study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "no_input_file"
+    assert decision.reason is not None and "smrnaseq" in decision.reason
+
+
+@pytest.mark.asyncio
+async def test_a_bulk_rnaseq_matrix_does_not_satisfy_the_smrnaseq_route(session, admin_user, smrna_run, de_template):
+    """`smrnaseq` contains `rnaseq`, the same trap scrnaseq set. A salmon gene-count matrix is not
+    a miRNA matrix and must not be silently accepted as one."""
+    await _file_at(session, admin_user, smrna_run, f"gs://b/run/star_salmon/{_SALMON_MATRIX}", _SALMON_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, smrna_run, pipeline_key="nf-core/smrnaseq")
+
+    decision = await resolve_level3(session, study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "no_input_file"
+
+
+def test_smrnaseq_offers_a_gene_finding_set_at_the_gate():
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assert supported_finding_kinds("nf-core/smrnaseq") == ["gene"]
+
+
+# ---- nf-core/ampliseq (plan_1 step 4): microbiome, the same DESeq2 notebook again ----
+
+_ASV_MATRIX = "ASV_table.tsv"
+# Published into the same directory by the same process. `DADA2_table.tsv` is the identical table
+# with the raw sequence appended as a trailing column, so it parses and it is not a count matrix.
+_DADA2_TABLE = "DADA2_table.tsv"
+_DADA2_STATS = "DADA2_stats.tsv"
+
+
+@pytest_asyncio.fixture
+async def ampliseq_run(session, admin_user):
+    run = PipelineRun(
+        organization_id=admin_user.organization_id,
+        submitted_by_user_id=admin_user.id,
+        pipeline_name="nf-core/ampliseq",
+        pipeline_version="2.18.0",
+        status="completed",
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+@pytest.mark.asyncio
+async def test_ampliseq_reproduces_a_gene_finding_from_the_asv_table(session, admin_user, ampliseq_run, de_template):
+    """A microbiome finding is "these taxa changed", which is an id with a direction and a
+    significance: the same comparison family a DEG list is, so E6 needs no new code. ASV_table.tsv
+    is an ASV_ID column followed by per-sample integer counts."""
+    f = await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_ASV_MATRIX}", _ASV_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, ampliseq_run, pipeline_key="nf-core/ampliseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["template_id"] == de_template.id
+    assert level3["input_file_ids"] == [f.id]
+    assert level3["parameters"]["id_column"] == "ASV_ID"
+
+
+@pytest.mark.asyncio
+async def test_ampliseq_does_not_take_the_table_that_carries_the_sequence_column(
+    session, admin_user, ampliseq_run, de_template
+):
+    """DADA2_table.tsv is ASV_table.tsv plus a trailing `sequence` column of raw nucleotides. Handed
+    to DESeq2 as a matrix it would coerce that column to NA and quietly analyse a phantom sample."""
+    await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_DADA2_TABLE}", _DADA2_TABLE)
+    await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_DADA2_STATS}", _DADA2_STATS)
+    matrix = await _file_at(session, admin_user, ampliseq_run, f"gs://b/run/dada2/{_ASV_MATRIX}", _ASV_MATRIX)
+    study, plan = await _study_with_plan(session, admin_user, ampliseq_run, pipeline_key="nf-core/ampliseq")
+
+    level3 = await build_level3_inputs(session, study, plan)
+
+    assert level3 is not None
+    assert level3["input_file_ids"] == [matrix.id]
+
+
+def test_ampliseq_offers_a_gene_finding_set_at_the_gate():
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assert supported_finding_kinds("nf-core/ampliseq") == ["gene"]
+
+
+@pytest.mark.asyncio
+async def test_peak_matrix_resolves_past_the_featurecounts_summary_sidecar(session, admin_user, chip_run, da_template):
+    """featureCounts always writes `<matrix>.summary` beside its matrix, and it is not a matrix.
+
+    Both files contain "consensus", "featurecounts" and ".mlb.", so the contains-rule matched the
+    pair and Level 3 refused with `ambiguous_input_file`. That is what happened on study 13, the
+    first real ATAC-seq Level-3 attempt, AFTER the full 12-sample pipeline had already succeeded:
+    the run cost ~10 hours of compute and was thrown away at the last step by a sidecar file.
+    """
+    matrix = await _count_matrix_file(session, admin_user, chip_run, filename=_NFCORE_CONSENSUS)
+    await _count_matrix_file(session, admin_user, chip_run, filename=f"{_NFCORE_CONSENSUS}.summary")
+    study, plan = await _study_with_plan(
+        session,
+        admin_user,
+        chip_run,
+        design=_INTERVAL_DESIGN,
+        claim=_INTERVAL_CLAIM,
+        pipeline_key="nf-core/atacseq",
+    )
+    level3 = await build_level3_inputs(session, study, plan)
+    assert level3 is not None, "the summary sidecar must not make the real matrix ambiguous"
+    assert level3["input_file_ids"] == [matrix.id]

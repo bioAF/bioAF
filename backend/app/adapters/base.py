@@ -53,6 +53,35 @@ class ComputeProvider(ABC):
         """
         return None
 
+    async def get_regional_quotas(self, region: str | None = None) -> dict | None:
+        """Report the region's resource quotas, or None when unknown.
+
+        Keyed by cloud metric name (``SSD_TOTAL_GB``, ``CPUS``, ...) with
+        `cluster_quota.QuotaMetric` values. None means "could not be read": no
+        reader on this backend, no credentials, or the cloud call failed.
+
+        Returning None rather than raising is deliberate. The Components page
+        calls this on every render, and a backend that cannot answer must
+        degrade the preflight to "unverified", never make the page unusable.
+        """
+        return None
+
+    async def get_task_terminations(self, run_id: int, namespace: str = "") -> list | None:
+        """How a run's task containers died, or None when unknowable.
+
+        None means the backend could not be asked, which is distinct from "nothing
+        died" and callers must treat it so.
+        """
+        return None
+
+    async def get_task_scheduling(self, run_id: int, namespace: str = "") -> dict | None:
+        """Whether a run's task pods can be placed, or None when unknowable.
+
+        None is not "fine": it means the backend could not be asked, and callers
+        must not act on it. Backends with no notion of pod scheduling return None.
+        """
+        return None
+
     @abstractmethod
     async def submit_job(self, job_spec: dict) -> JobSubmitResult:
         """Submit a pipeline job. Returns a JobSubmitResult."""

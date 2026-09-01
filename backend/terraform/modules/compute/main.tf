@@ -9,6 +9,46 @@ terraform {
   backend "gcs" {}
 }
 
+# --- Egress for private nodes ---
+#
+# Every GKE node used to take a regional external IP address. That quota is 8 in a
+# default project, so the pipeline pool could never exceed 3-4 nodes regardless of
+# what disk or CPU quota allowed, and scale-up failed with QUOTA_EXCEEDED on
+# `regional_in_use_addresses`: a constraint nothing in the product measured.
+#
+# Private nodes remove the ceiling rather than raising it, and a compute node has no
+# reason to be reachable from the internet. But a private node with no NAT has NO
+# outbound access at all, which breaks container image pulls, the Ensembl reference
+# URLs the pipelines fetch, and cloning nf-core from GitHub. NAT is required for the
+# change to be safe, not an optimisation on top of it.
+
+resource "google_compute_router" "bioaf" {
+  name    = "bioaf-${var.org_slug}-${var.stack_uid}-router"
+  project = var.project_id
+  region  = var.region
+  network = "default"
+}
+
+resource "google_compute_router_nat" "bioaf" {
+  name    = "bioaf-${var.org_slug}-${var.stack_uid}-nat"
+  project = var.project_id
+  region  = var.region
+  router  = google_compute_router.bioaf.name
+
+  # Let GCP allocate and scale the NAT addresses. Pinning them would reintroduce the
+  # address quota this change exists to escape.
+  nat_ip_allocate_option = "AUTO_ONLY"
+
+  # The cluster runs on the default VPC's subnets, and pod IPs are a secondary range
+  # on the same subnet, so both must be able to egress.
+  source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
+
+  log_config {
+    enable = false
+    filter = "ERRORS_ONLY"
+  }
+}
+
 # --- GKE Cluster ---
 
 resource "google_container_cluster" "bioaf" {
@@ -83,11 +123,21 @@ resource "google_container_node_pool" "pipelines" {
     location_policy = "ANY"
   }
 
+  # No public IP. See the Cloud NAT block above: this is what frees the node from the
+  # regional external-address quota, and NAT is what keeps its egress working.
+  network_config {
+    enable_private_nodes = true
+  }
+
+  # NAT must exist before a private node does, or it comes up unable to pull its own
+  # container images.
+  depends_on = [google_compute_router_nat.bioaf]
+
   node_config {
     machine_type = var.k8s_pipeline_machine_type
     spot         = var.k8s_pipeline_use_spot
-    disk_size_gb = 100
-    disk_type    = "pd-standard"
+    disk_size_gb = var.k8s_pipeline_disk_size_gb
+    disk_type    = var.k8s_pipeline_disk_type
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
@@ -164,6 +214,16 @@ resource "google_container_node_pool" "system" {
     location_policy      = "ANY"
   }
 
+  # No public IP. See the Cloud NAT block above: this is what frees the node from the
+  # regional external-address quota, and NAT is what keeps its egress working.
+  network_config {
+    enable_private_nodes = true
+  }
+
+  # NAT must exist before a private node does, or it comes up unable to pull its own
+  # container images.
+  depends_on = [google_compute_router_nat.bioaf]
+
   node_config {
     machine_type = var.k8s_system_machine_type
     disk_size_gb = 30
@@ -199,6 +259,16 @@ resource "google_container_node_pool" "interactive" {
     max_node_count  = var.k8s_interactive_max_nodes
     location_policy = "ANY"
   }
+
+  # No public IP. See the Cloud NAT block above: this is what frees the node from the
+  # regional external-address quota, and NAT is what keeps its egress working.
+  network_config {
+    enable_private_nodes = true
+  }
+
+  # NAT must exist before a private node does, or it comes up unable to pull its own
+  # container images.
+  depends_on = [google_compute_router_nat.bioaf]
 
   node_config {
     machine_type = var.k8s_interactive_machine_type
@@ -251,6 +321,16 @@ resource "google_container_node_pool" "pipeline_head" {
     max_node_count  = var.k8s_pipeline_head_max_nodes
     location_policy = "ANY"
   }
+
+  # No public IP. See the Cloud NAT block above: this is what frees the node from the
+  # regional external-address quota, and NAT is what keeps its egress working.
+  network_config {
+    enable_private_nodes = true
+  }
+
+  # NAT must exist before a private node does, or it comes up unable to pull its own
+  # container images.
+  depends_on = [google_compute_router_nat.bioaf]
 
   node_config {
     machine_type = var.k8s_pipeline_head_machine_type

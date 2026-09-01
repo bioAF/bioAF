@@ -14,6 +14,7 @@ from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services.audit_service import log_action
+from app.services.pipeline_mapper import declared_route_version, deposit_conflict, is_library_strategy_conflict
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 
@@ -89,6 +90,14 @@ def validate_paired_designs(design: dict) -> list[str]:
     return errors
 
 
+def _clamp(value, limit: int):
+    """``value`` cut to what its column holds, or None. Never raises on a long string."""
+    if value is None:
+        return None
+    text = str(value)
+    return text if len(text) <= limit else text[:limit]
+
+
 class ReproductionPlanService:
     @staticmethod
     async def create_plan(
@@ -110,6 +119,7 @@ class ReproductionPlanService:
         blockers: list | None = None,
         extractor_model: str | None = None,
         extractor_provider: str | None = None,
+        library_strategy: str | None = None,
     ) -> ReproductionPlan:
         """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
         plan = ReproductionPlan(
@@ -128,6 +138,7 @@ class ReproductionPlanService:
             blockers_json=blockers if blockers is not None else [],
             extractor_model=extractor_model,
             extractor_provider=extractor_provider,
+            library_strategy=_clamp(library_strategy, 100),
         )
         session.add(plan)
         await session.flush()
@@ -146,6 +157,12 @@ class ReproductionPlanService:
                 "pipeline_key": pipeline_key,
                 "mapping_confidence": mapping_confidence,
                 "accession_count": len(plan.accessions_json or []),
+                # What the deposited accession declared itself to be, which is what chose the
+                # pipeline whenever it disagreed with the paper. Always recorded, including as None:
+                # a strategy that AGREED with the prose leaves no other trace anywhere, so without
+                # this nothing could answer "was the deposit read for this study, and what did it
+                # say". None means unread or ambiguous, which is a different state from absent.
+                "library_strategy": library_strategy,
             },
         )
         return plan
@@ -154,7 +171,15 @@ class ReproductionPlanService:
     async def add_comparison_targets(
         session: AsyncSession, plan: ReproductionPlan, targets: list[dict]
     ) -> list[ComparisonTarget]:
-        """Attach the paper's quantitative claims (B2d) to ``plan`` as ComparisonTargets."""
+        """Attach the paper's quantitative claims (B2d) to ``plan`` as ComparisonTargets.
+
+        Every text field is clamped to its column. These values are a model's reading of a methods
+        section rather than a controlled vocabulary, so their length is not something bioAF gets to
+        assume: one over-long unit raised inside the insert, rolled the whole extraction back, and
+        left a real paper unplannable behind a 500 (10.1038/s41598-023-33729-4, 2026-08-30). A
+        clipped unit is a worse record of a claim than a full one; it is a far better one than no
+        plan at all.
+        """
         created: list[ComparisonTarget] = []
         for t in targets:
             metric_key = (t.get("metric_key") or "").strip()
@@ -162,11 +187,11 @@ class ReproductionPlanService:
                 continue
             target = ComparisonTarget(
                 reproduction_plan_id=plan.id,
-                metric_key=metric_key,
+                metric_key=_clamp(metric_key, 100),
                 claimed_value=t.get("claimed_value"),
-                unit=t.get("unit"),
+                unit=_clamp(t.get("unit"), 255),
                 tolerance=t.get("tolerance"),
-                source_locator=t.get("source_locator"),
+                source_locator=_clamp(t.get("source_locator"), 255),
             )
             session.add(target)
             created.append(target)
@@ -193,6 +218,82 @@ class ReproductionPlanService:
                 .options(selectinload(ReproductionPlan.comparison_targets))
             )
         ).scalar_one_or_none()
+
+    @staticmethod
+    async def use_deposit_pipeline(session: AsyncSession, study_id: int, org_id: int, user_id: int) -> ReproductionPlan:
+        """Re-point a conflicted plan at the pipeline the deposit's own strategy names.
+
+        The way OUT of the deposit-contradicts-pipeline refusal that fixes its cause. The paper's
+        prose chose a pipeline the deposited data cannot be read by; the deposit names the one that
+        can, and in the common case the deposit is simply right. Re-pointing is therefore the
+        primary action at the gate and the override is the secondary one: an override that is easier
+        to click than the correction becomes the default, and then the guard means nothing.
+
+        The version is re-pinned from the declared route rather than carried over, because the
+        pinned version is what the catalog installs and what a rerun reproduces. Only the conflict
+        blocker is cleared; the advisory ones are still what the scientist has to weigh.
+        """
+        from app.services.pipeline_assay_fallback import _candidates, _offer_by_key
+
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if not study:
+            raise HTTPException(404, "Validation study not found")
+        if study.state != "plan_ready":
+            raise HTTPException(
+                400,
+                f"Cannot change the plan's pipeline from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        if plan is None:
+            raise HTTPException(404, "No reproduction plan for this study.")
+
+        conflict = deposit_conflict(plan.blockers_json, plan.library_strategy)
+        if conflict is None:
+            raise HTTPException(400, "This plan does not contradict what the deposit says its data is.")
+        suggested = conflict["suggested_pipeline_key"]
+        if not suggested:
+            raise HTTPException(
+                400,
+                f"The deposit says this data is {conflict['library_strategy']}, which names no single "
+                "pipeline to move to. Choose a different accession, or record why this one should run anyway.",
+            )
+
+        # A route has to pin a version: it is what the catalog installs, what the gate's install
+        # control needs to be clickable, and what a rerun reproduces. Refuse rather than write a null
+        # one, which would repoint the plan onto a pipeline the gate could then not offer to install.
+        offer = await _offer_by_key(session, org_id, await _candidates(session, org_id), suggested)
+        version = offer[1] if offer else declared_route_version(suggested)
+        if not version:
+            raise HTTPException(
+                400,
+                f"{suggested} reads {conflict['library_strategy']} data, but this bioAF has no version "
+                "of it to move to: it is neither installed nor in the nf-core registry cache.",
+            )
+
+        previous = plan.pipeline_key
+        plan.pipeline_key = suggested
+        plan.pipeline_version = version
+        plan.blockers_json = [b for b in (plan.blockers_json or []) if not is_library_strategy_conflict(b)]
+        plan.mapping_notes = (
+            f"{plan.mapping_notes or ''}\nRe-pointed from {previous} to {suggested} because "
+            f"{conflict['library_strategy']} is what the deposit says this data is."
+        ).strip()
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study_id,
+            action="plan_repointed_to_deposit_pipeline",
+            details={"from": previous, "to": suggested, "library_strategy": conflict["library_strategy"]},
+            previous_value={"pipeline_key": previous},
+        )
+        return plan
 
     @staticmethod
     async def set_differential_design(

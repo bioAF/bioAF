@@ -14,6 +14,7 @@ production seam.
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,10 +23,17 @@ from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services import llm_provider_config_service
+from app.services.literature.accession_manifest_service import (
+    AccessionManifestService,
+    dominant_library_strategy,
+)
 from app.services.llm_provider_clients import get_client
-from app.services.pipeline_mapper import map_method
+from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
+from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
+
+logger = logging.getLogger("bioaf.validation_extraction")
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
@@ -57,6 +65,12 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
         f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "
         "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown.\n\n"
+        "For reference_build, give BOTH the genome assembly and the ANNOTATION the paper aligned "
+        'against, exactly as the paper words it (e.g. "GRCh38 / GENCODE v32", "mm10 / Ensembl 102", '
+        '"CellRanger refdata-gex-GRCh38-2020-A"). The assembly alone is not the reference: two papers '
+        "on the same assembly with different annotation releases do not share a gene set, and that "
+        "difference lands in the differential result we are compared against. Leave it empty if the "
+        "paper does not say.\n\n"
         "Also capture the paper's PRIMARY DIFFERENTIAL DESIGN in differential_design: the contrast(s) it "
         "tests (which condition is compared against which reference), the sample ids belonging to each "
         "group, and the significance thresholds it used (|log2 fold-change| and adjusted p / FDR). This is "
@@ -95,23 +109,106 @@ def _to_float(value) -> float | None:
 # plan.reference_genome must be a controlled-vocabulary token or launch_run 422s at the setup gate and
 # errors the study. Map common aliases to the canonical assembly token; an unrecognized build resolves
 # to None (the launch picks a default) rather than a value guaranteed to fail validation.
+#
+# Only the CURRENT assembly of each organism is recognized, and deliberately: Zv9 is not GRCz11 and
+# Rnor_6.0 is not mRatBN7.2, so folding an older spelling onto the current token would align against
+# a genome the paper never used and report the difference as biology. An unrecognized build resolves
+# to None and the plan carries a blocker saying so.
 _REFERENCE_GENOME_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("grch38", "hg38"), "GRCh38"),
     (("grch37", "hg19"), "GRCh37"),
     (("grcm39", "mm39"), "GRCm39"),
     (("grcm38", "mm10"), "GRCm38"),
     (("t2t", "chm13"), "T2T-CHM13"),
+    (("grcz11", "danrer11"), "GRCz11"),
+    (("mratbn7", "rn7"), "mRatBN7.2"),
+    # BDGP6 is the assembly FAMILY: Ensembl publishes point releases (BDGP6.32, BDGP6.46) that share
+    # a coordinate system and differ in annotation. The token names the family and the launch pins
+    # one release, exactly as GRCh38 pins Ensembl 112; `reference_build` keeps the paper's own words
+    # beside it so an annotation-driven divergence can still be attributed.
+    (("bdgp6", "dm6"), "BDGP6"),
+    (("wbcel235", "ce11"), "WBcel235"),
+    (("tair10",), "TAIR10"),
 )
 
 
-def _normalize_reference_genome(raw) -> str | None:
+def _builds_named_in(raw) -> list[str]:
+    """Every assembly ``raw`` names, in the order the PAPER names them.
+
+    Scanning the alias table in declaration order made bioAF's own row ordering decide the answer.
+    A real paper (10.1038/s41598-023-33729-4) writes "Human hg19, UCSC (RNA-seq annotation); hg38
+    implied for EPIC array", and the plan recorded GRCh38 because GRCh38 is the first row. Nothing
+    about the paper said so.
+
+    Ordering by position in the TEXT is a claim about the paper instead: a methods section states
+    the build it primarily worked in before the ones it mentions in passing. Two spellings of one
+    assembly ("GRCh38 (hg38)") collapse to a single entry, so they are never a disagreement.
+    """
     text = str(raw or "").lower()
     if not text.strip():
-        return None
+        return []
+    found: list[tuple[int, str]] = []
     for needles, token in _REFERENCE_GENOME_ALIASES:
-        if any(n in text for n in needles):
-            return token
-    return None
+        positions = [text.index(n) for n in needles if n in text]
+        if positions:
+            found.append((min(positions), token))
+    return [token for _at, token in sorted(found)]
+
+
+def _normalize_reference_genome(raw) -> str | None:
+    """The assembly the paper names FIRST, or None when it names none bioAF recognizes."""
+    builds = _builds_named_in(raw)
+    return builds[0] if builds else None
+
+
+def reference_genome_alternatives(raw) -> list[str]:
+    """The other assemblies the paper named, which the run will NOT align against.
+
+    A multi-assay paper naming a build per assay is the normal case, and one of them is about to be
+    chosen for a run that costs money. Empty when the paper names one assembly, or none.
+    """
+    return _builds_named_in(raw)[1:]
+
+
+async def scoped_library_strategy(study: ValidationStudy) -> str | None:
+    """What the accession this study was scoped to says its data actually IS, or None.
+
+    The paper is prose and prose is compound: a methods section saying "RRBS and RNA-seq" gives the
+    mapper one string naming two assays, and the first declared marker wins. The deposit is not
+    prose. ENA records a controlled ``library_strategy`` per run, chosen by the depositor, and where
+    it contradicts the prose it is the better evidence.
+
+    Best-effort in both directions. Nothing is fetched when no accession has been scoped, and an
+    unreachable or multi-assay deposit yields None, which leaves the paper's own words deciding
+    exactly as they did before. A study is never blocked on this lookup.
+    """
+    requested = (study.source_accession or "").strip()
+    if not requested:
+        logger.info("study %s: no accession scoped, so the paper's own words decide the pipeline", study.id)
+        return None
+    try:
+        manifest = await AccessionManifestService.fetch_manifest(requested)
+    except Exception:  # fetch_manifest documents never-raises; a regression there must not error a study
+        logger.warning("study %s: reading %s to learn its library strategy failed", study.id, requested, exc_info=True)
+        return None
+
+    strategy = dominant_library_strategy(manifest.samples)
+    if strategy:
+        logger.info("study %s: %s is deposited as %r", study.id, requested, strategy)
+    else:
+        declared = sorted({(s.get("library_strategy") or "").strip() for s in manifest.samples} - {""})
+        why = (
+            f"its runs declare more than one ({', '.join(declared)})"
+            if len(declared) > 1
+            else (manifest.unavailable_reason or "its runs declare no library strategy")
+        )
+        logger.info(
+            "study %s: %s says nothing usable about what it is (%s), so the paper's own words decide",
+            study.id,
+            requested,
+            why,
+        )
+    return strategy
 
 
 def _str_or_none(value) -> str | None:
@@ -230,23 +327,78 @@ class ValidationExtractionService:
         parsed = parse_extraction(output)
 
         method = parsed["method"]
-        mapping = map_method(method.get("assay"), method.get("tools"), method.get("reference_build"))
+        library_strategy = await scoped_library_strategy(study)
+        # Declared routes first, corrected by what the scoped accession says its data is; anything
+        # else is matched against the pipelines this instance can actually run, so a lab that
+        # installed the right pipeline is not told its paper is unreproducible. A fallback match is
+        # capped at Level-2 by having no _WIRING entry.
+        mapping = await resolve_pipeline_for_assay(
+            session,
+            org_id,
+            method.get("assay"),
+            method.get("tools"),
+            method.get("reference_build"),
+            # What the scoped deposit declares itself to be. It outranks the paper's prose where the
+            # two disagree, which is the only reason a multi-assay paper can reach the right pipeline.
+            library_strategy=library_strategy,
+        )
 
         blockers = list(parsed["blockers"]) + list(mapping.blockers)
+
+        # The deposit could not be honoured: `resolve_pipeline_for_assay` can only offer a pipeline
+        # this instance is able to run, so where the right one is neither installed nor in the
+        # registry cache the paper's prose route stands and would read the wrong data. Record it as a
+        # blocker rather than as a classification: the study is still reproducible, this instance
+        # just cannot do it yet, and the C1 gate is where a human decides what to do about that.
+        conflict = library_strategy_conflict(mapping.pipeline_key, library_strategy)
+        if conflict:
+            blockers.append(conflict)
+
         if parsed["parse_failure"]:
             blockers.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]
+
+        # A requester who named the study's accession has already scoped it, so that is the dataset
+        # to reproduce. The extractor's list is a reading of the paper's prose, and prose does not
+        # distinguish the data a paper DEPOSITS from the data it merely cites: for
+        # 10.1038/s41598-021-93509-w the model returned its own GSE157174 plus GSE114064
+        # (transcriptomic) and GSE118189 (another lab's ATAC), and since no endpoint edits
+        # `accessions_json`, approving would have fetched all three.
+        #
+        # The requested accession wins even when the model did not return it, because the paper is
+        # often not open access and the requester can know what the extracted text does not say.
+        requested = (study.source_accession or "").strip()
+        if requested:
+            dropped = [a for a in accessions if a.strip().upper() != requested.upper()]
+            accessions = [requested]
+            if dropped:
+                blockers.append(
+                    f"The paper also names {', '.join(dropped)}, which is not the accession this "
+                    f"study was requested for ({requested}). Only {requested} will be fetched."
+                )
+
         if (parsed["data_availability"] == "none" or not accessions) and not any(
             "accession" in b.lower() for b in blockers
         ):
             blockers.append("no data accession found in the paper")
 
         raw_genome = method.get("reference_build")
-        reference_genome = _normalize_reference_genome(raw_genome)
+        named_builds = _builds_named_in(raw_genome)
+        reference_genome = named_builds[0] if named_builds else None
         if raw_genome and reference_genome is None:
             blockers.append(
                 f"could not map the paper's reference genome '{raw_genome}' to a known assembly; "
                 "the analysis run will use a default"
+            )
+        # A paper that ran several assays names a build per assay, and only one of them can be what
+        # this run aligns against. Say which was taken and which were not, because the choice is
+        # made from word order in a methods section and a scientist can see in one glance whether
+        # it is the build their own dataset used.
+        if len(named_builds) > 1:
+            blockers.append(
+                f"The paper names more than one reference genome ({', '.join(named_builds)}). "
+                f"{named_builds[0]} was taken, because the paper names it first. Confirm it is the build "
+                f"this dataset was aligned to before approving."
             )
 
         plan = await ReproductionPlanService.create_plan(
@@ -268,11 +420,20 @@ class ValidationExtractionService:
             # cause (CellRanger vs STARsolo) instead of merely reported.
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
             reference_genome=reference_genome,
+            # The controlled token collapses "GRCh38 / Gencode 29" and "GRCh38 / Ensembl 112" onto
+            # one value, and the ANNOTATION is the half that decides which genes exist and what they
+            # are called. Keep the paper's own words beside it: a DEG concordance can diverge purely
+            # because two correct gene sets came from different annotation releases, and that is an
+            # attribution a verdict should be able to make rather than blame on the science.
+            reference_build=_str_or_none(raw_genome),
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,
             blockers=blockers,
             extractor_model=cfg.model,
             extractor_provider=cfg.provider,
+            # Audited, so the deposit's own declaration is on the record even when it agreed with the
+            # paper and left no other trace.
+            library_strategy=library_strategy,
         )
 
         targets = []
