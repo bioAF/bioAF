@@ -111,6 +111,41 @@ _STOPWORDS = frozenset(
     }
 )
 
+# Tools every pipeline in the catalog runs. A methods section lists its plumbing alongside its
+# science, and the plumbing says nothing about which pipeline to run: a paper naming samtools has
+# named what every workflow here uses to read a BAM.
+#
+# Rarity cannot catch these on its own, and that was measured rather than assumed. nf-core/hgtseq
+# declares `fastqc`, `multiqc` and `samtools` as its own TOPICS, so those words are rare in the
+# registry even though they are universal in practice, and a paper listing its QC tools was routed
+# to a horizontal-gene-transfer pipeline. Frequency in a topic list is not frequency in the world.
+_UBIQUITOUS_TOOLS = frozenset(
+    {
+        "samtools",
+        "bcftools",
+        "htslib",
+        "bedtools",
+        "picard",
+        "fastqc",
+        "multiqc",
+        "fastp",
+        "trimmomatic",
+        "cutadapt",
+        "trim galore",
+        "seqtk",
+        "bwa",
+        "bwa mem",
+        "bowtie",
+        "bowtie2",
+        "nextflow",
+        "docker",
+        "singularity",
+        "conda",
+        "python",
+        "r",
+    }
+)
+
 # A candidate must clear this to be offered at all, and the threshold is set so that ONE topic hit
 # on its own does not. nf-core topics carry disease and organism words ("cancer", "human") as well
 # as assay words, so a paper that merely says "cancer" would otherwise be routed to whichever
@@ -121,6 +156,13 @@ _MIN_SCORE = 4
 _SCORE_NAME = 4  # the pipeline's own name appears in the paper's text
 _SCORE_DESCRIPTION = 1  # a distinctive word shared with the description
 _MAX_DESCRIPTION_SCORE = 2
+
+# A tool the paper's methods named, which the candidate names too. Weighted by rarity like a topic,
+# because "STAR" is used by half the RNA catalog and "Bismark" is used by one pipeline.
+#
+# Capped, because a methods section lists every tool it touched. Eight generic ones agreeing is not
+# eight times the evidence, and an uncapped sum would let a toolbox description out-argue the assay.
+_MAX_TOOL_SCORE = 4.0
 
 # ---- what a declared topic is worth, which is what its RARITY says it is worth ----
 #
@@ -202,6 +244,64 @@ def _diagnostic_topics(topics: list[str], family: tuple[str, ...]) -> list[str]:
     return [t for t in topics if not any(marker_matches(m, _phrase(t)) for m in folded_family)]
 
 
+def _candidate_text(candidate: _Candidate) -> str:
+    """Everything the registry says about a pipeline, folded: its name, its topics, its description."""
+    return _phrase(" ".join([candidate.name, *candidate.topics, candidate.description]))
+
+
+def _tool_phrases(tools: list[str] | None) -> list[str]:
+    """The paper's tool names, folded and kept WHOLE.
+
+    Never split. "STAR-Fusion" folds to "star fusion" and stays one phrase, because splitting it
+    yields "star", which nf-core/rnaseq's own description names, and the fusion paper would score
+    the bulk pipeline. That is the same defect as matching `transcriptom` inside
+    `metatranscriptomics`, one field along.
+    """
+    seen: list[str] = []
+    for tool in tools or []:
+        phrase = _phrase(tool)
+        if len(phrase) > 2 and phrase not in _STOPWORDS and phrase not in _UBIQUITOUS_TOOLS and phrase not in seen:
+            seen.append(phrase)
+    return seen
+
+
+def _named_tools(candidate: _Candidate, tool_phrases: list[str]) -> list[str]:
+    """Which of the paper's tools this candidate names, matched as whole tokens at both ends.
+
+    The trailing anchor is what the leading one alone does not give: `rmats` starts a word inside
+    nothing, but a paper naming "STAR" would otherwise be credited to every pipeline whose
+    description says "STARsolo". The leading anchor is what keeps `rmats` out of "image formats".
+    """
+    text = _candidate_text(candidate)
+    return [t for t in tool_phrases if re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", text)]
+
+
+def _weights_by_frequency(counts: Counter, population: int) -> dict[str, float]:
+    """Inverse document frequency over ``population`` candidates, bounded to the topic scale."""
+    common = max(_COMMON_TOPIC_MINIMUM, round(population * _COMMON_TOPIC_SHARE))
+    span = math.log(common)
+    return {
+        key: _TOPIC_WEIGHT_FLOOR
+        + (_TOPIC_WEIGHT_CEILING - _TOPIC_WEIGHT_FLOOR) * max(0.0, min(1.0, math.log(common / count) / span))
+        for key, count in counts.items()
+    }
+
+
+def _tool_weights(candidates: list[_Candidate], tool_phrases: list[str]) -> dict[str, float]:
+    """What each of the paper's tools is worth, from how many pipelines name it.
+
+    Same rarity rule as a topic, and for the same reason: half the RNA catalog names STAR and one
+    pipeline names Bismark, so the two cannot count the same.
+    """
+    if not tool_phrases:
+        return {}
+    counts = Counter()
+    for candidate in candidates:
+        for tool in _named_tools(candidate, tool_phrases):
+            counts[tool] += 1
+    return _weights_by_frequency(counts, len(candidates))
+
+
 def _topic_weights(candidates: list[_Candidate]) -> dict[str, float]:
     """How much each declared topic is worth, from how many pipelines declare it.
 
@@ -209,17 +309,16 @@ def _topic_weights(candidates: list[_Candidate]) -> dict[str, float]:
     weights and the candidates can never be out of step with each other.
     """
     counts = Counter(topic for candidate in candidates for topic in set(candidate.topics))
-    common = max(_COMMON_TOPIC_MINIMUM, round(len(candidates) * _COMMON_TOPIC_SHARE))
-    span = math.log(common)
-    weights: dict[str, float] = {}
-    for topic, count in counts.items():
-        rarity = max(0.0, min(1.0, math.log(common / count) / span))
-        weights[topic] = _TOPIC_WEIGHT_FLOOR + (_TOPIC_WEIGHT_CEILING - _TOPIC_WEIGHT_FLOOR) * rarity
-    return weights
+    return _weights_by_frequency(counts, len(candidates))
 
 
 def _score(
-    candidate: _Candidate, haystack: str, haystack_tokens: set[str], weights: Mapping[str, float]
+    candidate: _Candidate,
+    haystack: str,
+    haystack_tokens: set[str],
+    weights: Mapping[str, float],
+    tool_phrases: list[str] | None = None,
+    tool_weights: Mapping[str, float] | None = None,
 ) -> tuple[float, list[str]]:
     """How well ``candidate`` explains the paper's text, and which fields said so.
 
@@ -246,6 +345,12 @@ def _score(
     if shared:
         score += min(_SCORE_DESCRIPTION * len(shared), _MAX_DESCRIPTION_SCORE)
         why.append("description terms " + ", ".join(sorted(shared)))
+
+    # A tool already credited as a topic is not two pieces of evidence wearing two hats.
+    named = [t for t in _named_tools(candidate, tool_phrases or []) if t not in {_phrase(m) for m in matched_topics}]
+    if named:
+        score += min(sum((tool_weights or {}).get(t, _TOPIC_WEIGHT_CEILING) for t in named), _MAX_TOOL_SCORE)
+        why.append("the paper's own tools " + ", ".join(sorted(named)))
 
     return round(score, 3), why
 
@@ -332,15 +437,19 @@ def split_assay(assay: str | None) -> list[str]:
     return parts or ([assay.strip()] if (assay or "").strip() else [])
 
 
-def _fallback_match(candidates: list[_Candidate], haystack: str) -> tuple[_Candidate, list[str]] | None:
+def _fallback_match(
+    candidates: list[_Candidate], haystack: str, tool_phrases: list[str] | None = None
+) -> tuple[_Candidate, list[str]] | None:
     """The single best-scoring candidate for ``haystack``, or None when nothing clears the bar or
     two candidates tie. Shared by the whole-string match and the per-fragment vote so both agree."""
     haystack_tokens = _tokens(haystack)
     weights = _topic_weights(candidates)
+    tool_weights = _tool_weights(candidates, tool_phrases or [])
     scored = [
         (score, candidate, why)
         for candidate in candidates
-        if (result := _score(candidate, haystack, haystack_tokens, weights)) and (score := result[0]) >= _MIN_SCORE
+        if (result := _score(candidate, haystack, haystack_tokens, weights, tool_phrases, tool_weights))
+        and (score := result[0]) >= _MIN_SCORE
         for why in [result[1]]
     ]
     if not scored:
@@ -456,7 +565,11 @@ async def _offer_by_key(
 
 
 def _no_single_fallback(
-    candidates: list[_Candidate], haystack: str, assay: str | None, declared: PipelineMapping
+    candidates: list[_Candidate],
+    haystack: str,
+    assay: str | None,
+    declared: PipelineMapping,
+    tool_phrases: list[str] | None = None,
 ) -> PipelineMapping:
     """Either nothing scored, which leaves the unchanged blocker, or two candidates tied, which is
     refused BY NAME. This is a screening tool for papers of unknown validity: silently picking one of
@@ -464,10 +577,12 @@ def _no_single_fallback(
     answer."""
     haystack_tokens = _tokens(haystack)
     weights = _topic_weights(candidates)
+    tool_weights = _tool_weights(candidates, tool_phrases or [])
     scored = [
         (result[0], candidate)
         for candidate in candidates
-        if (result := _score(candidate, haystack, haystack_tokens, weights))[0] >= _MIN_SCORE
+        if (result := _score(candidate, haystack, haystack_tokens, weights, tool_phrases, tool_weights))[0]
+        >= _MIN_SCORE
     ]
     if not scored:
         return declared
@@ -493,6 +608,8 @@ def _displaces_floor(
     floor_score: float,
     family: tuple[str, ...],
     haystack: str,
+    tool_phrases: list[str],
+    tool_weights: Mapping[str, float],
 ) -> bool:
     """Whether ``best`` has earned the right to overrule a contextual match.
 
@@ -508,7 +625,15 @@ def _displaces_floor(
     """
     if best.pipeline_key == floor_key or best_score <= floor_score:
         return False
-    return bool(_diagnostic_topics(_matched_topics(best, haystack), family))
+    if _diagnostic_topics(_matched_topics(best, haystack), family):
+        return True
+    # A tool the paper itself named is the paper saying what it did, which is at least as specific
+    # as a topic somebody wrote on a pipeline's README. It has to be a DISCRIMINATING tool, though,
+    # by the same rarity rule the topics follow: samtools and fastqc are named by nearly every
+    # pipeline there is, and a paper listing its plumbing has not said which pipeline to run.
+    return any(
+        tool_weights.get(t, _TOPIC_WEIGHT_CEILING) > _TOPIC_WEIGHT_FLOOR for t in _named_tools(best, tool_phrases)
+    )
 
 
 def _offer_over_floor(
@@ -518,6 +643,7 @@ def _offer_over_floor(
     floor: PipelineMapping,
     strategy_route: LibraryStrategyRoute | None,
     family: tuple[str, ...],
+    tool_phrases: list[str],
 ) -> PipelineMapping | None:
     """What wins when a contextual route has to defend itself, or None to leave the floor untouched.
 
@@ -542,19 +668,26 @@ def _offer_over_floor(
             return _floor_stands(floor, assay, floor_key, weighed_against=None)
 
     weights = _topic_weights(candidates)
-    floor_candidate = next((c for c in candidates if c.pipeline_key == floor_key), None)
-    floor_score = _score(floor_candidate, haystack, _tokens(haystack), weights)[0] if floor_candidate else 0.0
+    tool_weights = _tool_weights(candidates, tool_phrases)
+    tokens = _tokens(haystack)
 
-    match = _fallback_match(candidates, haystack)
+    def score_of(candidate: _Candidate) -> float:
+        return _score(candidate, haystack, tokens, weights, tool_phrases, tool_weights)[0]
+
+    floor_candidate = next((c for c in candidates if c.pipeline_key == floor_key), None)
+    floor_score = score_of(floor_candidate) if floor_candidate else 0.0
+
+    match = _fallback_match(candidates, haystack, tool_phrases)
     if match is None:
         return _floor_stands(floor, assay, floor_key, weighed_against=None)
 
     best, why = match
-    best_score = _score(best, haystack, _tokens(haystack), weights)[0]
-    if not _displaces_floor(best, best_score, floor_key, floor_score, family, haystack):
+    if not _displaces_floor(best, score_of(best), floor_key, floor_score, family, haystack, tool_phrases, tool_weights):
         return _floor_stands(floor, assay, floor_key, weighed_against=best.pipeline_key)
 
-    logger.info("org-independent: assay %r displaced the contextual floor %s -> %s", assay, floor_key, best.pipeline_key)
+    logger.info(
+        "org-independent: assay %r displaced the contextual floor %s -> %s", assay, floor_key, best.pipeline_key
+    )
     where = "installed on this bioAF" if best.installed else "available from the nf-core registry"
     return PipelineMapping(
         pipeline_key=best.pipeline_key,
@@ -671,7 +804,10 @@ async def resolve_pipeline_for_assay(
                 ),
             )
 
-    haystack = " ".join([assay or "", *[t or "" for t in tools]]).lower()
+    # The paper's own tools are part of what is matched against, but only the ones that mean
+    # something: plumbing in the haystack is plumbing scored as a declared topic.
+    tool_phrases = _tool_phrases(tools)
+    haystack = " ".join([(assay or "").lower(), *tool_phrases])
 
     # A declared route that was chosen by CONTEXTUAL evidence is a floor, not an answer. `rna-seq`
     # is as true of gene fusion, alternative splicing and dual host-pathogen work as it is of bulk
@@ -684,7 +820,13 @@ async def resolve_pipeline_for_assay(
     evidence = match_route((assay or "").lower())
     if declared.pipeline_key is not None and evidence is not None and not evidence.diagnostic:
         offered = _offer_over_floor(
-            candidates, haystack, assay, declared, strategy_route, evidence.route.contextual_markers
+            candidates,
+            haystack,
+            assay,
+            declared,
+            strategy_route,
+            evidence.route.contextual_markers,
+            tool_phrases,
         )
         if offered is not None:
             return offered
@@ -692,9 +834,9 @@ async def resolve_pipeline_for_assay(
     if declared.pipeline_key is not None:
         return declared
 
-    match = _fallback_match(candidates, haystack)
+    match = _fallback_match(candidates, haystack, tool_phrases)
     if match is None:
-        return _no_single_fallback(candidates, haystack, assay, declared)
+        return _no_single_fallback(candidates, haystack, assay, declared, tool_phrases)
 
     best, why = match
     logger.info("org %d: assay %r resolved to %s by fallback", org_id, assay, best.pipeline_key)

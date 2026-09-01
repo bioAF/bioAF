@@ -618,7 +618,7 @@ async def rna_family(session, admin_user):
     each with one topic of its own, plus enough filler for the frequencies to mean something."""
     await _registry(
         session,
-        "rnaseqreg",
+        "rnaseq",
         "RNA sequencing analysis pipeline using STAR, RSEM, HISAT2 or Salmon",
         ["rna", "rna-seq"],
         latest="3.14.0",
@@ -755,6 +755,110 @@ async def test_the_floors_own_family_words_cannot_be_what_unseats_it(session, ad
 
     mapping = await resolve_pipeline_for_assay(
         session, admin_user.organization_id, "total RNA-seq transcriptome profiling", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+# ---- the paper's own tool list is evidence, and whole tokens only (plan_5.1 step 5) ----
+#
+# `method.tools` is captured by the extractor and carried on the plan, and it was spent on one
+# boolean (`_mentions_nf_core`) plus a prose sentence. It is the paper telling you what it did:
+# rMATS, Arriba, Bismark, DADA2, Space Ranger. A pipeline that names the same tool in its own
+# description or topics is the pipeline that does that work.
+#
+# WHOLE TOKENS ONLY, which is not a detail. Measured against the live registry, `rmats` matched
+# inside "image formats" and `star` matched nf-core/rnaseq's description for a paper that ran
+# STAR-Fusion. Substring matching here re-creates exactly the bug this plan exists to fix.
+
+
+@pytest.mark.asyncio
+async def test_a_tool_the_paper_named_can_displace_the_floor(session, admin_user, rna_family):
+    """The assay says only "RNA-seq", which is true of the whole family. The tool says which member.
+
+    This is the one signal that separates a fusion paper from a bulk one when the methods section
+    describes its assay in family words, which is most of the time.
+    """
+    await _registry(
+        session,
+        "fusioncaller",
+        "Detection of gene fusions with Arriba and STAR-Fusion",
+        ["fusion"],
+        latest="3.0.2",
+    )
+
+    mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "RNA-seq", tools=["Arriba"])
+
+    assert mapping.pipeline_key == "nf-core/fusioncaller"
+    assert "arriba" in mapping.mapping_notes.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_tool_the_floors_own_pipeline_uses_keeps_the_floor(session, admin_user, rna_family):
+    """The other half of the same evidence. A paper that quantified with Salmon ran bulk RNA-seq,
+    and the tool list has to be able to CONFIRM the floor as well as overturn it."""
+    await _registry(
+        session,
+        "fusioncaller",
+        "Detection of gene fusions with Arriba and STAR-Fusion",
+        ["fusion"],
+        latest="3.0.2",
+    )
+
+    mapping = await resolve_pipeline_for_assay(session, admin_user.organization_id, "RNA-seq", tools=["Salmon"])
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_matches_as_a_whole_token_and_not_inside_a_word(session, admin_user, rna_family):
+    """`rmats` appears inside "image formats", which is a real row in the live registry.
+
+    Both candidates here declare the same topic, so the tool list is the only thing separating them.
+    Under substring matching both would be credited with the tool, the two would tie, and a tie is
+    refused by name: the paper would get no answer at all.
+    """
+    await _registry(session, "splicecaller", "Isoform switching with rMATS", ["isoform-switching"])
+    await _registry(session, "formatter", "Isoform switching across many image formats", ["isoform-switching"])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq isoform switching", tools=["rMATS"]
+    )
+
+    assert mapping.pipeline_key == "nf-core/splicecaller"
+
+
+@pytest.mark.asyncio
+async def test_a_tool_the_whole_catalog_uses_says_nothing(session, admin_user, rna_family):
+    """A methods section names every tool it touched, and most of them are plumbing.
+
+    samtools is named by nearly every pipeline there is, so a paper naming it has said nothing about
+    which one to run. The same rarity rule that weighs topics weighs tools, and a tool at the floor
+    cannot displace a floor.
+    """
+    for index in range(10):
+        await _registry(session, f"plumbing{index}", "A workflow using samtools and fastqc", [])
+    await _registry(session, "toolbox", "A workflow using samtools and fastqc", [])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq", tools=["samtools", "fastqc"]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_pipeline_that_declares_its_plumbing_as_topics_does_not_win_on_it(session, admin_user, rna_family):
+    """Measured against the live registry, not imagined. nf-core/hgtseq declares `fastqc`, `multiqc`
+    and `samtools` as its own topics, so those words are RARE in the registry while being universal
+    in practice, and a paper listing its QC tools was routed to a horizontal-gene-transfer pipeline.
+    Frequency in a topic list is not frequency in the world, so the plumbing is named outright."""
+    await _registry(
+        session, "plumbingtopics", "Detection of horizontal gene transfer", ["fastqc", "multiqc", "samtools"]
+    )
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq", tools=["samtools", "fastqc", "MultiQC"]
     )
 
     assert mapping.pipeline_key == "nf-core/rnaseq"
