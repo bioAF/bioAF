@@ -125,6 +125,7 @@ def test_a_fully_fitting_config_is_ok():
         _observed_quotas(),
     )
     assert verdict.status == "ok"
+    assert verdict.achievable_nodes is not None
     assert verdict.achievable_nodes >= 4
 
 

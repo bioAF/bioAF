@@ -308,6 +308,7 @@ def test_a_pipeline_that_cannot_read_the_deposited_data_is_a_conflict():
 
 def test_the_conflict_names_the_pipeline_the_data_does_need():
     conflict = library_strategy_conflict("nf-core/atacseq", "Bisulfite-Seq")
+    assert conflict is not None
     assert "nf-core/methylseq" in conflict
 
 

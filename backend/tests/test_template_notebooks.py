@@ -178,4 +178,6 @@ def test_da_template_honours_a_paired_design_like_the_bulk_template():
     from app.services.template_notebook_service import BUILTIN_TEMPLATES
 
     da = next(t for t in BUILTIN_TEMPLATES if t["local_file"] == "da_peaks_deseq2.ipynb")
-    assert "block_labels" in da["parameters"], "the driver passes block_labels; it must be declared"
+    parameters = da["parameters"]
+    assert isinstance(parameters, dict)
+    assert "block_labels" in parameters, "the driver passes block_labels; it must be declared"
