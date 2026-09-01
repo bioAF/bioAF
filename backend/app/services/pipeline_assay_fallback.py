@@ -726,9 +726,12 @@ def _floor_stands(
 ) -> PipelineMapping:
     """The contextual route, re-stated as the considered answer it now is.
 
-    The confidence is `partial` rather than `exact` even where the paper names nf-core, because the
-    evidence that chose this pipeline was true of its whole subfield. A scientist reading the plan
-    should see that the family was on the table and that prose is all that chose within it.
+    The route's OWN confidence is carried through untouched. Weighing a floor against the registry
+    and finding nothing better is not new information about how good the route is, and hardcoding
+    `partial` here silently downgraded the best evidence there is: `exact` is set when the paper's
+    own methods name nf-core, and it is the only value `_attribute` accepts to clear a pipeline
+    substitution as the explanation for a divergence. A paper that says it ran nf-core/rnaseq would
+    have had every later divergence blamed in part on a substitution that never happened.
     """
     runner_up = (
         f" The nearest alternative the registry offered was {weighed_against}, which carries no "
@@ -739,7 +742,7 @@ def _floor_stands(
     return PipelineMapping(
         pipeline_key=floor.pipeline_key,
         pipeline_version=floor.pipeline_version,
-        mapping_confidence="partial",
+        mapping_confidence=floor.mapping_confidence,
         mapping_notes=(
             f"The paper's assay ('{assay}') identifies a family rather than a pipeline: the words it "
             f"uses are as true of its neighbours as of {floor_key}. It was weighed against every "

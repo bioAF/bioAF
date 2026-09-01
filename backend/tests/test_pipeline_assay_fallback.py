@@ -881,3 +881,21 @@ async def test_two_spellings_of_one_word_are_one_piece_of_evidence(session, admi
     )
 
     assert mapping.pipeline_key == "nf-core/assembler"
+
+
+@pytest.mark.asyncio
+async def test_a_paper_that_named_nf_core_keeps_its_exact_confidence(session, admin_user, rna_family):
+    """Standing the floor up must not quietly downgrade the best evidence there is.
+
+    `exact` is set when the paper's own methods name nf-core, and it is the only value
+    `_attribute` accepts to clear a pipeline substitution as the explanation for a divergence. A
+    paper that says it ran nf-core/rnaseq and whose assay string says "RNA-seq" would otherwise come
+    out of the floor competition at `partial`, and every later divergence would be blamed in part on
+    a substitution that never happened.
+    """
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq", tools=["nf-core/rnaseq", "Salmon"]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+    assert mapping.mapping_confidence == "exact"
