@@ -36,8 +36,6 @@ Level 4 verdict, and the plan says so before you approve.
 
 ## Supported assays
 
-These are verified: someone read the pipeline's source and confirmed what it produces.
-
 | Assay | Pipeline | 1 | 2 | 3 | 4 | Ceiling |
 |---|---|:--:|:--:|:--:|:--:|:--:|
 | Bulk RNA-seq | `nf-core/rnaseq` | ✓ | ✓ | ✓ | ✓ | 4 |
@@ -48,7 +46,6 @@ These are verified: someone read the pipeline's source and confirmed what it pro
 | Amplicon / 16S | `nf-core/ampliseq` | ✓ | | - | - | 4 |
 | DNase-seq | `nf-core/atacseq` | - | | | | 4 |
 | CUT&RUN / CUT&Tag | `nf-core/cutandrun` | ✓ | | - | | 3 |
-|---|---|:--:|:--:|:--:|:--:|:--:|
 | WGBS / RRBS | `nf-core/methylseq` | ✓ | ✓ | - | | 3 |
 | Hi-C | `nf-core/hic` | - | | | | 3 |
 | CRISPR editing | `nf-core/crisprseq` | - | | | | 3 |
