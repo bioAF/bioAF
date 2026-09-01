@@ -523,3 +523,238 @@ async def test_the_deposits_strategy_still_outranks_the_vote(session, admin_user
     )
 
     assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+# ---- a registry topic is worth what its rarity says it is worth (plan_5.1 step 4) ----
+#
+# Every topic scored a flat 3, so two topics that a tenth of the catalog declares (`rna-seq`, `rna`,
+# `single-cell`) beat one topic that exactly one pipeline declares (`alternative-splicing`,
+# `fusion`, `circrna`). That is backwards: the discriminating evidence is the rare topic, and the
+# common ones are what a whole subfield shares.
+#
+# The weight is inverse document frequency over the registry itself, so it is DATA rather than a
+# hand-maintained table of exceptions: a topic's worth follows how many pipelines claim it, and a
+# registry refresh re-derives it.
+
+
+@pytest_asyncio.fixture
+async def frequencies(session, admin_user):
+    """A registry with known topic frequencies: `broad` is declared by ten pipelines, `narrow` by one.
+
+    Both descriptions share one word with the assay below, which is what puts BOTH candidates over
+    `_MIN_SCORE`. Without it the question the test asks ("which of these two wins?") could be
+    answered by refusing them both, and it would pass for the wrong reason.
+    """
+    for index in range(10):
+        await _registry(session, f"widely{index}", "hepatocyte workflow", ["broad-signal", "second-broad"])
+    await _registry(session, "narrowly", "hepatocyte workflow", ["narrow-signal"])
+    return session
+
+
+@pytest.mark.asyncio
+async def test_one_rare_topic_beats_two_common_ones(session, admin_user, frequencies):
+    """The whole of the scoring failure, in one assertion.
+
+    Ten pipelines declare `broad-signal` and `second-broad`; one declares `narrow-signal`. A paper
+    naming all three is a paper about whatever the rare topic describes. Under flat weighting the
+    ten tied with each other at 7 against the specific pipeline's 4, and a tie is refused by name,
+    so the paper got no answer at all.
+    """
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "broad signal second broad narrow signal of hepatocyte",
+        tools=[],
+    )
+
+    assert mapping.pipeline_key == "nf-core/narrowly"
+
+
+@pytest.mark.asyncio
+async def test_a_paper_naming_the_pipeline_still_outranks_any_topic(session, admin_user, frequencies):
+    """A paper that names the pipeline has answered the question, and no weighting may overturn
+    that. The rarest possible topic is declared by exactly one pipeline, so this is the ceiling
+    being held below the name's own score rather than an approximation of it."""
+    await _registry(session, "namedpipe", "hepatocyte workflow", ["second-broad"])
+
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "narrow signal analysis run with nf-core/namedpipe on hepatocyte",
+        tools=[],
+    )
+
+    assert mapping.pipeline_key == "nf-core/namedpipe"
+
+
+@pytest.mark.asyncio
+async def test_common_topics_alone_are_not_an_answer(session, admin_user, frequencies):
+    """Two topics a tenth of the catalog shares are the subfield, not the pipeline. Answering with
+    one of them would be a coin toss between ten equally good candidates, and this is a screening
+    tool for papers of unknown validity: it refuses instead."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "broad signal and second broad of hepatocyte", tools=[]
+    )
+
+    assert mapping.pipeline_key is None
+
+
+# ---- a contextual match competes instead of pre-empting (plan_5.1 step 3) ----
+#
+# A declared route short-circuits everything: `_match_route` returns the first marker hit and the
+# registry fallback never runs at all. So `rna-seq` did not out-score nf-core/rnafusion, it stopped
+# rnafusion from being considered, and the same for rnasplice, dualrnaseq, spatialvi and viralrecon.
+# Every one of those has no declared route of its own, so no reordering of the table could reach them.
+#
+# The contextual match stays a FLOOR rather than becoming a demotion, because a paper that says only
+# "RNA sequencing" genuinely carries no evidence separating rnaseq from rnasplice, and rarity cannot
+# rank what the paper never mentioned. What changes is that the floor can now be DISPLACED, and only
+# by evidence that is actually diagnostic: a topic rarer than anything the floor itself matched.
+
+
+@pytest_asyncio.fixture
+async def rna_family(session, admin_user):
+    """The RNA subfield the way the registry declares it: three pipelines sharing the common topics,
+    each with one topic of its own, plus enough filler for the frequencies to mean something."""
+    await _registry(
+        session,
+        "rnaseqreg",
+        "RNA sequencing analysis pipeline using STAR, RSEM, HISAT2 or Salmon",
+        ["rna", "rna-seq"],
+        latest="3.14.0",
+    )
+    await _registry(
+        session,
+        "rnasplice",
+        "Alternative splicing analysis using RNA-seq",
+        ["alternative-splicing", "rna", "rna-seq", "splicing"],
+        latest="1.0.4",
+    )
+    await _registry(
+        session,
+        "rnafusion",
+        "Pipeline for the detection of gene fusions",
+        ["fusion", "gene-fusion", "rna", "rna-seq"],
+        latest="3.0.2",
+    )
+    for index in range(8):
+        await _registry(session, f"filler{index}", "a workflow", ["rna", "rna-seq"])
+    return session
+
+
+@pytest.mark.asyncio
+async def test_a_splicing_paper_reaches_the_splicing_pipeline(session, admin_user, rna_family):
+    """The assay says RNA-seq, and `rna-seq` is true of every pipeline in the family. What separates
+    them is `alternative-splicing`, which exactly one pipeline in the catalog declares."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq alternative splicing analysis", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnasplice"
+
+
+@pytest.mark.asyncio
+async def test_a_fusion_paper_reaches_the_fusion_pipeline(session, admin_user, rna_family):
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq for gene fusion detection", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnafusion"
+
+
+@pytest.mark.asyncio
+async def test_a_diagnostic_marker_is_never_put_up_for_competition(session, admin_user, rna_family):
+    """`bulk rna` identifies the assay on its own, so the registry is never consulted. This is the
+    guard on the whole change: bulk RNA-seq is the one assay proven end to end at Level 3, and it is
+    the baseline that has held all project."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "bulk RNA-seq of liver tissue", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+    assert mapping.pipeline_version == "3.14.0"
+
+
+@pytest.mark.asyncio
+async def test_a_paper_with_only_contextual_evidence_keeps_the_floor(session, admin_user, rna_family):
+    """The measured reason the floor exists. "RNA-seq of primary hepatocytes" carries nothing that
+    separates rnaseq from rnasplice or rnafusion, and demoting the marker without a floor made this
+    paper a refusal. Rarity cannot rank what the paper never mentioned."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq of primary hepatocytes", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+    assert mapping.pipeline_version == "3.14.0"
+
+
+@pytest.mark.asyncio
+async def test_the_floor_says_that_a_choice_was_made(session, admin_user, rna_family):
+    """A scientist reading the plan has to be able to see that the pipeline was weighed rather than
+    merely matched, because the whole family was on the table and only prose chose between them."""
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq of primary hepatocytes", tools=[]
+    )
+
+    assert mapping.mapping_confidence == "partial"
+    assert "rna-seq" in mapping.mapping_notes.lower()
+    assert "weighed" in mapping.mapping_notes.lower()
+
+
+@pytest.mark.asyncio
+async def test_a_weaker_candidate_does_not_displace_the_floor(session, admin_user, rna_family):
+    """Displacing takes evidence more specific than the floor's own, not merely a higher total. A
+    pipeline that wins on description words has not identified the assay, it has shared vocabulary
+    with it."""
+    await _registry(session, "wordy", "RNA sequencing of primary hepatocytes in liver tissue", [])
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "RNA-seq of primary hepatocytes", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_the_deposit_bounds_what_may_displace_the_floor(session, admin_user, methyl_registry):
+    """A strategy with no pipeline of its own still says what must NOT run.
+
+    ENA files bulk, single-cell, total and ribo-depleted RNA under one `RNA-Seq` value, so the
+    strategy is declared but deliberately unrouted. It is still a statement about the data: a
+    compound paper naming bisulfite work would otherwise be displaced onto methylseq over an RNA-Seq
+    deposit, and the C1 gate would refuse the plan it produced.
+    """
+    mapping = await resolve_pipeline_for_assay(
+        session,
+        admin_user.organization_id,
+        "bisulfite sequencing, RRBS, and targeted RNA-seq",
+        tools=[],
+        library_strategy="RNA-Seq",
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
+
+
+@pytest.mark.asyncio
+async def test_the_floors_own_family_words_cannot_be_what_unseats_it(session, admin_user, rna_family):
+    """Rarity in the CATALOG is not rarity in a methods section, and this is where they come apart.
+
+    Exactly one pipeline declares `transcriptome`, so inverse document frequency calls it the most
+    diagnostic word available. It is nothing of the kind: "total RNA-seq transcriptome profiling" is
+    ordinary bulk RNA-seq, and it was measured routing to a de novo assembler. `transcriptom` is
+    declared as one of the rnaseq route's own contextual markers, and a word already on that list
+    cannot be the evidence that overrules it.
+    """
+    await _registry(
+        session,
+        "denovotranscriptreg",
+        "Assembly and annotation of transcriptome sequences",
+        ["transcriptome", "rna-seq"],
+        latest="1.2.0",
+    )
+
+    mapping = await resolve_pipeline_for_assay(
+        session, admin_user.organization_id, "total RNA-seq transcriptome profiling", tools=[]
+    )
+
+    assert mapping.pipeline_key == "nf-core/rnaseq"
