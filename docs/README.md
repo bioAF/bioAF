@@ -13,6 +13,7 @@ Welcome to the bioAF documentation. bioAF is a turnkey computational biology pla
 - [Bench Scientist Guide](user-guide-bench.md) - Experiment registration, sample management, QC results
 - [Computational Biologist Guide](user-guide-compbio.md) - Pipelines, notebooks, environments, data management
 - [Admin Guide](user-guide-admin.md) - User management, components, costs, backups, notifications
+- [Paper Validation](guides/paper-validation.md) - Reproduce a published paper's analysis and compare the result
 
 ## Architecture
 
