@@ -5,15 +5,10 @@
   fusion detection now plans `nf-core/rnafusion`, alternative splicing plans
   `nf-core/rnasplice`, and viral amplicon sequencing plans `nf-core/viralrecon`.
   Ordinary bulk RNA-seq is unchanged.
-- Use the tools a paper names as evidence for which pipeline to run. A methods
-  section naming Arriba or rMATS says which member of the RNA-seq family it
-  belongs to, where the assay string alone does not.
-- Weigh a pipeline's declared topics by how many other pipelines declare the
-  same ones, so a topic that names one pipeline in the catalog counts for more
-  than two that every pipeline in a subfield shares.
 - Say on the plan when a pipeline was WEIGHED rather than merely matched, so a
-  scientist can see that the whole family was on the table and what the nearest
-  alternative was.
+  scientist can see that the whole family was on the table, what the nearest
+  alternative was, and that scoping the study to its accession would settle it
+  outright.
 
 ### Fixes
 
@@ -25,3 +20,5 @@
   pipeline that would answer confidently about the wrong thing.
 - Reach `nf-core/bacass` for a bacterial assembly paper, which was previously
   refused as an unbreakable tie.
+- Stop a paper that listed its QC tools (samtools, FastQC, MultiQC) from being
+  routed on them.
