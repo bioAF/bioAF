@@ -67,9 +67,13 @@ def _spec_lines(tier: str) -> str:
         if spec.tier != tier:
             continue
         aliases = ", ".join(spec.aliases) or "no other wording"
+        # Where a paper can report the same quantity a different way, say what the computed side is
+        # measured on. Without it the model binds a consensus peak count to a per-sample one, which
+        # is a wrong answer that looks like a right one.
+        basis = f" | computed here as: {spec.basis}" if spec.basis else ""
         lines.append(
             f"  {spec.key} | {_SCALE_HINT.get(spec.scale, spec.scale)} | {spec.tier} | "
-            f"{spec.meaning} | also written as: {aliases}"
+            f"{spec.meaning}{basis} | also written as: {aliases}"
         )
     return "\n".join(lines)
 
@@ -108,6 +112,11 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "describes, or measures only a subset of one (peaks gained in a single condition is not peak_count), "
         "use a clear snake_case key of your own instead of forcing a wrong match. Do not invent values. Use "
         "null when unknown.\n\n"
+        "Where a key says what it is computed here as, the paper must be reporting the SAME basis for the "
+        "claim to be comparable. A consensus or merged peak set across replicates is not a per-sample peak "
+        "call, and a post-trim read count is not a raw one. If the paper reports the other basis, say so in "
+        'the unit ("consensus peaks", "reads after trimming") so the claim is shown as evidence '
+        "rather than scored against a number it does not correspond to.\n\n"
         "For reference_build, give BOTH the genome assembly and the ANNOTATION the paper aligned "
         'against, exactly as the paper words it (e.g. "GRCh38 / GENCODE v32", "mm10 / Ensembl 102", '
         '"CellRanger refdata-gex-GRCh38-2020-A"). The assembly alone is not the reference: two papers '

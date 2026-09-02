@@ -37,6 +37,18 @@ class MetricSpec:
     # extraction prompt renders so the model can tell `peak_count` from `percent_gc` as concepts
     # instead of as tokens; a spec without one reaches the model meaning nothing.
     meaning: str = ""
+    # What bioAF's own computed value is measured on, where a paper can plausibly report the same
+    # quantity on a different basis. Rendered into the extraction prompt so the model can decline, and
+    # named in the advisory reason when a claim states a basis we do not compute.
+    basis: str = ""
+    # Words that, appearing in a claim's key or unit, say the paper measured this metric on a DIFFERENT
+    # basis than ``basis``. A claim carrying one is rated and shown with its delta but never scored: the
+    # difference is one of method, not of result. Slug-matched, so "after trimming" folds to "after_trim".
+    #
+    # Deliberately short. Only two metrics have a measured mis-binding behind them (peak_count and
+    # total_sequences, both seen live on 2026-09-02), and a speculative word here silently stops a
+    # legitimate claim from scoring, which is the opposite of the failure it exists to prevent.
+    basis_conflicts: tuple[str, ...] = field(default_factory=tuple)
     # "finding": a substantive result the paper reports (peaks, cells, genes/UMIs recovered).
     # "qc_floor": a technical data-quality/identity metric (mapping rate, read depth, GC, dup, ...).
     # A `validated` verdict requires at least one FINDING to agree - a floor-only agreement proves the
@@ -110,7 +122,12 @@ _SPECS: tuple[MetricSpec, ...] = (
             "raw_reads_per_sample",
             "mean_raw_reads",
         ),
-        meaning="raw reads (or read pairs) sequenced per sample, before trimming",
+        meaning="raw reads (or read pairs) sequenced per sample, BEFORE trimming or filtering",
+        basis="the raw pre-trim read count",
+        # Study 3's paper reported a before-trimming AND an after-trimming figure and both were bound
+        # to this key (2026-09-02), so one was scored against a count it is not. "before trimming" must
+        # not match: these are slug substrings, and "before_trimming" contains none of them.
+        basis_conflicts=("after_trim", "post_trim", "trimmed", "filtered", "after_qc", "post_qc", "clean_read"),
     ),
     MetricSpec(
         "avg_sequence_length",
@@ -268,7 +285,11 @@ _SPECS: tuple[MetricSpec, ...] = (
             "significant_peaks",
         ),
         tier="finding",
-        meaning="significant peaks called for the sample (the paper's headline peak number)",
+        meaning="significant peaks called for ONE sample (the paper's headline peak number)",
+        basis="per-sample MACS2 peak calls",
+        # A consensus/merged/IDR set across replicates is a different number computed a different way,
+        # and study 5 reported exactly that under the exact key `peak_count` (2026-09-02).
+        basis_conflicts=("consensus", "merged", "union", "reproducible", "idr", "pooled", "across_replicate"),
     ),
     MetricSpec(
         "frip",
@@ -516,6 +537,25 @@ _PEAK_STRIP_BASES: tuple[str, ...] = tuple(
 )
 
 
+# Every declared basis word, so a key can be resolved when the basis LEADS it (`consensus_peak_count`)
+# rather than qualifying its unit. Only a word declared for the spec the remainder resolves to is
+# stripped, so this cannot widen what maps in general the way a free qualifier strip would.
+_BASIS_WORDS: tuple[str, ...] = tuple(
+    sorted({w for spec in _SPECS for w in spec.basis_conflicts}, key=len, reverse=True)
+)
+
+
+def _basis_conflict(spec: MetricSpec, metric_key, unit) -> str | None:
+    """The word in this claim's key or unit that says it was measured on a basis we do not compute."""
+    if not spec.basis_conflicts:
+        return None
+    haystack = f"{_slug(metric_key)}_{_slug(unit)}"
+    for word in spec.basis_conflicts:
+        if word in haystack:
+            return word
+    return None
+
+
 def _resolve_key(metric_key) -> tuple[str | None, bool]:
     """Resolve a paper-side claim key to a controlled key, plus whether the match required stripping a
     trailing qualifier off a basis-sensitive peak base (which makes the target advisory)."""
@@ -527,6 +567,15 @@ def _resolve_key(metric_key) -> tuple[str | None, bool]:
         prefix = f"{base}_"
         if slug.startswith(prefix) and len(slug) > len(prefix):
             return "peak_count", True
+    # A leading basis word (`consensus_peak_count`): resolve the remainder and surface the paper's
+    # number beside ours as advisory, rather than losing it to not_computed.
+    for word in _BASIS_WORDS:
+        prefix = f"{word}_"
+        if not slug.startswith(prefix):
+            continue
+        rest = _KEY_LOOKUP.get(slug[len(prefix) :])
+        if rest is not None and word in _SPEC_BY_KEY[rest].basis_conflicts:
+            return rest, True
     return None, False
 
 
@@ -569,10 +618,28 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         unit = t.get("unit")
         tol = t.get("tolerance")
         mapped, advisory = _resolve_key(key)
+        # A claim can name the right metric and still be measured on a different basis, stated in its
+        # own unit ("consensus peaks", "reads after trimming") with the key exactly right. Giving the
+        # model the specs made that the common shape, and it bypasses the key-side qualifier strip.
+        advisory_reason: str | None = None
+        if mapped is not None:
+            conflict = _basis_conflict(_SPEC_BY_KEY[mapped], key, unit)
+            if conflict:
+                advisory = True
+                advisory_reason = (
+                    f"the claim states a '{conflict.replace('_', ' ')}' basis; bioAF computes "
+                    f"{_SPEC_BY_KEY[mapped].basis or 'this metric'}"
+                )
+            elif advisory:
+                advisory_reason = (
+                    "the claim's key qualifies the metric, so the paper's basis may differ from "
+                    f"{_SPEC_BY_KEY[mapped].basis or 'the computed value'}"
+                )
         row = {
             "metric_key": key,
             "mapped_key": mapped,
             "advisory": advisory,
+            "advisory_reason": advisory_reason,
             "claimed_value": claimed,
             "claimed_normalized": None,
             "computed_value": None,
@@ -868,9 +935,9 @@ def classify_study(
 
     if coverage["advisory"]:
         reasoning += (
-            f" ({coverage['advisory']} peak-count claim(s) were surfaced as advisory evidence and not "
-            "scored: a condition/consensus-qualified peak count is not directly comparable to the "
-            "per-sample computed count.)"
+            f" ({coverage['advisory']} claim(s) were surfaced as advisory evidence and not scored: each "
+            "states a measurement basis the computed metric does not use, so the difference between the "
+            "two numbers is one of method rather than of result.)"
         )
 
     return {

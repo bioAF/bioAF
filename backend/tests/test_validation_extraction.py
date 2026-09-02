@@ -837,3 +837,17 @@ def test_extraction_prompt_lists_every_controlled_key():
     system, _ = build_extraction_prompt("body")
     missing = [k for k in CONTROLLED_METRIC_KEYS if k not in system]
     assert missing == []
+
+
+def test_the_spec_block_states_what_bioaf_actually_computes():
+    """Binding on the key alone is not enough: a paper's consensus peak count and bioAF's per-sample
+    MACS2 count are both `peak_count` and are not the same number. The model can only decline if the
+    prompt says which one the computed side is."""
+    system, _ = build_extraction_prompt("body")
+    peak_line = next(line for line in system.splitlines() if line.strip().startswith("peak_count"))
+    reads_line = next(line for line in system.splitlines() if line.strip().startswith("total_sequences"))
+
+    assert "per-sample" in peak_line
+    assert "pre-trim" in reads_line or "before trimming" in reads_line.lower()
+    # And the model is told what to do about it, not merely informed.
+    assert "basis" in system.lower()
