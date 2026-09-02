@@ -269,6 +269,14 @@ export interface LitReviewSettings {
   next_run: string | null;
 }
 
+export interface LitValidationSettings {
+  // "assisted" | "autonomous". How much of literature validation the model decides for itself; the
+  // C1 approval gate is human in both.
+  autonomy: string;
+}
+
+export type LitValidationSettingsUpdate = Partial<LitValidationSettings>;
+
 export type LitReviewSettingsUpdate = Partial<
   Omit<LitReviewSettings, "next_run">
 > & {
@@ -443,6 +451,11 @@ export const literature = {
     api.get<LitReviewSettings>("/api/literature/settings/lit-review"),
   updateLitReviewSettings: (patch: LitReviewSettingsUpdate) =>
     api.put<LitReviewSettings>("/api/literature/settings/lit-review", patch),
+
+  getLitValidationSettings: () =>
+    api.get<LitValidationSettings>("/api/literature/settings/lit-validation"),
+  updateLitValidationSettings: (patch: LitValidationSettingsUpdate) =>
+    api.put<LitValidationSettings>("/api/literature/settings/lit-validation", patch),
 };
 
 export function formatAuthors(authors: Author[]): string {

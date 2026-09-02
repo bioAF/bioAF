@@ -6,6 +6,7 @@ records how sure it was. The C1 gate itself stays human in BOTH modes: it author
 """
 
 import pytest
+import pytest_asyncio
 
 from app.services.validation_autonomy import (
     AUTONOMY_ASSISTED,
@@ -117,3 +118,56 @@ class TestTheDecisionList:
 
     def test_no_targets_is_an_empty_list_not_an_error(self):
         assert decision_list([]) == []
+
+
+@pytest_asyncio.fixture
+async def _enable_lit_validation(session):
+    """lit_validation is gated behind its beta flag; without it every endpoint 404s."""
+    from app.services import beta_features_service
+
+    await beta_features_service.set_flag(session, "lit_validation", True)
+    await session.commit()
+
+
+class TestTheGateSeesTheDecisions:
+    """The plan the C1 gate reads carries the AI decision list, in both modes. Without it the gate
+    shows a bound metric key and no way to tell whether a model chose it or a lookup table did."""
+
+    @pytest.mark.asyncio
+    async def test_the_plan_response_carries_the_decision_list(
+        self, client, admin_token, session, admin_user, _enable_lit_validation
+    ):
+        from app.services.reproduction_plan_service import ReproductionPlanService
+        from app.services.validation_study_service import ValidationStudyService
+
+        study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        await session.flush()
+        plan = await ReproductionPlanService.create_plan(
+            session, study, admin_user.id, accessions=["GSE1"], pipeline_key="nf-core/chipseq"
+        )
+        await ReproductionPlanService.add_comparison_targets(
+            session,
+            plan,
+            [
+                {
+                    "metric_key": "samd1_chip_peaks",
+                    "claimed_value": 8733.0,
+                    "bound_key": "peak_count",
+                    "binding_reason": "the paper's headline peak number",
+                    "binding_confidence": 0.94,
+                    "bound_by_model": "claude-opus-4-8",
+                    "bound_by": "model",
+                }
+            ],
+        )
+        await session.commit()
+
+        r = await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert r.status_code == 200, r.text
+        decisions = r.json()["plan"]["ai_decisions"]
+        assert len(decisions) == 1
+        assert decisions[0]["bound_key"] == "peak_count"
+        assert decisions[0]["model"] == "claude-opus-4-8"
+        assert decisions[0]["confidence"] == 0.94
+        assert decisions[0]["low_confidence"] is False
+        assert decisions[0]["reason"] == "the paper's headline peak number"

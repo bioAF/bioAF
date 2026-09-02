@@ -18,6 +18,7 @@ from app.database import get_session
 from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
+from app.services.validation_autonomy import decision_list
 from app.schemas.validation_study import (
     DepositOverrideRequest,
     ClassifyRequest,
@@ -93,6 +94,19 @@ async def _plan_response(
             )
             for t in (plan.comparison_targets or [])
         ],
+        ai_decisions=decision_list(
+            [
+                {
+                    "metric_key": t.metric_key,
+                    "bound_key": t.bound_key,
+                    "binding_reason": t.binding_reason,
+                    "binding_confidence": t.binding_confidence,
+                    "bound_by_model": t.bound_by_model,
+                    "bound_by": t.bound_by,
+                }
+                for t in (plan.comparison_targets or [])
+            ]
+        ),
     )
 
 
