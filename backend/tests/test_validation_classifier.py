@@ -686,3 +686,44 @@ class TestBasisMismatchIsAdvisory:
         assert result["coverage"]["advisory"] == 1
         assert "advisory" in result["reasoning"].lower()
         assert "peak-count claim" not in result["reasoning"]
+
+
+class TestComparisonHonoursTheRecordedBinding:
+    """plan_6 step 3. The model's binding decision is stored on the target, and the comparison uses
+    it. The alias table stays where it is and stops being the only path in."""
+
+    def test_a_recorded_binding_wins_over_the_free_form_key(self):
+        """Study 20's original shape: the paper's own key is `samd1_chip_peaks`, which resolves to
+        nothing. With the binding recorded, the claim is compared against the computed peak count."""
+        rows = compare_targets(
+            [_target("samd1_chip_peaks", 8_733, unit="peaks") | {"bound_key": "peak_count"}],
+            {"peak_count": 8_500},
+        )
+        assert rows[0]["mapped_key"] == "peak_count"
+        assert rows[0]["verdict"] == "agree"
+        assert rows[0]["advisory"] is False
+
+    def test_a_target_with_no_recorded_binding_is_unchanged(self):
+        """Every row written before this column existed keeps behaving exactly as it does now."""
+        rows = compare_targets([_target("alignment_rate", 96.0, unit="%")], {"reads_mapped_genome": 0.9578})
+        assert rows[0]["mapped_key"] == "reads_mapped_genome"
+        assert rows[0]["verdict"] == "agree"
+
+    def test_a_recorded_binding_outside_the_vocabulary_falls_back(self):
+        """A stored key that is not controlled cannot be compared against anything, so the row must
+        fall back to the alias table rather than claiming a mapping that does not exist."""
+        rows = compare_targets(
+            [_target("alignment_rate", 96.0, unit="%") | {"bound_key": "not_a_metric"}],
+            {"reads_mapped_genome": 0.9578},
+        )
+        assert rows[0]["mapped_key"] == "reads_mapped_genome"
+
+    def test_a_recorded_binding_is_still_subject_to_the_basis_rule(self):
+        """The model binding a claim does not make its basis ours. Study 5's consensus counts stay
+        advisory whether the key was resolved or recorded."""
+        rows = compare_targets(
+            [_target("total_peaks_in_study", 74_834, unit="consensus peaks") | {"bound_key": "peak_count"}],
+            {"peak_count": 31_914},
+        )
+        assert rows[0]["mapped_key"] == "peak_count"
+        assert rows[0]["advisory"] is True
