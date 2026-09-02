@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.models.comparison_target import ComparisonTarget
 from app.services import validation_extraction_service as ext
 from app.services.pipeline_mapper import is_library_strategy_conflict, map_method
+from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
 from app.services.validation_extraction_service import (
     ValidationExtractionService,
     build_extraction_prompt,
@@ -792,3 +793,47 @@ async def test_the_run_log_says_why_a_deposit_yielded_nothing(session, admin_use
 
     logged = " ".join(r.getMessage() for r in caplog.records)
     assert "SRP0003" in logged
+
+
+def test_extraction_prompt_carries_the_metric_specs_not_only_the_key_names():
+    """A bare key list tells the model nothing. `peak_count` and `percent_gc` are indistinguishable
+    as tokens, so the model cannot tell which key its claim means or which one can earn a verdict.
+
+    Study 20 (10.1126/sciadv.abf2229) is the evidence: the paper's own results text says "8733
+    significant peaks", `significant_peaks` is a literal alias of `peak_count`, and the extractor
+    still emitted `samd1_chip_peaks`, which resolves to None and scores nothing. The spec block is
+    what the model was missing: the meaning, the scale, the tier and the aliases.
+    """
+    system, _ = build_extraction_prompt("body")
+
+    assert "peak_count" in system
+    # The aliases are the paper's own wording, and they are the bridge from prose to key.
+    assert "significant_peaks" in system
+    # Scale, so a fraction claim is not reported on a percent key.
+    assert "0-1" in system and "0-100" in system
+
+    peak_line = next(line for line in system.splitlines() if line.strip().startswith("peak_count"))
+    assert "count" in peak_line
+    assert "significant_peaks" in peak_line
+    assert peak_line.strip().split("|")[3].strip(), "peak_count reaches the model with no meaning"
+
+
+def test_extraction_prompt_marks_which_keys_can_earn_a_verdict():
+    """`peak_count` is the only finding-tier key in the vocabulary and the only one that can earn
+    `validated` at Level 2. The model should know that binding it matters and that `percent_gc`
+    does not carry the same weight."""
+    system, _ = build_extraction_prompt("body")
+    lines = system.splitlines()
+
+    peak_line = next(line for line in lines if line.strip().startswith("peak_count"))
+    gc_line = next(line for line in lines if line.strip().startswith("percent_gc"))
+
+    assert "finding" in peak_line
+    assert "finding" not in gc_line
+
+
+def test_extraction_prompt_lists_every_controlled_key():
+    """The spec block replaces the bare key list, so nothing may drop out of the model's view."""
+    system, _ = build_extraction_prompt("body")
+    missing = [k for k in CONTROLLED_METRIC_KEYS if k not in system]
+    assert missing == []

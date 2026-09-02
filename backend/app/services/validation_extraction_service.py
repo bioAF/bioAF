@@ -31,7 +31,7 @@ from app.services.llm_provider_clients import get_client
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
-from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
+from app.services.validation_classifier_service import CONTROLLED_METRIC_SPECS
 
 logger = logging.getLogger("bioaf.validation_extraction")
 
@@ -52,6 +52,42 @@ _SCHEMA_HINT = (
 )
 
 
+_SCALE_HINT = {"fraction": "fraction 0-1", "percent": "percent 0-100", "count": "count"}
+
+
+def _spec_lines(tier: str) -> str:
+    """Render the controlled metrics of one tier as `key | scale | tier | meaning | also written as`.
+
+    One line per metric, pipe-delimited, because the model has to pick between 23 near neighbours and a
+    bare key list gives it nothing to pick on. The aliases are the load-bearing column: they are the
+    paper's own wording, and they are what turns "8733 significant peaks" into `peak_count`.
+    """
+    lines = []
+    for spec in CONTROLLED_METRIC_SPECS:
+        if spec.tier != tier:
+            continue
+        aliases = ", ".join(spec.aliases) or "no other wording"
+        lines.append(
+            f"  {spec.key} | {_SCALE_HINT.get(spec.scale, spec.scale)} | {spec.tier} | "
+            f"{spec.meaning} | also written as: {aliases}"
+        )
+    return "\n".join(lines)
+
+
+def _metric_vocabulary_block() -> str:
+    """The controlled QC vocabulary as specs rather than as names, split by evidence tier."""
+    return (
+        "CONTROLLED QC METRIC VOCABULARY. Each line is:\n"
+        "  key | scale | tier | what it measures | also written as: wordings papers use\n\n"
+        "FINDING metrics. These are substantive results a paper reports, and they are the ONLY keys "
+        "that can earn a validated verdict, so bind one whenever the paper states it:\n"
+        f"{_spec_lines('finding')}\n\n"
+        "QC FLOOR metrics. These are technical data-quality measures. They show the data is usable, "
+        "not that a finding held up:\n"
+        f"{_spec_lines('qc_floor')}"
+    )
+
+
 def build_extraction_prompt(full_text: str) -> tuple[str, str]:
     """Return (system, payload) instructing the model to extract the reproduction plan as JSON."""
     system = (
@@ -61,10 +97,17 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         f"{_SCHEMA_HINT}\n\n"
         "Rules: report a data accession only if the paper actually deposits one; if none, set "
         'accessions to [] and data_availability to "none". Capture the QC-level numbers the paper '
-        "reports (alignment rate, read/cell counts, saturation, etc.) as claims with a metric_key that "
-        "aligns to a standard QC metric. When a claim matches one of these controlled QC metric keys, use "
-        f"that exact key so it can be compared automatically: {', '.join(CONTROLLED_METRIC_KEYS)}. If a "
-        "claim matches none of them, use a clear snake_case key. Do not invent values. Use null when unknown.\n\n"
+        "reports (alignment rate, read/cell counts, saturation, peaks called, etc.) as claims with a "
+        "metric_key drawn from the controlled vocabulary below.\n\n"
+        f"{_metric_vocabulary_block()}\n\n"
+        "Use the EXACT controlled key whenever the paper reports the quantity that key describes, however the "
+        "paper words it, so the claim can be compared automatically. Match on what is measured, not on the "
+        "paper's phrasing: \"8733 significant peaks\" is peak_count. Report the claim on the key's own scale "
+        "and state the unit you read. Do not qualify a controlled key with the sample or condition it came "
+        "from (peak_count, never samd1_chip_peaks). If a claim genuinely measures something no controlled key "
+        "describes, or measures only a subset of one (peaks gained in a single condition is not peak_count), "
+        "use a clear snake_case key of your own instead of forcing a wrong match. Do not invent values. Use "
+        "null when unknown.\n\n"
         "For reference_build, give BOTH the genome assembly and the ANNOTATION the paper aligned "
         'against, exactly as the paper words it (e.g. "GRCh38 / GENCODE v32", "mm10 / Ensembl 102", '
         '"CellRanger refdata-gex-GRCh38-2020-A"). The assembly alone is not the reference: two papers '
