@@ -31,7 +31,7 @@ from app.services.llm_provider_clients import get_client
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
-from app.services.validation_classifier_service import CONTROLLED_METRIC_SPECS
+from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS, CONTROLLED_METRIC_SPECS
 
 logger = logging.getLogger("bioaf.validation_extraction")
 
@@ -352,6 +352,132 @@ def parse_extraction(response_text: str) -> dict:
         "blockers": [str(b) for b in _as_list(data.get("blockers")) if str(b).strip()],
         "parse_failure": False,
     }
+
+
+# ---- plan_6 step 2: the binding call ----------------------------------------------------------
+#
+# The extraction call reads a whole paper and emits its claims. This call does one thing: decide,
+# per claim, which controlled metric it measures, WHY, and how sure it is. It exists because the
+# extraction call's binding was unattributable and unreviewable: a claim either landed on a key or it
+# did not, and nothing recorded whether that was a judgment or an accident of the alias table.
+#
+# Declining is a first-class answer here. A per-condition subset is not a total, and a paper that
+# reports nothing bioAF computes must be able to say so without a wrong binding standing in for it.
+
+
+def build_binding_prompt(claims: list[dict]) -> tuple[str, str]:
+    """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline."""
+    system = (
+        "You are binding a paper's quantitative claims to a controlled vocabulary of QC metrics. For "
+        "each claim you are given, decide which ONE controlled metric it measures, or decline.\n\n"
+        f"{_metric_vocabulary_block()}\n\n"
+        "Respond with a SINGLE fenced JSON block (```json ... ```) and nothing else:\n"
+        '{"bindings": [{"claim_index": 0, "bound_key": "peak_count" or null, "reason": "one sentence", '
+        '"confidence": 0.0 to 1.0}]}\n\n'
+        "Rules:\n"
+        "- Bind only when the claim measures the SAME quantity the metric describes. A per-condition or "
+        "differential subset is not a total: peaks gained in one condition is not peak_count, and "
+        "differentially expressed genes is not total_genes_detected.\n"
+        "- Respect the basis. Where a metric says what it is computed here as, a claim measured another "
+        "way is not the same number: a consensus or merged peak set across replicates is not a "
+        "per-sample peak call, and a post-trim read count is not a raw one. Decline those, and say which "
+        "basis the paper used.\n"
+        "- DECLINING IS A CORRECT ANSWER. Use bound_key null whenever no controlled metric measures the "
+        "claim, and give the reason. A wrong binding is worse than no binding, because it is compared "
+        "against a number it does not correspond to and the difference is reported as the paper's.\n"
+        "- Never invent a key. bound_key must be one of the keys listed above, or null.\n"
+        "- Every claim gets exactly one row, in the order given, and every row carries a reason.\n"
+        "- confidence is your own certainty in THIS binding: 1.0 when the claim states the metric in so "
+        "many words, lower when you are reading intent from context."
+    )
+    lines = []
+    for i, c in enumerate(claims):
+        lines.append(
+            f"[{i}] key={c.get('metric_key')!r} value={c.get('value')!r} unit={c.get('unit')!r} "
+            f"where={c.get('source_locator')!r}"
+        )
+    payload = "Claims to bind:\n\n" + "\n".join(lines)
+    return system, payload
+
+
+def _confidence(value) -> float:
+    """A confidence that is not a number in 0-1 is no confidence at all, so it reads as 0.0."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return max(0.0, min(1.0, float(value)))
+
+
+def parse_binding(response_text: str) -> list[dict]:
+    """Pull the fenced binding decisions. Never raises; a key outside the vocabulary is refused here.
+
+    The prompt asks the model not to invent a key, and the parser enforces it: an invented key would
+    persist as a binding and be compared against a metric that does not exist, which is the one
+    failure this call is meant to remove.
+    """
+    match = _FENCED_JSON_RE.search(response_text or "")
+    if not match:
+        return []
+    try:
+        data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+
+    rows = []
+    for item in _as_list(data.get("bindings")):
+        if not isinstance(item, dict):
+            continue
+        raw_key = item.get("bound_key")
+        key = str(raw_key).strip() if raw_key is not None else None
+        reason = str(item.get("reason") or "").strip()
+        confidence = _confidence(item.get("confidence"))
+        if key and key not in CONTROLLED_METRIC_KEYS:
+            reason = (
+                f"the model answered '{key}', which is not a controlled metric key, so the claim is "
+                f"left unbound{': ' + reason if reason else ''}"
+            )
+            key, confidence = None, 0.0
+        rows.append(
+            {
+                "claim_index": item.get("claim_index"),
+                "bound_key": key or None,
+                "reason": reason,
+                "confidence": confidence,
+            }
+        )
+    return rows
+
+
+async def bind_claims(claims: list[dict], *, client, model: str, api_key: str | None) -> list[dict]:
+    """Ask the model which controlled metric each claim measures. One row per claim, in claim order.
+
+    A claim the model said nothing about comes back undecided rather than missing, so a short or
+    scrambled answer cannot silently drop a claim out of the plan.
+    """
+    if not claims:
+        return []
+
+    system, payload = build_binding_prompt(claims)
+    output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
+    by_index = {}
+    for row in parse_binding(output):
+        idx = row.get("claim_index")
+        if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(claims):
+            by_index.setdefault(idx, row)
+
+    return [
+        by_index.get(
+            i,
+            {
+                "claim_index": i,
+                "bound_key": None,
+                "reason": "the model returned no binding decision for this claim",
+                "confidence": 0.0,
+            },
+        )
+        for i in range(len(claims))
+    ]
 
 
 class ValidationExtractionService:

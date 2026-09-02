@@ -851,3 +851,128 @@ def test_the_spec_block_states_what_bioaf_actually_computes():
     assert "pre-trim" in reads_line or "before trimming" in reads_line.lower()
     # And the model is told what to do about it, not merely informed.
     assert "basis" in system.lower()
+
+
+# ---- plan_6 step 2: the binding call (pure prompt/parse) ----
+
+
+_CLAIMS = [
+    {"metric_key": "samd1_chip_peaks", "value": 8733, "unit": "peaks", "source_locator": "Fig. 1G"},
+    {"metric_key": "peaks_gained_accessibility", "value": 1089, "unit": "peaks", "source_locator": "Fig. 2A"},
+]
+
+
+def _binding_response(*rows) -> str:
+    import json as _json
+
+    return "Here:\n```json\n" + _json.dumps({"bindings": list(rows)}) + "\n```\n"
+
+
+def test_the_binding_prompt_shows_the_claims_and_the_vocabulary():
+    """The binding call re-reads the claims against the same specs, one focused decision at a time.
+    It needs the claim's own words (key, value, unit, where in the paper) and the vocabulary."""
+    system, payload = ext.build_binding_prompt(_CLAIMS)
+
+    assert "samd1_chip_peaks" in payload
+    assert "8733" in payload
+    assert "Fig. 1G" in payload
+    assert "peak_count" in system
+    # Declining has to be presented as a real answer, or the model binds everything.
+    assert "decline" in system.lower()
+    # And the basis rule, so it does not bind a consensus count to a per-sample one.
+    assert "basis" in system.lower()
+
+
+def test_parse_binding_reads_the_fenced_block():
+    rows = ext.parse_binding(
+        _binding_response(
+            {
+                "claim_index": 0,
+                "bound_key": "peak_count",
+                "reason": "the paper's headline peak number",
+                "confidence": 0.94,
+            },
+            {"claim_index": 1, "bound_key": None, "reason": "a per-condition subset, not a total", "confidence": 0.9},
+        )
+    )
+    assert [r["bound_key"] for r in rows] == ["peak_count", None]
+    assert rows[0]["confidence"] == 0.94
+    assert rows[1]["reason"] == "a per-condition subset, not a total"
+
+
+def test_parse_binding_never_raises_on_junk():
+    assert ext.parse_binding("no json here") == []
+    assert ext.parse_binding("```json\nnot json\n```") == []
+
+
+def test_parse_binding_refuses_a_key_outside_the_vocabulary():
+    """`Never invent a key outside the vocabulary` has to be enforced, not merely requested: an
+    invented key would be persisted as bound and compared against nothing."""
+    rows = ext.parse_binding(
+        _binding_response({"claim_index": 0, "bound_key": "samd1_peaks_v2", "reason": "looks right", "confidence": 0.9})
+    )
+    assert rows[0]["bound_key"] is None
+    assert "samd1_peaks_v2" in rows[0]["reason"]
+    assert rows[0]["confidence"] == 0.0
+
+
+def test_parse_binding_clamps_confidence():
+    rows = ext.parse_binding(
+        _binding_response(
+            {"claim_index": 0, "bound_key": "peak_count", "reason": "r", "confidence": 4},
+            {"claim_index": 1, "bound_key": "frip", "reason": "r", "confidence": "nonsense"},
+        )
+    )
+    assert rows[0]["confidence"] == 1.0
+    assert rows[1]["confidence"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_bind_claims_binds_the_headline_metric_and_declines_the_subset():
+    """Study 20's claim binds; study 5's per-condition subset declines with a reason. Both answers
+    are decisions the model made and both are recorded."""
+    client = _fake_client(
+        _binding_response(
+            {
+                "claim_index": 0,
+                "bound_key": "peak_count",
+                "reason": "8733 significant peaks is the paper's total",
+                "confidence": 0.94,
+            },
+            {
+                "claim_index": 1,
+                "bound_key": None,
+                "reason": "peaks gained in one condition is a subset",
+                "confidence": 0.88,
+            },
+        )
+    )
+    rows = await ext.bind_claims(_CLAIMS, client=client, model="claude-opus-4-8", api_key=None)
+
+    assert rows[0]["bound_key"] == "peak_count"
+    assert rows[0]["reason"]
+    assert rows[1]["bound_key"] is None
+    assert rows[1]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_bind_claims_returns_a_row_per_claim_even_when_the_model_skips_one():
+    """A short or scrambled answer must not silently drop a claim: every claim gets a row, and a
+    claim the model said nothing about is an undecided one rather than a missing one."""
+    client = _fake_client(
+        _binding_response({"claim_index": 1, "bound_key": "peak_count", "reason": "r", "confidence": 0.5})
+    )
+    rows = await ext.bind_claims(_CLAIMS, client=client, model="m", api_key=None)
+
+    assert len(rows) == 2
+    assert rows[0]["bound_key"] is None
+    assert rows[1]["bound_key"] == "peak_count"
+
+
+@pytest.mark.asyncio
+async def test_bind_claims_on_no_claims_makes_no_call():
+    class _Boom:
+        async def submit(self, **kwargs):
+            raise AssertionError("must not call the model with nothing to bind")
+
+    assert await ext.bind_claims([], client=_Boom(), model="m", api_key=None) == []
