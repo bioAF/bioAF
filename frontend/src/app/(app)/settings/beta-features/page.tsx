@@ -8,7 +8,7 @@ import { api } from "@/lib/api";
 const BETA_FEATURE_LABELS: Record<string, { label: string; description: string }> = {
   lit_validation: {
     label: "Literature Validation",
-    description: "AI-assisted reproduction triage for scientific papers (Validation Studies).",
+    description: "AI-assisted reproduction triage for scientific papers.",
   },
 };
 

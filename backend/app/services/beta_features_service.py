@@ -26,7 +26,7 @@ from app.platform.platform_config_service import PlatformConfigService
 BETA_FEATURES: dict[str, dict[str, str]] = {
     "lit_validation": {
         "label": "Literature Validation",
-        "description": "AI-assisted reproduction triage for scientific papers (Validation Studies).",
+        "description": "AI-assisted reproduction triage for scientific papers.",
     },
 }
 

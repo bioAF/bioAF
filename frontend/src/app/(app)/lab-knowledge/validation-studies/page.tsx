@@ -61,7 +61,7 @@ export default function ValidationStudiesListPage() {
       <Breadcrumb />
       <main className="flex-1 overflow-y-auto p-6">
         <LitValidationGate>
-          <h1 className="mb-1 text-2xl font-bold">Validation Studies</h1>
+          <h1 className="mb-1 text-2xl font-bold">Literature Validation</h1>
           <p data-testid="page-description" className="mb-6 text-sm text-gray-500">
             Reproduction attempts against papers. Start one from a paper in the Literature library.
           </p>

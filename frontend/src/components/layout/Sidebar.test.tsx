@@ -233,18 +233,18 @@ describe("Sidebar beta gating", () => {
     mockComponents.mockReturnValue({ components: [], loading: false, refetch: jest.fn() });
   });
 
-  test("hides Validation Studies when the lit_validation flag is off", () => {
+  test("hides Literature Validation when the lit_validation flag is off", () => {
     mockBetaFeatures.mockReturnValue({ flags: {}, loading: false });
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Lab Knowledge"));
-    expect(screen.queryByText("Validation Studies")).not.toBeInTheDocument();
+    expect(screen.queryByText("Literature Validation")).not.toBeInTheDocument();
   });
 
-  test("shows Validation Studies when the lit_validation flag is on", () => {
+  test("shows Literature Validation when the lit_validation flag is on", () => {
     mockBetaFeatures.mockReturnValue({ flags: { lit_validation: true }, loading: false });
     render(<Sidebar />);
     fireEvent.click(screen.getByText("Lab Knowledge"));
-    expect(screen.getByText("Validation Studies")).toBeInTheDocument();
+    expect(screen.getByText("Literature Validation")).toBeInTheDocument();
   });
 
   test("shows the Beta Features settings menu on any instance", () => {

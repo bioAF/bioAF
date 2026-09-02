@@ -98,10 +98,10 @@ export const navConfig: NavSection[] = [
     icon: "book",
     children: [
       { label: "Lab Documents", path: "/lab-knowledge/documents", permission: { resource: "lab_documents", action: "view" } },
-      // Papers-as-knowledge: Literature + its Validation Studies live alongside Documents/Glossary,
+      // Papers-as-knowledge: Literature + its Literature Validation live alongside Documents/Glossary,
       // where scientists look for reference material (moved out of Data & Files).
       { label: "Literature Library", path: "/lab-knowledge/literature", permission: { resource: "literature", action: "view" } },
-      { label: "Validation Studies", path: "/lab-knowledge/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
+      { label: "Literature Validation", path: "/lab-knowledge/validation-studies", permission: { resource: "lit_validation", action: "view" }, betaFlag: "lit_validation" },
       { label: "Lab Glossary", path: "/lab-knowledge/glossary", permission: { resource: "lab_glossary", action: "view" } },
       { label: "Scientific Decision Records", path: "/lab-knowledge/decision-records", permission: { resource: "sdr", action: "view" } },
     ],

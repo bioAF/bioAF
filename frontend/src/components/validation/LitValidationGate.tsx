@@ -8,7 +8,7 @@ export function LitValidationDisabledNotice() {
   return (
     <div className="mx-auto max-w-md rounded-lg border border-gray-200 bg-white p-8 text-center">
       <h2 className="text-lg font-semibold text-gray-900">
-        Validation Studies isn&apos;t enabled
+        Literature Validation isn&apos;t enabled
       </h2>
       <p className="mt-2 text-sm text-gray-500">
         This is a beta feature and is turned off on this instance. An admin can enable it under
