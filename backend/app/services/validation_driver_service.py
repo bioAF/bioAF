@@ -44,7 +44,13 @@ from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.result_set_normalizer import FindingSet, normalize_gene_table, normalize_interval_table
+from app.models.organization import Organization
+from app.services import llm_provider_config_service
+from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
+from app.services.llm_provider_clients import get_client
+from app.services.validation_autonomy import AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS
 from app.services.validation_classifier_service import classify_study
+from app.services.validation_ratification import ratify
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
 from app.services.validation_sample_values import sample_values_from_design
@@ -673,21 +679,58 @@ class ValidationDriverService:
             pipeline_key=(plan.pipeline_key if plan else None),
         )
         evidence["classification_result"] = result
+
+        # plan_6 step 8: in autonomous mode the model has the last word on what the measurements
+        # MEAN. The measurement itself stays on the record either way, beside the ratification, so a
+        # scientist can see both what was computed and what was concluded from it.
+        ratification = await ValidationDriverService._ratify(session, study, result)
+        if ratification is not None:
+            evidence["ratification"] = ratification
         study.evidence_json = evidence
 
-        if result["auto_finalize"]:
+        finalize = ratification["finalize"] if ratification else result["auto_finalize"]
+        classification = ratification["verdict"] if ratification else result["classification"]
+        if finalize:
             await ValidationStudyService.transition(
                 session,
                 study.id,
                 study.organization_id,
                 study.requested_by_user_id,
                 "classified",
-                classification=result["classification"],
+                classification=classification,
             )
         else:
             # Persist the suggested verdict; leave the study at comparing for the human gate.
             await session.flush()
         return True
+
+    @staticmethod
+    async def _ratify(session: AsyncSession, study: ValidationStudy, result: dict) -> dict | None:
+        """The model's ratification of the measured verdict, or None to keep the assisted behaviour.
+
+        None covers assisted mode, an org with no usable provider, and a provider outage. All three
+        hold the study exactly where the shipped policy holds it, which is the safe direction: a
+        study finalised on a failed call would be a verdict nobody made.
+        """
+        org = await session.get(Organization, study.organization_id)
+        autonomy = (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
+        if autonomy != AUTONOMY_AUTONOMOUS:
+            return None
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            logger.warning("study %s is autonomous but the org has no LLM provider; holding", study.id)
+            return None
+
+        return await ratify(
+            result,
+            autonomy=autonomy,
+            client=get_client(cfg.provider),
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
 
     # ---- helpers ----
 
