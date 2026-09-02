@@ -365,7 +365,7 @@ def parse_extraction(response_text: str) -> dict:
 # reports nothing bioAF computes must be able to say so without a wrong binding standing in for it.
 
 
-def build_binding_prompt(claims: list[dict]) -> tuple[str, str]:
+def build_binding_prompt(claims: list[dict], *, previous: list[dict] | None = None) -> tuple[str, str]:
     """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline."""
     system = (
         "You are binding a paper's quantitative claims to a controlled vocabulary of QC metrics. For "
@@ -397,6 +397,17 @@ def build_binding_prompt(claims: list[dict]) -> tuple[str, str]:
             f"where={c.get('source_locator')!r}"
         )
     payload = "Claims to bind:\n\n" + "\n".join(lines)
+    if previous:
+        prior = "\n".join(
+            f"[{d.get('claim_index')}] you answered {d.get('bound_key')!r} because: {d.get('reason')}" for d in previous
+        )
+        payload += (
+            "\n\nYou already reviewed these claims and bound NONE of them:\n\n"
+            f"{prior}\n\n"
+            "Reconsider. Binding nothing is the right answer when this paper genuinely reports no "
+            "quantity in the vocabulary, and it is the wrong one if you were reading a claim too "
+            "narrowly. Answer again for every claim, and keep a decline where a decline is correct."
+        )
     return system, payload
 
 
@@ -432,6 +443,9 @@ def parse_binding(response_text: str) -> list[dict]:
         key = str(raw_key).strip() if raw_key is not None else None
         reason = str(item.get("reason") or "").strip()
         confidence = _confidence(item.get("confidence"))
+        # An explicit null is the model declining; an invented key is the model trying and failing.
+        # Both leave the claim unbound and they are not the same event, so step 4 can tell them apart.
+        declined = raw_key is None
         if key and key not in CONTROLLED_METRIC_KEYS:
             reason = (
                 f"the model answered '{key}', which is not a controlled metric key, so the claim is "
@@ -444,21 +458,50 @@ def parse_binding(response_text: str) -> list[dict]:
                 "bound_key": key or None,
                 "reason": reason,
                 "confidence": confidence,
+                "declined": declined,
             }
         )
     return rows
 
 
-async def bind_claims(claims: list[dict], *, client, model: str, api_key: str | None) -> list[dict]:
+BINDING_FAILURE_BLOCKER = "The model could not map any of this paper's claims to a measurable metric."
+
+
+def binding_failure_blocker(decisions: list[dict]) -> str | None:
+    """The plan blocker for a claim set that bound nothing, or None while anything bound.
+
+    Two different events produce zero bindings and they need different sentences. Study 4 reported
+    "none of the paper's claimed metrics could be compared to a computed QC metric", which reads
+    exactly like an unreproducible paper and was in fact a paper whose claims are DE gene counts: real
+    results that bioAF does not compute. Blaming the model there is as wrong as blaming the paper when
+    the model is the one that failed.
+    """
+    if not decisions or any(d.get("bound_key") for d in decisions):
+        return None
+    if all(d.get("declined") for d in decisions):
+        return (
+            "This paper's quantitative claims do not correspond to any metric bioAF computes, so "
+            "there is nothing to compare at Level 2. The model reviewed every claim and declined "
+            "each one with a reason."
+        )
+    return BINDING_FAILURE_BLOCKER
+
+
+async def bind_claims(
+    claims: list[dict], *, client, model: str, api_key: str | None, previous: list[dict] | None = None
+) -> list[dict]:
     """Ask the model which controlled metric each claim measures. One row per claim, in claim order.
 
     A claim the model said nothing about comes back undecided rather than missing, so a short or
     scrambled answer cannot silently drop a claim out of the plan.
+
+    ``previous`` re-asks with the last attempt's own answers in front of it. It is used once, when a
+    whole paper bound nothing, because that is the case where a second look is worth its cost.
     """
     if not claims:
         return []
 
-    system, payload = build_binding_prompt(claims)
+    system, payload = build_binding_prompt(claims, previous=previous)
     output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
     by_index = {}
     for row in parse_binding(output):
@@ -474,6 +517,7 @@ async def bind_claims(claims: list[dict], *, client, model: str, api_key: str | 
                 "bound_key": None,
                 "reason": "the model returned no binding decision for this claim",
                 "confidence": 0.0,
+                "declined": False,
             },
         )
         for i in range(len(claims))
@@ -579,6 +623,61 @@ class ValidationExtractionService:
                 f"this dataset was aligned to before approving."
             )
 
+        targets = []
+        claims_to_bind = []
+        for c in parsed["claims"]:
+            metric_key = (c.get("metric_key") or "").strip()
+            if not metric_key:
+                continue
+            targets.append(
+                {
+                    "metric_key": metric_key,
+                    "claimed_value": _to_float(c.get("value")),
+                    "unit": c.get("unit"),
+                    "tolerance": _to_float(c.get("tolerance")),
+                    "source_locator": c.get("source_locator"),
+                    # Until the binding call answers, the alias table is what decides, exactly as before.
+                    "bound_by": "alias_table",
+                }
+            )
+            claims_to_bind.append(
+                {
+                    "metric_key": metric_key,
+                    "value": c.get("value"),
+                    "unit": c.get("unit"),
+                    "source_locator": c.get("source_locator"),
+                }
+            )
+
+        # plan_6 step 2/3: ask the model which controlled metric each claim measures, and record the
+        # answer with its reason. This is an improvement on the alias table, not a dependency of the
+        # extraction: a provider failure here must not cost the plan, because the claims are still the
+        # paper's claims and the alias table still resolves what it always did.
+        try:
+            decisions = await bind_claims(claims_to_bind, client=client, model=cfg.model, api_key=cfg.api_key)
+            # plan_6 step 4: a whole paper that bound nothing gets one more look, before the C1 gate
+            # and before any compute. Bounded at one retry, because a second failure is an answer.
+            if binding_failure_blocker(decisions) is not None:
+                decisions = await bind_claims(
+                    claims_to_bind, client=client, model=cfg.model, api_key=cfg.api_key, previous=decisions
+                )
+        except Exception as exc:  # noqa: BLE001 - any provider failure degrades to the alias table
+            logger.warning("claim binding failed for study %s, falling back to the alias table: %s", study.id, exc)
+            decisions = []
+
+        for target, decision in zip(targets, decisions):
+            target.update(
+                bound_key=decision["bound_key"],
+                binding_reason=decision["reason"],
+                binding_confidence=decision["confidence"],
+                bound_by_model=cfg.model,
+                bound_by="model",
+            )
+
+        binding_blocker = binding_failure_blocker(decisions)
+        if binding_blocker:
+            blockers.append(binding_blocker)
+
         plan = await ReproductionPlanService.create_plan(
             session,
             study,
@@ -614,19 +713,5 @@ class ValidationExtractionService:
             library_strategy=library_strategy,
         )
 
-        targets = []
-        for c in parsed["claims"]:
-            metric_key = (c.get("metric_key") or "").strip()
-            if not metric_key:
-                continue
-            targets.append(
-                {
-                    "metric_key": metric_key,
-                    "claimed_value": _to_float(c.get("value")),
-                    "unit": c.get("unit"),
-                    "tolerance": _to_float(c.get("tolerance")),
-                    "source_locator": c.get("source_locator"),
-                }
-            )
         await ReproductionPlanService.add_comparison_targets(session, plan, targets)
         return plan

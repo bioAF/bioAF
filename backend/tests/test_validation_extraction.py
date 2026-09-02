@@ -45,6 +45,19 @@ def _fake_client(response):
     return _C()
 
 
+def _fake_bind(*rows):
+    """Stand in for the binding call with a fixed set of decisions, one per claim index."""
+
+    async def _bind(claims, *, client, model, api_key):
+        by_index = {r["claim_index"]: r for r in rows}
+        return [
+            by_index.get(i, {"claim_index": i, "bound_key": None, "reason": "no decision", "confidence": 0.0})
+            for i in range(len(claims))
+        ]
+
+    return _bind
+
+
 def _patch_llm(monkeypatch, response, provider="anthropic", model="claude-opus-4-8"):
     async def fake_get_active(sess, org_id):
         return SimpleNamespace(provider=provider, model=model, api_key=None)
@@ -976,3 +989,234 @@ async def test_bind_claims_on_no_claims_makes_no_call():
             raise AssertionError("must not call the model with nothing to bind")
 
     assert await ext.bind_claims([], client=_Boom(), model="m", api_key=None) == []
+
+
+# ---- plan_6 step 3: the binding decision is recorded on the target ----
+
+
+@pytest.mark.asyncio
+async def test_a_target_records_who_bound_it_and_why(session, admin_user, monkeypatch):
+    """An AI decision that cannot be attributed is a defect. The target carries what was chosen, why,
+    how sure the model was, and which model made the call."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+    monkeypatch.setattr(
+        ext,
+        "bind_claims",
+        _fake_bind(
+            {
+                "claim_index": 0,
+                "bound_key": "reads_mapped_genome",
+                "reason": "the paper's alignment rate",
+                "confidence": 0.92,
+            },
+            {
+                "claim_index": 1,
+                "bound_key": None,
+                "reason": "a DE gene count has no controlled metric",
+                "confidence": 0.9,
+            },
+        ),
+    )
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    targets = (
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+        .scalars()
+        .all()
+    )
+    by_key = {t.metric_key: t for t in targets}
+
+    bound = by_key["alignment_rate"]
+    assert bound.bound_key == "reads_mapped_genome"
+    assert bound.bound_by == "model"
+    assert bound.bound_by_model == "claude-opus-4-8"
+    assert bound.binding_reason == "the paper's alignment rate"
+    assert bound.binding_confidence == 0.92
+
+    declined = by_key["de_genes"]
+    assert declined.bound_key is None
+    assert declined.bound_by == "model"
+    assert declined.binding_reason == "a DE gene count has no controlled metric"
+
+
+@pytest.mark.asyncio
+async def test_a_binding_call_that_fails_leaves_the_alias_table_in_charge(session, admin_user, monkeypatch):
+    """The binding call is an improvement on the alias table, not a dependency of the extraction. A
+    provider error there must not lose the plan: the claims are still the paper's claims."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("provider exploded")
+
+    monkeypatch.setattr(ext, "bind_claims", _boom)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    targets = (
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+        .scalars()
+        .all()
+    )
+    assert {t.metric_key for t in targets} == {"alignment_rate", "de_genes"}
+    assert all(t.bound_key is None for t in targets)
+    assert all(t.bound_by == "alias_table" for t in targets)
+
+
+# ---- plan_6 step 4: a binding failure is not a silent paper ----
+
+
+def _decision(index, key=None, reason="r", confidence=0.9, declined=None):
+    return {
+        "claim_index": index,
+        "bound_key": key,
+        "reason": reason,
+        "confidence": confidence,
+        "declined": (key is None) if declined is None else declined,
+    }
+
+
+class TestBindingFailureIsNamed:
+    """Study 4 scored 0 of 7 and its stored reasoning read "none of the paper's claimed metrics could
+    be compared to a computed QC metric", which is indistinguishable from what a genuinely
+    unreproducible paper produces. A weak model must not look like a weak literature.
+
+    Two different things produce zero bindings and they need different sentences: the model reviewed
+    every claim and correctly found nothing bioAF computes, or the model failed to decide at all.
+    """
+
+    def test_no_blocker_while_anything_bound(self):
+        assert ext.binding_failure_blocker([_decision(0, "peak_count"), _decision(1)]) is None
+
+    def test_no_blocker_when_there_were_no_claims(self):
+        assert ext.binding_failure_blocker([]) is None
+
+    def test_a_paper_whose_claims_are_all_outside_the_vocabulary(self):
+        """Study 4's real shape: DEG counts and gene overlaps, every one correctly declined. The
+        honest sentence is about the paper's claims, not about the model."""
+        blocker = ext.binding_failure_blocker(
+            [
+                _decision(0, None, "a DE gene count is not a controlled metric"),
+                _decision(1, None, "a gene-overlap count is not a controlled metric"),
+            ]
+        )
+        assert blocker is not None
+        assert "do not correspond to any metric bioAF computes" in blocker
+        assert "could not map" not in blocker
+
+    def test_a_model_that_failed_to_decide(self):
+        """The model answered nothing usable. That is a failure of the model, and the sentence has to
+        say so rather than blame the paper."""
+        blocker = ext.binding_failure_blocker(
+            [
+                _decision(0, None, "the model returned no binding decision for this claim", 0.0, declined=False),
+                _decision(1, None, "the model returned no binding decision for this claim", 0.0, declined=False),
+            ]
+        )
+        assert blocker == "The model could not map any of this paper's claims to a measurable metric."
+
+    def test_one_undecided_claim_makes_it_a_model_failure(self):
+        """A mix is not a clean decline: if any claim went unanswered the model did not review the
+        paper, so the paper must not be blamed for the gap."""
+        blocker = ext.binding_failure_blocker(
+            [
+                _decision(0, None, "a DE gene count is not a controlled metric"),
+                _decision(1, None, "no decision", 0.0, declined=False),
+            ]
+        )
+        assert "could not map" in blocker
+
+
+def _counting_bind(*passes):
+    """Drive bind_claims with a scripted answer per attempt, and count the attempts."""
+    calls = []
+
+    async def _bind(claims, *, client, model, api_key, previous=None):
+        calls.append(previous)
+        rows = passes[min(len(calls) - 1, len(passes) - 1)]
+        by_index = {r["claim_index"]: r for r in rows}
+        return [
+            by_index.get(
+                i, {"claim_index": i, "bound_key": None, "reason": "no decision", "confidence": 0.0, "declined": False}
+            )
+            for i in range(len(claims))
+        ]
+
+    _bind.calls = calls
+    return _bind
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_bound_nothing_is_rebound_exactly_once(session, admin_user, monkeypatch):
+    """One retry, no loop. The second attempt is given its own previous answers to reconsider."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+    binder = _counting_bind([_decision(0, None, "not a metric"), _decision(1, None, "not a metric")])
+    monkeypatch.setattr(ext, "bind_claims", binder)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert len(binder.calls) == 2
+    assert binder.calls[0] is None
+    assert binder.calls[1] is not None, "the second attempt must see the first attempt's answers"
+    assert any("do not correspond to any metric bioAF computes" in b for b in plan.blockers_json)
+
+
+@pytest.mark.asyncio
+async def test_a_plan_that_bound_something_is_not_rebound(session, admin_user, monkeypatch):
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+    binder = _counting_bind([_decision(0, "reads_mapped_genome"), _decision(1, None, "not a metric")])
+    monkeypatch.setattr(ext, "bind_claims", binder)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert len(binder.calls) == 1
+    assert not any("could not map" in b or "do not correspond" in b for b in plan.blockers_json)
+
+
+@pytest.mark.asyncio
+async def test_a_second_pass_that_binds_is_the_one_recorded(session, admin_user, monkeypatch):
+    """The retry exists to be believed when it succeeds: its answer is what the plan carries, and no
+    binding-failure blocker is recorded."""
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    _patch_llm(monkeypatch, _GOOD)
+    binder = _counting_bind(
+        [_decision(0, None, "read it too narrowly"), _decision(1, None, "not a metric")],
+        [_decision(0, "reads_mapped_genome", "it is the alignment rate after all"), _decision(1, None, "not a metric")],
+    )
+    monkeypatch.setattr(ext, "bind_claims", binder)
+
+    plan = await ValidationExtractionService.extract(
+        session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
+    )
+    await session.commit()
+
+    assert len(binder.calls) == 2
+    targets = (
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+        .scalars()
+        .all()
+    )
+    bound = {t.metric_key: t.bound_key for t in targets}
+    assert bound["alignment_rate"] == "reads_mapped_genome"
+    assert not any("could not map" in b or "do not correspond" in b for b in plan.blockers_json)

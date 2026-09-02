@@ -617,7 +617,15 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         claimed = t.get("claimed_value")
         unit = t.get("unit")
         tol = t.get("tolerance")
-        mapped, advisory = _resolve_key(key)
+        # plan_6 step 3: the model's own binding decision, when one was recorded. It is the whole
+        # point of the binding call that a claim keyed `samd1_chip_peaks` can still reach peak_count,
+        # so a stored binding outranks the alias table. A stored key outside the vocabulary is not a
+        # binding at all (nothing computes it), so that falls back rather than claiming a mapping.
+        bound = t.get("bound_key")
+        if bound in _SPEC_BY_KEY:
+            mapped, advisory = bound, False
+        else:
+            mapped, advisory = _resolve_key(key)
         # A claim can name the right metric and still be measured on a different basis, stated in its
         # own unit ("consensus peaks", "reads after trimming") with the key exactly right. Giving the
         # model the specs made that the common shape, and it bypasses the key-side qualifier strip.

@@ -192,6 +192,13 @@ class ReproductionPlanService:
                 unit=_clamp(t.get("unit"), 255),
                 tolerance=t.get("tolerance"),
                 source_locator=_clamp(t.get("source_locator"), 255),
+                # plan_6 step 3: the binding decision, when one was made. Absent keys leave NULLs,
+                # which is what every caller that predates the binding call writes.
+                bound_key=_clamp(t.get("bound_key"), 100),
+                binding_reason=t.get("binding_reason"),
+                binding_confidence=t.get("binding_confidence"),
+                bound_by_model=_clamp(t.get("bound_by_model"), 255),
+                bound_by=_clamp(t.get("bound_by"), 20),
             )
             session.add(target)
             created.append(target)
