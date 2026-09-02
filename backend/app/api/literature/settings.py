@@ -1,4 +1,4 @@
-"""Org-level Lit Review automation settings: relevance threshold and cadence."""
+"""Org-level literature settings: Lit Review automation, and literature validation autonomy."""
 
 from __future__ import annotations
 
@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
-from app.schemas.literature import LitReviewSettingsPayload, LitReviewSettingsUpdateRequest
+from app.schemas.literature import (
+    LitReviewSettingsPayload,
+    LitReviewSettingsUpdateRequest,
+    LitValidationSettingsPayload,
+    LitValidationSettingsUpdateRequest,
+)
 
 router = APIRouter()
 
@@ -137,3 +142,54 @@ async def update_lit_review_settings_endpoint(
         max_runs_per_tick=int(org.lit_review_max_runs_per_tick),
         next_run=next_run.isoformat() if next_run else None,
     )
+
+
+@router.get("/settings/lit-validation", response_model=LitValidationSettingsPayload)
+async def get_lit_validation_settings_endpoint(
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models.organization import Organization
+    from app.services.validation_autonomy import AUTONOMY_ASSISTED
+
+    org_id = int(current_user["org_id"])
+    row = (
+        await session.execute(select(Organization.lit_validation_autonomy).where(Organization.id == org_id))
+    ).one_or_none()
+    return LitValidationSettingsPayload(autonomy=(row[0] if row else None) or AUTONOMY_ASSISTED)
+
+
+@router.put("/settings/lit-validation", response_model=LitValidationSettingsPayload)
+async def update_lit_validation_settings_endpoint(
+    body: LitValidationSettingsUpdateRequest,
+    current_user: dict = require_permission("literature", "configure_sources"),
+    session: AsyncSession = Depends(get_session),
+):
+    from app.models.organization import Organization
+    from app.services import audit_service
+    from app.services.validation_autonomy import VALID_AUTONOMY
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
+
+    if body.autonomy is not None:
+        if body.autonomy not in VALID_AUTONOMY:
+            raise HTTPException(400, f"autonomy must be one of {VALID_AUTONOMY}")
+        previous = {"autonomy": org.lit_validation_autonomy}
+        org.lit_validation_autonomy = body.autonomy
+        await session.flush()
+        # Audited because it changes who is answerable for a study's scientific judgments, which is
+        # exactly the kind of change a lab needs to be able to reconstruct after the fact.
+        await audit_service.log_action(
+            session,
+            user_id=user_id,
+            entity_type="organization",
+            entity_id=org_id,
+            action="update_lit_validation_settings",
+            details={"autonomy": body.autonomy},
+            previous_value=previous,
+        )
+        await session.commit()
+
+    return LitValidationSettingsPayload(autonomy=org.lit_validation_autonomy)
