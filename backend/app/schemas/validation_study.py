@@ -112,6 +112,10 @@ class ReproductionPlanResponse(BaseModel):
     extractor_model: str | None = None
     extractor_provider: str | None = None
     comparison_targets: list[ComparisonTargetResponse] = []
+    # Computed from the targets: what the model decided about each claim, why, how sure it was, and
+    # which model decided. Rendered at the C1 gate in BOTH autonomy modes, because an AI decision
+    # that cannot be attributed is a defect rather than a feature (plan_6 step 5).
+    ai_decisions: list[dict] = []
     # Computed, not stored: which Level-3 finding kinds this plan's pipeline actually has a route for.
     # The C1 gate offered both kinds for every plan_ready study with no pipeline check, so a scientist
     # could paste a DEG table for an ATAC study and spend hours of compute to learn there was never a

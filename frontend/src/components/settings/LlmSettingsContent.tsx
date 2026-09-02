@@ -7,6 +7,7 @@ import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { logError } from "@/lib/errorReporting";
 import { literature } from "@/lib/literature";
+import { LitValidationAutonomySection } from "./LitValidationAutonomySection";
 
 type ProviderId = "openai" | "anthropic" | "google" | "gemma";
 
@@ -235,6 +236,7 @@ export function LlmSettingsContent() {
       )}
 
       <LitReviewThresholdSection />
+      <LitValidationAutonomySection />
 
       <AutoLitReviewSection />
 

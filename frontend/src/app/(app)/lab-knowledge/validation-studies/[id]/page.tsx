@@ -24,6 +24,10 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { LitValidationDisabledNotice } from "@/components/validation/LitValidationGate";
 import { useBetaFeatures } from "@/hooks/useBetaFeatures";
 import { api } from "@/lib/api";
+import {
+  AiDecisionList,
+  type AiDecision,
+} from "@/components/validation/AiDecisionList";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -55,6 +59,9 @@ interface ReproductionPlanView {
   // The one blocker that refuses approval, and the pipeline that would resolve it. Computed per
   // request, so a plan corrected in another tab stops showing it.
   deposit_conflict?: DepositConflict | null;
+  // What the model decided about each of the paper's claims, and how sure it was. Rendered at the
+  // C1 gate in both autonomy modes: the person approving the run is authorising these decisions.
+  ai_decisions?: AiDecision[] | null;
 }
 
 interface ValidationStudy {
@@ -237,6 +244,9 @@ export default function ValidationStudyPage() {
               </Field>
               <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
             </dl>
+            {plan.ai_decisions && plan.ai_decisions.length > 0 && (
+              <AiDecisionList decisions={plan.ai_decisions} />
+            )}
             {plan.blockers && plan.blockers.length > 0 && (
               <div className="mt-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
