@@ -12,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
 from app.database import get_session
+from app.exceptions import ValidationError
 from app.services import llm_provider_config_service
+from app.services.llm_feature_models import VALID_FEATURES
+from app.services.llm_suitability import suitability_for
 from app.services.llm_models_fetch_service import list_models_with_fallback
 from app.services.llm_provider_clients import ProviderError, get_client
 from app.services.llm_provider_config_service import (
@@ -46,6 +49,25 @@ class ProvidersResponse(BaseModel):
 class UpsertProviderRequest(BaseModel):
     api_key: str | None = Field(default=None)
     model: str | None = Field(default=None)
+
+
+class FeatureModelSummary(BaseModel):
+    feature: str
+    provider: str | None
+    model: str | None
+    # Whether this feature names its own model, or is simply running on the org's active provider.
+    # The UI has to be able to say which, because "clear the override" is only meaningful for one.
+    overridden: bool
+    suitability: dict
+
+
+class FeatureModelsResponse(BaseModel):
+    features: list[FeatureModelSummary]
+
+
+class SetFeatureModelRequest(BaseModel):
+    provider: str
+    model: str
 
 
 class TestProviderResponse(BaseModel):
@@ -223,4 +245,66 @@ async def delete_provider(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     await llm_provider_config_service.delete(session, org_id=org_id, provider=provider, actor_user_id=user_id)
+    await session.commit()
+
+
+async def _feature_summary(session: AsyncSession, org_id: int, feature: str) -> FeatureModelSummary:
+    overrides = {o.feature for o in await llm_provider_config_service.list_feature_overrides(session, org_id)}
+    cfg = await llm_provider_config_service.get_for_feature(session, org_id, feature)
+    provider = cfg.provider if cfg else None
+    model = cfg.model if cfg else None
+    return FeatureModelSummary(
+        feature=feature,
+        provider=provider,
+        model=model,
+        overridden=feature in overrides,
+        # The verdict is for the model actually in use, override or not: an org running an unsuitable
+        # model as its ORG default has the same problem as one that chose it for this feature.
+        suitability=suitability_for(provider, model),
+    )
+
+
+@router.get("/feature-models", response_model=FeatureModelsResponse)
+async def list_feature_models(
+    current_user: dict = require_permission("llm_integration", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    return FeatureModelsResponse(
+        features=[await _feature_summary(session, org_id, feature) for feature in VALID_FEATURES]
+    )
+
+
+@router.put("/feature-models/{feature}", response_model=FeatureModelSummary)
+async def set_feature_model(
+    feature: str,
+    body: SetFeatureModelRequest,
+    current_user: dict = require_permission("llm_integration", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        await llm_provider_config_service.set_feature_override(
+            session, org_id, user_id, feature, body.provider, body.model
+        )
+    except ValidationError as exc:
+        # A suitability warning never lands here: it informs and the save proceeds. This is the
+        # different case of an override that could not work at all.
+        raise HTTPException(400, str(exc))
+    await session.commit()
+    return await _feature_summary(session, org_id, feature)
+
+
+@router.delete("/feature-models/{feature}", status_code=204)
+async def clear_feature_model(
+    feature: str,
+    current_user: dict = require_permission("llm_integration", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    if feature not in VALID_FEATURES:
+        raise HTTPException(400, f"feature must be one of {VALID_FEATURES}")
+    await llm_provider_config_service.clear_feature_override(session, org_id, user_id, feature)
     await session.commit()
