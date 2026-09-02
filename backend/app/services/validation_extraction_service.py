@@ -23,6 +23,7 @@ from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services import llm_provider_config_service
+from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
 from app.services.literature.accession_manifest_service import (
     AccessionManifestService,
     dominant_library_strategy,
@@ -539,7 +540,10 @@ class ValidationExtractionService:
         gaps (no accession, unmappable method, parse failure) are recorded as plan blockers rather
         than raised, so the C1 gate can show them.
         """
-        cfg = await llm_provider_config_service.get_active(session, org_id)
+        # plan_6 step 6: validation runs on its own model when the org named one. The paper is a
+        # whole document and the vocabulary is 23 near neighbours; that is a different demand from
+        # scoring an abstract, and an org should not have to pick one model for both.
+        cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_VALIDATION)
         if not cfg:
             raise ValidationError("No active LLM provider is configured for this organization.")
 
