@@ -49,6 +49,7 @@ from app.models.literature import (
     derive_bucket,
 )
 from app.services import audit_service, llm_provider_config_service
+from app.services.llm_feature_models import FEATURE_LITERATURE_REVIEW
 from app.services.event_bus import event_bus
 from app.services.event_types import (
     LITERATURE_AUTO_REVIEW_RECOMMENDATIONS,
@@ -96,7 +97,7 @@ async def create_run(
     trigger is 'manual' for on-demand runs and 'scheduled' for runs started by
     the automated cadence loop.
     """
-    cfg = await llm_provider_config_service.get_active(session, org_id)
+    cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_REVIEW)
     if cfg is None:
         raise NoActiveLlmProvider("org has no active LLM provider")
 

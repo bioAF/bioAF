@@ -16,8 +16,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import NotFoundError, ValidationError
+from app.models.llm_feature_model_override import LlmFeatureModelOverride
 from app.models.llm_provider_config import LlmProviderConfig
 from app.services import audit_service
+from app.services.llm_feature_models import VALID_FEATURES
 
 SUPPORTED_PROVIDERS = {"openai", "anthropic", "google", "gemma"}
 HOSTED_PROVIDERS = {"openai", "anthropic", "google"}
@@ -56,6 +58,122 @@ async def get_active(session: AsyncSession, org_id: int) -> LlmProviderConfig | 
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_for_feature(session: AsyncSession, org_id: int, feature: str) -> LlmProviderConfig | None:
+    """The provider config one feature should run on: its override if it has one, else the active row.
+
+    Returns the override's PROVIDER row with the override's model substituted, so the API key comes
+    from the provider's own record and is never copied. The returned object is the live ORM instance
+    with an attribute changed in memory; callers read `.provider`, `.model` and `.api_key` and none
+    of them writes it back, which is why this does not need a detached copy.
+    """
+    override = (
+        await session.execute(
+            select(LlmFeatureModelOverride).where(
+                LlmFeatureModelOverride.organization_id == org_id,
+                LlmFeatureModelOverride.feature == feature,
+            )
+        )
+    ).scalar_one_or_none()
+    if override is None:
+        return await get_active(session, org_id)
+
+    cfg = await get_for_provider(session, org_id, override.provider)
+    if cfg is None or not cfg.api_key:
+        # The provider was configured when the override was saved and is not now. Falling back to the
+        # active config is the honest move: the feature keeps working on the org's default rather
+        # than failing with an auth error nobody can trace to a setting.
+        return await get_active(session, org_id)
+    cfg.model = override.model
+    return cfg
+
+
+async def set_feature_override(
+    session: AsyncSession, org_id: int, user_id: int, feature: str, provider: str, model: str
+) -> LlmFeatureModelOverride:
+    """Point one feature at a model on an already-configured provider.
+
+    Refused when the provider has no key, because saving it would fail at call time with an auth
+    error and nothing on the screen would connect that to this setting.
+    """
+    if feature not in VALID_FEATURES:
+        raise ValidationError(f"feature must be one of {VALID_FEATURES}")
+    if provider not in SUPPORTED_PROVIDERS:
+        raise ValidationError(f"unknown provider: {provider}")
+
+    cfg = await get_for_provider(session, org_id, provider)
+    if cfg is None or not cfg.api_key:
+        raise ValidationError(
+            f"The {provider} provider needs an API key before a feature can use it. Configure "
+            f"{provider} under Settings > Integrations > LLMs, then set this override."
+        )
+
+    override = (
+        await session.execute(
+            select(LlmFeatureModelOverride).where(
+                LlmFeatureModelOverride.organization_id == org_id,
+                LlmFeatureModelOverride.feature == feature,
+            )
+        )
+    ).scalar_one_or_none()
+    previous = {"provider": override.provider, "model": override.model} if override else None
+    if override is None:
+        override = LlmFeatureModelOverride(
+            organization_id=org_id, feature=feature, provider=provider, model=model, updated_by_user_id=user_id
+        )
+        session.add(override)
+    else:
+        override.provider = provider
+        override.model = model
+        override.updated_by_user_id = user_id
+    await session.flush()
+
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="organization",
+        entity_id=org_id,
+        action="set_llm_feature_model_override",
+        details={"feature": feature, "provider": provider, "model": model},
+        previous_value=previous,
+    )
+    return override
+
+
+async def clear_feature_override(session: AsyncSession, org_id: int, user_id: int, feature: str) -> None:
+    """Return a feature to the org's active provider and model."""
+    override = (
+        await session.execute(
+            select(LlmFeatureModelOverride).where(
+                LlmFeatureModelOverride.organization_id == org_id,
+                LlmFeatureModelOverride.feature == feature,
+            )
+        )
+    ).scalar_one_or_none()
+    if override is None:
+        return
+    previous = {"provider": override.provider, "model": override.model}
+    await session.delete(override)
+    await session.flush()
+    await audit_service.log_action(
+        session,
+        user_id=user_id,
+        entity_type="organization",
+        entity_id=org_id,
+        action="clear_llm_feature_model_override",
+        details={"feature": feature},
+        previous_value=previous,
+    )
+
+
+async def list_feature_overrides(session: AsyncSession, org_id: int) -> Sequence[LlmFeatureModelOverride]:
+    result = await session.execute(
+        select(LlmFeatureModelOverride)
+        .where(LlmFeatureModelOverride.organization_id == org_id)
+        .order_by(LlmFeatureModelOverride.feature)
+    )
+    return result.scalars().all()
 
 
 async def upsert(

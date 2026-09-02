@@ -74,6 +74,7 @@ from app.models.project_custom_field import ProjectCustomField
 from app.models.idempotency_key import IdempotencyKey
 from app.models.webhook import WebhookSubscription, WebhookDelivery
 from app.models.org_code_counter import OrgCodeCounter
+from app.models.llm_feature_model_override import LlmFeatureModelOverride
 from app.models.llm_provider_config import LlmProviderConfig
 from app.models.agent_review_job import AgentReviewJob
 from app.models.agent_review import AgentReview
@@ -206,6 +207,7 @@ __all__ = [
     "WebhookSubscription",
     "WebhookDelivery",
     "OrgCodeCounter",
+    "LlmFeatureModelOverride",
     "LlmProviderConfig",
     "AgentReviewJob",
     "AgentReview",
