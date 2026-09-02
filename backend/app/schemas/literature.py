@@ -170,6 +170,14 @@ class LitReviewSettingsPayload(BaseModel):
     next_run: str | None = None
 
 
+class LitValidationSettingsPayload(BaseModel):
+    autonomy: str
+
+
+class LitValidationSettingsUpdateRequest(BaseModel):
+    autonomy: str | None = None
+
+
 class LitReviewSettingsUpdateRequest(BaseModel):
     # All optional so the relevance-threshold panel and the automation panel can
     # save independently; only provided fields are changed.

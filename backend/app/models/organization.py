@@ -41,4 +41,10 @@ class Organization(Base):
         String(16), nullable=False, default="weekly", server_default="weekly"
     )
     lit_review_max_runs_per_tick: Mapped[int] = mapped_column(Integer, nullable=False, default=5, server_default="5")
+    # How much of literature validation the model decides for itself: "assisted" or "autonomous"
+    # (app/services/validation_autonomy.py). Defaults to assisted, which is today's behaviour. The C1
+    # gate stays human in both modes; this governs the science, not the spend.
+    lit_validation_autonomy: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="assisted", server_default="assisted"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
