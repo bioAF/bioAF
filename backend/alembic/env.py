@@ -53,9 +53,17 @@ from app.models import (  # noqa: F401
 # Alembic Config object
 config = context.config
 
-# Set up logging from the config file
+# Set up logging from the config file.
+#
+# `disable_existing_loggers=False` is load-bearing, not a default worth inheriting. fileConfig
+# defaults it to True, which DISABLES every logger that already exists, including all of bioaf's.
+# `./bioaf migrate` runs alembic in its own process so production never notices, but the test suite
+# imports this module in-process: after test_migrations_apply.py runs, every `bioaf.*` logger was
+# dead for the rest of the session and any later test asserting on a log line silently saw nothing
+# and blamed itself. Two tests in test_validation_extraction.py failed exactly this way, and
+# test_pipeline_output_service.py carries a hand-rolled workaround for the same cause.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Set the SQLAlchemy URL from app settings
 config.set_main_option("sqlalchemy.url", settings.database_url)

@@ -504,6 +504,30 @@
     ]
   },
   {
+    "path": "/api/literature/settings/lit-validation",
+    "methods": [
+      "GET"
+    ],
+    "name": "get_lit_validation_settings_endpoint",
+    "response_model": "LitValidationSettingsPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "path": "/api/literature/settings/lit-validation",
+    "methods": [
+      "PUT"
+    ],
+    "name": "update_lit_validation_settings_endpoint",
+    "response_model": "LitValidationSettingsPayload",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
     "methods": [
       "GET"
     ],
