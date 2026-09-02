@@ -33,6 +33,10 @@ class MetricSpec:
     tolerance: float  # in the metric's own scale
     relative: bool  # True: tolerance is a fraction of the claimed value; False: absolute
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    # One line of plain English, in the paper's terms rather than the pipeline's. It is what the
+    # extraction prompt renders so the model can tell `peak_count` from `percent_gc` as concepts
+    # instead of as tokens; a spec without one reaches the model meaning nothing.
+    meaning: str = ""
     # "finding": a substantive result the paper reports (peaks, cells, genes/UMIs recovered).
     # "qc_floor": a technical data-quality/identity metric (mapping rate, read depth, GC, dup, ...).
     # A `validated` verdict requires at least one FINDING to agree - a floor-only agreement proves the
@@ -63,6 +67,7 @@ _SPECS: tuple[MetricSpec, ...] = (
             "percent_aligned",
             "overall_mapping_rate",
         ),
+        meaning="share of sequenced reads that aligned anywhere on the reference genome",
     ),
     MetricSpec(
         "reads_mapped_genome_unique",
@@ -77,6 +82,7 @@ _SPECS: tuple[MetricSpec, ...] = (
             "unique_reads",
             "uniquely_mapped_percent",
         ),
+        meaning="share of sequenced reads that aligned to exactly one genome location",
     ),
     MetricSpec(
         "total_sequences",
@@ -104,6 +110,7 @@ _SPECS: tuple[MetricSpec, ...] = (
             "raw_reads_per_sample",
             "mean_raw_reads",
         ),
+        meaning="raw reads (or read pairs) sequenced per sample, before trimming",
     ),
     MetricSpec(
         "avg_sequence_length",
@@ -111,6 +118,7 @@ _SPECS: tuple[MetricSpec, ...] = (
         0.10,
         True,
         ("read_length", "avg_read_length", "mean_read_length", "average_read_length"),
+        meaning="mean read length in bases",
     ),
     MetricSpec(
         "percent_duplicates",
@@ -118,9 +126,24 @@ _SPECS: tuple[MetricSpec, ...] = (
         5.0,
         False,
         ("duplication_rate", "percent_dups", "pct_duplicates", "dup_rate", "duplicate_rate", "duplication"),
+        meaning="share of reads flagged as PCR or optical duplicates",
     ),
-    MetricSpec("percent_gc", "percent", 5.0, False, ("gc_content", "gc_percent", "pct_gc", "percent_gc_content", "gc")),
-    MetricSpec("total_samples", "count", 0.0, False, ("n_samples", "num_samples", "sample_count", "number_of_samples")),
+    MetricSpec(
+        "percent_gc",
+        "percent",
+        5.0,
+        False,
+        ("gc_content", "gc_percent", "pct_gc", "percent_gc_content", "gc"),
+        meaning="mean GC base content of the reads",
+    ),
+    MetricSpec(
+        "total_samples",
+        "count",
+        0.0,
+        False,
+        ("n_samples", "num_samples", "sample_count", "number_of_samples"),
+        meaning="how many samples the dataset contains",
+    ),
     # scRNA cell yield + sequencing-depth metrics. spec-06 refinement (2026-07-25): these are QC-FLOOR
     # metrics (the default tier), NOT findings. Recovering a similar cell count / genes-per-cell / UMIs-
     # per-cell proves the data processed to a comparable yield and depth, not that any biological finding
@@ -142,21 +165,79 @@ _SPECS: tuple[MetricSpec, ...] = (
             "cell_number",
             "cells",
         ),
+        meaning="cells recovered after cell calling, per sample",
     ),
-    MetricSpec("total_genes_detected", "count", 0.25, True, ("genes_detected", "total_genes")),
-    MetricSpec("median_genes_per_cell", "count", 0.25, True, ("median_genes",)),
-    MetricSpec("mean_genes_per_cell", "count", 0.25, True, ("mean_genes",)),
-    MetricSpec("median_umi_per_cell", "count", 0.25, True, ("median_umi", "median_umis", "median_umis_per_cell")),
-    MetricSpec("mean_umi_per_cell", "count", 0.25, True, ("mean_umi", "mean_umis", "mean_umis_per_cell")),
-    MetricSpec("median_reads_per_cell", "count", 0.25, True, ("median_reads",)),
-    MetricSpec("mean_reads_per_cell", "count", 0.25, True, ("mean_reads",)),
-    MetricSpec("saturation", "fraction", 0.05, False, ("sequencing_saturation", "seq_saturation")),
+    MetricSpec(
+        "total_genes_detected",
+        "count",
+        0.25,
+        True,
+        ("genes_detected", "total_genes"),
+        meaning="distinct genes detected across the sample",
+    ),
+    MetricSpec(
+        "median_genes_per_cell",
+        "count",
+        0.25,
+        True,
+        ("median_genes",),
+        meaning="median number of genes detected in a single cell",
+    ),
+    MetricSpec(
+        "mean_genes_per_cell",
+        "count",
+        0.25,
+        True,
+        ("mean_genes",),
+        meaning="mean number of genes detected in a single cell",
+    ),
+    MetricSpec(
+        "median_umi_per_cell",
+        "count",
+        0.25,
+        True,
+        ("median_umi", "median_umis", "median_umis_per_cell"),
+        meaning="median UMI (transcript) count in a single cell",
+    ),
+    MetricSpec(
+        "mean_umi_per_cell",
+        "count",
+        0.25,
+        True,
+        ("mean_umi", "mean_umis", "mean_umis_per_cell"),
+        meaning="mean UMI (transcript) count in a single cell",
+    ),
+    MetricSpec(
+        "median_reads_per_cell",
+        "count",
+        0.25,
+        True,
+        ("median_reads",),
+        meaning="median sequencing reads assigned to a single cell",
+    ),
+    MetricSpec(
+        "mean_reads_per_cell",
+        "count",
+        0.25,
+        True,
+        ("mean_reads",),
+        meaning="mean sequencing reads assigned to a single cell",
+    ),
+    MetricSpec(
+        "saturation",
+        "fraction",
+        0.05,
+        False,
+        ("sequencing_saturation", "seq_saturation"),
+        meaning="sequencing saturation: how far the library was sequenced toward its complexity limit",
+    ),
     MetricSpec(
         "valid_barcodes",
         "fraction",
         0.05,
         False,
         ("valid_barcode_rate", "valid_bc", "fraction_valid_barcodes", "percent_valid_barcodes"),
+        meaning="share of reads carrying a barcode on the chemistry's whitelist",
     ),
     MetricSpec(
         "mito_pct_median",
@@ -164,6 +245,7 @@ _SPECS: tuple[MetricSpec, ...] = (
         5.0,
         False,
         ("percent_mito", "mito_pct", "mitochondrial_pct", "pct_mito", "percent_mitochondrial"),
+        meaning="median share of a cell's counts coming from mitochondrial genes",
     ),
     # ChIP-seq (nf-core/chipseq; lit_validation Phase 4). Peaks + FRiP are what ChIP papers report;
     # NSC/RSC are phantompeakqualtools quality ratios rarely stated in prose (usually not_reported).
@@ -186,6 +268,7 @@ _SPECS: tuple[MetricSpec, ...] = (
             "significant_peaks",
         ),
         tier="finding",
+        meaning="significant peaks called for the sample (the paper's headline peak number)",
     ),
     MetricSpec(
         "frip",
@@ -193,13 +276,33 @@ _SPECS: tuple[MetricSpec, ...] = (
         0.5,
         True,
         ("frip_score", "fraction_reads_in_peaks", "reads_in_peaks_fraction", "fraction_of_reads_in_peaks"),
+        meaning="fraction of reads falling inside called peaks",
     ),
-    MetricSpec("nsc", "count", 0.15, False, ("normalized_strand_cross_correlation", "nsc_score", "normalized_scc")),
-    MetricSpec("rsc", "count", 0.25, False, ("relative_strand_cross_correlation", "rsc_score", "relative_scc")),
+    MetricSpec(
+        "nsc",
+        "count",
+        0.15,
+        False,
+        ("normalized_strand_cross_correlation", "nsc_score", "normalized_scc"),
+        meaning="normalized strand cross-correlation, a ChIP enrichment quality ratio",
+    ),
+    MetricSpec(
+        "rsc",
+        "count",
+        0.25,
+        False,
+        ("relative_strand_cross_correlation", "rsc_score", "relative_scc"),
+        meaning="relative strand cross-correlation, a ChIP enrichment quality ratio",
+    ),
     # ATAC-seq (nf-core/atacseq; lit_validation Phase 4). peak_count + frip are shared with ChIP;
     # TSS enrichment is ATAC's distinctive accessibility score (a unitless ratio, ~3-30). Soft default.
     MetricSpec(
-        "tss_enrichment", "count", 0.25, True, ("tss_score", "tsse", "tss_enrichment_score", "tss_enrichment_ratio")
+        "tss_enrichment",
+        "count",
+        0.25,
+        True,
+        ("tss_score", "tsse", "tss_enrichment_score", "tss_enrichment_ratio"),
+        meaning="accessibility signal at transcription start sites over background",
     ),
 )
 
@@ -382,6 +485,11 @@ for _spec in _SPECS:
 # The controlled QC vocabulary, exposed so the extractor prompt can steer claims toward keys E2 can
 # actually join (reducing the not_computed coverage gap at the source).
 CONTROLLED_METRIC_KEYS: tuple[str, ...] = tuple(_SPEC_BY_KEY)
+
+# The same vocabulary with everything the model needs to choose between its members: what each metric
+# means, the scale its number is on, whether it can earn a verdict, and the wordings papers use for it.
+# The keys alone are bare tokens, and a bare token is not enough to bind a claim to (plan_6 step 1).
+CONTROLLED_METRIC_SPECS: tuple[MetricSpec, ...] = _SPECS
 
 
 # Peak-count claims are the one metric where papers routinely qualify the key by condition

@@ -5,6 +5,8 @@ computed QC metrics. No DB, no LLM: the verdict is deterministic and auditable (
 """
 
 from app.services.validation_classifier_service import (
+    CONTROLLED_METRIC_KEYS,
+    CONTROLLED_METRIC_SPECS,
     attribute_divergences,
     classify_study,
     compare_targets,
@@ -577,3 +579,15 @@ class TestAttributedDivergenceDoesNotVetoAFinding:
         )
         assert result["classification"] == "validated"
         assert result["divergence_attribution"] == {}
+
+
+def test_every_controlled_metric_declares_what_it_means():
+    """The spec block in the extraction prompt renders each metric's meaning, so a spec added
+    without one reaches the model as a bare token, which is the defect the block exists to fix."""
+    unexplained = [s.key for s in CONTROLLED_METRIC_SPECS if not s.meaning.strip()]
+    assert unexplained == []
+
+
+def test_controlled_metric_specs_are_the_controlled_vocabulary():
+    """The exported specs and the exported keys must not drift apart."""
+    assert tuple(s.key for s in CONTROLLED_METRIC_SPECS) == CONTROLLED_METRIC_KEYS
