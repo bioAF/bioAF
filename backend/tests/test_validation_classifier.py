@@ -591,3 +591,98 @@ def test_every_controlled_metric_declares_what_it_means():
 def test_controlled_metric_specs_are_the_controlled_vocabulary():
     """The exported specs and the exported keys must not drift apart."""
     assert tuple(s.key for s in CONTROLLED_METRIC_SPECS) == CONTROLLED_METRIC_KEYS
+
+
+class TestBasisMismatchIsAdvisory:
+    """A claim can name the right metric and still be measured on a different basis than bioAF's.
+
+    The qualifier strip already catches the case where the basis is encoded in the KEY
+    (`peak_count_quiescent`). It cannot catch the case where the key is exactly right and the basis
+    is stated in the claim's own unit, which is what the extractor now produces: giving the model the
+    specs (plan_6 step 1) made it emit the controlled key directly, so `peak_count` with unit
+    "consensus peaks" bypassed the strip and was scored against a per-sample computed count.
+
+    Measured live on 2026-09-02: study 5 emitted two consensus peak_count claims and study 3 emitted
+    a before-trimming AND an after-trimming total_sequences claim, all four scored.
+    """
+
+    def test_a_consensus_peak_count_is_advisory(self):
+        """bioAF computes per-sample MACS2 peaks. A consensus across replicates is a different
+        number, and comparing the two rates a basis difference as if it were the paper's error."""
+        rows = compare_targets(
+            [_target("peak_count", 74_834, unit="consensus peaks")],
+            {"peak_count": 31_914},
+        )
+        assert rows[0]["mapped_key"] == "peak_count"
+        assert rows[0]["advisory"] is True
+        assert "consensus" in (rows[0]["advisory_reason"] or "").lower()
+        # Still surfaced with its numbers: advisory hides nothing, it only stops the scoring.
+        assert rows[0]["computed_value"] == 31_914
+        assert rows[0]["delta"] == 31_914 - 74_834
+
+    def test_a_plain_peak_count_is_still_scored(self):
+        """Study 20's shape. The claim states no conflicting basis, so nothing changes for it."""
+        rows = compare_targets([_target("peak_count", 8_733, unit="peaks")], {"peak_count": 8_500})
+        assert rows[0]["advisory"] is False
+        assert rows[0]["advisory_reason"] is None
+        assert rows[0]["verdict"] == "agree"
+
+    def test_a_post_trim_read_count_is_advisory(self):
+        """`total_sequences` is the RAW pre-trim count and the spec says so. Study 3's paper reported
+        both counts and both were bound to it, so one was compared against a number it is not."""
+        rows = compare_targets(
+            [_target("total_sequences", 5_000_000, unit="reads per sample (approximate, after trimming)")],
+            {"total_sequences": 7_000_000},
+        )
+        assert rows[0]["mapped_key"] == "total_sequences"
+        assert rows[0]["advisory"] is True
+
+    def test_a_pre_trim_read_count_is_scored(self):
+        """ "before trimming" states the basis we compute on. It must not be caught by the same rule
+        that catches "after trimming", which a bare "trim" substring would do."""
+        rows = compare_targets(
+            [_target("total_sequences", 7_000_000, unit="reads per sample (average, before trimming)")],
+            {"total_sequences": 7_100_000},
+        )
+        assert rows[0]["advisory"] is False
+        assert rows[0]["verdict"] == "agree"
+
+    def test_the_basis_conflict_can_be_stated_in_the_key_instead_of_the_unit(self):
+        """A model that keys the basis rather than unitting it must land in the same place."""
+        rows = compare_targets(
+            [_target("consensus_peak_count", 74_834, unit="peaks")],
+            {"peak_count": 31_914},
+        )
+        assert rows[0]["mapped_key"] == "peak_count"
+        assert rows[0]["advisory"] is True
+
+    def test_a_basis_advisory_row_is_not_scored(self):
+        """The whole point: a basis mismatch can neither strike the paper nor promote it. Study 5's
+        live shape, with the consensus counts keyed exactly right."""
+        result = classify_study(
+            [
+                _target("reads_mapped_genome", 96.0, unit="%"),
+                _target("peak_count", 74_834, unit="consensus peaks"),
+                _target("peak_count", 96_733, unit="consensus peaks"),
+            ],
+            {"reads_mapped_genome": 0.9978, "peak_count": 31_914},
+            mapping_confidence="partial",
+            reference_genome="GRCh38",
+        )
+        assert result["coverage"]["advisory"] == 2
+        assert result["coverage"]["diverge"] == 0
+        assert result["coverage"]["finding_agree"] == 0
+        assert result["classification"] == "inconclusive"
+
+    def test_the_reasoning_says_the_claims_were_measured_differently(self):
+        """The advisory sentence used to name peak counts specifically, because the strip was the
+        only path in. It has to cover a read count now too."""
+        result = classify_study(
+            [_target("total_sequences", 5_000_000, unit="reads after trimming")],
+            {"total_sequences": 7_000_000},
+            mapping_confidence="partial",
+            reference_genome="GRCh38",
+        )
+        assert result["coverage"]["advisory"] == 1
+        assert "advisory" in result["reasoning"].lower()
+        assert "peak-count claim" not in result["reasoning"]
