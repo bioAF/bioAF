@@ -81,19 +81,19 @@ describe("Breadcrumb", () => {
     expect(litLink).toHaveAttribute("href", "/lab-knowledge/literature");
   });
 
-  it("trails Lab Knowledge > Validation Studies on the validation list", () => {
+  it("trails Lab Knowledge > Literature Validation on the validation list", () => {
     mockPathname.mockReturnValue("/lab-knowledge/validation-studies");
     render(<Breadcrumb />);
-    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Validation Studies");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Literature Validation");
   });
 
-  it("trails Lab Knowledge > Validation Studies > study on a validation detail page", () => {
+  it("trails Lab Knowledge > Literature Validation > study on a validation detail page", () => {
     mockPathname.mockReturnValue("/lab-knowledge/validation-studies/5");
     render(<Breadcrumb entityName="Study #5" />);
     const breadcrumb = screen.getByTestId("breadcrumb");
-    expect(breadcrumb).toHaveTextContent("Validation Studies");
+    expect(breadcrumb).toHaveTextContent("Literature Validation");
     expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Study #5");
-    const listLink = screen.getByRole("link", { name: "Validation Studies" });
+    const listLink = screen.getByRole("link", { name: "Literature Validation" });
     expect(listLink).toHaveAttribute("href", "/lab-knowledge/validation-studies");
   });
 });

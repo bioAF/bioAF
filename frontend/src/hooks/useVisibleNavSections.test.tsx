@@ -50,14 +50,14 @@ test("drops a child the user has no permission for", () => {
 test("drops a beta child while its flag is off", () => {
   const { result } = renderHook(() => useVisibleNavSections());
   const knowledge = result.current.sections.find((s) => s.label === "Lab Knowledge");
-  expect(knowledge!.children!.map((c) => c.label)).not.toContain("Validation Studies");
+  expect(knowledge!.children!.map((c) => c.label)).not.toContain("Literature Validation");
 });
 
 test("keeps a beta child once its flag is on", () => {
   mockBeta.mockReturnValue({ flags: { lit_validation: true } });
   const { result } = renderHook(() => useVisibleNavSections());
   const knowledge = result.current.sections.find((s) => s.label === "Lab Knowledge");
-  expect(knowledge!.children!.map((c) => c.label)).toContain("Validation Studies");
+  expect(knowledge!.children!.map((c) => c.label)).toContain("Literature Validation");
 });
 
 test("drops a child whose backend capability is absent", () => {

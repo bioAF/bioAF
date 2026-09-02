@@ -1,16 +1,66 @@
-# Paper Validation
+# Literature Validation
 
-Paper Validation reproduces a published paper's analysis on your own infrastructure and tells you
-how far the result agrees. You give it a DOI, it reads the methods, picks an nf-core pipeline,
-fetches the deposited data, runs it, and compares what it got against what the paper reported.
+Literature validation attempts to validate the findings of a paper enough to determine whether the
+paper is worth further review by a human scientist. Its output depends on the LLM model configured
+for it and should be treated as informational only.
+
+You give it a DOI. It reads the methods, picks an nf-core pipeline, fetches the deposited data, runs
+it, and compares what it got against what the paper reported.
 
 Nothing runs until you approve it. The plan is shown first, and approval is the point where compute
-is spent.
+is spent. **That approval is human in both autonomy modes**, because it is where the money goes.
+
+## The output depends on the model, and that is not a caveat
+
+This is an AI feature, and the model reads the paper. It decides which of the paper's numbers are
+claims worth checking, and which computed metric each claim corresponds to. A model that cannot hold
+a full paper in context, or cannot return dependable structured output, produces a study that scores
+nothing, and a study that scores nothing looks exactly like a paper that could not be reproduced.
+
+Two things exist to keep that visible rather than silent:
+
+- **Every decision the model makes is shown on the study**: what it bound each claim to, why, how
+  confident it was, and which model decided. If the model declined every claim, the study says
+  whether that is because the paper reports nothing bioAF computes, or because the model could not
+  map anything. Those are different results and they used to read identically.
+- **Settings > Integrations > LLMs warns you** when the model you have chosen is unlikely to manage
+  this job, and says why rather than just labelling it. A model bioAF has not assessed is marked
+  unassessed, never unsuitable.
+
+Treat the verdict as a triage signal for a human scientist, not as a finding.
+
+## Choosing the model
+
+Literature validation and AI Literature Review are different jobs: one reads a whole paper against a
+controlled vocabulary of QC metrics, the other scores relevance over short abstracts. Each can name
+its own model under **Settings > Integrations > LLMs**, on any provider you have already configured.
+Leave either on the org default and it behaves exactly as it always has.
+
+## The two autonomy modes
+
+One setting, **Settings > Integrations > LLMs > Literature Validation Autonomy**.
+
+| | `assisted` (default) | `autonomous` |
+|---|---|---|
+| Binding a claim to a metric | the model decides | the model decides |
+| A claim the model declines or is unsure of | surfaced on the study for a person | the model must choose, and records low confidence |
+| Sample scoping, contrasts, reference build | the model proposes, a person edits | the model decides |
+| Approving the plan and the spend | **human** | **human** |
+| Ratifying the verdict | a clean `validated` finalises itself; everything else waits for a person | the model accepts or overrides the measured verdict, and says which evidence it reweighed |
+
+**The approval gate is human in both modes.** Autonomy governs the scientific judgment inside a
+study, not whether compute gets spent.
+
+In autonomous mode the verdict is still *measured* by deterministic code: the comparison of claimed
+numbers against computed ones is rule-based and auditable, and the model does not get to dispute a
+computed value. What it can do is judge what those measurements mean, and an override that does not
+name the evidence it turns on is discarded.
 
 ## The four levels
 
-A validation gets as far as the paper and the pipeline allow. Each level is a real result, and each
-one means something narrower than the one after it.
+A validation gets as far as the paper and the pipeline allow, from Level 1 (routing the paper, which
+spends nothing) to Level 4 (recovering the paper's actual finding). Each level is a real result, and
+each one means something narrower than the one after it.
 
 | Level | What it means | Spends compute |
 |---|---|---|

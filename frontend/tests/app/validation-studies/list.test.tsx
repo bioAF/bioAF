@@ -60,7 +60,7 @@ describe("ValidationStudiesListPage", () => {
     render(<ValidationStudiesListPage />);
     const breadcrumb = await screen.findByTestId("breadcrumb");
     expect(breadcrumb).toHaveTextContent("Lab Knowledge");
-    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Validation Studies");
+    expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Literature Validation");
   });
 
   it("shows an empty state when there are no studies", async () => {

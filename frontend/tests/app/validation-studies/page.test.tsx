@@ -50,15 +50,15 @@ describe("ValidationStudyPage", () => {
     expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
   });
 
-  it("renders a breadcrumb trailing to this study under Validation Studies", async () => {
+  it("renders a breadcrumb trailing to this study under Literature Validation", async () => {
     mockGet.mockResolvedValue({ id: 5, state: "classified", classification: "validated", confidence: 100 });
 
     render(<ValidationStudyPage />);
 
     const breadcrumb = await screen.findByTestId("breadcrumb");
-    expect(breadcrumb).toHaveTextContent("Validation Studies");
+    expect(breadcrumb).toHaveTextContent("Literature Validation");
     expect(screen.getByTestId("breadcrumb-current")).toHaveTextContent("Study #5");
-    expect(screen.getByRole("link", { name: "Validation Studies" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Literature Validation" })).toHaveAttribute(
       "href",
       "/lab-knowledge/validation-studies",
     );

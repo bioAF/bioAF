@@ -84,20 +84,20 @@ describe("Experiments surfaced as a top-level section", () => {
   });
 });
 
-describe("Validation Studies nav entry", () => {
-  it("adds a Validation Studies child under Lab Knowledge gated on lit_validation:view", () => {
+describe("Literature Validation nav entry", () => {
+  it("adds a Literature Validation child under Lab Knowledge gated on lit_validation:view", () => {
     const labKnowledge = navConfig.find((s) => s.label === "Lab Knowledge");
-    const child = labKnowledge?.children?.find((c) => c.label === "Validation Studies");
+    const child = labKnowledge?.children?.find((c) => c.label === "Literature Validation");
     expect(child?.path).toBe("/lab-knowledge/validation-studies");
     expect(child?.permission).toEqual({ resource: "lit_validation", action: "view" });
     expect(child?.betaFlag).toBe("lit_validation");
   });
 
-  it("no longer lists Literature or Validation Studies under Data & Files", () => {
+  it("no longer lists Literature or Literature Validation under Data & Files", () => {
     const data = navConfig.find((s) => s.label === "Data & Files");
     const labels = data?.children?.map((c) => c.label) ?? [];
     expect(labels).not.toContain("Literature");
-    expect(labels).not.toContain("Validation Studies");
+    expect(labels).not.toContain("Literature Validation");
   });
 });
 

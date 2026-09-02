@@ -71,7 +71,7 @@ const EVENT_CATEGORIES: EventCategory[] = [
       { type: "literature.auto_review_recommendations", label: "New recommendations", description: "An automated review produced paper recommendations" },
       { type: "literature.comment_replied", label: "Comment reply", description: "Someone replied to your comment on a paper" },
       { type: "literature.paper_dismissed", label: "Paper dismissed", description: "A recommended paper was dismissed" },
-      { type: "validation.study_error", label: "Validation study stopped", description: "A paper validation stopped on a technical failure and can be retried" },
+      { type: "validation.study_error", label: "Validation study stopped", description: "A literature validation stopped on a technical failure and can be retried" },
     ],
   },
   {
