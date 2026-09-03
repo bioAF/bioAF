@@ -41,17 +41,28 @@ interface FeatureModel {
   suitability: Suitability;
 }
 
+interface ProviderModelList {
+  provider: string;
+  models: string[];
+  used_fallback: boolean;
+}
+
 export function FeatureModelSection() {
   const [features, setFeatures] = useState<FeatureModel[] | null>(null);
+  // The same per-provider model lists the provider cards use, so this picker offers exactly what
+  // that one does. A free-text model id asks the user to recall it from memory and typo it silently.
+  const [modelLists, setModelLists] = useState<ProviderModelList[]>([]);
   const [draft, setDraft] = useState<Record<string, { provider: string; model: string }>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const r = await api.get<{ features: FeatureModel[] }>(
-        "/api/integrations/llm/feature-models",
-      );
+      const [r, providers] = await Promise.all([
+        api.get<{ features: FeatureModel[] }>("/api/integrations/llm/feature-models"),
+        api.get<{ model_lists: ProviderModelList[] }>("/api/integrations/llm/providers"),
+      ]);
+      setModelLists(providers?.model_lists ?? []);
       setFeatures(r.features);
       setDraft(
         Object.fromEntries(
@@ -102,6 +113,17 @@ export function FeatureModelSection() {
     }
   }
 
+  /** The provider's models, with the saved one kept even when the provider no longer lists it.
+   *
+   * A model can be retired between saving an override and opening this page. Dropping it here would
+   * silently swap what the feature runs on, so it stays selectable until the user changes it. */
+  function modelsFor(provider: string | undefined, current: string | undefined): string[] {
+    const listed = modelLists.find((m) => m.provider === provider)?.models ?? [];
+    return current && !listed.includes(current) ? [current, ...listed] : listed;
+  }
+
+  const usedFallback = modelLists.some((m) => m.used_fallback);
+
   if (features === null && !error) return null;
 
   return (
@@ -111,6 +133,11 @@ export function FeatureModelSection() {
         Reading a whole paper is a different job from scoring an abstract. Leave a feature on the
         org default, or give it its own model on a provider you have already configured.
       </p>
+      {usedFallback && (
+        <p className="text-xs text-amber-700">
+          Model list shown from local fallback; live fetch failed.
+        </p>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
       {(features ?? []).map((f) => (
         <div key={f.feature} className="border-t border-gray-100 pt-3 space-y-2">
@@ -161,7 +188,7 @@ export function FeatureModelSection() {
             <label className="sr-only" htmlFor={`${f.feature}-model`}>
               {`${LABELS[f.feature] ?? f.feature} model`}
             </label>
-            <input
+            <select
               id={`${f.feature}-model`}
               value={draft[f.feature]?.model ?? ""}
               onChange={(e) =>
@@ -171,7 +198,14 @@ export function FeatureModelSection() {
                 }))
               }
               className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56"
-            />
+            >
+              <option value="">Select a model</option>
+              {modelsFor(draft[f.feature]?.provider, draft[f.feature]?.model).map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
             <Button size="sm" onClick={() => save(f.feature)} disabled={busy === f.feature}>
               Save
             </Button>
