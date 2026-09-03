@@ -85,6 +85,35 @@ def geo_series_matrix_url(accession: str) -> str | None:
     return f"{_GEO_FTP}/{stub}/GSE{num}/matrix/GSE{num}_series_matrix.txt.gz"
 
 
+def geo_matrix_dir_url(accession: str) -> str | None:
+    """The series-matrix FOLDER for a GSE accession, or None if not a GSE id.
+
+    GEO publishes the combined ``GSE<n>_series_matrix.txt.gz`` only when a series used ONE platform
+    (GPL, the sequencing instrument). A series spanning two instruments is published as one matrix
+    per platform and no combined file, so the folder is the only way to learn what exists.
+    """
+    url = geo_series_matrix_url(accession)
+    if url is None:
+        return None
+    return url.rsplit("/", 1)[0] + "/"
+
+
+_MATRIX_HREF_RE = re.compile(r'href="([^"/]+_series_matrix\.txt\.gz)"', re.IGNORECASE)
+
+
+def parse_matrix_directory(html: str) -> list[str]:
+    """The series-matrix filenames an Apache index page lists, in page order (pure).
+
+    Anchored on the ``_series_matrix.txt.gz`` suffix and on the href having no path separator, so the
+    parent-directory link and the study's other artefacts (RAW tarballs, filelists) cannot match.
+    """
+    seen: list[str] = []
+    for name in _MATRIX_HREF_RE.findall(html or ""):
+        if name not in seen:
+            seen.append(name)
+    return seen
+
+
 def _ena_filereport_url(accession: str) -> str:
     """Build the ENA portal filereport (read_run TSV) URL for any SRA/ENA/INSDC accession."""
     fields = ",".join(_ENA_FIELDS)
@@ -275,17 +304,32 @@ class AccessionManifestService:
         url = geo_series_matrix_url(accession)
         if not url:  # defensive; _classify already gated on GSE
             return ManifestResult(unavailable_reason=f"Unrecognized accession type: {accession}.")
+
+        # The combined file first: it is what a single-platform series publishes, which is the large
+        # majority, and it answers in one request. Only when it is absent do we pay for a directory
+        # listing, and its absence is the multi-platform case rather than an outage.
         try:
-            text = await fetch(url)
+            texts = [await fetch(url)]
+            missing = 0
         except Exception as exc:
-            logger.info("GEO series-matrix fetch failed for %s: %s", accession, exc)
-            return ManifestResult(unavailable_reason="Could not reach GEO to list this study's samples.")
-        samples, series_sra = parse_series_matrix(text)
+            logger.info("GEO combined series-matrix unavailable for %s (%s); listing the folder", accession, exc)
+            texts, missing, failed = await AccessionManifestService._fetch_platform_matrices(accession, fetch)
+            if texts is None:
+                return ManifestResult(unavailable_reason=failed)
+
+        samples: list[dict] = []
+        series_sra: str | None = None
+        for text in texts:
+            parsed, sra = parse_series_matrix(text)
+            samples.extend(parsed)
+            series_sra = series_sra or sra
         if not samples:
             return ManifestResult(unavailable_reason=f"GEO series matrix for {accession} listed no samples.")
 
         # Best-effort: fill run accessions by joining the series' SRA study from ENA on the experiment
-        # accession. A failure here leaves run_accession empty but keeps the recognizable manifest.
+        # accession. Resolved once for the whole series, not per platform file, because the SRA study
+        # is a property of the series. A failure here leaves run_accession empty but keeps the
+        # recognizable manifest.
         if series_sra:
             try:
                 tsv = await fetch(_ena_filereport_url(series_sra))
@@ -305,4 +349,46 @@ class AccessionManifestService:
             except Exception as exc:
                 logger.info("GEO->ENA run-accession enrichment failed for %s: %s", accession, exc)
 
-        return ManifestResult(samples=samples)
+        # A partial manifest is more useful than none at a picker, and dangerous if it is not
+        # announced: an arm scoped from a list quietly missing samples is wrong in a way nobody sees.
+        partial = (
+            f"Only {len(texts)} of {len(texts) + missing} platform files could be read for {accession}, "
+            "so this list may be missing samples."
+            if missing
+            else None
+        )
+        return ManifestResult(samples=samples, unavailable_reason=partial)
+
+    @staticmethod
+    async def _fetch_platform_matrices(accession: str, fetch: Fetcher) -> tuple[list[str] | None, int, str | None]:
+        """Every per-platform series matrix GEO published, as (texts, missing_count, failure_reason).
+
+        ``texts`` is None only when nothing could be read at all, and ``failure_reason`` then says
+        which of the two things went wrong: GEO was unreachable, or GEO answered and has published no
+        series matrix for this study. Those were indistinguishable before, and reporting the second
+        as the first blamed NCBI for a URL this code built wrong.
+        """
+        dir_url = geo_matrix_dir_url(accession)
+        if not dir_url:
+            return None, 0, f"Unrecognized accession type: {accession}."
+        try:
+            listing = await fetch(dir_url)
+        except Exception as exc:
+            logger.info("GEO matrix-folder listing failed for %s: %s", accession, exc)
+            return None, 0, "Could not reach GEO to list this study's samples."
+
+        names = parse_matrix_directory(listing)
+        if not names:
+            return None, 0, f"GEO has published no series matrix for {accession}."
+
+        texts: list[str] = []
+        missing = 0
+        for name in names:
+            try:
+                texts.append(await fetch(dir_url + name))
+            except Exception as exc:
+                missing += 1
+                logger.info("GEO platform matrix %s unreadable for %s: %s", name, accession, exc)
+        if not texts:
+            return None, 0, "Could not reach GEO to list this study's samples."
+        return texts, missing, None
