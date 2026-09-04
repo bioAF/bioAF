@@ -98,9 +98,12 @@ class TestTheCall:
             async def submit(self, **kwargs):
                 raise AssertionError("must not ask about a QC-only paper")
 
-        assert await cs.select_contrast(
-            [], pipeline_key="nf-core/chipseq", assay="ChIP", client=_Boom(), model="m", api_key=None
-        ) is None
+        assert (
+            await cs.select_contrast(
+                [], pipeline_key="nf-core/chipseq", assay="ChIP", client=_Boom(), model="m", api_key=None
+            )
+            is None
+        )
 
     @pytest.mark.asyncio
     async def test_a_provider_failure_selects_nothing_rather_than_guessing(self):
@@ -110,9 +113,12 @@ class TestTheCall:
             async def submit(self, **kwargs):
                 raise RuntimeError("provider down")
 
-        assert await cs.select_contrast(
-            _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP", client=_C(), model="m", api_key=None
-        ) is None
+        assert (
+            await cs.select_contrast(
+                _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP", client=_C(), model="m", api_key=None
+            )
+            is None
+        )
 
 
 # ---- the plan records which contrast this run reproduces ----
@@ -153,9 +159,14 @@ async def test_the_plan_records_the_contrast_this_run_reproduces(session, admin_
     await session.flush()
     _patch_llm(monkeypatch, _MULTI)
 
-    async def fake_select(contrasts, *, pipeline_key, assay, client, model, api_key):
-        return {"contrast_index": 1, "reason": "the only ChIP-seq contrast", "confidence": 0.95,
-                "decided_by": "model", "model": model}
+    async def fake_select(contrasts, *, pipeline_key, assay, client, model, api_key, **kwargs):
+        return {
+            "contrast_index": 1,
+            "reason": "the only ChIP-seq contrast",
+            "confidence": 0.95,
+            "decided_by": "model",
+            "model": model,
+        }
 
     monkeypatch.setattr(ext, "select_contrast", fake_select)
     plan = await ext.ValidationExtractionService.extract(
@@ -180,9 +191,14 @@ async def test_a_run_matching_no_contrast_records_that_too(session, admin_user, 
     await session.flush()
     _patch_llm(monkeypatch, _MULTI)
 
-    async def fake_select(contrasts, *, pipeline_key, assay, client, model, api_key):
-        return {"contrast_index": None, "reason": "no contrast was measured on this assay",
-                "confidence": 0.9, "decided_by": "model", "model": model}
+    async def fake_select(contrasts, *, pipeline_key, assay, client, model, api_key, **kwargs):
+        return {
+            "contrast_index": None,
+            "reason": "no contrast was measured on this assay",
+            "confidence": 0.9,
+            "decided_by": "model",
+            "model": model,
+        }
 
     monkeypatch.setattr(ext, "select_contrast", fake_select)
     plan = await ext.ValidationExtractionService.extract(
@@ -193,3 +209,59 @@ async def test_a_run_matching_no_contrast_records_that_too(session, admin_user, 
     sel = plan.differential_design_json["selected_contrast"]
     assert sel["contrast_index"] is None
     assert "no contrast" in sel["reason"]
+
+
+def test_a_contrasts_assay_is_persisted():
+    """The prompt asks for it and the selection needs it. It was being dropped on the floor, so every
+    contrast reached the selector as `assay: undefined` and it had only names to go on."""
+    design = ext._normalize_differential_design(
+        {"contrasts": [{"name": "binding", "assay": "ChIP-seq"}, {"name": "expression"}]}
+    )
+    assert design["contrasts"][0]["assay"] == "ChIP-seq"
+    assert design["contrasts"][1]["assay"] is None
+
+
+class TestDistinguishingTwoContrastsOnOneAssay:
+    """The failure this run surfaced. GSE273743's paper reports TWO ChIP-seq differential-binding
+    contrasts: NKX2.2 alpha vs beta, and NKX2.2 under Klf4 knockdown. The pipeline key and the
+    paper's assay word are identical for both, so the selector had nothing to choose on and picked
+    the wrong one at 0.7 confidence. What distinguishes them is the DATA this run is scoped to."""
+
+    def test_the_prompt_carries_the_scoped_accession_and_its_samples(self):
+        system, payload = cs.build_contrast_prompt(
+            _CONTRASTS,
+            pipeline_key="nf-core/chipseq",
+            assay="ChIP-seq",
+            accession="GSE273743",
+            sample_titles=["alphaTC, scramble, NKX2.2 ChIP, 1", "alphaTC, Klf4-KD, NKX2.2 ChIP, 1"],
+        )
+        assert "GSE273743" in payload
+        assert "Klf4-KD" in payload
+        assert "sample" in system.lower()
+
+    def test_it_still_works_with_no_sample_information(self):
+        _, payload = cs.build_contrast_prompt(
+            _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP-seq", accession=None, sample_titles=[]
+        )
+        assert "nf-core/chipseq" in payload
+
+    @pytest.mark.asyncio
+    async def test_the_samples_reach_the_model(self):
+        seen = {}
+
+        class _C:
+            async def submit(self, prompt, payload, model, api_key, attachments=None):
+                seen["payload"] = payload
+                return _response(2)
+
+        await cs.select_contrast(
+            _CONTRASTS,
+            pipeline_key="nf-core/chipseq",
+            assay="ChIP-seq",
+            client=_C(),
+            model="m",
+            api_key=None,
+            accession="GSE273743",
+            sample_titles=["alphaTC, Klf4-KD, NKX2.2 ChIP, 1"],
+        )
+        assert "Klf4-KD" in seen["payload"]

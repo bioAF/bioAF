@@ -171,10 +171,14 @@ async def test_the_selected_contrasts_thresholds_normalize_the_table(session, ad
     await session.flush()
 
     claim = await ReproductionPlanService.set_finding_claim(
-        session, study.id, admin_user.organization_id, admin_user.id, kind="interval",
+        session,
+        study.id,
+        admin_user.organization_id,
+        admin_user.id,
+        kind="interval",
         table_text=(
             "chrom,start,end,padj,log2FoldChange\n"
-            "1,100,200,0.01,0.4\n"   # significant, small effect: kept on FDR alone, cut by |lfc|>=1
+            "1,100,200,0.01,0.4\n"  # significant, small effect: kept on FDR alone, cut by |lfc|>=1
             "2,300,400,0.01,2.5\n"
         ),
     )
@@ -190,7 +194,11 @@ async def test_a_plan_with_no_selection_still_uses_the_paper_level_pair(session,
     await session.flush()
 
     claim = await ReproductionPlanService.set_finding_claim(
-        session, study.id, admin_user.organization_id, admin_user.id, kind="interval",
+        session,
+        study.id,
+        admin_user.organization_id,
+        admin_user.id,
+        kind="interval",
         table_text="chrom,start,end,padj,log2FoldChange\n1,100,200,0.01,0.4\n2,300,400,0.01,2.5\n",
     )
     assert claim["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
