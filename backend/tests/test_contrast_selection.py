@@ -265,3 +265,109 @@ class TestDistinguishingTwoContrastsOnOneAssay:
             sample_titles=["alphaTC, Klf4-KD, NKX2.2 ChIP, 1"],
         )
         assert "Klf4-KD" in seen["payload"]
+
+
+class TestEditingTheDesignKeepsTheAttribution:
+    """`set_differential_design` rebuilt the design from the normalizer, which knows only contrasts
+    and thresholds, so editing at the gate silently deleted who chose the contrast and why. Study 26
+    lost a 0.97-confidence model decision the moment its sample arms were filled in.
+
+    The gate saves the ONE contrast it edited (validate_replicates rejects the untouched ones for
+    having no samples), so the surviving index is 0 and the attribution has to travel with it.
+    """
+
+    @staticmethod
+    async def _plan_with_selection(session, user, index=1):
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study = await ValidationStudyService.create_study(session, user.organization_id, user.id)
+        plan = await RPS.create_plan(session, study, user.id, accessions=["GSE1"], pipeline_key="nf-core/chipseq")
+        plan.differential_design_json = {
+            "contrasts": [{"name": "RNA"}, {"name": "ChIP"}],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+            "selected_contrast": {
+                "contrast_index": index,
+                "decided_by": "model",
+                "model": "claude-opus-4-8",
+                "confidence": 0.97,
+                "reason": "the only ChIP-seq contrast",
+            },
+        }
+        study.state = "plan_ready"
+        await session.flush()
+        return study, plan
+
+    @pytest.mark.asyncio
+    async def test_the_model_decision_survives_an_edit(self, session, admin_user):
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study, _ = await TestEditingTheDesignKeepsTheAttribution._plan_with_selection(session, admin_user)
+        plan = await RPS.set_differential_design(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            {
+                "contrasts": [{"name": "ChIP", "test_samples": ["a", "b"], "reference_samples": ["c", "d"]}],
+                "thresholds": {"log2fc": None, "padj": 0.05},
+            },
+            selected_contrast_index=1,
+        )
+        sel = plan.differential_design_json["selected_contrast"]
+        assert sel["decided_by"] == "model"
+        assert sel["model"] == "claude-opus-4-8"
+        assert sel["confidence"] == 0.97
+        # The saved list has one contrast, so that is the one selected.
+        assert sel["contrast_index"] == 0
+
+    @pytest.mark.asyncio
+    async def test_choosing_a_different_contrast_is_the_humans_decision(self, session, admin_user):
+        """Keeping 'decided_by: model' after a person overrode the pick would be a false record."""
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study, _ = await TestEditingTheDesignKeepsTheAttribution._plan_with_selection(session, admin_user, index=1)
+        plan = await RPS.set_differential_design(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            {
+                "contrasts": [{"name": "RNA", "test_samples": ["a", "b"], "reference_samples": ["c", "d"]}],
+                "thresholds": {"log2fc": 1.0, "padj": 0.05},
+            },
+            selected_contrast_index=0,
+        )
+        sel = plan.differential_design_json["selected_contrast"]
+        assert sel["decided_by"] == "human"
+        assert sel["contrast_index"] == 0
+
+    @pytest.mark.asyncio
+    async def test_a_design_that_never_had_a_selection_gains_none(self, session, admin_user):
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        await RPS.create_plan(session, study, admin_user.id, accessions=["GSE1"], pipeline_key="nf-core/rnaseq")
+        study.state = "plan_ready"
+        await session.flush()
+
+        plan = await RPS.set_differential_design(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            {
+                "contrasts": [{"name": "a", "test_samples": ["a", "b"], "reference_samples": ["c", "d"]}],
+                "thresholds": {"log2fc": 1.0, "padj": 0.05},
+            },
+        )
+        assert plan.differential_design_json.get("selected_contrast") is None
+
+    @pytest.mark.asyncio
+    async def test_clearing_the_design_clears_the_selection_with_it(self, session, admin_user):
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study, _ = await TestEditingTheDesignKeepsTheAttribution._plan_with_selection(session, admin_user)
+        plan = await RPS.set_differential_design(
+            session, study.id, admin_user.organization_id, admin_user.id, {"contrasts": []}
+        )
+        assert plan.differential_design_json is None

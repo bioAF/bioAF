@@ -47,6 +47,9 @@ class DifferentialDesignRequest(BaseModel):
 
     contrasts: list = []
     thresholds: dict | None = None
+    # Which contrast of the ORIGINAL list the human was editing. Lets the plan tell a ratified model
+    # choice from one a person overrode, instead of crediting the model for both.
+    selected_contrast_index: int | None = None
 
 
 class FindingSetRequest(BaseModel):

@@ -326,7 +326,12 @@ async def edit_differential_design(
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
     await ReproductionPlanService.set_differential_design(
-        session, study_id, org_id, user_id, {"contrasts": data.contrasts, "thresholds": data.thresholds or {}}
+        session,
+        study_id,
+        org_id,
+        user_id,
+        {"contrasts": data.contrasts, "thresholds": data.thresholds or {}},
+        selected_contrast_index=data.selected_contrast_index,
     )
     study = await _load(session, study_id, org_id)
     await session.commit()

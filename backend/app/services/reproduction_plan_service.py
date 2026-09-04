@@ -318,7 +318,12 @@ class ReproductionPlanService:
 
     @staticmethod
     async def set_differential_design(
-        session: AsyncSession, study_id: int, org_id: int, user_id: int, design: dict
+        session: AsyncSession,
+        study_id: int,
+        org_id: int,
+        user_id: int,
+        design: dict,
+        selected_contrast_index: int | None = None,
     ) -> ReproductionPlan:
         """B2e edit: persist the human-ratified differential design onto the plan at the C1 gate.
 
@@ -357,7 +362,36 @@ class ReproductionPlanService:
         errors = validate_replicates(normalized) + validate_paired_designs(normalized)
         if errors:
             raise HTTPException(400, "Invalid differential design. " + " ".join(errors))
-        plan.differential_design_json = _differential_design_or_none(normalized)
+        # The normalizer knows contrasts and thresholds, so rebuilding from it deleted the record of
+        # WHICH contrast this run reproduces and who chose it. Study 26 lost a 0.97-confidence model
+        # decision the moment its sample arms were filled in. Carry it across the edit.
+        #
+        # The gate saves the ONE contrast it edited (validate_replicates rejects the untouched ones
+        # for having no samples), so the surviving index is 0. `selected_contrast_index` is the index
+        # the human was looking at in the ORIGINAL list: when it differs from what was chosen for
+        # them, the choice is now theirs and the record must say so rather than keep crediting a
+        # model for a pick a person overrode.
+        previous = (plan.differential_design_json or {}).get("selected_contrast")
+        updated = _differential_design_or_none(normalized)
+        if updated and previous:
+            overridden = (
+                selected_contrast_index is not None
+                and previous.get("contrast_index") is not None
+                and selected_contrast_index != previous.get("contrast_index")
+            )
+            carried = dict(previous)
+            carried["contrast_index"] = (
+                0 if len(updated.get("contrasts") or []) == 1 else previous.get("contrast_index")
+            )
+            if overridden:
+                carried.update(
+                    decided_by="human",
+                    model=None,
+                    confidence=None,
+                    reason="chosen at the C1 gate, replacing the contrast selected for this run",
+                )
+            updated["selected_contrast"] = carried
+        plan.differential_design_json = updated
         await session.flush()
         await log_action(
             session,
