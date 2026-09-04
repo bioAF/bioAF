@@ -386,3 +386,54 @@ test("shows what the model chose when it resolved the columns itself", async () 
   expect(await screen.findByText(/claude-opus-4-8/)).toBeInTheDocument();
   expect(screen.getByText(/regions\.seqnames/)).toBeInTheDocument();
 });
+
+// ---- the contrast this run reproduces, not whichever was listed first ----
+
+const MULTI = {
+  contrasts: [
+    { name: "Nkx2.2 KO vs control (RNA-seq)", assay: "RNA-seq", test_samples: [], reference_samples: [],
+      thresholds: { log2fc: 1.0, padj: 0.05 } },
+    { name: "NKX2.2 differential binding (ChIP-seq)", assay: "ChIP-seq", test_samples: [], reference_samples: [],
+      thresholds: { log2fc: null, padj: 0.05 } },
+  ],
+  thresholds: { log2fc: 1.0, padj: 0.05 },
+  selected_contrast: { contrast_index: 1, decided_by: "model", model: "claude-opus-4-8", confidence: 0.95,
+                       reason: "the only ChIP-seq contrast" },
+};
+
+test("edits the selected contrast, not the first one", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  const name = (await screen.findByLabelText(/contrast name/i)) as HTMLInputElement;
+  expect(name.value).toBe("NKX2.2 differential binding (ChIP-seq)");
+});
+
+test("uses the selected contrast's own thresholds", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  const padj = (await screen.findByLabelText(/padj threshold/i)) as HTMLInputElement;
+  expect(padj.value).toBe("0.05");
+  const lfc = screen.getByLabelText(/log2fc threshold/i) as HTMLInputElement;
+  expect(lfc.value).toBe("");
+});
+
+test("says which contrast was chosen and why", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  expect(await screen.findByText(/claude-opus-4-8/)).toBeInTheDocument();
+  expect(screen.getByText(/only ChIP-seq contrast/i)).toBeInTheDocument();
+});
+
+test("lets a person choose a different contrast", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  const picker = (await screen.findByLabelText(/which contrast/i)) as HTMLSelectElement;
+  expect(Array.from(picker.options).map((o) => o.textContent)).toEqual(
+    expect.arrayContaining([expect.stringContaining("Nkx2.2 KO"), expect.stringContaining("NKX2.2 differential")]),
+  );
+  await userEvent.selectOptions(picker, "0");
+  const name = screen.getByLabelText(/contrast name/i) as HTMLInputElement;
+  expect(name.value).toBe("Nkx2.2 KO vs control (RNA-seq)");
+});
+
+test("a single-contrast paper shows no picker", async () => {
+  render(<Level3Gate studyId={1} design={DESIGN as never} claim={null} onChanged={jest.fn()} />);
+  await screen.findByLabelText(/contrast name/i);
+  expect(screen.queryByLabelText(/which contrast/i)).not.toBeInTheDocument();
+});
