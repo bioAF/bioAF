@@ -190,6 +190,9 @@ def test_parse_extraction_differential_design_tolerates_partial():
             "test_samples": [],
             "reference_samples": [],
             "subjects": {},  # canonical shape now carries the optional matched-pairs map (empty = unpaired)
+            # A contrast carries its own cutoffs now. This one states none, so it inherits the
+            # paper-level pair, which is what a single-contrast paper has always meant.
+            "thresholds": {"log2fc": None, "padj": 0.01},
         }
     ]
     assert design["thresholds"] == {"log2fc": None, "padj": 0.01}
@@ -1220,3 +1223,66 @@ async def test_a_second_pass_that_binds_is_the_one_recorded(session, admin_user,
     bound = {t.metric_key: t.bound_key for t in targets}
     assert bound["alignment_rate"] == "reads_mapped_genome"
     assert not any("could not map" in b or "do not correspond" in b for b in plan.blockers_json)
+
+
+# ---- thresholds belong to a contrast, not to a paper ----
+#
+# A paper states its cutoffs per finding: DEGs at |log2FC| >= 1 and FDR < 0.05, differential binding
+# on FDR alone. One pair for the whole paper flattens those into a number that is wrong for at least
+# one of its assays. GSE273743's paper reports six contrasts across RNA-seq, ATAC-seq and ChIP-seq;
+# applying the RNA-seq DEG cutoff to a windowed csaw table cut its 92 significant intervals to 33.
+
+
+def test_each_contrast_carries_its_own_thresholds():
+    design = ext._normalize_differential_design(
+        {
+            "contrasts": [
+                {"name": "DEGs", "thresholds": {"log2fc": 1.0, "padj": 0.05}},
+                {"name": "differential binding", "thresholds": {"log2fc": None, "padj": 0.05}},
+            ]
+        }
+    )
+    assert design["contrasts"][0]["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert design["contrasts"][1]["thresholds"] == {"log2fc": None, "padj": 0.05}
+
+
+def test_a_paper_level_pair_still_applies_to_every_contrast():
+    """Back-compat in the model's direction: a model that answers with one pair for the paper, as the
+    old prompt asked, must still produce a usable design."""
+    design = ext._normalize_differential_design(
+        {"contrasts": [{"name": "a"}, {"name": "b"}], "thresholds": {"log2fc": 1.0, "padj": 0.01}}
+    )
+    assert all(c["thresholds"] == {"log2fc": 1.0, "padj": 0.01} for c in design["contrasts"])
+
+
+def test_a_contrasts_own_thresholds_beat_the_paper_level_pair():
+    design = ext._normalize_differential_design(
+        {
+            "contrasts": [{"name": "binding", "thresholds": {"log2fc": None, "padj": 0.05}}],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        }
+    )
+    assert design["contrasts"][0]["thresholds"]["log2fc"] is None
+
+
+def test_the_paper_level_pair_is_still_written_for_plans_that_read_it():
+    """Every stored plan and the Level-3 wiring read design['thresholds']. It stays."""
+    design = ext._normalize_differential_design(
+        {"contrasts": [{"name": "a"}], "thresholds": {"log2fc": 2.0, "padj": 0.01}}
+    )
+    assert design["thresholds"] == {"log2fc": 2.0, "padj": 0.01}
+
+
+def test_a_qc_only_paper_is_unchanged():
+    design = ext._normalize_differential_design({"contrasts": [], "thresholds": {}})
+    assert design["contrasts"] == []
+    assert design["thresholds"] == {"log2fc": None, "padj": None}
+
+
+def test_the_prompt_asks_for_thresholds_per_contrast():
+    system, _ = build_extraction_prompt("body")
+    assert "thresholds" in system
+    # The schema hint must close the CONTRAST object on its own thresholds, or the model keeps
+    # answering with one pair for the paper. `}]` is the end of the contrast list.
+    assert '"thresholds": {"log2fc": null, "padj": null}}]' in system
+    assert '"assay": "the assay this contrast was measured on"' in system

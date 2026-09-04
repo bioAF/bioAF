@@ -418,11 +418,25 @@ class ReproductionPlanService:
         if plan is None:
             raise HTTPException(404, "No reproduction plan to attach the ground-truth set to.")
 
-        # The paper's own stated thresholds normalize its own table. Default to the captured design.
-        design_thresholds = (plan.differential_design_json or {}).get("thresholds") or {}
+        # The paper's own stated thresholds normalize its own table, and they belong to the CONTRAST
+        # this run reproduces, not to the paper: a DEG cutoff applied to a windowed differential
+        # binding table cut 92 significant intervals to 33. Fall back to the paper-level pair, which
+        # is what a single-contrast paper means and what every plan written before this carries.
+        design_json = plan.differential_design_json or {}
+        selected = (design_json.get("selected_contrast") or {}).get("contrast_index")
+        contrasts = design_json.get("contrasts") or []
+        contrast_thresholds = None
+        if isinstance(selected, int) and 0 <= selected < len(contrasts):
+            contrast_thresholds = contrasts[selected].get("thresholds")
+        from_contrast = bool(contrast_thresholds)
+        design_thresholds = contrast_thresholds if from_contrast else (design_json.get("thresholds") or {})
         lfc = lfc_threshold if lfc_threshold is not None else design_thresholds.get("log2fc")
         padj = padj_threshold if padj_threshold is not None else design_thresholds.get("padj")
-        lfc = float(lfc) if lfc is not None else 1.0
+        # A null on the CONTRAST is the model answering the question it was asked: this cutoff does
+        # not apply to this finding, which is the usual case for windowed differential binding. That
+        # is 0.0 (significance alone), not the 1.0 default meant for "nobody stated one".
+        default_lfc = 0.0 if from_contrast else 1.0
+        lfc = float(lfc) if lfc is not None else default_lfc
         padj = float(padj) if padj is not None else 0.05
 
         def _normalize(cmap: dict | None):

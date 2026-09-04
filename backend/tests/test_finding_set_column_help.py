@@ -153,3 +153,45 @@ async def test_autonomous_that_gets_no_answer_falls_back_to_asking_a_person(sess
         session, study.id, admin_user.organization_id, admin_user.id, kind="interval", table_text=_CSAW
     )
     assert claim["needs_column_mapping"]["header"]
+
+
+async def test_the_selected_contrasts_thresholds_normalize_the_table(session, admin_user):
+    """A DEG cutoff applied to a windowed binding table is the wrong number. The contrast this run
+    reproduces owns the cutoffs, and the paper-level pair is only the fallback."""
+    study = await _plan_ready_study(session, admin_user)
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [
+            {"name": "DEGs (RNA-seq)", "thresholds": {"log2fc": 1.0, "padj": 0.05}},
+            {"name": "binding (ChIP-seq)", "thresholds": {"log2fc": None, "padj": 0.05}},
+        ],
+        "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        "selected_contrast": {"contrast_index": 1, "decided_by": "model", "reason": "r", "confidence": 0.9},
+    }
+    await session.flush()
+
+    claim = await ReproductionPlanService.set_finding_claim(
+        session, study.id, admin_user.organization_id, admin_user.id, kind="interval",
+        table_text=(
+            "chrom,start,end,padj,log2FoldChange\n"
+            "1,100,200,0.01,0.4\n"   # significant, small effect: kept on FDR alone, cut by |lfc|>=1
+            "2,300,400,0.01,2.5\n"
+        ),
+    )
+    assert claim["thresholds"] == {"log2fc": 0.0, "padj": 0.05}
+    assert len(claim["finding_set"]["entities"]) == 2
+
+
+async def test_a_plan_with_no_selection_still_uses_the_paper_level_pair(session, admin_user):
+    """Every plan written before selection existed, study 6 included."""
+    study = await _plan_ready_study(session, admin_user)
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    plan.differential_design_json = {"contrasts": [{"name": "a"}], "thresholds": {"log2fc": 1.0, "padj": 0.05}}
+    await session.flush()
+
+    claim = await ReproductionPlanService.set_finding_claim(
+        session, study.id, admin_user.organization_id, admin_user.id, kind="interval",
+        table_text="chrom,start,end,padj,log2FoldChange\n1,100,200,0.01,0.4\n2,300,400,0.01,2.5\n",
+    )
+    assert claim["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
+    assert len(claim["finding_set"]["entities"]) == 1

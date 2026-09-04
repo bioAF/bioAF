@@ -23,7 +23,10 @@ from app.exceptions import ValidationError
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services import llm_provider_config_service
+from app.models.organization import Organization
+from app.services.contrast_selection import select_contrast
 from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
+from app.services.validation_autonomy import AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS
 from app.services.literature.accession_manifest_service import (
     AccessionManifestService,
     dominant_library_strategy,
@@ -45,7 +48,9 @@ _SCHEMA_HINT = (
     '"method": {"assay": "e.g. bulk RNA-seq / scRNA-seq", "tools": [], "reference_build": "", "key_params": {}}, '
     '"differential_design": {"contrasts": [{"name": "e.g. treated vs control", "test_condition": "", '
     '"reference_condition": "", "test_samples": ["sample ids in the test group"], '
-    '"reference_samples": ["sample ids in the reference group"]}], '
+    '"reference_samples": ["sample ids in the reference group"], '
+    '"assay": "the assay this contrast was measured on", '
+    '"thresholds": {"log2fc": null, "padj": null}}], '
     '"thresholds": {"log2fc": null, "padj": null}}, '
     '"claims": [{"metric_key": "aligns to a QC metric", "value": 0, "unit": "", "tolerance": null, "source_locator": "section/figure"}], '
     '"data_availability": "deposited | none | restricted", '
@@ -127,7 +132,13 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "Also capture the paper's PRIMARY DIFFERENTIAL DESIGN in differential_design: the contrast(s) it "
         "tests (which condition is compared against which reference), the sample ids belonging to each "
         "group, and the significance thresholds it used (|log2 fold-change| and adjusted p / FDR). This is "
-        "the finding to be reproduced, not the pipeline's parameters. If the paper reports no differential "
+        "the finding to be reproduced, not the pipeline's parameters. Give each contrast the thresholds THAT "
+        "contrast was reported at, and name the assay it was measured on. A paper states its cutoffs per "
+        "finding, not once for itself: differential expression is usually reported at a |log2FC| cutoff "
+        "AND an adjusted p, while differential binding on windows or peaks is usually reported on the "
+        "adjusted p alone. Where a cutoff genuinely does not apply to a contrast, set it to null rather "
+        "than copying another contrast's number. If the paper truly states one pair for everything, "
+        "repeat it on each contrast. If the paper reports no differential "
         "comparison (a descriptive/QC-only paper), set contrasts to [] and leave thresholds null. Never "
         "fabricate a contrast or a threshold."
     )
@@ -284,6 +295,20 @@ def _normalize_subjects(value) -> dict:
     return out
 
 
+def _contrast_thresholds(own, paper_level: dict) -> dict:
+    """This contrast's cutoffs, falling back to the paper-level pair when it states none of its own.
+
+    A contrast that explicitly says a cutoff does not apply (``log2fc: null`` on a windowed binding
+    analysis) must keep that null rather than inherit the paper's DEG cutoff, so the fallback is
+    per-key and only fills a key the contrast omitted entirely.
+    """
+    own_d = _as_dict(own)
+    out = {}
+    for key in ("log2fc", "padj"):
+        out[key] = _to_float(own_d[key]) if key in own_d else _to_float(paper_level.get(key))
+    return out
+
+
 def _normalize_differential_design(value) -> dict:
     """B2e: coerce the model's differential_design to a stable, human-editable shape.
 
@@ -307,10 +332,19 @@ def _normalize_differential_design(value) -> dict:
                 # variance). Empty for the default unpaired design. Human-supplied at the C1 gate (the
                 # donor->sample mapping lives in GEO sample metadata, not the paper text).
                 "subjects": _normalize_subjects(c.get("subjects")),
+                # A paper states its cutoffs PER FINDING: DEGs at |log2FC| >= 1 and FDR < 0.05,
+                # differential binding on FDR alone. One pair for the whole paper flattens those into
+                # a number that is wrong for at least one of its assays, and the wrongness is silent:
+                # the RNA-seq cutoff applied to a windowed csaw table cut 92 significant intervals to
+                # 33. The paper-level pair below is the fallback, for a model that answered the older
+                # prompt with one pair, and for every plan written before this existed.
+                "thresholds": _contrast_thresholds(c.get("thresholds"), thresholds),
             }
         )
     return {
         "contrasts": contrasts,
+        # Kept: stored plans and the Level-3 wiring read it, and a single-contrast paper has exactly
+        # one answer either way.
         "thresholds": {"log2fc": _to_float(thresholds.get("log2fc")), "padj": _to_float(thresholds.get("padj"))},
     }
 
@@ -525,6 +559,25 @@ async def bind_claims(
     ]
 
 
+async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, cfg, client) -> dict | None:
+    """Ask which contrast this run reproduces, in autonomous mode; propose nothing in assisted.
+
+    In `assisted` the gate shows every contrast for a person to pick, which is the same question
+    asked of a human instead of a model. A single-contrast paper needs neither: there is one answer.
+    """
+    if len(contrasts) == 1:
+        return await select_contrast(
+            contrasts, pipeline_key=pipeline_key, assay=assay, client=client, model=cfg.model, api_key=cfg.api_key
+        )
+
+    org = await session.get(Organization, study.organization_id)
+    if ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) != AUTONOMY_AUTONOMOUS:
+        return None
+    return await select_contrast(
+        contrasts, pipeline_key=pipeline_key, assay=assay, client=client, model=cfg.model, api_key=cfg.api_key
+    )
+
+
 class ValidationExtractionService:
     @staticmethod
     async def extract(
@@ -682,6 +735,17 @@ class ValidationExtractionService:
         if binding_blocker:
             blockers.append(binding_blocker)
 
+        # Which of the paper's contrasts THIS run could reproduce. A paper reports one per finding
+        # across every assay it ran; the plan runs one pipeline. The gate used to take contrasts[0],
+        # so a paper listing its ChIP-seq contrast last handed a chipseq run an RNA-seq knockout.
+        design = _differential_design_or_none(parsed["differential_design"])
+        if design and design.get("contrasts"):
+            selection = await _select_contrast_for(
+                session, study, design["contrasts"], mapping.pipeline_key, method.get("assay"), cfg, client
+            )
+            if selection is not None:
+                design["selected_contrast"] = selection
+
         plan = await ReproductionPlanService.create_plan(
             session,
             study,
@@ -696,7 +760,7 @@ class ValidationExtractionService:
             parameters={},
             # B2e: capture the differential design (the finding to reproduce) for the C1 gate and
             # Level-3. None when the paper reports no contrast, keeping the plan Level-2-only.
-            differential_design=_differential_design_or_none(parsed["differential_design"]),
+            differential_design=design,
             # Keep the paper's own tool list. It is what lets a divergence be attributed to a named
             # cause (CellRanger vs STARsolo) instead of merely reported.
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],

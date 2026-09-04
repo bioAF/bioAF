@@ -9,6 +9,10 @@ import { type Arm, type ManifestSample, SampleManifestPicker, sampleId } from ".
 
 // Shapes mirror the backend plan surface (ReproductionPlanResponse.differential_design / finding_claim).
 export interface Contrast {
+  // The cutoffs THIS contrast was reported at. A paper states them per finding: DEGs at a |log2FC|
+  // and an adjusted p, differential binding usually on the adjusted p alone.
+  assay?: string | null;
+  thresholds?: { log2fc: number | null; padj: number | null } | null;
   name?: string | null;
   test_condition?: string | null;
   reference_condition?: string | null;
@@ -20,6 +24,15 @@ export interface Contrast {
 }
 
 export interface DifferentialDesign {
+  // Which contrast this run reproduces, and who decided. A paper reports one per finding across
+  // every assay it ran; the plan runs one pipeline. Absent on plans written before this existed.
+  selected_contrast?: {
+    contrast_index: number | null;
+    decided_by: string;
+    model?: string | null;
+    confidence?: number | null;
+    reason?: string | null;
+  } | null;
   contrasts: Contrast[];
   thresholds: { log2fc: number | null; padj: number | null };
 }
@@ -142,7 +155,15 @@ export function Level3Gate({
   onChanged: (updated: unknown) => void;
 }) {
   const { canAccess } = usePermissions();
-  const primary: Contrast = design?.contrasts?.[0] ?? { test_samples: [], reference_samples: [] };
+  const contrasts = design?.contrasts ?? [];
+  const chosen = design?.selected_contrast?.contrast_index;
+  const [contrastIndex, setContrastIndex] = useState(
+    typeof chosen === "number" && chosen >= 0 && chosen < contrasts.length ? chosen : 0,
+  );
+  const primary: Contrast = contrasts[contrastIndex] ?? { test_samples: [], reference_samples: [] };
+  // A contrast's own cutoffs, falling back to the paper-level pair for plans written before
+  // thresholds moved onto contrasts.
+  const th = primary.thresholds ?? design?.thresholds;
 
   const [name, setName] = useState(primary.name ?? "");
   const [testCondition, setTestCondition] = useState(primary.test_condition ?? "");
@@ -150,8 +171,8 @@ export function Level3Gate({
   const [testSamples, setTestSamples] = useState((primary.test_samples ?? []).join(", "));
   const [refSamples, setRefSamples] = useState((primary.reference_samples ?? []).join(", "));
   const [subjectsText, setSubjectsText] = useState(formatSubjects(primary.subjects));
-  const [lfc, setLfc] = useState(design?.thresholds?.log2fc != null ? String(design.thresholds.log2fc) : "");
-  const [padj, setPadj] = useState(design?.thresholds?.padj != null ? String(design.thresholds.padj) : "");
+  const [lfc, setLfc] = useState(th?.log2fc != null ? String(th.log2fc) : "");
+  const [padj, setPadj] = useState(th?.padj != null ? String(th.padj) : "");
 
   // A pipeline with no Level-3 route offers nothing; one with a single route offers only that.
   const kinds = supportedFindingKinds ?? ["gene", "interval"];
@@ -246,6 +267,19 @@ export function Level3Gate({
     return run("design", () => api.put(`${base}/differential-design`, payload));
   }
 
+  function chooseContrast(i: number) {
+    const c = contrasts[i];
+    const t = c?.thresholds ?? design?.thresholds;
+    setContrastIndex(i);
+    setName(c?.name ?? "");
+    setTestCondition(c?.test_condition ?? "");
+    setRefCondition(c?.reference_condition ?? "");
+    setTestSamples((c?.test_samples ?? []).join(", "));
+    setRefSamples((c?.reference_samples ?? []).join(", "));
+    setLfc(t?.log2fc != null ? String(t.log2fc) : "");
+    setPadj(t?.padj != null ? String(t.padj) : "");
+  }
+
   function confirmSet(map?: Record<string, string>) {
     const chosen = map ?? (Object.keys(columnMap).length ? columnMap : undefined);
     return run("claim", () =>
@@ -302,6 +336,38 @@ export function Level3Gate({
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Differential design (primary contrast)</p>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {contrasts.length > 1 && (
+          <div className="mb-2 space-y-1">
+            <label className="block text-xs text-gray-700">
+              Which contrast does this run reproduce?
+              <select
+                aria-label="Which contrast"
+                className={input}
+                value={String(contrastIndex)}
+                onChange={(e) => chooseContrast(Number(e.target.value))}
+              >
+                {contrasts.map((c, i) => (
+                  <option key={i} value={String(i)}>
+                    {`${c.name ?? `contrast ${i + 1}`}${c.assay ? ` (${c.assay})` : ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {design?.selected_contrast?.reason && (
+              <p className="text-xs text-gray-600">
+                {`Chosen by ${
+                  design.selected_contrast.decided_by === "model"
+                    ? design.selected_contrast.model
+                    : design.selected_contrast.decided_by
+                }: ${design.selected_contrast.reason}`}
+                {design.selected_contrast.confidence != null
+                  ? ` (${design.selected_contrast.confidence.toFixed(2)})`
+                  : ""}
+              </p>
+            )}
+          </div>
+        )}
+
           <label className="text-xs text-gray-600">
             Contrast name
             <input className={input} aria-label="Contrast name" value={name} onChange={(e) => setName(e.target.value)} />
