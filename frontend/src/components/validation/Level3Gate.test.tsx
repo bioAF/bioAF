@@ -309,3 +309,80 @@ test("an older response with no declaration degrades to offering both kinds", as
   const select = screen.getByLabelText(/result set kind/i) as HTMLSelectElement;
   expect(Array.from(select.options).map((o) => o.value)).toEqual(["gene", "interval"]);
 });
+
+// ---- the column picker: what the gate asks when a table's header is not recognised ----
+//
+// A real csaw deposit names its coordinates regions.seqnames / regions.start / regions.end, which
+// the alias list does not know, so the table parsed to nothing and the gate said "could not locate
+// chrom/start/end columns". That is not a question a scientist can answer. This is: here is your
+// header, which column is the chromosome?
+
+const NEEDS_MAPPING = {
+  kind: "interval",
+  namespace: "interval",
+  confirmed: true,
+  finding_set: { n_sig: 0, n_up: 0, n_down: 0, namespace: "interval", parse_notes: ["could not locate chrom/start/end columns"], entities: [] },
+  needs_column_mapping: {
+    header: ["", "regions.seqnames", "regions.start", "regions.end", "combined.FDR", "combined.rep.logFC"],
+    roles: ["chrom", "start", "end", "lfc", "padj", "pval"],
+  },
+};
+
+test("asks which column plays each role when the header is not recognised", async () => {
+  render(<Level3Gate studyId={1} design={DESIGN} claim={NEEDS_MAPPING as never} onChanged={jest.fn()} />);
+
+  expect(await screen.findByText(/which column/i)).toBeInTheDocument();
+  const chrom = screen.getByLabelText(/chrom column/i) as HTMLSelectElement;
+  expect(Array.from(chrom.options).map((o) => o.value)).toEqual(
+    expect.arrayContaining(["regions.seqnames", "regions.start", "combined.FDR"]),
+  );
+});
+
+test("posts the chosen mapping back with the table", async () => {
+  render(<Level3Gate studyId={1} design={DESIGN} claim={NEEDS_MAPPING as never} onChanged={jest.fn()} />);
+
+  await userEvent.selectOptions(await screen.findByLabelText(/chrom column/i), "regions.seqnames");
+  await userEvent.selectOptions(screen.getByLabelText(/start column/i), "regions.start");
+  await userEvent.selectOptions(screen.getByLabelText(/end column/i), "regions.end");
+  await userEvent.click(screen.getByRole("button", { name: /use these columns/i }));
+
+  await waitFor(() => {
+    const call = mockPost.mock.calls.find((c) => String(c[0]).includes("/finding-set"));
+    expect(call?.[1].column_map).toEqual({
+      chrom: "regions.seqnames",
+      start: "regions.start",
+      end: "regions.end",
+    });
+  });
+});
+
+test("does not ask when the table parsed", () => {
+  const ok = {
+    kind: "interval",
+    namespace: "interval",
+    confirmed: true,
+    finding_set: { n_sig: 2, n_up: 1, n_down: 1, namespace: "interval", parse_notes: [], entities: [{ id: "1:100-200" }] },
+  };
+  render(<Level3Gate studyId={1} design={DESIGN} claim={ok as never} onChanged={jest.fn()} />);
+  expect(screen.queryByText(/which column/i)).not.toBeInTheDocument();
+});
+
+test("shows what the model chose when it resolved the columns itself", async () => {
+  const resolved = {
+    kind: "interval",
+    namespace: "interval",
+    confirmed: true,
+    finding_set: { n_sig: 2, n_up: 1, n_down: 1, namespace: "interval", parse_notes: [], entities: [{ id: "1:100-200" }] },
+    column_mapping: {
+      columns: { chrom: "regions.seqnames", start: "regions.start" },
+      decided_by: "model",
+      model: "claude-opus-4-8",
+      confidence: 0.96,
+      reason: "csaw prefixes its columns",
+    },
+  };
+  render(<Level3Gate studyId={1} design={DESIGN} claim={resolved as never} onChanged={jest.fn()} />);
+
+  expect(await screen.findByText(/claude-opus-4-8/)).toBeInTheDocument();
+  expect(screen.getByText(/regions\.seqnames/)).toBeInTheDocument();
+});
