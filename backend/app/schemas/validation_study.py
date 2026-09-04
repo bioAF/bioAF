@@ -63,6 +63,9 @@ class FindingSetRequest(BaseModel):
     lfc_threshold: float | None = None
     padj_threshold: float | None = None
     source_locator: str | None = None
+    # Which column plays which role, when the alias list did not recognise the header. Posted
+    # back by the gate's column picker; absent on the first attempt.
+    column_map: dict | None = None
 
 
 class SampleManifestEntry(BaseModel):

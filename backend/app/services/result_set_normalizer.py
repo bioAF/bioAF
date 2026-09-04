@@ -202,6 +202,26 @@ def _squash(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
 
 
+def _mapped(column_map: dict | None, role: str, header_lc: list[str]) -> int | None:
+    """The index a caller pinned for ``role``, or None to fall back to the alias list.
+
+    The map is a hint (from a model in autonomous mode, or a person at the gate), not a contract: a
+    name that is not in the header is ignored rather than honoured, so a wrong guess can never blank
+    a table that the alias list would have parsed on its own.
+    """
+    if not column_map:
+        return None
+    name = column_map.get(role)
+    if not name:
+        return None
+    target = _clean(str(name)).lower()
+    if target in header_lc:
+        return header_lc.index(target)
+    squashed = [_squash(h) for h in header_lc]
+    t = _squash(target)
+    return squashed.index(t) if t and t in squashed else None
+
+
 def _pick(cands: list[str], header_lc: list[str]) -> int | None:
     """The index of the first candidate present in the header, punctuation ignored.
 
@@ -296,19 +316,20 @@ def normalize_gene_table(
     lfc_threshold: float = 1.0,
     padj_threshold: float = 0.05,
     contrast: str | None = None,
+    column_map: dict | None = None,
 ) -> FindingSet:
     header, rows = _read_rows(text)
     if not header:
         return FindingSet(kind="gene", namespace="unknown", parse_notes=["empty table"])
 
     header_lc = [_clean(h).lower() for h in header]
-    id_i = _pick(_ID_COLS, header_lc)
+    id_i = _mapped(column_map, "id", header_lc) or _pick(_ID_COLS, header_lc)
     if id_i is None:
         id_i = 0  # common: unnamed index column holds the gene id
 
-    lfc_i = _pick(_LFC_COLS, header_lc)
-    padj_i = _pick(_PADJ_COLS, header_lc)
-    pval_i = _pick(_PVAL_COLS, header_lc)
+    lfc_i = _mapped(column_map, "lfc", header_lc) or _pick(_LFC_COLS, header_lc)
+    padj_i = _mapped(column_map, "padj", header_lc) or _pick(_PADJ_COLS, header_lc)
+    pval_i = _mapped(column_map, "pval", header_lc) or _pick(_PVAL_COLS, header_lc)
     notes: list[str] = []
 
     # multi-contrast wide table: no bare lfc/padj -> need a contrast to pick the columns
@@ -366,6 +387,7 @@ def normalize_interval_table(
     lfc_threshold: float = 1.0,
     padj_threshold: float = 0.05,
     contrast: str | None = None,
+    column_map: dict | None = None,
 ) -> FindingSet:
     """Normalize a differential-peak table (ATAC/ChIP DA) into interval entities.
 
@@ -377,12 +399,12 @@ def normalize_interval_table(
         return FindingSet(kind="interval", namespace="interval", parse_notes=["empty table"])
 
     header_lc = [_clean(h).lower() for h in header]
-    chrom_i = _pick(_CHROM_COLS, header_lc)
-    start_i = _pick(_START_COLS, header_lc)
-    end_i = _pick(_END_COLS, header_lc)
-    lfc_i = _pick(_LFC_COLS, header_lc)
-    padj_i = _pick(_PADJ_COLS, header_lc)
-    pval_i = _pick(_PVAL_COLS, header_lc)
+    chrom_i = _mapped(column_map, "chrom", header_lc) or _pick(_CHROM_COLS, header_lc)
+    start_i = _mapped(column_map, "start", header_lc) or _pick(_START_COLS, header_lc)
+    end_i = _mapped(column_map, "end", header_lc) or _pick(_END_COLS, header_lc)
+    lfc_i = _mapped(column_map, "lfc", header_lc) or _pick(_LFC_COLS, header_lc)
+    padj_i = _mapped(column_map, "padj", header_lc) or _pick(_PADJ_COLS, header_lc)
+    pval_i = _mapped(column_map, "pval", header_lc) or _pick(_PVAL_COLS, header_lc)
 
     fs = FindingSet(kind="interval", namespace="interval")
     if chrom_i is None or start_i is None or end_i is None:

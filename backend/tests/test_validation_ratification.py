@@ -72,17 +72,13 @@ class TestParsing:
     def test_an_override_naming_no_evidence_is_refused(self):
         """An override that reweighs nothing is an assertion, not a judgment. It falls back to the
         measured verdict rather than silently replacing it."""
-        out = rat.parse_ratification(
-            _response("override", "validated", "trust me", []), suggested="inconclusive"
-        )
+        out = rat.parse_ratification(_response("override", "validated", "trust me", []), suggested="inconclusive")
         assert out["action"] == "accept"
         assert out["verdict"] == "inconclusive"
         assert "evidence" in out["reasoning"].lower()
 
     def test_an_override_to_a_verdict_that_does_not_exist_is_refused(self):
-        out = rat.parse_ratification(
-            _response("override", "brilliant", "r", ["peak_count"]), suggested="inconclusive"
-        )
+        out = rat.parse_ratification(_response("override", "brilliant", "r", ["peak_count"]), suggested="inconclusive")
         assert out["action"] == "accept"
         assert out["verdict"] == "inconclusive"
 
