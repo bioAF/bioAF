@@ -186,6 +186,9 @@ def test_parse_extraction_differential_design_tolerates_partial():
         {
             "name": "KO vs WT",
             "test_condition": None,
+            # Which assay measured this contrast; the selector needs it to tell two contrasts on one
+            # assay apart. None when the paper's text does not say.
+            "assay": None,
             "reference_condition": None,
             "test_samples": [],
             "reference_samples": [],

@@ -324,6 +324,9 @@ def _normalize_differential_design(value) -> dict:
             {
                 "name": _str_or_none(c.get("name")),
                 "test_condition": _str_or_none(c.get("test_condition")),
+                # Which assay measured this contrast. The selector needs it: a paper can report two
+                # contrasts on the SAME assay, and then the pipeline key alone cannot tell them apart.
+                "assay": _str_or_none(c.get("assay")),
                 "reference_condition": _str_or_none(c.get("reference_condition")),
                 "test_samples": [str(s).strip() for s in _as_list(c.get("test_samples")) if str(s).strip()],
                 "reference_samples": [str(s).strip() for s in _as_list(c.get("reference_samples")) if str(s).strip()],
@@ -559,6 +562,23 @@ async def bind_claims(
     ]
 
 
+async def _scoped_sample_titles(study) -> list[str]:
+    """The titles of the samples this run is actually scoped to, for the contrast selector.
+
+    Two contrasts measured on the same assay are indistinguishable from the pipeline key alone; what
+    separates them is which conditions were sequenced in THIS deposit. Best-effort: an unreachable
+    manifest just means the selector decides on names, as it did before.
+    """
+    requested = (study.source_accession or "").strip()
+    if not requested:
+        return []
+    try:
+        manifest = await AccessionManifestService.fetch_manifest(requested)
+    except Exception:  # noqa: BLE001 - the selector degrades, it does not fail
+        return []
+    return [str(s.get("title") or "").strip() for s in manifest.samples if (s.get("title") or "").strip()]
+
+
 async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, cfg, client) -> dict | None:
     """Ask which contrast this run reproduces, in autonomous mode; propose nothing in assisted.
 
@@ -574,7 +594,14 @@ async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, c
     if ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) != AUTONOMY_AUTONOMOUS:
         return None
     return await select_contrast(
-        contrasts, pipeline_key=pipeline_key, assay=assay, client=client, model=cfg.model, api_key=cfg.api_key
+        contrasts,
+        pipeline_key=pipeline_key,
+        assay=assay,
+        client=client,
+        model=cfg.model,
+        api_key=cfg.api_key,
+        accession=(study.source_accession or "").strip() or None,
+        sample_titles=await _scoped_sample_titles(study),
     )
 
 

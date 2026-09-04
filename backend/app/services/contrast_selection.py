@@ -26,7 +26,14 @@ logger = logging.getLogger("bioaf.contrast_selection")
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
 
-def build_contrast_prompt(contrasts: list[dict], *, pipeline_key: str | None, assay: str | None) -> tuple[str, str]:
+def build_contrast_prompt(
+    contrasts: list[dict],
+    *,
+    pipeline_key: str | None,
+    assay: str | None,
+    accession: str | None = None,
+    sample_titles: list[str] | None = None,
+) -> tuple[str, str]:
     """Return (system, payload) asking which contrast this pipeline's run could reproduce."""
     system = (
         "You are matching a paper's reported findings to one analysis run. The run below executes a "
@@ -42,7 +49,11 @@ def build_contrast_prompt(contrasts: list[dict], *, pipeline_key: str | None, as
         "result; reproducing the wrong contrast is not.\n"
         "- Match on what was measured. Chromatin accessibility is ATAC, occupancy and differential "
         "binding are ChIP, expression is RNA. A knockout studied by RNA-seq is not a ChIP contrast "
-        "even when the same gene is named in both."
+        "even when the same gene is named in both.\n"
+        "- When two contrasts were measured on the SAME assay, the pipeline alone cannot separate "
+        "them. Use the dataset below: its accession and its SAMPLE titles say which conditions were "
+        "actually sequenced here, and only the contrast between those conditions is reproducible "
+        "from this data."
     )
     lines = []
     for i, c in enumerate(contrasts):
@@ -51,9 +62,13 @@ def build_contrast_prompt(contrasts: list[dict], *, pipeline_key: str | None, as
             f" | assay: {c.get('assay') or 'not stated'}"
             f" | {c.get('test_condition') or '?'} vs {c.get('reference_condition') or '?'}"
         )
+    dataset = f"This run is scoped to: {accession or 'no specific accession'}\n"
+    if sample_titles:
+        dataset += "Its samples:\n" + "\n".join(f"  {t}" for t in sample_titles[:40]) + "\n"
     payload = (
         f"This run executes: {pipeline_key or 'unknown pipeline'}\n"
-        f"The paper's methods call its assay: {assay or 'not stated'}\n\n"
+        f"The paper's methods call its assay: {assay or 'not stated'}\n"
+        f"{dataset}\n"
         "The paper's contrasts:\n" + "\n".join(lines)
     )
     return system, payload
@@ -87,7 +102,15 @@ def parse_contrast_selection(response_text: str, *, n: int) -> dict:
 
 
 async def select_contrast(
-    contrasts: list[dict], *, pipeline_key: str | None, assay: str | None, client, model: str, api_key: str | None
+    contrasts: list[dict],
+    *,
+    pipeline_key: str | None,
+    assay: str | None,
+    client,
+    model: str,
+    api_key: str | None,
+    accession: str | None = None,
+    sample_titles: list[str] | None = None,
 ) -> dict | None:
     """The contrast this run reproduces, or None when there is nothing to pick or the ask failed.
 
@@ -106,7 +129,9 @@ async def select_contrast(
             "model": None,
         }
 
-    system, payload = build_contrast_prompt(contrasts, pipeline_key=pipeline_key, assay=assay)
+    system, payload = build_contrast_prompt(
+        contrasts, pipeline_key=pipeline_key, assay=assay, accession=accession, sample_titles=sample_titles
+    )
     try:
         output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
     except Exception as exc:  # noqa: BLE001 - an outage must not silently pick the first contrast
