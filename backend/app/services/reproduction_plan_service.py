@@ -15,7 +15,13 @@ from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services.audit_service import log_action
 from app.services.pipeline_mapper import declared_route_version, deposit_conflict, is_library_strategy_conflict
-from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
+from app.services import llm_provider_config_service
+from app.services.column_resolution import ROLES as COLUMN_ROLES
+from app.services.column_resolution import resolve_columns
+from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
+from app.services.llm_provider_clients import get_client
+from app.services.result_set_normalizer import _read_rows, normalize_gene_table, normalize_interval_table
+from app.services.validation_autonomy import AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS
 
 
 # DESeq2 estimates per-gene dispersion from WITHIN-group variance, so an arm with one sample has none
@@ -96,6 +102,14 @@ def _clamp(value, limit: int):
         return None
     text = str(value)
     return text if len(text) <= limit else text[:limit]
+
+
+async def _autonomy_for(session: AsyncSession, org_id: int) -> str:
+    """The org's literature-validation autonomy mode, defaulting to assisted."""
+    from app.models.organization import Organization
+
+    org = await session.get(Organization, org_id)
+    return (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
 
 
 class ReproductionPlanService:
@@ -371,6 +385,7 @@ class ReproductionPlanService:
         lfc_threshold: float | None = None,
         padj_threshold: float | None = None,
         source_locator: str | None = None,
+        column_map: dict | None = None,
     ) -> dict:
         """B4 (ADR-069): normalize the paper's deposited result table into a directional FindingSet
         and persist it as the plan's confirmed ground-truth claim (the C1 gate).
@@ -410,10 +425,45 @@ class ReproductionPlanService:
         lfc = float(lfc) if lfc is not None else 1.0
         padj = float(padj) if padj is not None else 0.05
 
-        if kind == "interval":
-            fs = normalize_interval_table(table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast)
-        else:
-            fs = normalize_gene_table(table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast)
+        def _normalize(cmap: dict | None):
+            if kind == "interval":
+                return normalize_interval_table(
+                    table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast, column_map=cmap
+                )
+            return normalize_gene_table(
+                table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast, column_map=cmap
+            )
+
+        fs = _normalize(column_map)
+        # A map the caller supplied is the assisted picker's answer, so it is the human's decision.
+        mapping = (
+            {"columns": column_map, "decided_by": "human", "reason": "", "confidence": None, "model": None}
+            if column_map
+            else None
+        )
+        needs_help = None
+
+        # The alias list only knows the spellings someone enumerated, and a real csaw deposit names
+        # its columns `regions.seqnames` / `regions.start` / `regions.end`. Rather than report that
+        # as an unusable deposit, ask: the model in `autonomous`, a person at the gate in `assisted`.
+        if not fs.entities and any("could not locate" in n for n in fs.parse_notes):
+            header, _ = _read_rows(table_text)
+            resolved = None
+            if header and await _autonomy_for(session, org_id) == AUTONOMY_AUTONOMOUS:
+                cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_VALIDATION)
+                if cfg is not None:
+                    resolved = await resolve_columns(
+                        header, kind=kind, client=get_client(cfg.provider), model=cfg.model, api_key=cfg.api_key
+                    )
+            if resolved:
+                retried = _normalize(resolved["columns"])
+                if retried.entities:
+                    fs = retried
+                    mapping = {**resolved, "decided_by": "model"}
+            if not fs.entities:
+                # Still unparsed: hand the header and the roles still to fill to a person, which is
+                # a question they can answer, unlike "could not locate chrom/start/end columns".
+                needs_help = {"header": header, "roles": list(COLUMN_ROLES.get(kind, ()))}
 
         claim = {
             "kind": kind,
@@ -423,6 +473,8 @@ class ReproductionPlanService:
             "confirmed": True,
             "thresholds": {"log2fc": lfc, "padj": padj},
             "finding_set": fs.to_dict(),
+            "column_mapping": mapping,
+            "needs_column_mapping": needs_help,
         }
         plan.finding_claim_json = claim
         await session.flush()

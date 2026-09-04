@@ -495,6 +495,7 @@ async def confirm_finding_set(
         lfc_threshold=data.lfc_threshold,
         padj_threshold=data.padj_threshold,
         source_locator=data.source_locator,
+        column_map=data.column_map,
     )
     study = await _load(session, study_id, org_id)
     await session.commit()

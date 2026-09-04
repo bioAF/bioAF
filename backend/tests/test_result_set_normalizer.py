@@ -341,3 +341,81 @@ def test_normalize_interval_skips_a_supplementary_title_row():
         "chr9:127396571-127397615": "up",
         "chr7:68326932-68327384": "down",
     }
+
+
+# ---- a caller-supplied column map, for when the alias list does not recognise the header ----
+#
+# `_pick` matches a squashed header cell against an enumerated alias list, so it only knows the
+# spellings somebody wrote down. A real csaw deposit (GSE273743, the NKX2.2 ChIP-seq series) names
+# its columns `regions.seqnames` / `regions.start` / `regions.end` / `combined.FDR` /
+# `combined.rep.logFC`, none of which is in any list, and the whole table parsed to zero entities
+# under the note "could not locate chrom/start/end columns". csaw and DiffBind both prefix their
+# columns, so this is a family of deposits rather than one odd file.
+
+_CSAW_HEADER = (
+    '"","regions.seqnames","regions.start","regions.end","regions.width","regions.strand",'
+    '"combined.PValue","combined.FDR","combined.direction","combined.rep.logFC",'
+    '"best.PValue","best.FDR","best.rep.logFC"'
+)
+_CSAW = (
+    _CSAW_HEADER + "\n"
+    '"1","1",3361051,3361210,160,"*",0.795,0.99,"down",-0.116,1,1,-0.201\n'
+    '"2","2",4857701,4857760,60,"*",0.0004,0.004,"up",2.31,0.11,0.68,0.58\n'
+    '"3","3",5000000,5000500,500,"*",0.0001,0.001,"down",-3.02,0.05,0.2,-2.9\n'
+)
+
+
+def test_a_csaw_table_still_fails_without_help():
+    """The baseline this exists to fix. Recorded so the fix is not mistaken for a no-op."""
+    fs = normalize_interval_table(_CSAW, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.entities == []
+    assert any("could not locate" in n for n in fs.parse_notes)
+
+
+def test_a_column_map_lets_a_csaw_table_parse():
+    """Given the mapping, the same table normalizes with no other change."""
+    fs = normalize_interval_table(
+        _CSAW,
+        lfc_threshold=1.0,
+        padj_threshold=0.05,
+        column_map={
+            "chrom": "regions.seqnames",
+            "start": "regions.start",
+            "end": "regions.end",
+            "lfc": "combined.rep.logFC",
+            "padj": "combined.FDR",
+        },
+    )
+    assert [e.id for e in fs.entities] == ["2:4857701-4857760", "3:5000000-5000500"]
+    assert [e.direction for e in fs.entities] == ["up", "down"]
+
+
+def test_a_column_map_may_name_only_what_the_alias_list_missed():
+    """Partial maps are the common case: usually only the chrom/start/end prefix is unrecognised."""
+    text = _CSAW.replace("combined.rep.logFC", "log2FoldChange").replace("combined.FDR", "padj")
+    fs = normalize_interval_table(
+        text,
+        column_map={"chrom": "regions.seqnames", "start": "regions.start", "end": "regions.end"},
+    )
+    assert len(fs.entities) == 2
+
+
+def test_a_column_map_naming_a_column_that_is_not_there_is_ignored():
+    """The map is a hint from a model or a person, not a contract. A wrong name must fall back to
+    the alias list rather than blanking a table that would otherwise have parsed."""
+    text = _CSAW.replace("regions.seqnames", "chrom").replace("regions.start", "start")
+    text = text.replace("regions.end", "end").replace("combined.rep.logFC", "log2FoldChange")
+    text = text.replace("combined.FDR", "padj")
+    fs = normalize_interval_table(text, column_map={"chrom": "not_a_column"})
+    assert len(fs.entities) == 2
+
+
+def test_a_column_map_works_for_gene_tables_too():
+    """The same `_pick` sits in the gene path, so a prefixed DEG table fails identically."""
+    text = "res.gene_symbol,res.log2FoldChange,res.padj\nTP53,2.4,0.001\nMYC,-3.1,0.0004\nACTB,0.1,0.9\n"
+    assert normalize_gene_table(text).entities == []
+    fs = normalize_gene_table(
+        text,
+        column_map={"id": "res.gene_symbol", "lfc": "res.log2FoldChange", "padj": "res.padj"},
+    )
+    assert {e.id for e in fs.entities} == {"TP53", "MYC"}
