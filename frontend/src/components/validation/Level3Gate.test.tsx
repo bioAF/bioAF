@@ -437,3 +437,25 @@ test("a single-contrast paper shows no picker", async () => {
   await screen.findByLabelText(/contrast name/i);
   expect(screen.queryByLabelText(/which contrast/i)).not.toBeInTheDocument();
 });
+
+test("tells the server which contrast was being edited, so a model pick is not credited to a human override", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  await screen.findByLabelText(/contrast name/i);
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => {
+    const call = mockPut.mock.calls.find((c) => String(c[0]).includes("/differential-design"));
+    expect(call?.[1].selected_contrast_index).toBe(1);
+  });
+});
+
+test("sends the index the person moved to when they override the choice", async () => {
+  render(<Level3Gate studyId={1} design={MULTI as never} claim={null} onChanged={jest.fn()} />);
+  await userEvent.selectOptions(await screen.findByLabelText(/which contrast/i), "0");
+  await userEvent.click(screen.getByRole("button", { name: /save design/i }));
+
+  await waitFor(() => {
+    const call = mockPut.mock.calls.find((c) => String(c[0]).includes("/differential-design"));
+    expect(call?.[1].selected_contrast_index).toBe(0);
+  });
+});

@@ -263,6 +263,9 @@ export function Level3Gate({
         },
       ],
       thresholds: { log2fc: numOrNull(lfc), padj: numOrNull(padj) },
+      // Which contrast of the original list this edit is of. The server saves one contrast, so
+      // without this it cannot tell a ratified model choice from one a person overrode.
+      selected_contrast_index: contrastIndex,
     };
     return run("design", () => api.put(`${base}/differential-design`, payload));
   }
