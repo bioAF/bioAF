@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+
+import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { type Arm, type ManifestSample, SampleManifestPicker, sampleId } from "./SampleManifestPicker";
@@ -36,6 +38,19 @@ export interface FindingClaim {
     parse_notes: string[];
     entities: Array<{ id: string; direction?: string | null }>;
   };
+  // Set when the alias list could not identify the table's columns. Carries the header and the
+  // roles still to fill, which is a question a scientist can answer; "could not locate
+  // chrom/start/end columns" is not.
+  needs_column_mapping?: { header: string[]; roles: string[] } | null;
+  // What was decided, once something resolved them. `decided_by` is "model" in autonomous mode or
+  // "human" when the picker below posted it.
+  column_mapping?: {
+    columns: Record<string, string>;
+    decided_by: string;
+    model?: string | null;
+    confidence?: number | null;
+    reason?: string | null;
+  } | null;
 }
 
 function parseList(s: string): string[] {
@@ -147,6 +162,8 @@ export function Level3Gate({
   const [source, setSource] = useState(claim?.source_locator ?? "");
 
   const [busy, setBusy] = useState<null | "design" | "claim" | "fetch">(null);
+  // Role -> column name, filled in by the picker when the header was not recognised.
+  const [columnMap, setColumnMap] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
@@ -229,12 +246,14 @@ export function Level3Gate({
     return run("design", () => api.put(`${base}/differential-design`, payload));
   }
 
-  function confirmSet() {
+  function confirmSet(map?: Record<string, string>) {
+    const chosen = map ?? (Object.keys(columnMap).length ? columnMap : undefined);
     return run("claim", () =>
       api.post(`${base}/finding-set`, {
         kind,
         table_text: tableText,
         source_locator: source.trim() || null,
+        ...(chosen ? { column_map: chosen } : {}),
       }),
     );
   }
@@ -451,7 +470,7 @@ export function Level3Gate({
           <button
             className={`${btn} bg-bioaf-600 text-white hover:bg-bioaf-700`}
             disabled={busy !== null || tableText.trim() === ""}
-            onClick={confirmSet}
+            onClick={() => confirmSet()}
           >
             {busy === "claim" ? "Parsing..." : "Confirm ground-truth set"}
           </button>
@@ -464,6 +483,67 @@ export function Level3Gate({
             {busy === "fetch" ? "Fetching..." : "Try GEO auto-fetch"}
           </button>
         </div>
+
+        {claim?.needs_column_mapping && (
+          <div className="rounded border border-amber-200 bg-amber-50 p-3 space-y-2">
+            <p className="text-sm font-medium text-amber-900">
+              Which column is which?
+            </p>
+            <p className="text-xs text-amber-800">
+              This table&apos;s columns are not ones bioAF recognises by name, so nothing could be
+              read from it. Point each role at a column and confirm again. Leave a role blank if the
+              table does not have it.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {claim.needs_column_mapping.roles.map((role) => (
+                <label key={role} className="text-xs text-amber-900">
+                  {`${role} column`}
+                  <select
+                    aria-label={`${role} column`}
+                    className="mt-0.5 w-full rounded border border-amber-300 bg-white px-2 py-1 text-sm text-gray-900"
+                    value={columnMap[role] ?? ""}
+                    onChange={(e) =>
+                      setColumnMap((m) => {
+                        const next = { ...m };
+                        if (e.target.value) next[role] = e.target.value;
+                        else delete next[role];
+                        return next;
+                      })
+                    }
+                  >
+                    <option value="">not in this table</option>
+                    {claim.needs_column_mapping!.header
+                      .filter((h) => h !== "")
+                      .map((h) => (
+                        <option key={h} value={h}>
+                          {h}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <Button
+              size="sm"
+              disabled={busy !== null || Object.keys(columnMap).length === 0}
+              onClick={() => confirmSet(columnMap)}
+            >
+              {busy === "claim" ? "Parsing..." : "Use these columns"}
+            </Button>
+          </div>
+        )}
+
+        {claim?.column_mapping && (
+          <p className="text-xs text-gray-600">
+            {`Columns resolved by ${claim.column_mapping.decided_by === "model" ? claim.column_mapping.model : "you"}: `}
+            {Object.entries(claim.column_mapping.columns)
+              .map(([role, col]) => `${role} = ${col}`)
+              .join(", ")}
+            {claim.column_mapping.confidence != null
+              ? ` (${claim.column_mapping.confidence.toFixed(2)})`
+              : ""}
+          </p>
+        )}
       </div>
       )}
 
