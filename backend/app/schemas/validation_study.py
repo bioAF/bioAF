@@ -108,6 +108,9 @@ class ReproductionPlanResponse(BaseModel):
     # The tools the paper's own methods named. Visible on the plan because it is what an attributed
     # divergence is argued from, so a human ratifying a verdict can check the argument's input.
     tools: list | None = None
+    # Where the authors said their analysis code lives (plan_7 step 3). Shown at the C1 gate so a
+    # scientist can weigh the reproduction against the authors' own code; never executed.
+    code_availability: list | None = None
     differential_design: dict | None = None
     finding_claim: dict | None = None
     reference_genome: str | None = None
