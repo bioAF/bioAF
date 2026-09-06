@@ -227,3 +227,74 @@ async def test_a_declined_selection_is_returned_rather_than_swallowed():
     assert out is not None
     assert out["declined"] is True
     assert "peaks" in out["reason"]
+
+
+# ---- defects found by running step 2 against the real deposits (2026-09-05) ----
+
+_PER_SAMPLE = (
+    [
+        _entry(f"GSM475835{i}_L2_bio{i}_act.narrowPeak.gz", "peaks", 4000000, gsm=f"GSM475835{i}", level="sample")
+        for i in range(1, 4)
+    ]
+    + [
+        _entry(f"GSM475836{i}_L2_bio{i}_con.narrowPeak.gz", "peaks", 4000000, gsm=f"GSM475836{i}", level="sample")
+        for i in range(1, 4)
+    ]
+    + [_entry("GSE157174_RAW.tar", "raw", 50186240)]
+)
+
+
+def test_a_per_sample_pick_expands_to_every_sample_file():
+    """Asked to choose from GSE157174's twelve per-sample narrowPeak files, the model named ONE, and
+    its reasoning was right for the file it named. But a differential interval test needs every
+    sample in both arms: one peak file is not a matrix, it is one column of one.
+
+    The expansion is deterministic and is NOT asked of the model, for the same reason triplet
+    grouping is not: which files form the set is answered by the classification and the GSM prefix,
+    and a judgment call there would be a judgment call about nothing.
+    """
+    out = parse_selection(
+        _fenced('{"primary_matrix": "GSM4758351_L2_bio1_act.narrowPeak.gz", "value_type": "unknown"}'),
+        inventory=_PER_SAMPLE,
+    )
+    assert out["primary_matrix"] == "GSM4758351_L2_bio1_act.narrowPeak.gz"
+    assert len(out["matrix_files"]) == 6
+    assert "GSE157174_RAW.tar" not in out["matrix_files"]
+    # Stable order, so a re-run builds the same matrix columns in the same order.
+    assert out["matrix_files"] == sorted(out["matrix_files"])
+
+
+def test_a_series_level_pick_is_a_set_of_one():
+    """A single deposited matrix is already the whole input. `matrix_files` is always the set to
+    read, so step 5 has one shape to handle rather than two."""
+    out = parse_selection(
+        _fenced('{"primary_matrix": "GSE274331_TPMs_H2AS40-KD.xlsx", "value_type": "tpm"}'),
+        inventory=_INVENTORY,
+    )
+    assert out["matrix_files"] == ["GSE274331_TPMs_H2AS40-KD.xlsx"]
+
+
+def test_expansion_does_not_mix_classifications():
+    """A deposit carrying both per-sample peaks and per-sample count matrices must not be merged
+    into one set: they are different measurements and cannot share a matrix."""
+    mixed = _PER_SAMPLE + [
+        _entry("GSM9999991_counts.tsv", "matrix_counts", 5000, gsm="GSM9999991", level="sample"),
+    ]
+    out = parse_selection(
+        _fenced('{"primary_matrix": "GSM4758351_L2_bio1_act.narrowPeak.gz", "value_type": "unknown"}'),
+        inventory=mixed,
+    )
+    assert "GSM9999991_counts.tsv" not in out["matrix_files"]
+    assert len(out["matrix_files"]) == 6
+
+
+def test_a_declined_selection_has_no_matrix_files():
+    out = parse_selection(_fenced('{"declined": true, "reason": "nothing usable"}'), inventory=_PER_SAMPLE)
+    assert out["matrix_files"] == []
+
+
+def test_the_prompt_says_a_per_sample_pick_takes_the_whole_set():
+    """The model should know naming one file selects its whole group, or it will agonise over which
+    of twelve equivalent files to name."""
+    system, _ = build_selection_prompt(_PER_SAMPLE, pipeline_key="nf-core/atacseq", kind="interval")
+    assert "per-sample" in system.lower()
