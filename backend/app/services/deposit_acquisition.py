@@ -72,6 +72,42 @@ def sniff_format(data: bytes) -> str:
     return "text"
 
 
+def _xls_to_tsv(data: bytes, filename: str) -> str:
+    """First worksheet of a legacy BIFF .xls as TSV.
+
+    xlrd 2.x reads ONLY .xls: it deliberately dropped .xlsx support, which makes it the exact
+    complement of openpyxl rather than an alternative to it. GSE213770's differential-methylation
+    table is one of these, and until xlrd was added it was refused by name.
+    """
+    import xlrd
+
+    try:
+        book = xlrd.open_workbook(file_contents=data)
+    except Exception as exc:  # noqa: BLE001 - a corrupt workbook is a deposit problem, not a crash
+        raise UnreadableDepositError(f"{filename} is a legacy Excel file that could not be opened: {exc}") from exc
+
+    if not book.nsheets:
+        raise UnreadableDepositError(f"{filename} is a legacy Excel file with no worksheets")
+    sheet = book.sheet_by_index(0)
+
+    lines: list[str] = []
+    for r in range(sheet.nrows):
+        cells = []
+        for value in sheet.row_values(r):
+            # xlrd returns every number as a float, so an integer count would render as "5.0" and
+            # step 6 would measure the matrix as normalized rather than as counts. Integral floats
+            # are written back as integers for exactly that reason.
+            if isinstance(value, float) and value.is_integer():
+                cells.append(str(int(value)))
+            else:
+                cells.append("" if value is None else str(value))
+        if any(c.strip() for c in cells):
+            lines.append("\t".join(cells))
+    if not lines:
+        raise UnreadableDepositError(f"{filename} is a legacy Excel file with no rows")
+    return "\n".join(lines) + "\n"
+
+
 def _xlsx_to_tsv(data: bytes, filename: str) -> str:
     """First worksheet of an .xlsx as TSV. openpyxl is already a dependency (requirements.txt)."""
     from openpyxl import load_workbook
@@ -117,14 +153,7 @@ def decode_deposit(filename: str, raw: bytes) -> tuple[str, str]:
     if fmt == "xlsx":
         return _xlsx_to_tsv(data, filename), "xlsx"
     if fmt == "xls":
-        # xlrd is not a dependency, so this genuinely cannot be read today. Adding it is a one-line
-        # requirements change AND a new third-party dependency, which is an owner decision rather
-        # than one to make inside a parser. Until then this refuses by name instead of returning a
-        # table of mojibake that would be scored as a paper with no findings.
-        raise UnreadableDepositError(
-            f"{filename} is a legacy Excel (.xls) file, which bioAF cannot read. "
-            "Ask the authors for a TSV/CSV, or use the raw-reads route."
-        )
+        return _xls_to_tsv(data, filename), "xls"
     raise UnreadableDepositError(f"{filename} is not a readable table (format looks binary)")
 
 

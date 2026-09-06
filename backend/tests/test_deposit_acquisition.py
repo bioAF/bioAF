@@ -97,16 +97,69 @@ def test_a_gzipped_xlsx_is_still_decoded():
     assert "TP53" in text
 
 
-def test_legacy_xls_is_refused_by_name_rather_than_parsed_into_mojibake():
-    """`xlrd` is NOT a dependency, so a BIFF file cannot be read today. Refusing with a reason that
-    names the format is the honest outcome: decoding it as text produces a table that parses to zero
-    rows, which is indistinguishable from a paper that deposited nothing.
+def _biff_stream(rows: list[list]) -> bytes:
+    """A minimal BIFF record stream, which is what lives INSIDE an .xls container.
 
-    Adding xlrd is a one-line requirements change and an owner decision, not a silent one.
+    Hand-built because xlwt is not a dependency and will not become one to write a fixture. This is
+    the payload half of a legacy workbook: BOF, one NUMBER/LABEL record per cell, EOF. It exercises
+    the reader; the CONTAINER (OLE2) is what `sniff_format` keys on and is covered separately, and
+    the whole chain is verified against GEO's real GSE213770 file on the demo.
     """
+    import struct
+
+    out = bytearray()
+    out += struct.pack("<HHHH", 0x0009, 4, 0x0002, 0x0010)  # BOF, BIFF2 worksheet
+    for r, row in enumerate(rows):
+        for c, val in enumerate(row):
+            # BIFF2 cell records carry THREE attribute bytes between the column and the payload.
+            if isinstance(val, (int, float)):
+                # NUMBER: rw(2) col(2) attr(3) num(8) = 15
+                out += struct.pack("<HHHHBBBd", 0x0003, 15, r, c, 0, 0, 0, float(val))
+            else:
+                b = str(val).encode("latin-1")
+                # LABEL: rw(2) col(2) attr(3) cch(1) rgch
+                out += struct.pack("<HHHHBBBB", 0x0004, 8 + len(b), r, c, 0, 0, 0, len(b)) + b
+    out += struct.pack("<HH", 0x000A, 0)  # EOF
+    return bytes(out)
+
+
+def test_a_legacy_workbook_is_decoded_now_that_xlrd_is_a_dependency():
+    """GSE213770's differential-methylation table is genuine legacy BIFF, and until xlrd was added
+    it was refused by name.
+
+    xlrd 2.x reads ONLY .xls (it deliberately dropped .xlsx), so it is the exact complement of
+    openpyxl rather than an alternative to it.
+    """
+    from app.services.deposit_acquisition import _xls_to_tsv
+
+    text = _xls_to_tsv(_biff_stream([["gene", "s1", "s2"], ["TP53", 5, 6]]), "legacy.xls")
+    assert text.splitlines()[0] == "gene\ts1\ts2"
+    assert "TP53" in text
+
+
+def test_integer_cells_do_not_become_floats():
+    """xlrd returns every number as a float, so a count of 5 would render "5.0" and step 6 would
+    measure the matrix as NORMALIZED rather than as counts, sending it to limma instead of DESeq2.
+    An integral float is written back as an integer for exactly that reason."""
+    from app.services.deposit_acquisition import _xls_to_tsv
+
+    text = _xls_to_tsv(_biff_stream([["gene", "s1"], ["TP53", 5]]), "legacy.xls")
+    assert text.splitlines()[1] == "TP53\t5"
+    assert "5.0" not in text
+
+
+def test_a_real_fraction_keeps_its_decimals():
+    from app.services.deposit_acquisition import _xls_to_tsv
+
+    text = _xls_to_tsv(_biff_stream([["gene", "s1"], ["TP53", 0.25]]), "legacy.xls")
+    assert "0.25" in text
+
+
+def test_a_corrupt_legacy_workbook_refuses_by_name():
+    """OLE2 magic with no readable workbook behind it. The refusal must still name the file, because
+    it reaches a scientist at the C1 gate."""
     with pytest.raises(UnreadableDepositError) as exc:
         decode_deposit("GSE213770_DMR.xls.gz", gzip.compress(_OLE2_MAGIC + b"\x00" * 64))
-    assert "xls" in str(exc.value).lower()
     assert "GSE213770_DMR.xls.gz" in str(exc.value)
 
 
@@ -290,8 +343,31 @@ async def test_a_gzipped_deposit_is_stored_decoded(session, deposit_study):
 
 @pytest.mark.asyncio
 async def test_an_unreadable_deposit_holds_for_a_human_rather_than_erroring(session, deposit_study):
-    """A legacy .xls is a deposit problem, not an infrastructure failure. The study stays on the
-    deposit route with a reason a scientist can act on, and the gate can escalate to raw reads."""
+    """An undecodable deposit is a deposit problem, not an infrastructure failure. The study stays on
+    the deposit route with a reason a scientist can act on, and the gate can escalate to raw reads.
+
+    This used to assert on the .xls refusal, because a legacy workbook was the undecodable case bioAF
+    had. xlrd now reads those, so the case is carried by a payload that genuinely is not a table.
+    The BEHAVIOUR under test never changed: hold, with a reason, naming the file.
+    """
+    storage = _FakeStorage()
+    base = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSEnnn/GSE1/suppl/"
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    await ValidationDriverService._handle_acquiring_processed(
+        session,
+        deposit_study,
+        fetcher=_bytes_fetcher({base + "GSE1_counts.tsv": png, base + "GSE1_meta.tsv": b"a\n"}),
+        storage_adapter=storage,
+    )
+    assert deposit_study.state == "acquiring_processed"
+    reason = deposit_study.evidence_json["deposit_failed"]["reason"]
+    assert "GSE1_counts.tsv" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_corrupt_workbook_also_holds_and_names_the_file(session, deposit_study):
+    """OLE2 magic with nothing readable behind it now reaches xlrd and fails there instead of being
+    refused up front. Still a hold, still named."""
     storage = _FakeStorage()
     base = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSEnnn/GSE1/suppl/"
     await ValidationDriverService._handle_acquiring_processed(
@@ -301,7 +377,7 @@ async def test_an_unreadable_deposit_holds_for_a_human_rather_than_erroring(sess
         storage_adapter=storage,
     )
     assert deposit_study.state == "acquiring_processed"
-    assert "xls" in deposit_study.evidence_json["deposit_failed"]["reason"].lower()
+    assert "GSE1_counts.tsv" in deposit_study.evidence_json["deposit_failed"]["reason"]
 
 
 @pytest.mark.asyncio
