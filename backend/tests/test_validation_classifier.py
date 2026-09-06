@@ -727,3 +727,49 @@ class TestComparisonHonoursTheRecordedBinding:
         )
         assert rows[0]["mapped_key"] == "peak_count"
         assert rows[0]["advisory"] is True
+
+
+# ---- plan_7 step 9: which KIND of validation produced this verdict ----
+
+
+def test_a_deposit_route_verdict_says_the_upstream_processing_was_not_repeated():
+    """The rule plan_7 added, and the step that makes the other nine honest.
+
+    A verdict reached from the authors' own processed matrix tests their statistics, not their
+    processing. It cannot detect a processing error, a swapped sample or a contaminated library, and
+    it must not read as the same claim a raw-reads run produces.
+    """
+    out = classify_study([], {}, route="deposit")
+    assert "deposited" in out["reasoning"].lower()
+    assert "not independently repeated" in out["reasoning"].lower()
+    assert out["route"] == "deposit"
+
+
+def test_a_pipeline_route_verdict_is_worded_exactly_as_before():
+    """The regression guard. Every existing study and every existing test asserts this wording."""
+    before = classify_study([], {})
+    after = classify_study([], {}, route="pipeline")
+    assert before["reasoning"] == after["reasoning"]
+    assert "deposited" not in after["reasoning"].lower()
+
+
+def test_an_unrouted_study_is_treated_as_the_pipeline_route():
+    """Every study that predates plan_7 has no route recorded. None must mean the historical
+    behaviour, not an unknown third thing."""
+    assert classify_study([], {}, route=None)["reasoning"] == classify_study([], {})["reasoning"]
+
+
+def test_the_route_qualifier_does_not_invent_a_classification_bucket():
+    """The seven buckets are correct and partially_reproduced already exists. This is a qualifier on
+    the same verdict, not an eighth verdict."""
+    from app.models.validation_study import VALIDATION_STUDY_CLASSIFICATIONS
+
+    out = classify_study([], {}, route="deposit")
+    assert out["classification"] in VALIDATION_STUDY_CLASSIFICATIONS
+
+
+def test_the_method_is_named_when_it_differs_from_the_papers():
+    """A limma-trend reproduction compared against a paper's DESeq2 result is a METHOD difference,
+    and attribution has to name it rather than charge the gap to the paper."""
+    out = classify_study([], {}, route="deposit", reproduction_method="limma_trend")
+    assert "limma" in out["reasoning"].lower()

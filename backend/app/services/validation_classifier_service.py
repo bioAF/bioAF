@@ -753,6 +753,8 @@ def classify_study(
     differential_attribution: dict | None = None,
     paper_tools: list[str] | None = None,
     pipeline_key: str | None = None,
+    route: str | None = None,
+    reproduction_method: str | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -948,9 +950,36 @@ def classify_study(
             "two numbers is one of method rather than of result.)"
         )
 
+    # plan_7 step 9. A verdict reached from the authors' OWN processed matrix is a different claim
+    # from one reached by re-running the paper from its raw reads: it tests their statistics, not
+    # their processing, and it cannot detect a processing error, a swapped sample or a contaminated
+    # library. Saying so is what keeps the deposit route honest, because that route will produce more
+    # `validated` verdicts, faster and cheaper, and every one of them is a weaker claim.
+    #
+    # A qualifier on the same verdict, never an eighth classification bucket: the seven in
+    # VALIDATION_STUDY_CLASSIFICATIONS are correct and `partially_reproduced` already exists.
+    #
+    # `None` means the historical behaviour, because every study predating plan_7 has no route and
+    # must keep reading exactly as it did.
+    if route == "deposit":
+        reasoning += (
+            " This verdict was reached from the data the authors deposited, not by re-running the "
+            "paper from its raw reads, so the upstream processing was not independently repeated."
+        )
+        if reproduction_method == "limma_trend":
+            reasoning += (
+                " The deposited matrix held already-normalized values, so the reproduction used "
+                "limma-trend rather than a count-based test; where the paper used a count-based "
+                "method, a difference here can be the method rather than the result."
+            )
+
     return {
         "comparisons": comparisons,
         "attribution": attribution,
+        # Which kind of validation produced this verdict. Carried out so the badge and the provenance
+        # report can qualify it without re-deriving it from the study's state.
+        "route": route or "pipeline",
+        "reproduction_method": reproduction_method,
         # Per-metric: which divergences a named tool-pair difference accounts for, and the sentence
         # that says so. Rendered next to the verdict; a divergence absent from here is unexplained.
         "divergence_attribution": divergence_attribution,
