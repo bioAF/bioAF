@@ -130,6 +130,36 @@ BUILTIN_TEMPLATES = [
         },
     },
     {
+        # plan_7 step 8. The other three headless reproducers are DESeq2, which requires integer
+        # counts. A DEPOSITED matrix is very often already normalized (GSE274331's is TPM, every
+        # column summing to exactly 1e6), and feeding that to DESeq2 invalidates its dispersion model
+        # and returns numbers that are confidently wrong. limma-trend is the standard, defensible
+        # test for a matrix somebody else normalized.
+        #
+        # `limma` is already installed in the notebook image AND already in its build-time missing-
+        # package assertion (notebook_image_service), so this needs no image change.
+        "name": "Differential Expression (limma-trend, headless)",
+        "description": "Reproduce a paper's finding from a deposited matrix of already-normalized values (Level-3)",
+        "category": "differential_expression",
+        "notebook_path": "notebooks/de_normalized_limma.ipynb",
+        "local_file": "de_normalized_limma.ipynb",
+        "compatible_with": None,
+        "sort_order": 9,
+        "parameters": {
+            "counts_path": "/data/matrix.tsv",
+            "output_path": "/outputs/de_results.csv",
+            # A deposit often leaves its id column unnamed, so "" means "the first column" rather
+            # than an error. The nf-core templates can hard-code a name; this one cannot.
+            "id_column": "",
+            "test_samples": "",
+            "reference_samples": "",
+            "block_labels": "",
+            "lfc_threshold": 1.0,
+            "padj_threshold": 0.05,
+            "already_logged": "false",
+        },
+    },
+    {
         "name": "Differential Expression (pseudobulk DESeq2, headless)",
         "description": "Reproduce a paper's DEG finding from scRNA-seq per-sample matrices (Level-3)",
         "category": "differential_expression",
