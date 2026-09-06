@@ -21,6 +21,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
+from app.services.literature.deposit_inventory_service import classify_deposit_filename
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 logger = logging.getLogger("bioaf.ground_truth_fetch")
@@ -30,10 +31,20 @@ _TIMEOUT = httpx.Timeout(30.0)
 
 Fetcher = Callable[[str], Awaitable[str]]
 
-# Filename token sets (promoted from spike-03's scan_geo_suppl classifier).
-_DE_TOKENS = ("deg", "_de_", "_de.", "diffexp", "differential_expression", "deseq", "edger", "dge", "limma")
-_DA_TOKENS = ("diffbind", "diff_peak", "differential_peak", "da_peak", "_da.", "_da_")
-_COUNT_TOKENS = ("count", "tpm", "fpkm", "rpkm", "matrix")
+# This module's five buckets, expressed over the deposit route's finer vocabulary (plan_7 step 1).
+# Anything the deposit route separates but this caller does not care about collapses to `other`.
+#
+# There is ONE classifier now. The token sets that used to live here were built from spike-03's scan
+# and could only recognise what somebody had enumerated, which is how GSE273743's csaw table and
+# GSE213770's DMR table both came back as "other" while being exactly the ground truth the C1 gate
+# was asking a human to go and find. Keeping a second list here is how the two drift apart again.
+_DEPOSIT_TO_ASSIST = {
+    "matrix_counts": "counts",
+    "matrix_normalized": "counts",
+    "de_table": "de_table",
+    "da_table": "da_table",
+    "raw": "raw",
+}
 
 
 def geo_suppl_dir_url(accession: str) -> str | None:
@@ -52,17 +63,12 @@ def geo_suppl_dir_url(accession: str) -> str | None:
 
 def classify_supplementary_filename(name: str) -> str:
     """Classify a GEO supplementary filename by what it likely holds: de_table / da_table / counts /
-    raw / other. Best-effort, from the filename alone (spike-03)."""
-    n = (name or "").lower()
-    if n.endswith("_raw.tar") or n == "filelist.txt":
-        return "raw"
-    if any(t in n for t in _DA_TOKENS) or ("peak" in n and any(t in n for t in ("diff", "_da", "gain", "lost"))):
-        return "da_table"
-    if any(t in n for t in _DE_TOKENS):
-        return "de_table"
-    if any(t in n for t in _COUNT_TOKENS):
-        return "counts"
-    return "other"
+    raw / other. Best-effort, from the filename alone.
+
+    Delegates to the deposit route's classifier and maps its finer answer back to these five, so both
+    routes recognise a deposit identically and this caller's contract is unchanged.
+    """
+    return _DEPOSIT_TO_ASSIST.get(classify_deposit_filename(name), "other")
 
 
 def parse_dir_listing(html: str) -> list[str]:
