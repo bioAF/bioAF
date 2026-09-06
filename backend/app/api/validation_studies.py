@@ -20,6 +20,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.validation_autonomy import decision_list
 from app.schemas.validation_study import (
+    ApproveRequest,
     DepositOverrideRequest,
     ClassifyRequest,
     ComparisonTargetResponse,
@@ -511,12 +512,13 @@ async def confirm_finding_set(
 @router.post("/{study_id}/approve", response_model=ValidationStudyResponse)
 async def approve_plan(
     study_id: int,
+    body: ApproveRequest = ApproveRequest(),
     current_user: dict = require_permission("lit_validation", "approve"),
     session: AsyncSession = Depends(get_session),
 ):
     org_id = int(current_user["org_id"])
     user_id = int(current_user["sub"])
-    study = await ValidationStudyService.approve_plan(session, study_id, org_id, user_id)
+    study = await ValidationStudyService.approve_plan(session, study_id, org_id, user_id, route=body.route)
     await session.commit()
     return await _study_response(session, study, org_id)
 

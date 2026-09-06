@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -22,6 +24,20 @@ class ReadRequest(BaseModel):
 
 class DeclineRequest(BaseModel):
     reason: str | None = None
+
+
+class ApproveRequest(BaseModel):
+    """C1 gate approval, carrying the route the scientist chose.
+
+    `pipeline` is the historical behaviour and the default, so an approval that says nothing about
+    the route spends compute exactly as it always did. `deposit` starts from the pre-processed data
+    the authors published: minutes instead of hours, and it tests the analysis rather than the whole
+    processing chain (see the route qualifier on the verdict).
+
+    Literal rather than str: a typo must not fall through to the route that spends hours of compute.
+    """
+
+    route: Literal["pipeline", "deposit"] = "pipeline"
 
 
 class DepositOverrideRequest(BaseModel):
