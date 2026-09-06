@@ -55,7 +55,7 @@ from app.services.validation_ratification import ratify
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
 from app.services.validation_sample_values import sample_values_from_design
-from app.services.validation_level3_service import resolve_level3
+from app.services.validation_level3_service import resolve_level3, resolve_level3_from_deposit
 from app.services.validation_study_service import ValidationStudyService, record_study_error
 
 logger = logging.getLogger("bioaf.validation_driver")
@@ -660,6 +660,15 @@ class ValidationDriverService:
                 return ValidationDriverService._hold_deposit(session, study, evidence, reason or "design mismatch")
             plan.differential_design_json = rewritten
             await session.flush()
+
+        # Build the SAME level3 bundle the pipeline route builds in `_handle_extracting`, out of the
+        # deposit instead of a run. This is where the two routes converge: `_handle_reproducing`
+        # reads evidence["level3"] and is deliberately untouched by plan_7.
+        decision = await resolve_level3_from_deposit(session, study, plan, evidence=evidence)
+        if decision.inputs:
+            evidence["level3"] = decision.inputs
+        else:
+            evidence["level3_skipped"] = {"reason": decision.reason, "reason_code": decision.reason_code}
 
         evidence.pop("deposit_failed", None)
         study.evidence_json = evidence

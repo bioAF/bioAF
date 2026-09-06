@@ -430,3 +430,174 @@ async def _find_builtin_template(session: AsyncSession, org_id: int, notebook_pa
         .scalars()
         .first()
     )
+
+
+# ---- plan_7 step 8: the same bundle, built from a deposit ----
+
+
+@dataclass(frozen=True)
+class DepositTemplate:
+    """Which headless template reproduces a finding from a matrix of this kind of value.
+
+    Chosen by what step 6 MEASURED, never by the filename and never by the pipeline. All three
+    pre-plan_7 templates are DESeq2, which requires integer counts and estimates its own size
+    factors: handing it TPM invalidates the dispersion model and returns numbers that are
+    confidently wrong rather than obviously wrong.
+    """
+
+    template_notebook_path: str
+    method: str
+
+
+_DESEQ2_GENE = DepositTemplate("notebooks/de_bulk_deseq2.ipynb", "deseq2")
+_DESEQ2_INTERVAL = DepositTemplate("notebooks/da_peaks_deseq2.ipynb", "deseq2")
+_LIMMA = DepositTemplate("notebooks/de_normalized_limma.ipynb", "limma_trend")
+
+# Every normalized flavour lands on limma-trend. `tpm_or_cpm` is what step 6 emits when it cannot
+# separate the two from the matrix alone, and it does not need to: the choice of TEST is the same.
+_NORMALIZED = ("tpm_or_cpm", "tpm", "cpm", "fpkm", "normalized_other", "log_transformed")
+
+
+def template_for_value_type(value_type: str | None, *, kind: str = "gene") -> DepositTemplate | None:
+    """The template for a deposited matrix of this measured value type, or None to refuse.
+
+    `unknown` returns None rather than defaulting to counts. Defaulting would be the same defect as
+    trusting the filename, one layer further on and with the consequence landing on a verdict.
+    """
+    v = (value_type or "").strip().lower()
+    if v == "counts":
+        return _DESEQ2_INTERVAL if kind == "interval" else _DESEQ2_GENE
+    if v in _NORMALIZED:
+        return _LIMMA
+    return None
+
+
+async def resolve_level3_from_deposit(
+    session: AsyncSession,
+    study: ValidationStudy,
+    plan: ReproductionPlan | None,
+    *,
+    evidence: dict | None = None,
+) -> Level3Decision:
+    """Assemble ``evidence["level3"]`` from an acquired DEPOSIT rather than from a pipeline run.
+
+    Returns the SAME bundle shape ``resolve_level3`` returns, because ``_handle_reproducing`` consumes
+    it and is deliberately not modified by plan_7. That convergence is the whole design: the two
+    routes differ in how they obtain a matrix, not in how a finding is reproduced from one.
+
+    ``evidence`` is passed EXPLICITLY by the driver rather than read off the study, because the
+    driver holds the freshly-measured inspection in a local dict and assigns ``evidence_json`` exactly
+    once at the end. Reading the study here saw the pre-inspection evidence and declined every
+    deposit with `unknown_value_type`. That is the same ordering trap `_handle_extracting` documents
+    at length for its own bundle; making the input a parameter removes it rather than restating it.
+    """
+    if plan is None:
+        return _decline(study.id, "no_plan", "the study has no reproduction plan")
+
+    claim = plan.finding_claim_json or {}
+    finding_set = claim.get("finding_set") or {}
+    if not claim or not finding_set:
+        return _decline(
+            study.id,
+            "no_finding_claim",
+            "no ground-truth result set from the paper was confirmed, so there is nothing to reproduce against",
+        )
+
+    design = plan.differential_design_json or {}
+    contrasts = design.get("contrasts") or []
+    if not contrasts:
+        return _decline(study.id, "no_contrast", "the reproduction plan declares no differential contrast to reproduce")
+
+    replicate_errors = validate_replicates({"contrasts": contrasts[:1]})
+    if replicate_errors:
+        return _decline(study.id, "too_few_replicates", " ".join(replicate_errors))
+
+    ev = evidence if evidence is not None else (study.evidence_json or {})
+    deposit = ev.get("deposit") or {}
+    matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]
+    if not matrices:
+        return _decline(study.id, "no_deposit", "no deposited matrix was acquired for this study")
+
+    inspection = ev.get("deposit_inspection") or {}
+    kind = claim.get("kind") or "gene"
+    template_spec = template_for_value_type(inspection.get("value_type_observed"), kind=kind)
+    if template_spec is None:
+        return _decline(
+            study.id,
+            "unknown_value_type",
+            "the deposited matrix's values could not be identified as counts or as normalized "
+            "values, and running either test on the wrong one would produce a confident wrong answer",
+        )
+
+    template = await _find_builtin_template(session, study.organization_id, template_spec.template_notebook_path)
+    if template is None:
+        return _decline(
+            study.id,
+            "no_template",
+            f"this bioAF instance has no '{template_spec.template_notebook_path}' analysis template "
+            "registered, so the reproduction could not be run here",
+        )
+
+    primary = contrasts[0]
+    thresholds = claim.get("thresholds") or design.get("thresholds") or {}
+    lfc = thresholds.get("log2fc")
+    padj = thresholds.get("padj")
+    test_samples = primary.get("test_samples") or []
+    reference_samples = primary.get("reference_samples") or []
+
+    files = await _load_deposit_files(session, study.organization_id, [m["file_id"] for m in matrices])
+    if not files:
+        return _decline(study.id, "no_deposit", "the acquired deposit files are no longer present")
+    name_cache = await _resolve_input_file_context(session, {f.id: f for f in files})
+    paths = [f"/data/{_build_relative_path(f, name_cache)}" for f in files]
+
+    parameters: dict = {
+        "counts_path": paths[0],
+        "test_samples": ",".join(test_samples),
+        "reference_samples": ",".join(reference_samples),
+        "lfc_threshold": float(lfc) if lfc is not None else 1.0,
+        "padj_threshold": float(padj) if padj is not None else 0.05,
+        # A deposit's id column is whatever the depositor wrote, INCLUDING empty (GSE274331 leaves it
+        # unnamed). The wiring's fixed id_column describes an nf-core output and cannot speak for a
+        # deposit, so it is carried from what step 6 measured.
+        "id_column": inspection.get("id_column") or "",
+    }
+    if template_spec.method == "limma_trend":
+        # Logging a log compresses real differences into nothing and yields a quiet null result.
+        parameters["already_logged"] = "true" if inspection.get("value_type_observed") == "log_transformed" else "false"
+
+    subjects = primary.get("subjects") or {}
+    ordered = list(test_samples) + list(reference_samples)
+    if subjects and ordered and all(s in subjects for s in ordered):
+        parameters["block_labels"] = ",".join(subjects[s] for s in ordered)
+
+    return Level3Decision(
+        inputs={
+            "template_id": template.id,
+            "parameters": parameters,
+            "input_file_ids": [f.id for f in files],
+            "input_files": [f.filename for f in files],
+            "transform": None,
+            "paper_finding_set": finding_set,
+            "kind": kind,
+            "contrast": primary.get("name"),
+            # Which statistical test actually ran. A limma-trend result compared against a paper's
+            # DESeq2 result is a METHOD difference, and attribution has to be able to name it rather
+            # than charge the gap to the paper (the study-26 lesson).
+            "method": template_spec.method,
+            "source": "deposit",
+        }
+    )
+
+
+async def _load_deposit_files(session: AsyncSession, org_id: int, file_ids: list[int]) -> list[File]:
+    """The acquired deposit's File rows, in the order their ids were given."""
+    if not file_ids:
+        return []
+    rows = (
+        (await session.execute(select(File).where(File.id.in_(file_ids), File.organization_id == org_id)))
+        .scalars()
+        .all()
+    )
+    by_id = {f.id: f for f in rows}
+    return [by_id[i] for i in file_ids if i in by_id]
