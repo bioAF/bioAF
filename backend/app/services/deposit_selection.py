@@ -83,6 +83,9 @@ def build_selection_prompt(
         '"confidence": 0.0 to 1.0, "declined": false}\n\n'
         "Rules:\n"
         "- Use filenames EXACTLY as listed. Do not invent a file.\n"
+        "- When a deposit holds one per-sample file per GSM (per-sample peaks or matrices), name "
+        "any ONE of them: the whole group is taken as the input automatically. Do not try to pick "
+        "the best single sample, and do not decline because there is no combined matrix.\n"
         "- Never choose a raw archive (a .tar of reads) or a coverage track (bigwig/bedgraph): "
         "neither carries per-feature values that a differential test can read.\n"
         "- Never choose the paper's own differential result table as the matrix. That is the answer "
@@ -116,6 +119,7 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
     """
     empty = {
         "primary_matrix": None,
+        "matrix_files": [],
         "metadata_file": None,
         "value_type": "unknown",
         "reason": "",
@@ -153,6 +157,25 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
     primary = _resolve("primary_matrix", must_be_selectable=True)
     metadata = _resolve("metadata_file", must_be_selectable=False)
 
+    # A per-sample deposit is ONE input made of many files, so naming one of them selects its whole
+    # group. Found by running this against GSE157174: asked to choose among twelve per-sample
+    # narrowPeak files the model named one, and its reasoning about that file was right, but one
+    # peak file is a single column rather than a matrix and a differential test needs both arms.
+    #
+    # Deterministic, and deliberately not asked of the model, for the same reason triplet grouping
+    # is not: the classification and the GSM prefix already answer which files form the set, so
+    # there is no judgment to make. Grouped on classification so that a deposit carrying per-sample
+    # peaks AND per-sample count matrices cannot merge two different measurements into one matrix.
+    matrix_files: list[str] = []
+    if primary:
+        chosen = by_name[primary]
+        if chosen.level == "sample":
+            matrix_files = sorted(
+                e.filename for e in inventory or [] if e.level == "sample" and e.classification == chosen.classification
+            )
+        else:
+            matrix_files = [primary]
+
     value_type = str(data.get("value_type") or "").strip().lower()
     if value_type not in VALUE_TYPES:
         value_type = "unknown"
@@ -166,6 +189,7 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
 
     return {
         "primary_matrix": primary,
+        "matrix_files": matrix_files,
         "metadata_file": metadata,
         "value_type": value_type,
         "reason": reason,
