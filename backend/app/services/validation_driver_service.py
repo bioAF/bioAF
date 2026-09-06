@@ -602,10 +602,16 @@ class ValidationDriverService:
             design_samples.extend(contrast.get("test_samples") or [])
             design_samples.extend(contrast.get("reference_samples") or [])
 
+        # Coverage is MEASURED here but does not gate: the design names GSM accessions and the
+        # matrix names its own columns, and step 7's association is what bridges them. Gating on it
+        # here would refuse every deposit before the thing that resolves it had run. The association
+        # below is the real coverage gate. A transposed matrix still gates, because no association
+        # can fix an axis swap.
         inspection = inspect_matrix(
             text,
             claimed_value_type=(evidence.get("deposit_selection") or {}).get("value_type"),
             design_samples=design_samples or None,
+            gate_on_coverage=False,
         )
         evidence["deposit_inspection"] = inspection
 
@@ -616,6 +622,44 @@ class ValidationDriverService:
             return ValidationDriverService._hold_deposit(
                 session, study, evidence, inspection["unusable_reason"] or "the deposited matrix is not usable"
             )
+
+        # plan_7 step 7: work out what each COLUMN is, then rewrite the design onto those columns so
+        # the differential test matches its input by construction. Mirrors `_resolve_sample_design`
+        # on the pipeline route, including its held-before-compute contract.
+        from app.services.deposit_metadata_association import (
+            associate_columns,
+            parse_metadata_table,
+            rewrite_design_to_columns,
+        )
+
+        metadata_rows: list[dict] = []
+        meta_file = next(
+            (f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_metadata"), None
+        )
+        if meta_file:
+            try:
+                metadata_rows = parse_metadata_table(
+                    await storage.read_text(meta_file["storage_uri"]),
+                    column_map=(evidence.get("deposit_metadata_columns") or None),
+                )
+            except Exception:
+                # A metadata file we cannot read is not a failure: two other sources remain, and the
+                # association records which one answered.
+                logger.info("validation study %d: deposited metadata unreadable; falling back", study.id)
+
+        associations = associate_columns(
+            inspection["columns"],
+            metadata_rows=metadata_rows or None,
+            manifest=(evidence.get("sample_manifest") or None),
+        )
+        evidence["deposit_metadata_association"] = associations
+
+        if design.get("contrasts"):
+            rewritten, status, reason = rewrite_design_to_columns(design, associations)
+            if status == "mismatch":
+                return ValidationDriverService._hold_deposit(session, study, evidence, reason or "design mismatch")
+            plan.differential_design_json = rewritten
+            await session.flush()
 
         evidence.pop("deposit_failed", None)
         study.evidence_json = evidence

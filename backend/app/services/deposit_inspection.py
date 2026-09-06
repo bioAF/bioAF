@@ -64,9 +64,16 @@ def inspect_matrix(
     *,
     claimed_value_type: str | None = None,
     design_samples: list[str] | None = None,
+    gate_on_coverage: bool = True,
 ) -> dict:
     """Measure a deposited matrix: shape, what its values are, how even its libraries are, and
     whether the study's design can actually be run on it.
+
+    ``gate_on_coverage=False`` still MEASURES how many design samples were found, but does not let a
+    zero make the matrix unusable. The deposit route needs that: its design names GSM accessions
+    while the matrix names its own columns, and bridging the two is exactly what step 7's association
+    does. Gating here would refuse every deposit before the thing that resolves it had run. A
+    TRANSPOSED matrix still gates either way, because no association can fix an axis swap.
 
     Never raises. An unreadable table returns ``usable: False`` with a reason, because that is a fact
     about the deposit that a scientist can act on (fix the selection, or escalate to raw reads).
@@ -153,7 +160,7 @@ def inspect_matrix(
         usable, reason = False, "the deposited matrix has only one sample column, so it cannot carry a contrast"
     elif looks_transposed:
         usable, reason = False, "the deposited matrix appears to be transposed (samples in rows, features in columns)"
-    elif wanted and not found:
+    elif gate_on_coverage and wanted and not found:
         usable, reason = (
             False,
             f"none of the study's design samples appear in the deposited matrix "

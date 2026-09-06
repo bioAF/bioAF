@@ -123,3 +123,31 @@ class TestTheCall:
                 raise RuntimeError("provider down")
 
         assert await cr.resolve_columns(_CSAW_HEADER, kind="interval", client=_C(), model="m", api_key=None) is None
+
+
+# ---- plan_7 step 7: sample metadata is a third kind of table with wrong headers ----
+
+
+def test_sample_metadata_is_a_resolvable_kind():
+    """ "Other times the metadata has it, but the headers may be incorrect" is the stated case, so a
+    deposited metadata table reaches the same seam a result table does."""
+    from app.services.column_resolution import ROLES
+
+    assert "sample_metadata" in ROLES
+    assert set(ROLES["sample_metadata"]) == {"sample_id", "condition", "replicate", "batch"}
+
+
+def test_the_metadata_prompt_describes_each_role():
+    system, payload = cr.build_column_prompt(["Sample", "Group", "Rep"], kind="sample_metadata")
+    assert "sample_id" in system
+    assert "condition" in system
+    for h in ("Sample", "Group", "Rep"):
+        assert h in payload
+
+
+def test_a_metadata_resolution_still_refuses_an_invented_column():
+    out = cr.parse_column_resolution(
+        '```json\n{"columns": {"sample_id": "Sample", "condition": "NotThere"}, "confidence": 0.9}\n```',
+        header=["Sample", "Group"],
+    )
+    assert out["columns"] == {"sample_id": "Sample"}

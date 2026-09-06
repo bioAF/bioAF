@@ -30,6 +30,10 @@ _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 ROLES: dict[str, tuple[str, ...]] = {
     "interval": ("chrom", "start", "end", "lfc", "padj", "pval"),
     "gene": ("id", "lfc", "padj", "pval"),
+    # plan_7 step 7. A deposited SAMPLE METADATA table is the third kind whose headers are the
+    # depositor's own vocabulary, and the bioinformaticians named the failure explicitly: "other
+    # times the metadata has it, but the headers may be incorrect". Same seam, one more kind.
+    "sample_metadata": ("sample_id", "condition", "replicate", "batch"),
 }
 
 _ROLE_HELP = {
@@ -40,6 +44,10 @@ _ROLE_HELP = {
     "lfc": "the log2 fold change, signed, giving the direction of the change",
     "padj": "the ADJUSTED p-value / FDR / q-value",
     "pval": "the nominal p-value, only if there is no adjusted one",
+    "sample_id": "the sample identifier, matching the matrix's column names",
+    "condition": "the experimental group this sample belongs to (treated/control, genotype, ...)",
+    "replicate": "the replicate number within a condition",
+    "batch": "the batch, run or lane, if one is recorded",
 }
 
 
