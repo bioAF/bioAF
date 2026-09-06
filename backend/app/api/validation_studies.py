@@ -71,6 +71,7 @@ async def _plan_response(
         pipeline_version=plan.pipeline_version,
         parameters=plan.parameters_json,
         tools=plan.tools_json,
+        code_availability=plan.code_availability_json,
         differential_design=plan.differential_design_json,
         finding_claim=plan.finding_claim_json,
         reference_genome=plan.reference_genome,

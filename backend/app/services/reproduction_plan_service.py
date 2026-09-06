@@ -134,6 +134,7 @@ class ReproductionPlanService:
         extractor_model: str | None = None,
         extractor_provider: str | None = None,
         library_strategy: str | None = None,
+        code_availability: list | None = None,
     ) -> ReproductionPlan:
         """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
         plan = ReproductionPlan(
@@ -153,6 +154,9 @@ class ReproductionPlanService:
             extractor_model=extractor_model,
             extractor_provider=extractor_provider,
             library_strategy=_clamp(library_strategy, 100),
+            # [] when the extraction looked and the paper named no code; NULL only for a plan made
+            # before the column existed.
+            code_availability_json=code_availability if code_availability is not None else [],
         )
         session.add(plan)
         await session.flush()
@@ -177,6 +181,7 @@ class ReproductionPlanService:
                 # this nothing could answer "was the deposit read for this study, and what did it
                 # say". None means unread or ambiguous, which is a different state from absent.
                 "library_strategy": library_strategy,
+                "code_availability": code_availability if code_availability is not None else [],
             },
         )
         return plan

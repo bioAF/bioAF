@@ -54,8 +54,83 @@ _SCHEMA_HINT = (
     '"thresholds": {"log2fc": null, "padj": null}}, '
     '"claims": [{"metric_key": "aligns to a QC metric", "value": 0, "unit": "", "tolerance": null, "source_locator": "section/figure"}], '
     '"data_availability": "deposited | none | restricted", '
+    '"code_availability": [{"kind": "github|gitlab|zenodo|codeocean|supplementary|none", "url": "", '
+    '"identifier": "e.g. a DOI", "stated_in": "methods | data availability | code availability", '
+    '"language": "R|Python|shell|unknown", "confidence": 0.0}], '
     '"blockers": ["reasons the paper cannot be reproduced"]}'
 )
+
+
+_CODE_KINDS = ("github", "gitlab", "zenodo", "codeocean", "supplementary", "other")
+
+# Host -> kind. The URL is EVIDENCE and the model's `kind` is a claim about it, so where the two
+# disagree the URL wins. Same precedence the depositor's `Type` takes over a filename in step 1.
+_CODE_HOSTS = (
+    ("github.com", "github"),
+    ("gitlab.com", "gitlab"),
+    ("zenodo.org", "zenodo"),
+    ("codeocean.com", "codeocean"),
+)
+
+
+def parse_code_availability(raw) -> list[dict]:
+    """Normalize the extractor's `code_availability` block into stored rows.
+
+    Returns [] rather than None for anything unusable, because the COLUMN's null carries a different
+    meaning ("planned before this existed") than an empty list ("we looked and the paper named
+    none"), and only the caller can tell which of those it is.
+
+    A row with neither a URL nor an identifier is dropped: "code available on request" is not a
+    location. A non-http URL is dropped because the C1 gate renders these as links and a
+    `javascript:` or `file:` URL must never reach an href.
+    """
+    if not isinstance(raw, list):
+        return []
+
+    rows: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+
+        url = str(item.get("url") or "").strip() or None
+        if url and not url.lower().startswith(("http://", "https://")):
+            url = None
+        identifier = str(item.get("identifier") or "").strip() or None
+        if not url and not identifier:
+            continue
+
+        kind = str(item.get("kind") or "").strip().lower()
+        if url:
+            for host, host_kind in _CODE_HOSTS:
+                if host in url.lower():
+                    kind = host_kind
+                    break
+        # An unenumerated host is still a place the code is. Keeping the row and relabelling it
+        # `other` loses a vocabulary entry; dropping it would lose the location.
+        if kind not in _CODE_KINDS:
+            kind = "other"
+
+        confidence = item.get("confidence")
+        if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+            confidence = 0.0
+
+        key = (url or "", identifier or "")
+        if key in seen:
+            continue
+        seen.add(key)
+
+        rows.append(
+            {
+                "kind": kind,
+                "url": url,
+                "identifier": identifier,
+                "stated_in": str(item.get("stated_in") or "").strip() or None,
+                "language": str(item.get("language") or "").strip() or "unknown",
+                "confidence": max(0.0, min(1.0, float(confidence))),
+            }
+        )
+    return rows
 
 
 _SCALE_HINT = {"fraction": "fraction 0-1", "percent": "percent 0-100", "count": "count"}
@@ -791,6 +866,8 @@ class ValidationExtractionService:
             # Keep the paper's own tool list. It is what lets a divergence be attributed to a named
             # cause (CellRanger vs STARsolo) instead of merely reported.
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
+            # Where the authors said their own analysis code lives. Shown at the C1 gate, never run.
+            code_availability=parse_code_availability(parsed.get("code_availability")),
             reference_genome=reference_genome,
             # The controlled token collapses "GRCh38 / Gencode 29" and "GRCh38 / Ensembl 112" onto
             # one value, and the ANNOTATION is the half that decides which genes exist and what they

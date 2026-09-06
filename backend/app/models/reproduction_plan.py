@@ -57,6 +57,20 @@ class ReproductionPlan(Base):
     # NULL means "extracted before this was kept"; [] means "the paper named no tools".
     tools_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # Where the paper said its ANALYSIS CODE lives (plan_7 step 3). Shape:
+    # [{"kind": "github|gitlab|zenodo|codeocean|supplementary|other", "url", "identifier",
+    #   "stated_in", "language", "confidence"}].
+    #
+    # Stored and displayed, never executed: running a stranger's repository is a sandboxing problem
+    # this feature does not open. It earns its place twice over regardless. A scientist at the C1
+    # gate can see the authors' own code before authorising a reproduction, and attribution can name
+    # "the paper published its DESeq2 script and we used ours" as a difference rather than leaving a
+    # divergence unexplained, which is the job tools_json already does for the aligner.
+    #
+    # NULL means "extracted before this column existed"; [] means "we looked and the paper named
+    # none". Same distinction library_strategy draws.
+    code_availability_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+
     # What the accession this study was scoped to declares its data actually IS (the INSDC
     # `library_strategy`: Bisulfite-Seq, ChIP-Seq, ATAC-seq, ...). The deposit is not prose, so where
     # it disagrees with the paper's methods section it is the better evidence and it chooses the
