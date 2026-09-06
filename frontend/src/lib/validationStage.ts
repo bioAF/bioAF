@@ -44,6 +44,32 @@ export const VALIDATION_HAPPY_PATH: ReadonlyArray<{
 
 const TOTAL_STEPS = VALIDATION_HAPPY_PATH.length;
 
+// plan_7: the deposit route. A study that starts from the authors' pre-processed data skips
+// fetching raw reads, setting up an experiment, running a pipeline and extracting QC from it, so it
+// has its OWN, shorter path. Reporting its progress against the pipeline path's nine steps would
+// tell a scientist it has further to go than it does.
+export const VALIDATION_DEPOSIT_PATH: ReadonlyArray<{
+  state: string;
+  label: string;
+  description: string;
+  kind: ValidationStageKind;
+}> = [
+  { state: "requested", label: "Requested", description: "Validation requested; queued to read the paper.", kind: "in_progress" },
+  { state: "acquiring_text", label: "Fetching paper", description: "Retrieving the paper's full text.", kind: "in_progress" },
+  { state: "reading", label: "Reading paper", description: "Extracting the reproduction plan from the paper.", kind: "in_progress" },
+  { state: "plan_ready", label: "Plan ready", description: "The reproduction plan is ready for a scientist to approve.", kind: "awaiting_review" },
+  { state: "acquiring_processed", label: "Fetching deposited data", description: "Downloading the processed data the authors deposited.", kind: "in_progress" },
+  { state: "inspecting_deposit", label: "Checking deposited data", description: "Checking the deposited data is what the paper's design needs.", kind: "in_progress" },
+  { state: "comparing", label: "Awaiting review", description: "Computed metrics are ready to compare against the paper's claims.", kind: "awaiting_review" },
+];
+
+const DEPOSIT_TOTAL_STEPS = VALIDATION_DEPOSIT_PATH.length;
+
+// The states that exist ONLY on the deposit path. `comparing` and the earlier reading states are
+// shared, and a shared state must keep reporting against the pipeline path so an unrouted study
+// (every study that predates plan_7) renders exactly as it did before.
+const DEPOSIT_ONLY_STATES = new Set(["acquiring_processed", "inspecting_deposit"]);
+
 const OFF_PATH: Record<string, { label: string; description: string; kind: ValidationStageKind }> = {
   classified: {
     label: "Classified",
@@ -68,6 +94,19 @@ const OFF_PATH: Record<string, { label: string; description: string; kind: Valid
  * step. The page renders a validation badge for a classified study and this stage for everything else.
  */
 export function getValidationStage(state: string): ValidationStage {
+  if (DEPOSIT_ONLY_STATES.has(state)) {
+    const dIdx = VALIDATION_DEPOSIT_PATH.findIndex((s) => s.state === state);
+    const dStep = VALIDATION_DEPOSIT_PATH[dIdx];
+    return {
+      state,
+      label: dStep.label,
+      description: dStep.description,
+      kind: dStep.kind,
+      step: dIdx + 1,
+      totalSteps: DEPOSIT_TOTAL_STEPS,
+    };
+  }
+
   const idx = VALIDATION_HAPPY_PATH.findIndex((s) => s.state === state);
   if (idx >= 0) {
     const step = VALIDATION_HAPPY_PATH[idx];

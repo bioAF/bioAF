@@ -291,10 +291,21 @@ class ValidationStudyService:
         return study
 
     @staticmethod
-    async def approve_plan(session: AsyncSession, study_id: int, org_id: int, user_id: int) -> ValidationStudy:
-        """C1 gate: ratify the plan and advance plan_ready -> acquiring_data, stamping the approver."""
+    async def approve_plan(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, *, route: str = "pipeline"
+    ) -> ValidationStudy:
+        """C1 gate: ratify the plan and start the chosen route, stamping the approver.
+
+        ``pipeline`` (the default) advances to ``acquiring_data`` and re-runs the paper from its raw
+        reads, which is the historical behaviour. ``deposit`` advances to ``acquiring_processed`` and
+        starts from the pre-processed data the authors published.
+
+        The route is recorded on the study's evidence rather than on the plan, because it is a
+        property of THIS attempt: the same plan can be tried both ways.
+        """
         study = await ValidationStudyService._load(session, study_id, org_id)
-        if not can_transition(study.state, "acquiring_data"):
+        target = "acquiring_processed" if route == "deposit" else "acquiring_data"
+        if not can_transition(study.state, target):
             raise HTTPException(
                 400,
                 f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
@@ -316,10 +327,13 @@ class ValidationStudyService:
         study.approved_at = datetime.now(timezone.utc)
         # The person this study was waiting for has now decided.
         evidence = dict(study.evidence_json or {})
-        if evidence.pop("awaiting_refetch_approval", None) is not None:
-            study.evidence_json = evidence
+        evidence.pop("awaiting_refetch_approval", None)
+        # Recorded on BOTH routes, so a verdict can always say which kind of validation produced it
+        # instead of inferring it from an absence.
+        evidence["route"] = "deposit" if route == "deposit" else "pipeline"
+        study.evidence_json = evidence
         old_state = study.state
-        study.state = "acquiring_data"
+        study.state = target
         await session.flush()
         await log_action(
             session,

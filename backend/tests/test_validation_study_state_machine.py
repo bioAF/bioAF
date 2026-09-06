@@ -122,3 +122,80 @@ def test_classification_confidence_interim_mapping():
     assert classification_confidence(None) is None
     # Every real bucket must be mapped EXPLICITLY (no silent default-to-None on a new bucket).
     assert set(VALIDATION_STUDY_CLASSIFICATIONS) == set(_CLASSIFICATION_CONFIDENCE)
+
+
+# ---- plan_7 step 4: the deposit route ----
+
+
+def test_the_deposit_states_exist():
+    from app.models.validation_study import VALIDATION_STUDY_STATES
+
+    assert "acquiring_processed" in VALIDATION_STUDY_STATES
+    assert "inspecting_deposit" in VALIDATION_STUDY_STATES
+
+
+def test_an_approved_plan_can_go_down_either_route():
+    """The C1 gate is where the route is chosen, so `plan_ready` gains a second forward edge. The
+    pipeline edge is untouched: an approval that does not ask for the deposit behaves as it always
+    has."""
+    assert can_transition("plan_ready", "acquiring_data")
+    assert can_transition("plan_ready", "acquiring_processed")
+    assert can_transition("plan_ready", "plan_declined")
+    assert can_transition("plan_ready", "error")
+
+
+def test_the_deposit_route_reaches_reproducing_without_running_a_pipeline():
+    """The whole point of the route: no acquiring_data, no setup, no running, no extracting. The two
+    routes converge at `reproducing`, which already takes its input from evidence["level3"] and does
+    not care where those file ids came from."""
+    assert can_transition("acquiring_processed", "inspecting_deposit")
+    assert can_transition("inspecting_deposit", "reproducing")
+    assert not can_transition("acquiring_processed", "running")
+    assert not can_transition("inspecting_deposit", "running")
+
+
+def test_either_deposit_state_can_escalate_to_the_pipeline_route():
+    """A deposit that turns out unusable is not a verdict on the paper. It is a reason to spend the
+    compute after all, so both states can fall back to acquiring_data."""
+    assert can_transition("acquiring_processed", "acquiring_data")
+    assert can_transition("inspecting_deposit", "acquiring_data")
+
+
+def test_a_deposit_state_can_reach_an_early_exit_classification():
+    """A deposit that holds nothing reproducible AND a paper with no usable raw data is a verdict
+    (missing_data), reachable without compute."""
+    assert can_transition("acquiring_processed", "classified")
+    assert can_transition("inspecting_deposit", "classified")
+
+
+def test_the_deposit_states_are_not_terminal():
+    from app.models.validation_study import is_terminal
+
+    assert not is_terminal("acquiring_processed")
+    assert not is_terminal("inspecting_deposit")
+
+
+def test_a_failed_study_reaches_the_deposit_route_through_the_gate():
+    """plan_7 proposed a direct `error -> acquiring_processed` edge. It is deliberately absent.
+
+    The route is a decision the C1 gate owns, which is the premise of this whole step, and a direct
+    edge would put a study on the deposit route without a human choosing it. Going back to
+    `plan_ready` reaches the same place with the choice made where choices are made, so `error`
+    keeps exactly the two outbound edges it has always had."""
+    assert not can_transition("error", "acquiring_processed")
+    assert can_transition("error", "plan_ready")
+    assert can_transition("plan_ready", "acquiring_processed")
+
+
+def test_the_pipeline_route_is_unchanged():
+    """The regression guard for the whole of plan_7. If any of these move, the plan is wrong."""
+    assert can_transition("acquiring_data", "setup")
+    assert can_transition("acquiring_data", "samples_mismatch")
+    assert can_transition("setup", "running")
+    assert can_transition("running", "extracting")
+    assert can_transition("extracting", "reproducing")
+    assert can_transition("extracting", "comparing")
+    assert can_transition("reproducing", "comparing")
+    assert can_transition("comparing", "classified")
+    assert not can_transition("plan_ready", "setup")
+    assert not can_transition("plan_ready", "reproducing")

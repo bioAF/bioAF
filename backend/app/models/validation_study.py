@@ -27,6 +27,11 @@ VALIDATION_STUDY_STATES = [
     "reading",
     "plan_ready",
     "acquiring_data",
+    # plan_7: the deposit route. Starts from the pre-processed data the authors published rather
+    # than from raw reads, so it costs an HTTP download and a notebook instead of a fetchngs run and
+    # a full nf-core pipeline. Both routes converge at `reproducing`.
+    "acquiring_processed",
+    "inspecting_deposit",
     "samples_mismatch",  # held: a picked sample was not fetched; a human decides before any compute
     "setup",
     "running",
@@ -47,7 +52,16 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "requested": ["acquiring_text", "error"],
     "acquiring_text": ["reading", "error"],
     "reading": ["plan_ready", "classified", "error"],
-    "plan_ready": ["acquiring_data", "plan_declined", "error"],
+    # The C1 gate is where the route is chosen, so an approved plan has two forward edges that spend
+    # something: the pipeline route (raw reads, hours) and the deposit route (processed data,
+    # minutes). The pipeline edge is unchanged.
+    "plan_ready": ["acquiring_data", "acquiring_processed", "plan_declined", "error"],
+    # The deposit route. `acquiring_data` is the ESCALATION edge on both: a deposit that turns out
+    # unusable is not a verdict on the paper, it is a reason to spend the compute after all, and it
+    # is never automatic. `classified` is the genuine early exit (the deposit is a PDF, or the
+    # matrix holds none of the design's samples and the paper deposited no raw data either).
+    "acquiring_processed": ["inspecting_deposit", "acquiring_data", "classified", "error"],
+    "inspecting_deposit": ["reproducing", "acquiring_data", "classified", "error"],
     # samples_mismatch: a picked sample was not fetched, so the run is held before compute is spent; a
     # human either runs with the samples we have (-> setup) or stops (-> plan_declined).
     "acquiring_data": ["setup", "samples_mismatch", "classified", "error"],
@@ -67,6 +81,12 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # Retrying is a human act. A study whose data was already fetched resumes at `setup` and
     # relaunches the analysis against it; one with nothing fetched goes back to the C1 gate, so a
     # human approves the re-fetch rather than a button quietly starting a 122 GB download.
+    #
+    # plan_7 proposed a direct `error -> acquiring_processed` edge so a failed pipeline run could
+    # retry the cheap way. It is NOT added, for the reason step 4 exists at all: the route is a
+    # decision the C1 gate owns, and a direct edge would pick the deposit route without a human
+    # choosing it. `error -> plan_ready -> acquiring_processed` reaches the same place with the
+    # choice made where choices are made, and it needs no new edge.
     "error": ["setup", "plan_ready"],
 }
 

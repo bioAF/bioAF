@@ -603,3 +603,63 @@ async def test_a_plan_with_no_pipeline_makes_no_claim_about_installation(client,
     plan = r.json()["plan"]
     assert plan["pipeline_installed"] is None
     assert plan["pipeline_registry_name"] is None
+
+
+# ---- plan_7 step 4: the route is chosen at the C1 gate ----
+
+
+async def _study_at_plan_ready(client, admin_token, monkeypatch):
+    _patch_llm(monkeypatch, _GOOD)
+    sid = (
+        await client.post("/api/validation-studies", json={"source_accession": "GSE52778"}, headers=_auth(admin_token))
+    ).json()["id"]
+    await client.post(
+        f"/api/validation-studies/{sid}/read", json={"full_text": "the paper body"}, headers=_auth(admin_token)
+    )
+    return sid
+
+
+async def test_approving_without_a_route_takes_the_pipeline_route(client, admin_token, monkeypatch):
+    """The regression guard for the whole of plan_7. An approval that says nothing about the route
+    behaves exactly as it always has, so every existing caller and every existing study is
+    unaffected."""
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "acquiring_data"
+
+
+async def test_approving_with_the_deposit_route_starts_at_the_deposit(client, admin_token, monkeypatch):
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(
+        f"/api/validation-studies/{sid}/approve", json={"route": "deposit"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "acquiring_processed"
+
+
+async def test_the_chosen_route_is_recorded_on_the_study(client, admin_token, monkeypatch):
+    """The route is a property of THIS attempt rather than of the plan, so it lives in evidence
+    beside the deposit selection, not in a plan column."""
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    await client.post(f"/api/validation-studies/{sid}/approve", json={"route": "deposit"}, headers=_auth(admin_token))
+    r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
+    assert r.json()["evidence"]["route"] == "deposit"
+
+
+async def test_the_pipeline_route_is_recorded_too(client, admin_token, monkeypatch):
+    """Recorded on both routes, so a verdict can always say which kind of validation produced it
+    rather than inferring it from an absence."""
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    await client.post(f"/api/validation-studies/{sid}/approve", json={"route": "pipeline"}, headers=_auth(admin_token))
+    r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
+    assert r.json()["evidence"]["route"] == "pipeline"
+
+
+async def test_an_unknown_route_is_refused(client, admin_token, monkeypatch):
+    """A typo must not quietly fall through to the route that spends hours of compute."""
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(
+        f"/api/validation-studies/{sid}/approve", json={"route": "depsoit"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 422
