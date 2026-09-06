@@ -70,8 +70,9 @@ _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 # else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
 _ACTIVE_BACK_HALF_STATES = (
     "acquiring_data",
-    # plan_7: the deposit route's two states. `inspecting_deposit` is added by step 6.
+    # plan_7: the deposit route's two states.
     "acquiring_processed",
+    "inspecting_deposit",
     "setup",
     "running",
     "extracting",
@@ -320,6 +321,7 @@ class ValidationDriverService:
         handlers = {
             "acquiring_data": ValidationDriverService._handle_acquiring_data,
             "acquiring_processed": ValidationDriverService._handle_acquiring_processed,
+            "inspecting_deposit": ValidationDriverService._handle_inspecting_deposit,
             "setup": ValidationDriverService._handle_setup,
             "running": ValidationDriverService._handle_running,
             "extracting": ValidationDriverService._handle_extracting,
@@ -558,6 +560,67 @@ class ValidationDriverService:
         study.evidence_json = evidence
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "inspecting_deposit"
+        )
+        return True
+
+    @staticmethod
+    async def _handle_inspecting_deposit(
+        session: AsyncSession, study: ValidationStudy, *, storage_adapter=None
+    ) -> bool:
+        """plan_7 step 6: measure the deposited matrix before anything is run on it.
+
+        On the pipeline route MultiQC is what stands between a run and its verdict. A deposited
+        matrix arrives with no QC, so this is where "does the pre-processed data align with what we
+        expect" gets answered, in numbers, with no model involved.
+
+        The measured `value_type` OVERRULES the one the model claimed from the filename in step 2.
+        Both are kept: the claim stays on `deposit_selection` and the measurement lands on
+        `deposit_inspection`, so a disagreement is visible rather than silently resolved.
+        """
+        from app.services.deposit_inspection import inspect_matrix
+
+        evidence = dict(study.evidence_json or {})
+        deposit = evidence.get("deposit") or {}
+        matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]
+        if not matrices:
+            return ValidationDriverService._hold_deposit(
+                session, study, evidence, "no deposited matrix was acquired to inspect"
+            )
+
+        storage = storage_adapter or get_storage_adapter()
+        try:
+            text = await storage.read_text(matrices[0]["storage_uri"])
+        except Exception as exc:  # noqa: BLE001
+            return ValidationDriverService._hold_deposit(
+                session, study, evidence, f"the acquired deposit could not be read back: {exc}"
+            )
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        design = (plan.differential_design_json if plan else None) or {}
+        design_samples: list[str] = []
+        for contrast in design.get("contrasts") or []:
+            design_samples.extend(contrast.get("test_samples") or [])
+            design_samples.extend(contrast.get("reference_samples") or [])
+
+        inspection = inspect_matrix(
+            text,
+            claimed_value_type=(evidence.get("deposit_selection") or {}).get("value_type"),
+            design_samples=design_samples or None,
+        )
+        evidence["deposit_inspection"] = inspection
+
+        if not inspection["usable"]:
+            # The study-13 lesson, enforced BEFORE the notebook rather than after it. That run
+            # completed cleanly having written nothing, and the empty output was scored as a real
+            # comparison of zero against the paper's 5,607.
+            return ValidationDriverService._hold_deposit(
+                session, study, evidence, inspection["unusable_reason"] or "the deposited matrix is not usable"
+            )
+
+        evidence.pop("deposit_failed", None)
+        study.evidence_json = evidence
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "reproducing"
         )
         return True
 
