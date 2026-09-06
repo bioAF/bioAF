@@ -22,6 +22,7 @@ Everything the back half touches (launch_run, the fetchngs ingest/attach, QC ext
 machinery; this driver is the orchestration glue that sequences it and moves the study's state.
 """
 
+import hashlib
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -67,7 +68,16 @@ _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 # acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
 # driver runs the automatic classifier (E2/E3/E4) once; a clean `validated` auto-finalizes, everything
 # else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
-_ACTIVE_BACK_HALF_STATES = ("acquiring_data", "setup", "running", "extracting", "reproducing", "comparing")
+_ACTIVE_BACK_HALF_STATES = (
+    "acquiring_data",
+    # plan_7: the deposit route's two states. `inspecting_deposit` is added by step 6.
+    "acquiring_processed",
+    "setup",
+    "running",
+    "extracting",
+    "reproducing",
+    "comparing",
+)
 
 _FETCHNGS_KEY = "nf-core/fetchngs"
 # fetchngs's catalog default download_method is aspera, unproven on our GKE nodes; ftp is proven
@@ -111,6 +121,30 @@ def classify_acquisition_failure(failure_reason: str | None, error_message: str 
     if any(sig in text for sig in _PERMANENT_ACQUISITION_SIGNATURES):
         return "permanent"
     return "transient"
+
+
+async def _deposit_bytes_fetcher(url: str) -> bytes:
+    """Default byte fetcher for a deposited file. Bytes, not text: the format is decided from magic
+    bytes and a text decode would destroy a spreadsheet before it could be recognised."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=True) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.content
+
+
+async def _resolve_deposit_prefix(session: AsyncSession, study: ValidationStudy) -> str:
+    """Where a study's deposited files are stored.
+
+    Resolved the same way `_resolve_outdir` resolves a run's results prefix, and keyed by STUDY so
+    two studies of the same accession never overwrite each other.
+    """
+    results_bucket = await PlatformConfigService.get(session, "results_bucket_name")
+    path = f"validation-deposits/study-{study.id}"
+    if results_bucket:
+        return get_storage_adapter().build_uri(results_bucket, path)
+    return f"/data/results/{path}"
 
 
 def _now() -> datetime:
@@ -285,6 +319,7 @@ class ValidationDriverService:
     async def _advance_one(session: AsyncSession, study: ValidationStudy) -> bool:
         handlers = {
             "acquiring_data": ValidationDriverService._handle_acquiring_data,
+            "acquiring_processed": ValidationDriverService._handle_acquiring_processed,
             "setup": ValidationDriverService._handle_setup,
             "running": ValidationDriverService._handle_running,
             "extracting": ValidationDriverService._handle_extracting,
@@ -411,6 +446,134 @@ class ValidationDriverService:
             )
             return "mismatch", reason
         return "ok", None
+
+    @staticmethod
+    async def _handle_acquiring_processed(
+        session: AsyncSession, study: ValidationStudy, *, fetcher=None, storage_adapter=None
+    ) -> bool:
+        """plan_7 step 5: download the deposited files, decode them, and land them as Files.
+
+        No pipeline run, no Kubernetes, no notebook. This is an HTTP download, which is why the
+        deposit route takes minutes where `_handle_acquiring_data` takes hours (36.7 GB / ~5h15m on
+        study 22).
+
+        A study still gets an experiment, so a deposit-route study looks like every other one in the
+        UI and its files hang off the same place.
+        """
+        evidence = dict(study.evidence_json or {})
+
+        # The driver ticks repeatedly; re-downloading each time would hammer NCBI and duplicate the
+        # File rows.
+        if evidence.get("deposit"):
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "inspecting_deposit"
+            )
+            return True
+
+        selection = evidence.get("deposit_selection") or {}
+        wanted = list(selection.get("matrix_files") or [])
+        if not wanted:
+            # Assisted mode arrives here with nothing chosen yet. A wait, not a failure.
+            return False
+
+        from app.services.deposit_acquisition import (
+            DepositTooLargeError,
+            UnreadableDepositError,
+            decode_deposit,
+        )
+        from app.services.file_service import FileService
+        from app.services.literature.deposit_inventory_service import series_suppl_url
+
+        base = series_suppl_url(study.source_accession or "")
+        if not base:
+            return await ValidationDriverService._fail(session, study, "the deposit route needs a GEO series accession")
+
+        fetch = fetcher or _deposit_bytes_fetcher
+        storage = storage_adapter or get_storage_adapter()
+
+        metadata_name = selection.get("metadata_file")
+        targets = [(n, "deposited_matrix") for n in wanted]
+        if metadata_name:
+            targets.append((metadata_name, "deposited_metadata"))
+
+        if study.experiment_id is None:
+            label = study.source_doi or study.source_accession or f"study {study.id}"
+            experiment = await ExperimentService.create_experiment(
+                session,
+                study.organization_id,
+                study.requested_by_user_id,
+                ExperimentCreate(name=f"Reproduction: {label}"),
+            )
+            study.experiment_id = experiment.id
+
+        records: list[dict] = []
+        for filename, artifact_type in targets:
+            url = f"{base}{filename}"
+            try:
+                raw = await fetch(url)
+            except Exception as exc:  # noqa: BLE001
+                # A partial deposit is worse than none: step 8 would build a matrix missing an arm.
+                # Held on the route rather than failed, so the gate can escalate to raw reads.
+                return ValidationDriverService._hold_deposit(
+                    session, study, evidence, f"{filename} could not be downloaded from GEO ({exc})"
+                )
+            try:
+                text, fmt = decode_deposit(filename, raw)
+            except (UnreadableDepositError, DepositTooLargeError) as exc:
+                return ValidationDriverService._hold_deposit(session, study, evidence, str(exc))
+
+            # Stored DECODED, so step 8's notebook reads a table rather than re-deriving the format
+            # from magic bytes inside R.
+            uri = f"{await _resolve_deposit_prefix(session, study)}/{filename}"
+            await storage.write_text(uri, text, content_type="text/tab-separated-values")
+            f = await FileService.create_file_record(
+                session,
+                study.organization_id,
+                study.requested_by_user_id,
+                filename=filename,
+                storage_uri=uri,
+                size_bytes=len(raw),
+                md5_checksum=hashlib.md5(raw).hexdigest(),
+                file_type="table",
+                experiment_id=study.experiment_id,
+                source_type="external_deposit",
+                artifact_type=artifact_type,
+            )
+            records.append(
+                {
+                    "file_id": f.id,
+                    "filename": filename,
+                    "url": url,
+                    # GEO supplementary files can be revised in place, so the checksum of what WE
+                    # downloaded is the only thing that makes this verdict reproducible later.
+                    "md5": f.md5_checksum,
+                    "bytes": len(raw),
+                    "format": fmt,
+                    "artifact_type": artifact_type,
+                }
+            )
+
+        evidence.pop("deposit_failed", None)
+        evidence["deposit"] = {"files": records, "fetched_at": _now().isoformat()}
+        study.evidence_json = evidence
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "inspecting_deposit"
+        )
+        return True
+
+    @staticmethod
+    def _hold_deposit(session: AsyncSession, study: ValidationStudy, evidence: dict, reason: str) -> bool:
+        """Record why the deposit could not be taken and HOLD on the route.
+
+        Not `error`: a legacy .xls or a withdrawn supplementary file is a fact about the deposit, not
+        an infrastructure failure, and marking it `error` would put it in the bucket the driver is
+        forbidden to retry. The gate reads this and either fixes the selection or escalates to raw
+        reads, which is what the `acquiring_processed -> acquiring_data` edge is for.
+        """
+        evidence["deposit_failed"] = {"reason": reason, "at": _now().isoformat()}
+        study.evidence_json = evidence
+        logger.info("validation study %d: deposit held: %s", study.id, reason)
+        return False
 
     @staticmethod
     async def _handle_setup(session: AsyncSession, study: ValidationStudy) -> bool:
