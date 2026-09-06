@@ -49,6 +49,14 @@ PyGithub>=2.1.0
 pyyaml>=6.0
 # Phase 9: GEO Export
 openpyxl>=3.1
+# plan_7 (deposit route): reading a paper's DEPOSITED pre-processed table. GEO holds these as Excel
+# more often than as TSV, and in two different formats needing two different readers. openpyxl above
+# handles .xlsx; xlrd handles legacy BIFF .xls, which is what GSE213770's differential-methylation
+# table actually is (it gunzips to OLE2 magic, d0 cf 11 e0, rather than to text).
+#
+# xlrd 2.x deliberately dropped .xlsx and reads ONLY .xls, which is exactly the half openpyxl cannot
+# do, so the two are complements rather than alternatives.
+xlrd>=2.0
 # Phase 16: GCP Settings Configuration
 google-auth>=2.29
 # pyasn1 ships transitively under google-auth (and rsa). Floor pinned here
