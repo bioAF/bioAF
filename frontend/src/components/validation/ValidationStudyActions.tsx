@@ -39,6 +39,10 @@ export function ValidationStudyActions({
   const [error, setError] = useState<string | null>(null);
   const [fullText, setFullText] = useState("");
   const [declineReason, setDeclineReason] = useState("");
+  // plan_7 step 10. The route the approver chooses. `pipeline` is the historical behaviour and the
+  // default, and choosing it sends NO body, so the wire call for an unchanged gate is byte-identical
+  // to what it has always been.
+  const [route, setRoute] = useState<"pipeline" | "deposit">("pipeline");
   const [classification, setClassification] = useState(() =>
     suggestedClassification && VALIDATION_CLASSIFICATIONS.some((c) => c.value === suggestedClassification)
       ? suggestedClassification
@@ -124,6 +128,42 @@ export function ValidationStudyActions({
             Decline
           </button>
         </div>
+        <fieldset className="rounded border border-gray-200 p-3">
+          <legend className="px-1 text-xs font-medium text-gray-700">What to reproduce from</legend>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="radio"
+              name="validation-route"
+              className="mt-1"
+              checked={route === "pipeline"}
+              onChange={() => setRoute("pipeline")}
+            />
+            <span>
+              <span className="font-medium">Raw reads</span>
+              <span className="block text-xs text-gray-500">
+                Fetches the sequencing reads and re-runs the whole analysis. Takes hours and spends
+                cloud compute. Tests the entire processing chain.
+              </span>
+            </span>
+          </label>
+          <label className="mt-2 flex items-start gap-2 text-sm">
+            <input
+              type="radio"
+              name="validation-route"
+              className="mt-1"
+              checked={route === "deposit"}
+              onChange={() => setRoute("deposit")}
+            />
+            <span>
+              <span className="font-medium">Deposited data</span>
+              <span className="block text-xs text-gray-500">
+                Starts from the processed data the authors published. Takes minutes and spends no
+                pipeline compute, but tests the analysis, not the processing: it cannot detect a
+                processing error, a swapped sample or a contaminated library.
+              </span>
+            </span>
+          </label>
+        </fieldset>
         <p className="text-xs text-gray-500">
           Approving spends compute: it fetches the data and runs the reproduction pipeline.
         </p>
@@ -156,7 +196,10 @@ export function ValidationStudyActions({
           busy={busy}
           onConfirm={() => {
             setShowApprove(false);
-            run(() => api.post(`${base}/approve`, undefined));
+            // Only send a body when the route was actually changed: the endpoint already defaults
+            // to the pipeline route, so sending nothing IS choosing it, and the existing wire
+            // contract stays exactly as it was.
+            run(() => api.post(`${base}/approve`, route === "deposit" ? { route } : undefined));
           }}
           onCancel={() => setShowApprove(false)}
         />

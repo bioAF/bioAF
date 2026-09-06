@@ -956,6 +956,10 @@ class ValidationDriverService:
             # divergence with a known tool-pair cause is explained instead of merely reported.
             paper_tools=(plan.tools_json if plan else None),
             pipeline_key=(plan.pipeline_key if plan else None),
+            # plan_7 step 9: which KIND of validation this was. A deposit-route verdict tests the
+            # authors' statistics rather than their processing, and the verdict has to say so.
+            route=evidence.get("route"),
+            reproduction_method=(evidence.get("level3") or {}).get("method"),
         )
         evidence["classification_result"] = result
 

@@ -93,3 +93,47 @@ test("offers Approve again once the conflict has been answered", () => {
   );
   expect(screen.getByRole("button", { name: /approve plan/i })).toBeInTheDocument();
 });
+
+// ---- plan_7 step 10: the route is chosen at the C1 gate ----
+
+function renderActions(study: { id: number; state: string }) {
+  render(<ValidationStudyActions study={study} onChanged={jest.fn()} />);
+}
+
+describe("the route choice", () => {
+  it("offers both routes with their real cost stated", () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    expect(screen.getByLabelText(/deposited data/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/raw reads/i)).toBeInTheDocument();
+    // The cost is the whole basis of the choice: minutes against hours.
+    expect(screen.getByText(/minutes/i)).toBeInTheDocument();
+    expect(screen.getByText(/hours/i)).toBeInTheDocument();
+  });
+
+  it("sends the chosen route when approving", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await userEvent.click(screen.getByLabelText(/deposited data/i));
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan/i }));
+    await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", { route: "deposit" }),
+    );
+  });
+
+  it("leaves the wire call untouched when the default route is kept", async () => {
+    // The endpoint already defaults to the pipeline route, so sending nothing IS choosing it. The
+    // committed test pinning this call as `undefined` is a promise about existing behaviour and
+    // stands.
+    renderActions({ id: 7, state: "plan_ready" });
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan/i }));
+    await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", undefined),
+    );
+  });
+
+  it("tells the approver what the deposited route does not test", () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    expect(screen.getByText(/tests the analysis, not the processing/i)).toBeInTheDocument();
+  });
+});
