@@ -13,7 +13,6 @@ production seam.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 
@@ -31,15 +30,15 @@ from app.services.literature.accession_manifest_service import (
     AccessionManifestService,
     dominant_library_strategy,
 )
+from app.services.llm_decision import confidence_of, decide, fenced_json
 from app.services.llm_provider_clients import get_client
+from app.services.validation_issue_service import ValidationIssueService
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS, CONTROLLED_METRIC_SPECS
 
 logger = logging.getLogger("bioaf.validation_extraction")
-
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 
 # The extraction contract. Kept in the system prompt so every provider returns the same shape.
 _SCHEMA_HINT = (
@@ -445,14 +444,8 @@ def parse_extraction(response_text: str) -> dict:
         "blockers": [],
         "parse_failure": True,
     }
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return empty
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return empty
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return empty
 
     return {
@@ -524,11 +517,9 @@ def build_binding_prompt(claims: list[dict], *, previous: list[dict] | None = No
     return system, payload
 
 
-def _confidence(value) -> float:
-    """A confidence that is not a number in 0-1 is no confidence at all, so it reads as 0.0."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return 0.0
-    return max(0.0, min(1.0, float(value)))
+# The clamp lives in `llm_decision` now, with every other caller's copy of it. Kept as a local
+# name because this module's own tests and helpers read better with it.
+_confidence = confidence_of
 
 
 def parse_binding(response_text: str) -> list[dict]:
@@ -538,14 +529,8 @@ def parse_binding(response_text: str) -> list[dict]:
     persist as a binding and be compared against a metric that does not exist, which is the one
     failure this call is meant to remove.
     """
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return []
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return []
 
     rows = []
@@ -579,6 +564,10 @@ def parse_binding(response_text: str) -> list[dict]:
 
 BINDING_FAILURE_BLOCKER = "The model could not map any of this paper's claims to a measurable metric."
 
+# The step in the user's language, for the issues section of the report.
+CLAIM_BINDING_INTENT = "binding the paper's claims to measurable metrics"
+PAPER_READING_INTENT = "reading the paper and extracting its methods and claims"
+
 
 def binding_failure_blocker(decisions: list[dict]) -> str | None:
     """The plan blocker for a claim set that bound nothing, or None while anything bound.
@@ -601,7 +590,13 @@ def binding_failure_blocker(decisions: list[dict]) -> str | None:
 
 
 async def bind_claims(
-    claims: list[dict], *, client, model: str, api_key: str | None, previous: list[dict] | None = None
+    claims: list[dict],
+    *,
+    client,
+    model: str,
+    api_key: str | None,
+    previous: list[dict] | None = None,
+    on_issue=None,
 ) -> list[dict]:
     """Ask the model which controlled metric each claim measures. One row per claim, in claim order.
 
@@ -615,9 +610,27 @@ async def bind_claims(
         return []
 
     system, payload = build_binding_prompt(claims, previous=previous)
-    output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
+    # `allowed` is the controlled vocabulary. An invented key would persist as a binding and be
+    # compared against a metric that does not exist, which is the one failure this call removes.
+    decision = await decide(
+        intent=CLAIM_BINDING_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        allowed=CONTROLLED_METRIC_KEYS,
+    )
+    if not decision.ok:
+        # Degraded, not blocked: the claims are still the paper's claims and the alias table still
+        # resolves what it always did. What changes is that the fall-back is now on the record
+        # instead of only in a log line.
+        if on_issue:
+            on_issue(decision.as_issue(impact="degraded"))
+        return []
+
     by_index = {}
-    for row in parse_binding(output):
+    for row in parse_binding(decision.text):
         idx = row.get("claim_index")
         if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(claims):
             by_index.setdefault(idx, row)
@@ -654,7 +667,9 @@ async def _scoped_sample_titles(study) -> list[str]:
     return [str(s.get("title") or "").strip() for s in manifest.samples if (s.get("title") or "").strip()]
 
 
-async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, cfg, client) -> dict | None:
+async def _select_contrast_for(
+    session, study, contrasts, pipeline_key, assay, cfg, client, *, on_issue=None
+) -> dict | None:
     """Ask which contrast this run reproduces, in autonomous mode; propose nothing in assisted.
 
     In `assisted` the gate shows every contrast for a person to pick, which is the same question
@@ -662,7 +677,13 @@ async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, c
     """
     if len(contrasts) == 1:
         return await select_contrast(
-            contrasts, pipeline_key=pipeline_key, assay=assay, client=client, model=cfg.model, api_key=cfg.api_key
+            contrasts,
+            pipeline_key=pipeline_key,
+            assay=assay,
+            client=client,
+            model=cfg.model,
+            api_key=cfg.api_key,
+            on_issue=on_issue,
         )
 
     org = await session.get(Organization, study.organization_id)
@@ -677,6 +698,7 @@ async def _select_contrast_for(session, study, contrasts, pipeline_key, assay, c
         api_key=cfg.api_key,
         accession=(study.source_accession or "").strip() or None,
         sample_titles=await _scoped_sample_titles(study),
+        on_issue=on_issue,
     )
 
 
@@ -704,8 +726,22 @@ class ValidationExtractionService:
 
         system, payload = build_extraction_prompt(full_text)
         client = get_client(cfg.provider)
-        output = await client.submit(prompt=system, payload=payload, model=cfg.model, api_key=cfg.api_key)
-        parsed = parse_extraction(output)
+        # Every step that asks a model something appends here when it could not get an answer. The
+        # list is study-scoped rather than plan-scoped because a refusal can happen before a plan
+        # exists, and it reaches the report through `ValidationStudy.evidence_json` (step 14c).
+        issues: list[dict] = []
+        reading = await decide(
+            intent=PAPER_READING_INTENT,
+            system=system,
+            payload=payload,
+            client=client,
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
+        if not reading.ok:
+            # `blocked`: with no extraction there is no plan, so this one really did produce nothing.
+            issues.append(reading.as_issue(impact="blocked"))
+        parsed = parse_extraction(reading.text)
 
         method = parsed["method"]
         library_strategy = await scoped_library_strategy(study)
@@ -812,17 +848,26 @@ class ValidationExtractionService:
         # answer with its reason. This is an improvement on the alias table, not a dependency of the
         # extraction: a provider failure here must not cost the plan, because the claims are still the
         # paper's claims and the alias table still resolves what it always did.
-        try:
-            decisions = await bind_claims(claims_to_bind, client=client, model=cfg.model, api_key=cfg.api_key)
-            # plan_6 step 4: a whole paper that bound nothing gets one more look, before the C1 gate
-            # and before any compute. Bounded at one retry, because a second failure is an answer.
-            if binding_failure_blocker(decisions) is not None:
-                decisions = await bind_claims(
-                    claims_to_bind, client=client, model=cfg.model, api_key=cfg.api_key, previous=decisions
-                )
-        except Exception as exc:  # noqa: BLE001 - any provider failure degrades to the alias table
-            logger.warning("claim binding failed for study %s, falling back to the alias table: %s", study.id, exc)
-            decisions = []
+        # The blanket `except Exception` that used to wrap this is gone (plan_7 step 14a). A provider
+        # failure no longer escapes `bind_claims`: it comes back as an empty decision list AND as a
+        # row on `issues`, so the degrade to the alias table is on the record rather than in a log
+        # line nobody reads. Same behaviour, now visible.
+        decisions = await bind_claims(
+            claims_to_bind, client=client, model=cfg.model, api_key=cfg.api_key, on_issue=issues.append
+        )
+        # plan_6 step 4: a whole paper that bound nothing gets one more look, before the C1 gate
+        # and before any compute. Bounded at one retry, because a second failure is an answer. The
+        # re-ask stays HERE rather than in the helper: the trigger is domain logic, and only this
+        # layer knows whether the second attempt succeeded and therefore whether an issue happened.
+        if binding_failure_blocker(decisions) is not None:
+            decisions = await bind_claims(
+                claims_to_bind,
+                client=client,
+                model=cfg.model,
+                api_key=cfg.api_key,
+                previous=decisions,
+                on_issue=issues.append,
+            )
 
         for target, decision in zip(targets, decisions):
             target.update(
@@ -843,7 +888,14 @@ class ValidationExtractionService:
         design = _differential_design_or_none(parsed["differential_design"])
         if design and design.get("contrasts"):
             selection = await _select_contrast_for(
-                session, study, design["contrasts"], mapping.pipeline_key, method.get("assay"), cfg, client
+                session,
+                study,
+                design["contrasts"],
+                mapping.pipeline_key,
+                method.get("assay"),
+                cfg,
+                client,
+                on_issue=issues.append,
             )
             if selection is not None:
                 design["selected_contrast"] = selection
@@ -886,4 +938,8 @@ class ValidationExtractionService:
         )
 
         await ReproductionPlanService.add_comparison_targets(session, plan, targets)
+        # Everything that could not get an answer from a model while reading this paper, on the
+        # record. Study-scoped rather than plan-scoped: the extraction refusal above happens before
+        # a plan exists, so it has nothing plan-shaped to hang off.
+        await ValidationIssueService.record(session, study, issues)
         return plan

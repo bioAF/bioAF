@@ -48,7 +48,7 @@ def _fake_client(response):
 def _fake_bind(*rows):
     """Stand in for the binding call with a fixed set of decisions, one per claim index."""
 
-    async def _bind(claims, *, client, model, api_key):
+    async def _bind(claims, *, client, model, api_key, on_issue=None):
         by_index = {r["claim_index"]: r for r in rows}
         return [
             by_index.get(i, {"claim_index": i, "bound_key": None, "reason": "no decision", "confidence": 0.0})
@@ -1054,15 +1054,30 @@ async def test_a_target_records_who_bound_it_and_why(session, admin_user, monkey
 @pytest.mark.asyncio
 async def test_a_binding_call_that_fails_leaves_the_alias_table_in_charge(session, admin_user, monkeypatch):
     """The binding call is an improvement on the alias table, not a dependency of the extraction. A
-    provider error there must not lose the plan: the claims are still the paper's claims."""
+    provider error there must not lose the plan: the claims are still the paper's claims.
+
+    The failure is now simulated at the PROVIDER, which is where it comes from. It used to be
+    simulated by making `bind_claims` itself raise, which plan_7 step 14a made impossible: a provider
+    failure comes back as an empty decision list and an issue row rather than as an exception, and
+    the blanket `except Exception` that used to catch it here is gone. Every assertion below is
+    unchanged.
+    """
+    from app.services.llm_provider_clients import ProviderError
+
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.flush()
-    _patch_llm(monkeypatch, _GOOD)
 
-    async def _boom(*args, **kwargs):
-        raise RuntimeError("provider exploded")
+    class _FlakyClient:
+        async def submit(self, prompt, payload, model, api_key, attachments=None):
+            if prompt.startswith("You are binding a paper's quantitative claims"):
+                raise ProviderError("provider exploded", error_class="server")
+            return _GOOD
 
-    monkeypatch.setattr(ext, "bind_claims", _boom)
+    async def _cfg(sess, org_id):
+        return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
+
+    monkeypatch.setattr(ext.llm_provider_config_service, "get_active", _cfg)
+    monkeypatch.setattr(ext, "get_client", lambda p: _FlakyClient())
 
     plan = await ValidationExtractionService.extract(
         session, study, "FULL TEXT", admin_user.organization_id, admin_user.id
@@ -1147,7 +1162,7 @@ def _counting_bind(*passes):
     """Drive bind_claims with a scripted answer per attempt, and count the attempts."""
     calls = []
 
-    async def _bind(claims, *, client, model, api_key, previous=None):
+    async def _bind(claims, *, client, model, api_key, previous=None, on_issue=None):
         calls.append(previous)
         rows = passes[min(len(calls) - 1, len(passes) - 1)]
         by_index = {r["claim_index"]: r for r in rows}
