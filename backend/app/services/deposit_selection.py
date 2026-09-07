@@ -40,6 +40,18 @@ VALUE_TYPES = ("counts", "tpm", "fpkm", "cpm", "normalized_other", "log_transfor
 # recompute from (using it as the input would be scoring the paper against itself).
 _SELECTABLE = ("matrix_counts", "matrix_normalized", "peaks", "barcodes", "features")
 
+# Deposited, and deliberately NOT selectable. `matrix_unfiltered` is CellRanger's raw matrix: every
+# barcode the sequencer saw, overwhelmingly empty droplets. Pseudobulking it sums the ambient soup
+# along with the cells, and the scrnaseq Level-3 wiring already refuses it on the pipeline route.
+# Letting the deposit route accept it would be the cheap route doing what the expensive one forbids.
+_UNUSABLE_REASONS = {
+    "matrix_unfiltered": (
+        "the deposited matrices are CellRanger's raw (pre-cell-calling) output, which is every "
+        "barcode the sequencer saw rather than the called cells. Summing it would pseudobulk the "
+        "ambient droplets along with the cells, so it cannot stand in for a cell-called matrix"
+    ),
+}
+
 
 def _size_hint(n: int | None) -> str:
     if n is None:
@@ -53,6 +65,30 @@ def _size_hint(n: int | None) -> str:
 def selectable(inventory: list[DepositEntry]) -> list[DepositEntry]:
     """The entries that could be a reproduction input, in inventory order."""
     return [e for e in inventory or [] if e.classification in _SELECTABLE]
+
+
+def deposit_blocker(inventory: list[DepositEntry]) -> str | None:
+    """Why a deposit that DOES hold files still has nothing to reproduce from, or None.
+
+    "Nothing selectable" on its own reads as "this study deposited nothing", which on GSE312719
+    would be the opposite of true: it deposits nine matrices, and every one of them is the wrong
+    kind. A scientist told only that there is nothing would go looking for files that are right
+    there. The reason names what IS deposited and why it cannot serve.
+
+    None for an empty deposit: nothing deposited is a different situation from the wrong thing
+    deposited, and explaining an absence with a reason about files that do not exist helps nobody.
+    """
+    if not inventory or selectable(inventory):
+        return None
+    counts: dict[str, int] = {}
+    for e in inventory:
+        if e.classification in _UNUSABLE_REASONS:
+            counts[e.classification] = counts.get(e.classification, 0) + 1
+    for classification, reason in _UNUSABLE_REASONS.items():
+        n = counts.get(classification)
+        if n:
+            return f"This study deposited {n} file(s), but {reason}."
+    return None
 
 
 def build_selection_prompt(
@@ -88,6 +124,8 @@ def build_selection_prompt(
         "the best single sample, and do not decline because there is no combined matrix.\n"
         "- Never choose a raw archive (a .tar of reads) or a coverage track (bigwig/bedgraph): "
         "neither carries per-feature values that a differential test can read.\n"
+        "- Never choose a pre-cell-calling single-cell matrix (CellRanger's raw_feature_bc_matrix). "
+        "Only a cell-called matrix (filtered/cellbender) can be summed to a per-sample profile.\n"
         "- Never choose the paper's own differential result table as the matrix. That is the answer "
         "being checked, not the input to recompute from.\n"
         '- If nothing in the deposit can serve, set "declined": true and say why in one sentence. '

@@ -350,3 +350,56 @@ def test_a_differential_methylation_table_is_a_result_table():
     assert classify_deposit_filename("GSE213770_DMR_DMB_TET2Neu.xls.gz") == "da_table"
     assert classify_deposit_filename("GSE1_dmp_results.csv") == "da_table"
     assert classify_deposit_filename("GSE1_summary.csv") == "other"
+
+
+# ---- defect 8: a 10x matrix is a matrix, whatever words are in its name ----
+
+
+def test_a_cellranger_h5_is_a_matrix_not_a_triplet_part():
+    """`GSM..._filtered_feature_bc_matrix.h5` carries BOTH "feature" and "matrix" in its name, and
+    the feature token was checked first, so the most common scRNA-seq deposit shape classified as a
+    triplet part rather than as the matrix it is.
+
+    Shape beats vocabulary: an .h5/.mtx/.mat IS a matrix regardless of what it is called, while a
+    triplet's features list is always a .tsv.
+    """
+    assert classify_deposit_filename("GSM1_filtered_feature_bc_matrix.h5") == "matrix_counts"
+    assert classify_deposit_filename("GSM1_matrix.mtx.gz") == "matrix_counts"
+    assert classify_deposit_filename("GSM2560245_A.mat.gz") == "matrix_counts"
+    assert classify_deposit_filename("GSM1_something.h5ad") == "matrix_counts"
+
+
+def test_the_triplet_parts_still_classify_as_triplet_parts():
+    """The regression guard for the fix: a features/barcodes TSV must not be swept into matrices."""
+    assert classify_deposit_filename("GSM123_features.tsv.gz") == "features"
+    assert classify_deposit_filename("GSM123_genes.tsv.gz") == "features"
+    assert classify_deposit_filename("GSM123_barcodes.tsv.gz") == "barcodes"
+    assert classify_deposit_filename("GSE96583_batch1.genes.tsv.gz") == "features"
+
+
+def test_a_pre_cell_calling_matrix_is_its_own_thing():
+    """CellRanger's `raw_feature_bc_matrix` is every barcode the sequencer saw, overwhelmingly empty
+    droplets. It is NOT a usable count matrix: pseudobulking it sums the ambient soup along with the
+    cells, which is why the scrnaseq Level-3 wiring already refuses it.
+
+    Given its own bucket rather than being called `matrix_counts`, so the deposit route can refuse it
+    by name instead of running it and being confidently wrong.
+    """
+    assert classify_deposit_filename("GSM9351970_Sample_01_raw_feature_bc_matrix.h5") == "matrix_unfiltered"
+    # Older CellRanger spelled it `gene` rather than `feature`.
+    assert classify_deposit_filename("GSM1_raw_gene_bc_matrix.h5") == "matrix_unfiltered"
+
+
+def test_a_cell_called_matrix_is_not_confused_with_an_uncalled_one():
+    assert classify_deposit_filename("GSM1_filtered_feature_bc_matrix.h5") == "matrix_counts"
+    assert classify_deposit_filename("GSM1_cellbender_filter_matrix.h5") == "matrix_counts"
+
+
+def test_a_normalized_matrix_keeps_its_shape_and_its_normalization():
+    """Shape says "matrix"; the name still decides counts vs normalized."""
+    assert classify_deposit_filename("GSM1_tpm_matrix.h5") == "matrix_normalized"
+    assert classify_deposit_filename("GSE1_TPMs.xlsx") == "matrix_normalized"
+
+
+def test_the_depositors_type_still_outranks_the_shape():
+    assert classify_deposit_filename("GSM1_feature_bc_matrix.h5", deposited_type="BIGWIG") == "coverage"
