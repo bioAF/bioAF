@@ -430,3 +430,30 @@ async def test_a_study_with_no_selection_holds_for_the_gate(session, admin_user)
         session, study, fetcher=_bytes_fetcher({}), storage_adapter=_FakeStorage()
     )
     assert study.state == "acquiring_processed"
+
+
+@pytest.mark.asyncio
+async def test_a_deposit_of_only_unfiltered_matrices_holds_with_the_reason(session, admin_user):
+    """GSE312719's shape. The study holds with a reason naming what IS deposited and why it cannot
+    serve, so the gate can escalate to raw reads instead of a scientist wondering where the nine
+    matrices went."""
+    study = ValidationStudy(
+        organization_id=admin_user.organization_id,
+        requested_by_user_id=admin_user.id,
+        source_accession="GSE312719",
+        state="acquiring_processed",
+        evidence_json={
+            "route": "deposit",
+            "deposit_unusable": (
+                "This study deposited 9 file(s), but the deposited matrices are CellRanger's raw "
+                "(pre-cell-calling) output"
+            ),
+        },
+    )
+    session.add(study)
+    await session.flush()
+    await ValidationDriverService._handle_acquiring_processed(
+        session, study, fetcher=_bytes_fetcher({}), storage_adapter=_FakeStorage()
+    )
+    assert study.state == "acquiring_processed"
+    assert "cell-calling" in study.evidence_json["deposit_failed"]["reason"]

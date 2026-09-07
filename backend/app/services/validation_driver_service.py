@@ -472,9 +472,16 @@ class ValidationDriverService:
             )
             return True
 
+        # A deposit that holds files but none that can serve is a FINDING, not a wait. Recorded by
+        # step 2 (`deposit_blocker`) and surfaced here so the gate can escalate to raw reads, rather
+        # than a scientist being told nothing while nine matrices sit in GEO.
+        blocker = evidence.get("deposit_unusable")
+
         selection = evidence.get("deposit_selection") or {}
         wanted = list(selection.get("matrix_files") or [])
         if not wanted:
+            if blocker:
+                return ValidationDriverService._hold_deposit(session, study, evidence, blocker)
             # Assisted mode arrives here with nothing chosen yet. A wait, not a failure.
             return False
 

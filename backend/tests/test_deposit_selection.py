@@ -14,8 +14,10 @@ import pytest
 
 from app.services.deposit_selection import (
     build_selection_prompt,
+    deposit_blocker,
     parse_selection,
     select_deposit,
+    selectable,
 )
 from app.services.literature.deposit_inventory_service import DepositEntry
 
@@ -298,3 +300,63 @@ def test_the_prompt_says_a_per_sample_pick_takes_the_whole_set():
     of twelve equivalent files to name."""
     system, _ = build_selection_prompt(_PER_SAMPLE, pipeline_key="nf-core/atacseq", kind="interval")
     assert "per-sample" in system.lower()
+
+
+# ---- defect 8: a pre-cell-calling matrix is never a reproduction input ----
+
+
+def test_an_unfiltered_matrix_is_not_selectable():
+    """CellRanger's raw matrix is every barcode the sequencer saw. Pseudobulking it sums the ambient
+    soup along with the cells, which is why the scrnaseq Level-3 wiring already refuses it. Offering
+    it here would let the deposit route do exactly what the pipeline route forbids."""
+    inv = [_entry("GSM1_raw_feature_bc_matrix.h5", "matrix_unfiltered", 88244818, gsm="GSM1", level="sample")]
+    assert selectable(inv) == []
+
+
+def test_a_cell_called_matrix_is_selectable():
+    inv = [_entry("GSM1_filtered_feature_bc_matrix.h5", "matrix_counts", 1000, gsm="GSM1", level="sample")]
+    assert len(selectable(inv)) == 1
+
+
+def test_the_model_can_never_pick_an_unfiltered_matrix():
+    """Defence in depth: even if the prompt is ignored, the parse refuses it."""
+    inv = [_entry("GSM1_raw_feature_bc_matrix.h5", "matrix_unfiltered", 1000, gsm="GSM1", level="sample")]
+    out = parse_selection(
+        _fenced('{"primary_matrix": "GSM1_raw_feature_bc_matrix.h5", "value_type": "counts"}'), inventory=inv
+    )
+    assert out["primary_matrix"] is None
+
+
+def test_a_deposit_of_only_unfiltered_matrices_says_why_it_cannot_be_used():
+    """GSE312719 is exactly this: nine raw_feature_bc_matrix.h5 and no cell-called matrix anywhere.
+
+    "Nothing selectable" alone would read as "this study deposited nothing", which is the opposite of
+    true and would send a scientist looking for files that are right there. The reason has to name
+    what IS deposited and why it cannot serve.
+    """
+    inv = [
+        _entry(f"GSM{i}_raw_feature_bc_matrix.h5", "matrix_unfiltered", 80_000_000, gsm=f"GSM{i}", level="sample")
+        for i in range(1, 10)
+    ]
+    reason = deposit_blocker(inv)
+    assert reason
+    assert "cell" in reason.lower()
+    assert "9" in reason
+
+
+def test_a_usable_deposit_has_no_blocker():
+    assert deposit_blocker(_INVENTORY) is None
+
+
+def test_an_empty_deposit_has_no_special_blocker():
+    """Nothing deposited is a different situation from "deposited the wrong thing", and conflating
+    them would explain an absence with a reason about files that do not exist."""
+    from app.services.deposit_selection import deposit_blocker
+
+    assert deposit_blocker([]) is None
+
+
+def test_the_prompt_warns_the_model_off_pre_cell_calling_matrices():
+    inv = [_entry("GSM1_raw_feature_bc_matrix.h5", "matrix_unfiltered", 1000, gsm="GSM1", level="sample")]
+    system, _ = build_selection_prompt(inv, pipeline_key="nf-core/scrnaseq", kind="gene")
+    assert "cell-called" in system or "cell calling" in system

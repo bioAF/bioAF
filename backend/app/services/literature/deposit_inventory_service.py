@@ -113,7 +113,22 @@ _DA_TOKENS = (
     "dmp_",
 )
 _DE_TOKENS = ("deg", "_de_", "_de.", "diffexp", "differential_expression", "deseq", "edger", "dge", "limma")
-# Triplet parts before matrices: `GSM1_matrix.mtx.gz` is a triplet member and also carries "matrix".
+# File SHAPES that are a matrix whatever the filename calls them. This is checked BEFORE the token
+# lists because a real deposit's words collide: `GSM..._filtered_feature_bc_matrix.h5` carries both
+# "feature" and "matrix", and with tokens alone the feature list claimed it, so the most common
+# scRNA-seq deposit shape classified as a triplet part rather than as the matrix it is.
+#
+# A triplet's features/barcodes list is always a .tsv, so nothing is lost by letting shape win.
+_MATRIX_SUFFIXES = (".h5", ".h5ad", ".mtx", ".mat")
+
+# CellRanger emits `raw_feature_bc_matrix` (every barcode the sequencer saw) beside
+# `filtered_feature_bc_matrix` (the cell-called one). The raw one is overwhelmingly empty droplets
+# and is NOT a usable count matrix: pseudobulking it sums the ambient soup along with the cells,
+# which is why the scrnaseq Level-3 wiring already refuses it. It gets its own bucket so the deposit
+# route can refuse it BY NAME rather than run it and be confidently wrong. Older CellRanger spelled
+# it `gene` rather than `feature`.
+_UNFILTERED_MARKERS = ("raw_feature_bc_matrix", "raw_gene_bc_matrix")
+
 _BARCODE_TOKENS = ("barcode",)
 _FEATURE_TOKENS = ("feature", "genes.tsv")
 _MTX_TOKENS = (".mtx",)
@@ -165,6 +180,20 @@ def classify_deposit_filename(name: str, deposited_type: str | None = None) -> s
         return "da_table"
     if any(t in n for t in _DE_TOKENS):
         return "de_table"
+
+    # Shape before vocabulary, for the reason given at _MATRIX_SUFFIXES. Result tables stay ahead of
+    # it: a `deseq2_results.h5` is the paper's ANSWER, not an input to recompute from. The name still decides
+    # counts vs normalized vs pre-cell-calling; it just no longer decides whether it is a matrix.
+    stem = n[:-3] if n.endswith(".gz") else n
+    if stem.endswith(_MATRIX_SUFFIXES):
+        if any(m in n for m in _UNFILTERED_MARKERS):
+            return "matrix_unfiltered"
+        if any(t in n for t in _NORMALIZED_TOKENS):
+            return "matrix_normalized"
+        return "matrix_counts"
+    if any(m in n for m in _UNFILTERED_MARKERS):
+        return "matrix_unfiltered"
+
     if any(t in n for t in _BARCODE_TOKENS):
         return "barcodes"
     if any(t in n for t in _FEATURE_TOKENS):
