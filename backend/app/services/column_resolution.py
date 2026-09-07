@@ -17,13 +17,14 @@ the rest. One line of text per call.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
+
+from app.services.llm_decision import confidence_of, decide, fenced_json
 
 logger = logging.getLogger("bioaf.column_resolution")
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
+# The step in the user's language, for the issues section of the report.
+COLUMN_RESOLUTION_INTENT = "reading the columns of the paper's result table"
 
 # What each table kind needs before it can be normalized. `pval` is a fallback for `padj`, so it is
 # offered but never required.
@@ -82,14 +83,8 @@ def parse_column_resolution(response_text: str, *, header: list[str]) -> dict:
     failure this whole path exists to remove.
     """
     empty = {"columns": {}, "reason": "", "confidence": 0.0}
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return empty
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return empty
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return empty
 
     reason = str(data.get("reason") or "").strip()
@@ -105,13 +100,12 @@ def parse_column_resolution(response_text: str, *, header: list[str]) -> dict:
     if invented:
         reason = f"{reason} (ignored {', '.join(invented)}: not in the header)".strip()
 
-    confidence = data.get("confidence")
-    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        confidence = 0.0
-    return {"columns": columns, "reason": reason, "confidence": max(0.0, min(1.0, float(confidence)))}
+    return {"columns": columns, "reason": reason, "confidence": confidence_of(data.get("confidence"))}
 
 
-async def resolve_columns(header: list[str], *, kind: str, client, model: str, api_key: str | None) -> dict | None:
+async def resolve_columns(
+    header: list[str], *, kind: str, client, model: str, api_key: str | None, on_issue=None
+) -> dict | None:
     """Which column plays which role, or None when there is nothing to ask or the ask failed.
 
     Best-effort by design: a provider outage leaves the table exactly as unparsed as it already was,
@@ -120,13 +114,26 @@ async def resolve_columns(header: list[str], *, kind: str, client, model: str, a
     if not header:
         return None
     system, payload = build_column_prompt(header, kind=kind)
-    try:
-        output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
-    except Exception as exc:  # noqa: BLE001 - asking for help must not be able to fail a study
-        logger.warning("column resolution failed for a %s table: %s", kind, exc)
+    # `allowed` is the header, because the closed set here is the VALUES: a column name the table
+    # does not have would be read as a role assignment and parse the wrong column. The role KEYS are
+    # this module's own closed set and it checks them itself, three lines below.
+    decision = await decide(
+        intent=COLUMN_RESOLUTION_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        allowed=header,
+    )
+    if not decision.ok:
+        # The table stays exactly as unparsed as it already was, and the gate still reports the
+        # header for a person to resolve.
+        if on_issue:
+            on_issue(decision.as_issue(impact="degraded"))
         return None
 
-    resolved = parse_column_resolution(output, header=header)
+    resolved = parse_column_resolution(decision.text, header=header)
     if not resolved["columns"]:
         return None
     return {**resolved, "model": model}

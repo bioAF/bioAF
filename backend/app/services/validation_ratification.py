@@ -19,14 +19,15 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 from app.models.validation_study import VALIDATION_STUDY_CLASSIFICATIONS
+from app.services.llm_decision import decide, fenced_json
 from app.services.validation_autonomy import AUTONOMY_AUTONOMOUS
 
 logger = logging.getLogger("bioaf.validation_ratification")
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
+# The step in the user's language, for the issues section of the report.
+RATIFICATION_INTENT = "ratifying the measured verdict"
 
 
 def build_ratification_prompt(result: dict) -> tuple[str, str]:
@@ -72,14 +73,8 @@ def parse_ratification(response_text: str, *, suggested: str) -> dict:
         "reasoning": "the model did not return a usable ratification, so the measured verdict stands",
         "evidence_reweighed": [],
     }
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return fallback
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return fallback
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return fallback
 
     reasoning = str(data.get("reasoning") or "").strip()
@@ -104,7 +99,7 @@ def parse_ratification(response_text: str, *, suggested: str) -> dict:
     return {"action": "override", "verdict": verdict, "reasoning": reasoning, "evidence_reweighed": evidence}
 
 
-async def ratify(result: dict, *, autonomy: str, client, model: str, api_key: str | None) -> dict | None:
+async def ratify(result: dict, *, autonomy: str, client, model: str, api_key: str | None, on_issue=None) -> dict | None:
     """The model's ratification of a measured verdict, or None when there is not one to apply.
 
     None means "change nothing": either the org is in assisted mode, or the call failed. A provider
@@ -116,13 +111,24 @@ async def ratify(result: dict, *, autonomy: str, client, model: str, api_key: st
 
     suggested = result.get("classification")
     system, payload = build_ratification_prompt(result)
-    try:
-        output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
-    except Exception as exc:  # noqa: BLE001 - an outage holds the study, it does not decide it
-        logger.warning("ratification call failed, holding the study for a person: %s", exc)
+    answer = await decide(
+        intent=RATIFICATION_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        allowed=VALIDATION_STUDY_CLASSIFICATIONS,
+    )
+    if not answer.ok:
+        # `blocked`: the study does not finalise. It holds at `comparing` for a person, exactly where
+        # the assisted policy holds it, because a verdict finalised on a failed call is a verdict
+        # nobody made.
+        if on_issue:
+            on_issue(answer.as_issue(impact="blocked"))
         return None
 
-    decision = parse_ratification(output, suggested=suggested)
+    decision = parse_ratification(answer.text, suggested=suggested)
     return {
         "action": decision["action"],
         "verdict": decision["verdict"],

@@ -17,13 +17,14 @@ Level-2 study, and saying so is better than reproducing the wrong contrast confi
 
 from __future__ import annotations
 
-import json
 import logging
-import re
+
+from app.services.llm_decision import confidence_of, decide, fenced_json
 
 logger = logging.getLogger("bioaf.contrast_selection")
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
+# The step in the user's language, for the issues section of the report.
+CONTRAST_SELECTION_INTENT = "choosing which of the paper's contrasts this run reproduces"
 
 
 def build_contrast_prompt(
@@ -77,21 +78,12 @@ def build_contrast_prompt(
 def parse_contrast_selection(response_text: str, *, n: int) -> dict:
     """Read the selection, refusing an index the contrast list does not have."""
     empty = {"contrast_index": None, "reason": "", "confidence": 0.0}
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return empty
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return empty
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return empty
 
     reason = str(data.get("reason") or "").strip()
-    confidence = data.get("confidence")
-    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        confidence = 0.0
-    confidence = max(0.0, min(1.0, float(confidence)))
+    confidence = confidence_of(data.get("confidence"))
 
     idx = data.get("contrast_index")
     if isinstance(idx, bool) or not isinstance(idx, int) or not (0 <= idx < n):
@@ -111,6 +103,7 @@ async def select_contrast(
     api_key: str | None,
     accession: str | None = None,
     sample_titles: list[str] | None = None,
+    on_issue=None,
 ) -> dict | None:
     """The contrast this run reproduces, or None when there is nothing to pick or the ask failed.
 
@@ -132,11 +125,21 @@ async def select_contrast(
     system, payload = build_contrast_prompt(
         contrasts, pipeline_key=pipeline_key, assay=assay, accession=accession, sample_titles=sample_titles
     )
-    try:
-        output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
-    except Exception as exc:  # noqa: BLE001 - an outage must not silently pick the first contrast
-        logger.warning("contrast selection failed for %s: %s", pipeline_key, exc)
+    decision = await decide(
+        intent=CONTRAST_SELECTION_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+    )
+    if not decision.ok:
+        # No fallback to contrasts[0]: defaulting to the first one is precisely the defect this
+        # replaces, and doing it on an outage would put it back where it is hardest to notice. The
+        # gate then shows every contrast for a person, which is `degraded` rather than `blocked`.
+        if on_issue:
+            on_issue(decision.as_issue(impact="degraded"))
         return None
 
-    selected = parse_contrast_selection(output, n=len(contrasts))
+    selected = parse_contrast_selection(decision.text, n=len(contrasts))
     return {**selected, "decided_by": "model", "model": model}

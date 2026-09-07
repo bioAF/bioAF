@@ -19,15 +19,15 @@ inventory to a person, which is exactly the assisted path.
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 
 from app.services.literature.deposit_inventory_service import DepositEntry
+from app.services.llm_decision import confidence_of, decide, fenced_json
 
 logger = logging.getLogger("bioaf.deposit_selection")
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
+# The step in the user's language, for the issues section of the report.
+DEPOSIT_SELECTION_INTENT = "choosing which deposited file to reproduce from"
 
 # What the matrix holds. Drives step 8's choice of statistical test, which is why "unknown" is a
 # value rather than an omission: DESeq2 on a normalized matrix is wrong, and a route that cannot
@@ -165,14 +165,8 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
         "declined": False,
     }
 
-    match = _FENCED_JSON_RE.search(response_text or "")
-    if not match:
-        return empty
-    try:
-        data = json.loads(match.group(1))
-    except json.JSONDecodeError:
-        return empty
-    if not isinstance(data, dict):
+    data = fenced_json(response_text)
+    if data is None:
         return empty
 
     by_name = {e.filename: e for e in inventory or []}
@@ -218,10 +212,6 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
     if value_type not in VALUE_TYPES:
         value_type = "unknown"
 
-    confidence = data.get("confidence")
-    if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
-        confidence = 0.0
-
     if notes:
         reason = f"{reason} ({'; '.join(notes)})".strip()
 
@@ -231,7 +221,7 @@ def parse_selection(response_text: str, *, inventory: list[DepositEntry]) -> dic
         "metadata_file": metadata,
         "value_type": value_type,
         "reason": reason,
-        "confidence": max(0.0, min(1.0, float(confidence))),
+        "confidence": confidence_of(data.get("confidence")),
         "declined": bool(data.get("declined")),
     }
 
@@ -244,6 +234,7 @@ async def select_deposit(
     client,
     model: str,
     api_key: str | None,
+    on_issue=None,
 ) -> dict | None:
     """Which deposited file to reproduce from, or None when there is nothing to ask or the ask failed.
 
@@ -259,13 +250,26 @@ async def select_deposit(
     if not system:
         return None
 
-    try:
-        output = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
-    except Exception as exc:  # noqa: BLE001 - asking for help must not be able to fail a study
-        logger.warning("deposit selection failed (falling back to the assisted pick): %s", exc)
+    # `allowed` is what the deposit actually holds. A filename the model invented would send the
+    # download at a 404, and the parser's own guard would catch it; stating the set here means the
+    # decision record says which value was refused and why.
+    decision = await decide(
+        intent=DEPOSIT_SELECTION_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        allowed=[e.filename for e in inventory or []],
+    )
+    if not decision.ok:
+        # Falls back to the assisted pick: a person chooses at the C1 gate rather than a provider
+        # outage choosing the file the whole verdict is computed from.
+        if on_issue:
+            on_issue(decision.as_issue(impact="degraded"))
         return None
 
-    chosen = parse_selection(output, inventory=inventory)
+    chosen = parse_selection(decision.text, inventory=inventory)
     if not chosen["primary_matrix"] and not chosen["declined"]:
         return None
     return {**chosen, "model": model, "decided_by": "model"}
