@@ -565,6 +565,11 @@ class ValidationDriverService:
                 {
                     "file_id": f.id,
                     "filename": filename,
+                    # Where the DECODED copy landed. `_handle_inspecting_deposit` reads the matrix
+                    # back from here, and without it every deposit held on "could not be read back"
+                    # the moment it reached inspection. Found by step 12's end-to-end walk; every
+                    # per-step test had planted the record by hand with this key already on it.
+                    "storage_uri": uri,
                     "url": url,
                     # GEO supplementary files can be revised in place, so the checksum of what WE
                     # downloaded is the only thing that makes this verdict reproducible later.
@@ -744,7 +749,11 @@ class ValidationDriverService:
             "entries": [asdict(e) for e in entries],
             "triplets": inventory.triplets,
         }
-        study.evidence_json = evidence
+        # A COPY on every assignment. The caller keeps mutating `evidence` and assigns it again on
+        # its way out, and re-assigning the identical object leaves the column looking unchanged, so
+        # the download's own `evidence["deposit"]` never reached the database. Found by step 12
+        # driving the whole route: the inventory persisted and everything after it silently did not.
+        study.evidence_json = dict(evidence)
 
         org = await session.get(Organization, study.organization_id)
         autonomy = (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
@@ -780,7 +789,7 @@ class ValidationDriverService:
             evidence["deposit_unusable"] = declined
             return ValidationDriverService._hold_deposit(session, study, evidence, declined)
 
-        study.evidence_json = evidence
+        study.evidence_json = dict(evidence)
         return True
 
     @staticmethod
@@ -793,7 +802,7 @@ class ValidationDriverService:
         reads, which is what the `acquiring_processed -> acquiring_data` edge is for.
         """
         evidence["deposit_failed"] = {"reason": reason, "at": _now().isoformat()}
-        study.evidence_json = evidence
+        study.evidence_json = dict(evidence)
         logger.info("validation study %d: deposit held: %s", study.id, reason)
         return False
 
