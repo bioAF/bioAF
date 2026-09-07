@@ -148,6 +148,29 @@ def _first_match(pattern: re.Pattern, text: str) -> str:
     return m.group(0) if m else ""
 
 
+def parse_series_organisms(text: str) -> list[str]:
+    """The organisms a GEO series declares for its samples, deduplicated, in first-seen order.
+
+    plan_7 step 14's species check. It is the DEPOSITOR's own statement of what the data is, which
+    is the same authority ``library_strategy`` carries over the paper's prose: a paper's methods can
+    describe a mouse experiment while the deposit scoped to this study is human, and nothing in the
+    product noticed.
+
+    Its own function rather than a third element on ``parse_series_matrix``'s tuple, because that
+    return shape is consumed in several places and widening it would touch all of them to serve one
+    caller.
+    """
+    seen: list[str] = []
+    for raw in (text or "").splitlines():
+        if not raw.startswith("!Sample_organism_ch1\t"):
+            continue
+        for value in _series_matrix_values(raw.rstrip("\r\n")):
+            name = value.strip()
+            if name and name not in seen:
+                seen.append(name)
+    return seen
+
+
 def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
     """Parse a GEO series-matrix into (samples, series_sra_accession).
 
