@@ -441,6 +441,11 @@ def parse_extraction(response_text: str) -> dict:
         "differential_design": _normalize_differential_design(None),
         "claims": [],
         "data_availability": "unknown",
+        # Where the authors said their analysis code lives (plan_7 step 3). The prompt has always
+        # asked for it and the column has always existed; this dict never carried it, so
+        # `extract`'s `parsed.get("code_availability")` read None on every paper and the column
+        # shipped empty. Found by step 13, which needs the answer to fill the checklist's code rows.
+        "code_availability": [],
         "blockers": [],
         "parse_failure": True,
     }
@@ -455,6 +460,10 @@ def parse_extraction(response_text: str) -> dict:
         "differential_design": _normalize_differential_design(data.get("differential_design")),
         "claims": [c for c in _as_list(data.get("claims")) if isinstance(c, dict)],
         "data_availability": str(data.get("data_availability") or "unknown"),
+        # Normalized by `parse_code_availability` at the point of storage; kept raw here so a paper
+        # that named nothing reads as `[]` ("we looked and it named none") rather than as a missing
+        # key, which step 13 renders as UNKNOWN ("we never asked").
+        "code_availability": [c for c in _as_list(data.get("code_availability")) if isinstance(c, dict)],
         "blockers": [str(b) for b in _as_list(data.get("blockers")) if str(b).strip()],
         "parse_failure": False,
     }

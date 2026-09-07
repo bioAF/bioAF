@@ -61,6 +61,17 @@ from app.services.validation_study_service import ValidationStudyService, record
 
 logger = logging.getLogger("bioaf.validation_driver")
 
+# plan_7 step 13: each capability question in the user's language, for the issues section. A row
+# that could not be established says which question went unanswered, not which key was empty.
+_CAPABILITY_STEPS = {
+    "geo_entry": "checking whether this paper has a GEO entry",
+    "raw_data": "checking whether raw sequencing data is available",
+    "preprocessed_data": "checking whether pre-processed data is available",
+    "sample_metadata": "checking whether the GEO entry carries sample metadata",
+    "code_artifact": "checking whether the paper published a code artifact",
+    "code_repository": "checking whether the paper links a code repository",
+}
+
 # Decline paths that mean Level-3 was never CONFIGURED for this study (a QC-only paper with no
 # ground-truth set). Reporting those as "skipped" would report an absence as a failure.
 _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
@@ -272,6 +283,12 @@ class ValidationDriverService:
 
         plan = await ValidationExtractionService.extract(session, study, full_text, org_id, user_id)
 
+        # plan_7 step 13: establish what this paper actually has, BEFORE the C1 gate, so the route
+        # modal offers what is available rather than three equal-looking options. Runs here rather
+        # than in the driver because the gate is pre-approval: answers produced after approval
+        # cannot inform the decision to approve. Two HTTP calls, no model, no compute.
+        await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=bool(full_text))
+
         classification = _early_exit_classification(plan)
         if classification is not None:
             # Record the "why" (the plan's blockers) before the terminal transition.
@@ -283,6 +300,54 @@ class ValidationDriverService:
             )
 
         return await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
+
+    @staticmethod
+    async def _discover_capabilities(
+        session: AsyncSession, study: ValidationStudy, plan, *, has_full_text: bool, fetcher=None
+    ) -> dict:
+        """plan_7 step 13: land the phase-1 answers on ``evidence["capabilities"]``.
+
+        Never raises and never blocks a read. Nothing it discovers rules a paper in or out; it
+        decides which route is best and how high a validation level is reachable. Every UNKNOWN
+        carries its own failure reason so a discovery failure is visible as a limitation of the run
+        rather than as a fact about the paper.
+        """
+        from app.services.validation_capabilities import UNKNOWN, discover_capabilities
+
+        try:
+            capabilities = await discover_capabilities(
+                accession=study.source_accession,
+                has_full_text=has_full_text,
+                code_availability=(plan.code_availability_json if plan else None),
+                fetcher=fetcher,
+            )
+        except Exception as exc:  # noqa: BLE001 - discovery informs the gate; it cannot fail a read
+            logger.warning("capability discovery failed for study %s: %s", study.id, exc)
+            return {}
+
+        evidence = dict(study.evidence_json or {})
+        evidence["capabilities"] = capabilities
+        study.evidence_json = evidence
+        await session.flush()
+
+        # A discovery failure is a limitation of THIS RUN, so it belongs beside every other step
+        # that could not get an answer rather than only in the checklist's UNKNOWN cells.
+        await ValidationIssueService.record(
+            session,
+            study,
+            [
+                {
+                    "step": _CAPABILITY_STEPS.get(key, key),
+                    "outcome": "unreachable",
+                    "impact": "degraded",
+                    "message": answer.get("failure_reason") or "",
+                    "model": None,
+                }
+                for key, answer in capabilities.items()
+                if isinstance(answer, dict) and answer.get("value") == UNKNOWN
+            ],
+        )
+        return capabilities
 
     # ---- Execution half (background tick) ----
 

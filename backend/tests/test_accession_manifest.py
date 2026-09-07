@@ -436,11 +436,12 @@ async def test_one_unreadable_platform_file_does_not_lose_the_others():
 @pytest.mark.asyncio
 async def test_the_multi_platform_path_still_fills_run_accessions_from_ena():
     """The ENA join is resolved once for the whole series, not per platform file."""
-    ena_url = (
-        "https://www.ebi.ac.uk/ena/portal/api/filereport?accession=SRP248037&result=read_run"
-        "&fields=run_accession,experiment_accession,sample_accession,sample_title,experiment_title,"
-        "library_strategy&format=tsv&download=false"
-    )
+    # Built from the service's own field list rather than restated, so adding a field (plan_7 step
+    # 13 added `fastq_bytes`) does not silently turn this fake into a 404 and the assertion below
+    # into a lie about the ENA join.
+    from app.services.literature.accession_manifest_service import _ena_filereport_url
+
+    ena_url = _ena_filereport_url("SRP248037")
     pages = {
         _DIR: _MATRIX_DIR_HTML,
         _P1: _matrix(["SAMD1_WT_repl1"], ["SRX7660001"], ["SAMN14000001"]),
