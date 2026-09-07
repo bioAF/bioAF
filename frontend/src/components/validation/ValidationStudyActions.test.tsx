@@ -29,7 +29,12 @@ test("a refused approval says which pipeline and which data, on screen", async (
   await userEvent.click(screen.getByRole("button", { name: /^approve/i }));
   await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
 
-  await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", undefined));
+  // The gate now always sends the route explicitly (it used to send no body and lean on the server
+  // default). A caller relying on a server default is one flip away from silently spending hours of
+  // compute, so the UI states its choice every time.
+  await waitFor(() =>
+    expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", { route: "deposit" }),
+  );
   expect(await screen.findByText(/nf-core\/atacseq/)).toBeInTheDocument();
   expect(screen.getByText(/Bisulfite-Seq/)).toBeInTheDocument();
   expect(screen.getByText(/nf-core\/methylseq/)).toBeInTheDocument();
@@ -94,46 +99,99 @@ test("offers Approve again once the conflict has been answered", () => {
   expect(screen.getByRole("button", { name: /approve plan/i })).toBeInTheDocument();
 });
 
-// ---- plan_7 step 10: the route is chosen at the C1 gate ----
+// ---- the route modal: chosen at the C1 gate, GEO by default ----
 
 function renderActions(study: { id: number; state: string }) {
   render(<ValidationStudyActions study={study} onChanged={jest.fn()} />);
 }
 
-describe("the route choice", () => {
-  it("offers both routes with their real cost stated", () => {
+async function openModal() {
+  await userEvent.click(screen.getByRole("button", { name: /^approve plan/i }));
+}
+
+describe("the route modal", () => {
+  it("offers all three routes", async () => {
     renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
     expect(screen.getByLabelText(/deposited data/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/raw reads/i)).toBeInTheDocument();
-    // The cost is the whole basis of the choice: minutes against hours.
-    expect(screen.getByText(/minutes/i)).toBeInTheDocument();
-    expect(screen.getByText(/hours/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/both/i)).toBeInTheDocument();
   });
 
-  it("sends the chosen route when approving", async () => {
+  it("defaults to the deposited-data route", async () => {
     renderActions({ id: 7, state: "plan_ready" });
-    await userEvent.click(screen.getByLabelText(/deposited data/i));
-    await userEvent.click(screen.getByRole("button", { name: /^approve plan/i }));
+    await openModal();
+    expect(screen.getByLabelText(/deposited data/i)).toBeChecked();
+    expect(screen.getByLabelText(/raw reads/i)).not.toBeChecked();
+  });
+
+  it("states what each route actually tests", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    expect(screen.getByText(/validates the computational findings/i)).toBeInTheDocument();
+    expect(screen.getByText(/validates the pre-processing and sample quality/i)).toBeInTheDocument();
+  });
+
+  it("states the cost on both sides, because that is the basis of the choice", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    expect(screen.getByText(/takes minutes/i)).toBeInTheDocument();
+    expect(screen.getByText(/takes hours/i)).toBeInTheDocument();
+  });
+
+  it("sends the deposit route when the default is accepted", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
     await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
     await waitFor(() =>
       expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", { route: "deposit" }),
     );
   });
 
-  it("leaves the wire call untouched when the default route is kept", async () => {
-    // The endpoint already defaults to the pipeline route, so sending nothing IS choosing it. The
-    // committed test pinning this call as `undefined` is a promise about existing behaviour and
-    // stands.
+  it("sends the raw-reads route when chosen", async () => {
     renderActions({ id: 7, state: "plan_ready" });
-    await userEvent.click(screen.getByRole("button", { name: /^approve plan/i }));
+    await openModal();
+    await userEvent.click(screen.getByLabelText(/raw reads/i));
     await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
     await waitFor(() =>
-      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", undefined),
+      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", { route: "pipeline" }),
     );
   });
 
-  it("tells the approver what the deposited route does not test", () => {
+  it("sends both when chosen", async () => {
     renderActions({ id: 7, state: "plan_ready" });
-    expect(screen.getByText(/tests the analysis, not the processing/i)).toBeInTheDocument();
+    await openModal();
+    await userEvent.click(screen.getByLabelText(/both/i));
+    await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/approve", { route: "both" }),
+    );
+  });
+
+  it("always sends the route explicitly, so no caller relies on a server default", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    await userEvent.click(screen.getByRole("button", { name: /approve and run/i }));
+    await waitFor(() => expect(mockPost).toHaveBeenCalled());
+    expect(mockPost.mock.calls[0][1]).not.toBeUndefined();
+  });
+
+  it("warns that the raw route is the one that spends real compute", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    await userEvent.click(screen.getByLabelText(/raw reads/i));
+    expect(screen.getByText(/spends compute on your cloud account/i)).toBeInTheDocument();
+  });
+
+  it("does not warn about cloud spend for the deposited-data route", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    expect(screen.queryByText(/spends compute on your cloud account/i)).not.toBeInTheDocument();
+  });
+
+  it("says the deposited route cannot test the processing", async () => {
+    renderActions({ id: 7, state: "plan_ready" });
+    await openModal();
+    expect(screen.getByText(/cannot detect a processing error/i)).toBeInTheDocument();
   });
 });

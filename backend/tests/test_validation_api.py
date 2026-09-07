@@ -74,9 +74,11 @@ async def test_request_read_approve_flow(client, admin_token, monkeypatch):
     assert design["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
     assert design["contrasts"][0]["test_samples"] == ["GSM1"]
 
+    # The default route is `deposit` (owner's instruction, 2026-09-07), so a bare approval starts
+    # from what the authors deposited rather than re-running the paper from raw reads.
     r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
     assert r.status_code == 200, r.text
-    assert r.json()["state"] == "acquiring_data"
+    assert r.json()["state"] == "acquiring_processed"
 
     r = await client.get(f"/api/validation-studies/{sid}", headers=_auth(admin_token))
     assert r.status_code == 200
@@ -619,14 +621,61 @@ async def _study_at_plan_ready(client, admin_token, monkeypatch):
     return sid
 
 
-async def test_approving_without_a_route_takes_the_pipeline_route(client, admin_token, monkeypatch):
-    """The regression guard for the whole of plan_7. An approval that says nothing about the route
-    behaves exactly as it always has, so every existing caller and every existing study is
-    unaffected."""
+async def test_approving_without_a_route_now_takes_the_deposit_route(client, admin_token, monkeypatch):
+    """The default is the DEPOSIT route, on the owner's instruction (2026-09-07): start from what the
+    authors deposited, and spend on raw reads only when a person asks for it.
+
+    This test previously asserted the opposite. plan_7 shipped with `pipeline` as the default
+    deliberately, so nothing changed behaviour on the way in; the flip is a separate, deliberate
+    decision made after the route had been proven end to end.
+    """
     sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
     r = await client.post(f"/api/validation-studies/{sid}/approve", headers=_auth(admin_token))
     assert r.status_code == 200, r.text
+    assert r.json()["state"] == "acquiring_processed"
+
+
+async def test_the_raw_reads_route_is_still_reachable_by_asking_for_it(client, admin_token, monkeypatch):
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(
+        f"/api/validation-studies/{sid}/approve", json={"route": "pipeline"}, headers=_auth(admin_token)
+    )
+    assert r.status_code == 200, r.text
     assert r.json()["state"] == "acquiring_data"
+
+
+async def test_both_runs_each_route_as_its_own_study(client, admin_token, monkeypatch):
+    """A study carries ONE state and ONE classification, so "both" cannot be one study. It is two,
+    and they answer different questions: the deposit route tests the authors' analysis, the raw route
+    tests their processing.
+
+    The sibling reuses this study's plan rather than re-reading the paper: same paper, same
+    extraction, and a second LLM read would cost money to produce a plan we already have.
+    """
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(f"/api/validation-studies/{sid}/approve", json={"route": "both"}, headers=_auth(admin_token))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["state"] == "acquiring_processed"
+    sibling_id = (body.get("evidence") or {}).get("sibling_study_id")
+    assert sibling_id and sibling_id != sid
+
+    sib = await client.get(f"/api/validation-studies/{sibling_id}", headers=_auth(admin_token))
+    assert sib.status_code == 200
+    assert sib.json()["state"] == "acquiring_data"
+    assert (sib.json().get("evidence") or {})["route"] == "pipeline"
+    # Each names the other, so neither reads as an orphan duplicate in the list.
+    assert (sib.json().get("evidence") or {}).get("sibling_study_id") == sid
+
+
+async def test_the_sibling_carries_the_same_plan_without_re_reading_the_paper(client, admin_token, monkeypatch):
+    sid = await _study_at_plan_ready(client, admin_token, monkeypatch)
+    r = await client.post(f"/api/validation-studies/{sid}/approve", json={"route": "both"}, headers=_auth(admin_token))
+    sibling_id = r.json()["evidence"]["sibling_study_id"]
+    sib = (await client.get(f"/api/validation-studies/{sibling_id}", headers=_auth(admin_token))).json()
+    assert sib["plan"]["pipeline_key"] == r.json()["plan"]["pipeline_key"]
+    assert sib["plan"]["accessions"] == r.json()["plan"]["accessions"]
+    assert sib["plan"]["id"] != r.json()["plan"]["id"]  # its own row, not a shared one
 
 
 async def test_approving_with_the_deposit_route_starts_at_the_deposit(client, admin_token, monkeypatch):

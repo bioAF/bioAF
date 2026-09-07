@@ -188,7 +188,9 @@ class TestARetryCannotQuietlyPayTwice:
                 session, study.id, admin_user.organization_id, admin_user.id, "error", failure_reason="boom"
             )
         await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id, admin_user.id)
-        study = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+        study = await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+        )
 
         assert study.state == "acquiring_data"
         assert "awaiting_refetch_approval" not in (study.evidence_json or {})
