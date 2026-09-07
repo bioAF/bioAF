@@ -18,6 +18,7 @@ produced nothing, and a section that cannot tell them apart is one users learn t
 """
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 
 from app.models.validation_study_issue import ValidationStudyIssue
@@ -223,3 +224,80 @@ class TestTheExtractionRecordsWhatItCouldNotGet:
         await ValidationExtractionService.extract(session, study, "txt", admin_user.organization_id, admin_user.id)
 
         assert await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id) == []
+
+
+class TestTheApiCarriesTheSection:
+    @pytest_asyncio.fixture(autouse=True)
+    async def _enable(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_the_study_response_lists_the_issues(self, client, session, admin_user, admin_token):
+        """The study page and the export both read one place. Empty is the normal case."""
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(session, study, [_row()])
+        await session.commit()
+
+        r = await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert r.status_code == 200
+        issues = r.json()["issues"]
+        assert len(issues) == 1
+        assert issues[0]["step"] == "binding the paper's claims to measurable metrics"
+        assert issues[0]["impact"] == "degraded"
+        assert issues[0]["model"] == "claude-opus-4-8"
+
+    @pytest.mark.asyncio
+    async def test_a_clean_study_lists_none(self, client, session, admin_user, admin_token):
+        study = await _study(session, admin_user)
+        await session.commit()
+        r = await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        assert r.json()["issues"] == []
+
+
+class TestTheExportCarriesTheSection:
+    @pytest.mark.asyncio
+    async def test_the_provenance_report_includes_them(self, session, admin_user):
+        """An exported report missing the issues would be worse than the page missing them: the
+        export is what leaves the building."""
+        import json as _json
+
+        from app.services.provenance.report_service import ProvenanceReportService
+
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(session, study, [_row(outcome="unreachable", impact="blocked")])
+
+        result = await ProvenanceReportService.generate(
+            session=session,
+            entity_type="validation_study",
+            entity_id=study.id,
+            org_id=admin_user.organization_id,
+            user_email=admin_user.email,
+            format="json",
+        )
+        body = _json.loads(result.content) if isinstance(result.content, (str, bytes)) else result.content
+        entity = body["report"]["entity"] if "report" in body else body["entity"]
+        assert entity["issues"][0]["outcome"] == "unreachable"
+        assert entity["issues"][0]["impact"] == "blocked"
+
+    @pytest.mark.asyncio
+    async def test_the_markdown_export_names_them_in_plain_language(self, session, admin_user):
+        from app.services.provenance.report_service import ProvenanceReportService
+
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(session, study, [_row()])
+
+        result = await ProvenanceReportService.generate(
+            session=session,
+            entity_type="validation_study",
+            entity_id=study.id,
+            org_id=admin_user.organization_id,
+            user_email=admin_user.email,
+            format="md",
+        )
+        text = result.content if isinstance(result.content, str) else result.content.decode()
+        assert "Issues Encountered" in text
+        assert "binding the paper's claims to measurable metrics" in text
+        assert "claude-opus-4-8" in text

@@ -102,6 +102,10 @@ class ValidationStudyProvenanceData:
     experiment: dict[str, Any] | None = None
     pipeline_runs: list[dict[str, Any]] = field(default_factory=list)
     evidence: dict[str, Any] | None = None
+    # plan_7 step 14c: steps that hit an error which may affect the ability to validate this paper.
+    # An exported report missing these would be worse than the page missing them, because the export
+    # is what leaves the building.
+    issues: list[dict[str, Any]] = field(default_factory=list)
     audit_trail: list[dict[str, Any]] = field(default_factory=list)
 
 

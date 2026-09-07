@@ -711,8 +711,59 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append(_table(["Step", "Entity"], chain_rows))
     parts.append("")
 
+    _append_issues(parts, entity.get("issues") or [])
+
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
+
+
+# What each outcome means to a reader, in plain language. The token itself says nothing to a
+# scientist, and a refusal is the one an administrator can actually do something about.
+_ISSUE_OUTCOME_LABEL = {
+    "refusal": "the model declined to answer",
+    "unreachable": "bioAF could not reach the language model",
+    "internal": "bioAF hit an internal error",
+    "unparseable": "the model's answer was not in the format bioAF asked for",
+}
+
+_ISSUE_IMPACT_LABEL = {
+    "degraded": "continued with a fallback",
+    "blocked": "produced nothing",
+}
+
+
+def _append_issues(parts: list[str], issues: list[dict[str, Any]]) -> None:
+    """plan_7 step 14c: the steps that hit an error which may affect this validation.
+
+    Informational, and absent when nothing went wrong. Each row carries its IMPACT, because a step
+    that fell back and carried on is not a step that produced nothing, and a section that cannot
+    tell them apart is one readers learn to ignore.
+    """
+    if not issues:
+        return
+    parts.append("## Issues Encountered")
+    parts.append("")
+    parts.append(
+        "Some steps encountered errors that may affect the ability to validate this paper. "
+        "Each is listed with what it cost the run."
+    )
+    parts.append("")
+    parts.append(
+        _table(
+            ["Step", "What happened", "Impact", "Model", "When"],
+            [
+                [
+                    i.get("step"),
+                    _ISSUE_OUTCOME_LABEL.get(i.get("outcome"), i.get("outcome")),
+                    _ISSUE_IMPACT_LABEL.get(i.get("impact"), i.get("impact")),
+                    i.get("model") or "--",
+                    i.get("at"),
+                ]
+                for i in issues
+            ],
+        )
+    )
+    parts.append("")
 
 
 _LEVEL3_VERDICT_LABEL = {
