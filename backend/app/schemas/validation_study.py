@@ -205,3 +205,7 @@ class ValidationStudyResponse(BaseModel):
     # The assembled evidence bundle (computed QC metrics beside the paper's claimed targets, plus the
     # linked run ids) the human reads to classify by hand at the comparing gate. Null until extracting.
     evidence: dict | None = None
+    # plan_7 step 14c: steps that hit an error which may affect the ability to validate this paper.
+    # Informational, one row per occurrence, each with its impact (`degraded` or `blocked`). Empty is
+    # the normal case and means every step got the answer it asked for.
+    issues: list[dict] = []

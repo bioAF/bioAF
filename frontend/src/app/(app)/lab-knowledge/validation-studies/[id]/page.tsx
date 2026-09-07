@@ -28,6 +28,10 @@ import {
   AiDecisionList,
   type AiDecision,
 } from "@/components/validation/AiDecisionList";
+import {
+  ValidationIssuesSection,
+  type ValidationIssue,
+} from "@/components/validation/ValidationIssuesSection";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -78,6 +82,10 @@ interface ValidationStudy {
   failure_reason?: string | null;
   plan?: ReproductionPlanView | null;
   evidence?: Evidence | null;
+  // plan_7 step 14c: steps that hit an error which may affect this validation. Study-scoped, so it
+  // carries failures that happened before there was a plan to hang them off. Empty is the normal
+  // case and renders nothing.
+  issues?: ValidationIssue[] | null;
 }
 
 /**
@@ -342,6 +350,8 @@ export default function ValidationStudyPage() {
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
           <ValidationEvidenceTable evidence={study.evidence} />
         </section>
+
+        <ValidationIssuesSection issues={study.issues ?? []} />
       </main>
     </>
   );

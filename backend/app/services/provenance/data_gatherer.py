@@ -28,6 +28,7 @@ from app.models.reproduction_plan import ReproductionPlan
 from app.models.sample import Sample
 from app.models.user import User
 from app.models.validation_study import ValidationStudy, classification_confidence
+from app.services.validation_issue_service import ValidationIssueService
 from app.services.provenance.schema import (
     ArtifactProvenanceData,
     ExperimentProvenanceData,
@@ -1177,5 +1178,6 @@ class ProvenanceDataGatherer:
             experiment=experiment,
             pipeline_runs=pipeline_runs,
             evidence=study.evidence_json,
+            issues=await ValidationIssueService.list_for_study(session, study_id, org_id),
             audit_trail=audit_trail,
         )

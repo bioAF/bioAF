@@ -54,6 +54,7 @@ from app.services.validation_classifier_service import classify_study
 from app.services.validation_ratification import ratify
 from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
 from app.services.validation_extraction_service import ValidationExtractionService
+from app.services.validation_issue_service import ValidationIssueService
 from app.services.validation_sample_values import sample_values_from_design
 from app.services.validation_level3_service import resolve_level3, resolve_level3_from_deposit
 from app.services.validation_study_service import ValidationStudyService, record_study_error
@@ -769,6 +770,7 @@ class ValidationDriverService:
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         claim = (plan.finding_claim_json if plan else None) or {}
+        issues: list[dict] = []
         chosen = await select_deposit(
             entries,
             pipeline_key=plan.pipeline_key if plan else None,
@@ -776,7 +778,9 @@ class ValidationDriverService:
             client=get_client(cfg.provider),
             model=cfg.model,
             api_key=cfg.api_key,
+            on_issue=issues.append,
         )
+        await ValidationIssueService.record(session, study, issues)
         if chosen is None:
             # The ask failed. Same direction the ratifier takes: hold where the assisted policy
             # holds, so the gate can pick rather than a provider outage choosing the file.
@@ -1122,13 +1126,17 @@ class ValidationDriverService:
             logger.warning("study %s is autonomous but the org has no LLM provider; holding", study.id)
             return None
 
-        return await ratify(
+        issues: list[dict] = []
+        decision = await ratify(
             result,
             autonomy=autonomy,
             client=get_client(cfg.provider),
             model=cfg.model,
             api_key=cfg.api_key,
+            on_issue=issues.append,
         )
+        await ValidationIssueService.record(session, study, issues)
+        return decision
 
     # ---- helpers ----
 

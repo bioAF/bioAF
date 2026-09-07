@@ -38,6 +38,7 @@ from app.services.audit_service import log_action
 from app.services.literature.accession_manifest_service import AccessionManifestService
 from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 from app.services.provenance.report_service import ProvenanceReportService
+from app.services.validation_issue_service import ValidationIssueService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.pipeline_mapper import deposit_conflict
@@ -189,6 +190,9 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
             session, plan, org_id, deposit_override=(study.evidence_json or {}).get("deposit_override")
         ),
         evidence=study.evidence_json,
+        # plan_7 step 14c: what went wrong on the way to this verdict. Study-scoped, so it carries
+        # failures that happened before there was a plan to hang them off.
+        issues=await ValidationIssueService.list_for_study(session, study.id, org_id),
     )
 
 

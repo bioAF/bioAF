@@ -135,6 +135,7 @@ def _render_validation_study(data: ProvenanceData) -> dict[str, Any]:
         "experiment": data.experiment,
         "pipeline_runs": data.pipeline_runs,
         "evidence": data.evidence,
+        "issues": data.issues,
     }
 
 
