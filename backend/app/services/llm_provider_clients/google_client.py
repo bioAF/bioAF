@@ -8,6 +8,7 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.google")
@@ -80,28 +81,44 @@ async def submit(
         len(prompt),
         len(payload),
     )
-    try:
+
+    async def _send():
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
+            return await client.post(
                 f"{_BASE_URL}/models/{model}:generateContent",
                 params={"key": api_key},
                 headers={"Content-Type": "application/json"},
                 json=body,
             )
-    except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("google submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+
+    resp = await request_with_retry(_send, what="google submit")
     logger.info("google submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
     if resp.status_code >= 400:
         logger.warning("google submit non-2xx body: %s", resp.text[:2000])
     _raise_for_status(resp)
     try:
         data = resp.json()
-        parts = data["candidates"][0]["content"]["parts"]
-        return "".join(p.get("text", "") for p in parts)
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
+    except ValueError as exc:
         raise ProviderError(f"Google generateContent response not parseable: {exc}", error_class="parse") from exc
+
+    # Gemini reports a blocked PROMPT under `promptFeedback.blockReason`, and a blocked ANSWER by
+    # returning a candidate with no `content` key at all. The second used to raise KeyError and be
+    # reported as `error_class="parse"`, which told the user bioAF could not read the answer when in
+    # fact the model declined to give one.
+    block_reason = (data.get("promptFeedback") or {}).get("blockReason")
+    if block_reason:
+        raise refusal(f"the model declined to answer ({block_reason})")
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise refusal("the model returned no candidate answer")
+    content = candidates[0].get("content")
+    if not content or not content.get("parts"):
+        finish = candidates[0].get("finishReason") or "no content"
+        raise refusal(f"the model declined to answer ({finish})")
+    text = "".join(p.get("text", "") for p in content["parts"])
+    if not text:
+        raise refusal("the model returned no content")
+    return text
 
 
 def _tools_to_google(tools: list[dict]) -> list[dict]:

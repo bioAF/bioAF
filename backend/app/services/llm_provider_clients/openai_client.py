@@ -15,6 +15,7 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.openai")
@@ -85,9 +86,10 @@ async def submit(
         len(prompt),
         len(payload),
     )
-    try:
+
+    async def _send():
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
+            return await client.post(
                 f"{_BASE_URL}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {api_key}",
@@ -95,10 +97,8 @@ async def submit(
                 },
                 json=body,
             )
-    except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("openai submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+
+    resp = await request_with_retry(_send, what="openai submit")
 
     logger.info("openai submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
     if resp.status_code >= 400:
@@ -115,9 +115,22 @@ async def submit(
 
     try:
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        choice = data["choices"][0]
+        content = choice["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError) as exc:
         raise ProviderError(f"OpenAI completion response not parseable: {exc}", error_class="parse") from exc
+
+    # A safety block comes back 200 with `finish_reason: "content_filter"` and content that is
+    # usually null; newer models add an explicit `refusal` string. Neither was read, so the caller
+    # received None and ran a regex over it. Silently empty.
+    if str(choice.get("finish_reason") or "").lower() == "content_filter":
+        raise refusal(str(choice.get("message", {}).get("refusal") or "the model declined to answer"))
+    explicit = choice.get("message", {}).get("refusal")
+    if explicit:
+        raise refusal(str(explicit))
+    if not content:
+        raise refusal("the model returned no content")
+    return content
 
 
 def _raise_for_status(resp: httpx.Response) -> None:

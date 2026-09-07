@@ -7,6 +7,7 @@ import logging
 import httpx
 
 from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.anthropic")
@@ -84,17 +85,12 @@ async def submit(
         len(prompt),
         len(payload),
     )
-    try:
+
+    async def _send():
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            resp = await client.post(
-                f"{_BASE_URL}/messages",
-                headers=_headers(api_key),
-                json=body,
-            )
-    except httpx.HTTPError as exc:
-        detail = _transport_detail(exc)
-        logger.warning("anthropic submit transport failure: %s", detail)
-        raise ProviderError(detail, error_class="transport") from exc
+            return await client.post(f"{_BASE_URL}/messages", headers=_headers(api_key), json=body)
+
+    resp = await request_with_retry(_send, what="anthropic submit")
     logger.info("anthropic submit response: status=%d bytes=%d", resp.status_code, len(resp.content))
     if resp.status_code >= 400:
         logger.warning("anthropic submit non-2xx body: %s", resp.text[:2000])
@@ -102,9 +98,21 @@ async def submit(
     try:
         data = resp.json()
         parts = data.get("content", [])
-        return "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+        text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
     except (ValueError, KeyError, TypeError) as exc:
         raise ProviderError(f"Anthropic message response not parseable: {exc}", error_class="parse") from exc
+
+    # A safety block comes back 200 with `stop_reason: "refusal"` and the refusal prose as an
+    # ordinary text block. Nothing read the field, so the caller saw prose with no fenced JSON in it
+    # and reported an unparseable answer, which is a true statement about the text and a false one
+    # about what happened.
+    if str(data.get("stop_reason") or "").lower() == "refusal":
+        raise refusal(text or "the model declined to answer")
+    # No text at all is the same event by a different route. An empty string would be reported as
+    # unparseable for the same wrong reason.
+    if not text:
+        raise refusal("the model returned no content")
+    return text
 
 
 def _tools_to_anthropic(tools: list[dict]) -> list[dict]:
