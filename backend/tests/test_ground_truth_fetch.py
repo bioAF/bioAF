@@ -161,3 +161,26 @@ async def test_fetch_geo_candidates_now_offers_a_csaw_table():
     )
     assert [c["filename"] for c in cands] == [name]
     assert cands[0]["table_text"] == table
+
+
+def test_the_absolute_parent_link_is_not_read_as_a_filename():
+    """NCBI writes the parent link as an ABSOLUTE path, not as `../`, so the series accession itself
+    came back as a supplementary filename.
+
+    Measured on the real GSE273743 listing: the parser returned ['GSE273743', '..._csaw.csv.gz'].
+    Latent rather than live, because the phantom classifies as `other` and is filtered before any
+    fetch, but it is one classifier token away from sending a download at a directory URL.
+    """
+    html = (
+        '<a href="/geo/series/GSE273nnn/GSE273743/">Parent Directory</a>'
+        '<a href="GSE273743_csaw.dba_window.set.csv.gz">x</a>'
+    )
+    assert parse_dir_listing(html) == ["GSE273743_csaw.dba_window.set.csv.gz"]
+
+
+def test_one_listing_parser_serves_both_routes():
+    """The duplicate is what let the two drift: they were identical except for this exclusion. Same
+    consolidation `classify_supplementary_filename` got in a0d90761."""
+    from app.services.literature import deposit_inventory_service as deposit
+
+    assert parse_dir_listing is deposit.parse_dir_listing
