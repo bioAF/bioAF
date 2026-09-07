@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
-from app.services.literature.deposit_inventory_service import classify_deposit_filename
+from app.services.literature.deposit_inventory_service import classify_deposit_filename, parse_dir_listing
 from app.services.result_set_normalizer import normalize_gene_table, normalize_interval_table
 
 logger = logging.getLogger("bioaf.ground_truth_fetch")
@@ -71,17 +71,14 @@ def classify_supplementary_filename(name: str) -> str:
     return _DEPOSIT_TO_ASSIST.get(classify_deposit_filename(name), "other")
 
 
-def parse_dir_listing(html: str) -> list[str]:
-    """Extract supplementary filenames from an NCBI FTP-over-HTTP directory listing (href links),
-    excluding parent/self and absolute links."""
-    names: list[str] = []
-    for href in re.findall(r'href="([^"]+)"', html or ""):
-        if href in ("../", "./", "/") or href.startswith(("http://", "https://", "?", "#")):
-            continue
-        name = href.rstrip("/").split("/")[-1]
-        if name and name not in names:
-            names.append(name)
-    return names
+# Re-exported from the deposit route so ONE parser reads a GEO listing. The two copies were
+# identical except that this one did not exclude `/`-prefixed hrefs, and NCBI writes the parent link
+# as an absolute path: on the real GSE273743 listing that returned the series accession itself,
+# `GSE273743`, as a supplementary filename. Latent rather than live (the phantom classified as
+# `other` and was filtered before any fetch) but one token away from a download aimed at a directory.
+#
+# Same consolidation `classify_supplementary_filename` got: keeping a second copy is how the two
+# drifted apart in the first place.
 
 
 async def _http_fetch_text(url: str) -> str:
