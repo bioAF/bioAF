@@ -451,7 +451,7 @@ class ValidationDriverService:
 
     @staticmethod
     async def _handle_acquiring_processed(
-        session: AsyncSession, study: ValidationStudy, *, fetcher=None, storage_adapter=None
+        session: AsyncSession, study: ValidationStudy, *, fetcher=None, storage_adapter=None, inventory_fetcher=None
     ) -> bool:
         """plan_7 step 5: download the deposited files, decode them, and land them as Files.
 
@@ -478,6 +478,19 @@ class ValidationDriverService:
         blocker = evidence.get("deposit_unusable")
 
         selection = evidence.get("deposit_selection") or {}
+
+        # plan_7 step 11: nothing has chosen yet, so choose. Steps 1 and 2 built the inventory and
+        # the selection and NOTHING called them, which parked every approved deposit-route study
+        # here forever. This is that wire, and it mirrors `_handle_acquiring_data`'s first visit.
+        if not selection and not blocker:
+            proceed = await ValidationDriverService._choose_from_deposit(
+                session, study, evidence, fetcher=inventory_fetcher
+            )
+            if not proceed:
+                return False
+            selection = evidence.get("deposit_selection") or {}
+            blocker = evidence.get("deposit_unusable")
+
         wanted = list(selection.get("matrix_files") or [])
         if not wanted:
             if blocker:
@@ -682,6 +695,92 @@ class ValidationDriverService:
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "reproducing"
         )
+        return True
+
+    @staticmethod
+    async def _choose_from_deposit(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, *, fetcher=None
+    ) -> bool:
+        """plan_7 step 11: list what the study deposited and decide what to reproduce from.
+
+        Returns True when a selection now exists and the caller should fall through to the download,
+        False when the study holds (nothing listable, nothing usable, or a person's turn).
+
+        **In the driver, not in the approve endpoint.** Post-approval work belongs here: a GEO blip
+        must not fail an approval, this retries for free on the next tick, and the model is paid only
+        when the route is actually taken.
+        """
+        from dataclasses import asdict
+
+        from app.services.deposit_selection import deposit_blocker, select_deposit, selectable
+        from app.services.literature.deposit_inventory_service import list_deposit
+
+        accession = (study.source_accession or "").strip()
+        inventory = await list_deposit(accession, fetcher=fetcher)
+        if inventory.unavailable_reason:
+            return ValidationDriverService._hold_deposit(session, study, evidence, inventory.unavailable_reason)
+
+        entries = inventory.entries
+        # `deposit_blocker` names what IS deposited and why it cannot serve (GSE312719's nine
+        # pre-cell-calling matrices); the fallback covers a deposit whose files are simply not
+        # reproduction inputs at all.
+        reason = deposit_blocker(entries)
+        if not reason and not selectable(entries):
+            reason = (
+                f"GEO listed {len(entries)} supplementary file(s) for {accession}, none of which holds "
+                "per-feature values a differential test could read."
+            )
+        if reason:
+            evidence["deposit_unusable"] = reason
+            return ValidationDriverService._hold_deposit(session, study, evidence, reason)
+
+        # The inventory is kept whichever way the choice is made: in `assisted` it is the list the
+        # C1 gate shows a person, and in `autonomous` it is what the model chose FROM, which is part
+        # of the record (a choice among three files reads differently from one among thirty).
+        evidence["deposit_inventory"] = {
+            "accession": accession,
+            "source": inventory.source,
+            "listed_at": _now().isoformat(),
+            "entries": [asdict(e) for e in entries],
+            "triplets": inventory.triplets,
+        }
+        study.evidence_json = evidence
+
+        org = await session.get(Organization, study.organization_id)
+        autonomy = (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
+        if autonomy != AUTONOMY_AUTONOMOUS:
+            return False  # a person picks at the C1 gate
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            logger.warning("study %s is autonomous but the org has no LLM provider; the deposit pick waits", study.id)
+            return False
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        claim = (plan.finding_claim_json if plan else None) or {}
+        chosen = await select_deposit(
+            entries,
+            pipeline_key=plan.pipeline_key if plan else None,
+            kind=claim.get("kind"),
+            client=get_client(cfg.provider),
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
+        if chosen is None:
+            # The ask failed. Same direction the ratifier takes: hold where the assisted policy
+            # holds, so the gate can pick rather than a provider outage choosing the file.
+            return False
+
+        evidence["deposit_selection"] = chosen
+        if chosen.get("declined"):
+            # Looked and said no. A finding, and not the same as never having looked.
+            declined = chosen.get("reason") or "the model found nothing in this deposit worth reproducing from"
+            evidence["deposit_unusable"] = declined
+            return ValidationDriverService._hold_deposit(session, study, evidence, declined)
+
+        study.evidence_json = evidence
         return True
 
     @staticmethod
