@@ -289,6 +289,10 @@ class ValidationDriverService:
         # cannot inform the decision to approve. Two HTTP calls, no model, no compute.
         await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=bool(full_text))
 
+        # plan_7 step 14: the cheap checks, beside step 13 and for the same reason. The gate is
+        # pre-approval, so an answer produced after approval cannot inform the decision to approve.
+        await ValidationDriverService._run_precompute_checks(session, study, plan, full_text=full_text)
+
         classification = _early_exit_classification(plan)
         if classification is not None:
             # Record the "why" (the plan's blockers) before the terminal transition.
@@ -348,6 +352,84 @@ class ValidationDriverService:
             ],
         )
         return capabilities
+
+    @staticmethod
+    async def _run_precompute_checks(
+        session: AsyncSession, study: ValidationStudy, plan, *, full_text: str | None, fetcher=None
+    ) -> dict:
+        """plan_7 step 14: land the four pre-compute checks on ``evidence["precompute_checks"]``.
+
+        Two facts and two judgments. The facts are answered without a model, so a provider outage
+        cannot take the species hold with it. Never raises: these inform the gate, they do not gate
+        the read.
+        """
+        from app.services.validation_precompute_checks import run_precompute_checks
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            logger.info("study %s: no LLM provider, so the sufficiency judgments are unanswered", study.id)
+
+        evidence = dict(study.evidence_json or {})
+        sample_sheet = (plan.sample_sheet_json if plan else None) or {}
+        issues: list[dict] = []
+        try:
+            checks = await run_precompute_checks(
+                # The methods section is not separated out of the extraction, so the judgment reads
+                # the paper. A model asked "is the methods description detailed enough" over the
+                # whole text answers the same question; splitting the paper up here would be our
+                # guess at where the section starts.
+                methods_text=full_text or "",
+                samples_text=full_text or "",
+                plan_organism=sample_sheet.get("organism"),
+                deposit_organisms=await ValidationDriverService._deposit_organisms(study, fetcher=fetcher),
+                paper_sample_count=sample_sheet.get("sample_count"),
+                entries=await ValidationDriverService._deposit_entries(study, fetcher=fetcher),
+                client=get_client(cfg.provider) if cfg else None,
+                model=cfg.model if cfg else "",
+                api_key=cfg.api_key if cfg else None,
+                on_issue=issues.append,
+            )
+        except Exception as exc:  # noqa: BLE001 - the checks inform the gate; they cannot fail a read
+            logger.warning("pre-compute checks failed for study %s: %s", study.id, exc)
+            return {}
+
+        evidence["precompute_checks"] = checks
+        study.evidence_json = evidence
+        await session.flush()
+        await ValidationIssueService.record(session, study, issues)
+        return checks
+
+    @staticmethod
+    async def _deposit_organisms(study: ValidationStudy, *, fetcher=None) -> list[str]:
+        """What the DEPOSIT says its samples are, from the series matrix. Empty when unreachable.
+
+        The depositor's own controlled statement, which is the same authority ``library_strategy``
+        takes over a paper's prose when the two disagree.
+        """
+        from app.services.literature.accession_manifest_service import (
+            _http_fetch_text,
+            geo_series_matrix_url,
+            parse_series_organisms,
+        )
+
+        url = geo_series_matrix_url((study.source_accession or "").strip())
+        if not url:
+            return []
+        try:
+            return parse_series_organisms(await (fetcher or _http_fetch_text)(url))
+        except Exception as exc:  # noqa: BLE001 - an unreachable matrix leaves the check UNKNOWN
+            logger.info("study %s: could not read the deposit's declared organism: %s", study.id, exc)
+            return []
+
+    @staticmethod
+    async def _deposit_entries(study: ValidationStudy, *, fetcher=None) -> list:
+        """What the study deposited, for the sample-data check. Empty when unlistable."""
+        from app.services.literature.deposit_inventory_service import list_deposit
+
+        inventory = await list_deposit((study.source_accession or "").strip(), fetcher=fetcher)
+        return inventory.entries
 
     # ---- Execution half (background tick) ----
 

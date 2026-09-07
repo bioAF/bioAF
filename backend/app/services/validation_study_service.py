@@ -22,6 +22,7 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import VALIDATION_STUDY_ERROR
 from app.services.pipeline_mapper import deposit_conflict
+from app.services.validation_precompute_checks import species_hold
 from app.services.reproduction_plan_service import ReproductionPlanService
 
 logger = logging.getLogger("bioaf.validation_study")
@@ -389,6 +390,15 @@ class ValidationStudyService:
         if conflict and not (study.evidence_json or {}).get("deposit_override"):
             raise HTTPException(400, conflict["message"])
 
+        # plan_7 step 14: the OTHER blocker that refuses rather than advises, and the only one of the
+        # four pre-compute checks that does. A species mismatch is a string comparison, not an
+        # opinion, and it invalidates every number downstream: aligning mouse data to a human genome
+        # produces a confident wrong answer and costs hours before anyone can see it. The three
+        # sufficiency judgments are advisory and never stop a run.
+        hold = species_hold((study.evidence_json or {}).get("precompute_checks"))
+        if hold and not (study.evidence_json or {}).get("species_override"):
+            raise HTTPException(400, hold)
+
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
         # The person this study was waiting for has now decided.
@@ -470,6 +480,51 @@ class ValidationStudyService:
                 "pipeline_key": plan.pipeline_key if plan else None,
                 "library_strategy": conflict["library_strategy"],
             },
+        )
+        return study
+
+    @staticmethod
+    async def override_species_mismatch(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str
+    ) -> ValidationStudy:
+        """ "The deposit's annotation is wrong, run it anyway": the way past the species hold.
+
+        Mirrors the deposit override exactly, and for the same reason. The deposit is usually right,
+        which is why refusing is the default, but a depositor can annotate a series wrong and the
+        scientist's only other control would be Decline, which is terminal. So the way through exists
+        and costs something: a stated reason, recorded with who gave it, kept on the study so a
+        verdict that later diverges can be argued against the choice that produced it.
+        """
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if study.state != "plan_ready":
+            raise HTTPException(
+                400,
+                f"Cannot override the species check from '{study.state}'; the study must be in 'plan_ready'.",
+            )
+        if not (reason or "").strip():
+            raise HTTPException(400, "Say why the species mismatch should be overruled; the reason goes on the record.")
+
+        checks = (study.evidence_json or {}).get("precompute_checks")
+        if species_hold(checks) is None:
+            raise HTTPException(400, "This study's plan and its deposit do not disagree about the organism.")
+
+        study.evidence_json = {
+            **(study.evidence_json or {}),
+            "species_override": {
+                "by_user_id": user_id,
+                "at": datetime.now(timezone.utc).isoformat(),
+                "reason": reason.strip(),
+                "detail": (checks or {}).get("species_matches", {}).get("detail"),
+            },
+        }
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study_id,
+            action="species_mismatch_overridden",
+            details={"reason": reason.strip()},
         )
         return study
 

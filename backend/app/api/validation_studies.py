@@ -462,6 +462,27 @@ async def override_deposit(
     return await _study_response(session, study, org_id)
 
 
+@router.post("/{study_id}/override-species", response_model=ValidationStudyResponse)
+async def override_species(
+    study_id: int,
+    data: DepositOverrideRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """plan_7 step 14: "the deposit's annotation is wrong, run it anyway".
+
+    The way past the species hold, which is the one pre-compute check that refuses rather than
+    advises. Same shape as the deposit override it mirrors, including the required reason: a
+    one-click override becomes the default action, and then the guard means nothing."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.override_species_mismatch(
+        session, study_id, org_id, user_id, reason=data.reason
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
 @router.get("/{study_id}/finding-set/candidates")
 async def finding_set_candidates(
     study_id: int,
