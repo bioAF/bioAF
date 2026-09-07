@@ -39,10 +39,10 @@ export function ValidationStudyActions({
   const [error, setError] = useState<string | null>(null);
   const [fullText, setFullText] = useState("");
   const [declineReason, setDeclineReason] = useState("");
-  // plan_7 step 10. The route the approver chooses. `pipeline` is the historical behaviour and the
-  // default, and choosing it sends NO body, so the wire call for an unchanged gate is byte-identical
-  // to what it has always been.
-  const [route, setRoute] = useState<"pipeline" | "deposit">("pipeline");
+  // The route the approver chooses, asked in the confirm modal. `deposit` is the default on the
+  // owner's instruction (2026-09-07): start from what the authors deposited, and spend on raw reads
+  // only when a person asks for it.
+  const [route, setRoute] = useState<"deposit" | "pipeline" | "both">("deposit");
   const [classification, setClassification] = useState(() =>
     suggestedClassification && VALIDATION_CLASSIFICATIONS.some((c) => c.value === suggestedClassification)
       ? suggestedClassification
@@ -128,44 +128,8 @@ export function ValidationStudyActions({
             Decline
           </button>
         </div>
-        <fieldset className="rounded border border-gray-200 p-3">
-          <legend className="px-1 text-xs font-medium text-gray-700">What to reproduce from</legend>
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name="validation-route"
-              className="mt-1"
-              checked={route === "pipeline"}
-              onChange={() => setRoute("pipeline")}
-            />
-            <span>
-              <span className="font-medium">Raw reads</span>
-              <span className="block text-xs text-gray-500">
-                Fetches the sequencing reads and re-runs the whole analysis. Takes hours and spends
-                cloud compute. Tests the entire processing chain.
-              </span>
-            </span>
-          </label>
-          <label className="mt-2 flex items-start gap-2 text-sm">
-            <input
-              type="radio"
-              name="validation-route"
-              className="mt-1"
-              checked={route === "deposit"}
-              onChange={() => setRoute("deposit")}
-            />
-            <span>
-              <span className="font-medium">Deposited data</span>
-              <span className="block text-xs text-gray-500">
-                Starts from the processed data the authors published. Takes minutes and spends no
-                pipeline compute, but tests the analysis, not the processing: it cannot detect a
-                processing error, a swapped sample or a contaminated library.
-              </span>
-            </span>
-          </label>
-        </fieldset>
         <p className="text-xs text-gray-500">
-          Approving spends compute: it fetches the data and runs the reproduction pipeline.
+          Approving asks what to validate: the deposited data (minutes) or the raw reads (hours).
         </p>
         {study.evidence?.awaiting_refetch_approval && (
           <p className="text-xs text-amber-800">
@@ -177,29 +141,86 @@ export function ValidationStudyActions({
           open={showApprove}
           title="Approve this plan?"
           message={
-            <>
-              <p>
-                This fetches the data behind the paper and runs the reproduction pipeline on it.
-                That spends compute on your cloud account, and the spend cannot be
-                recovered once the run starts.
-              </p>
-              {study.evidence?.awaiting_refetch_approval && (
-                <p>
+            <div className="space-y-3">
+              <p>Choose what to validate. The two routes answer different questions.</p>
+
+              <label className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="validation-route"
+                  className="mt-1"
+                  checked={route === "deposit"}
+                  onChange={() => setRoute("deposit")}
+                />
+                <span>
+                  <span className="font-medium">Deposited data and available code</span>
+                  <span className="block text-xs text-gray-600">
+                    Reproduces the paper&apos;s analysis from the processed data it deposited in GEO,
+                    using the study&apos;s own differential design. Validates the computational
+                    findings. Takes minutes. It cannot detect a processing error, a swapped sample or
+                    a contaminated library, because the upstream processing is not repeated.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="validation-route"
+                  className="mt-1"
+                  checked={route === "pipeline"}
+                  onChange={() => setRoute("pipeline")}
+                />
+                <span>
+                  <span className="font-medium">Raw reads</span>
+                  <span className="block text-xs text-gray-600">
+                    Fetches the sequencing reads and re-runs the whole analysis. Validates the
+                    pre-processing and sample quality. Takes hours.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-2">
+                <input
+                  type="radio"
+                  name="validation-route"
+                  className="mt-1"
+                  checked={route === "both"}
+                  onChange={() => setRoute("both")}
+                />
+                <span>
+                  <span className="font-medium">Both</span>
+                  <span className="block text-xs text-gray-600">
+                    Runs each route as its own study, so each carries its own verdict. The deposited
+                    run starts now; the raw-reads run starts alongside it.
+                  </span>
+                </span>
+              </label>
+
+              {route !== "deposit" && (
+                <p className="text-xs text-amber-800">
+                  The raw-reads route spends compute on your cloud account, and the spend cannot be
+                  recovered once the run starts.
+                </p>
+              )}
+              {study.evidence?.awaiting_refetch_approval && route !== "deposit" && (
+                <p className="text-xs text-amber-800">
                   This study has run before. The data it downloaded is no longer here, so this
                   downloads it again.
                 </p>
               )}
-              <p>The study stays held until you approve, so nothing has been charged yet.</p>
-            </>
+              <p className="text-xs text-gray-500">
+                The study stays held until you approve, so nothing has been charged yet.
+              </p>
+            </div>
           }
           confirmLabel="Approve and run"
           busy={busy}
           onConfirm={() => {
             setShowApprove(false);
-            // Only send a body when the route was actually changed: the endpoint already defaults
-            // to the pipeline route, so sending nothing IS choosing it, and the existing wire
-            // contract stays exactly as it was.
-            run(() => api.post(`${base}/approve`, route === "deposit" ? { route } : undefined));
+            // ALWAYS send the route. The server has a default, but a caller that relies on it is
+            // one default-flip away from silently spending hours of compute it did not ask for.
+            run(() => api.post(`${base}/approve`, { route }));
           }}
           onCancel={() => setShowApprove(false)}
         />

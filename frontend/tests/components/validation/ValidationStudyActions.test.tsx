@@ -40,7 +40,9 @@ describe("ValidationStudyActions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /approve and run/i }));
 
-    await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/3/approve", undefined));
+    await waitFor(() => // The gate now always states the route (it used to send no body and lean on the server
+  // default). Default is `deposit`: start from what the authors deposited.
+  expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/3/approve", { route: "deposit" }));
     expect(onChanged).toHaveBeenCalled();
   });
 

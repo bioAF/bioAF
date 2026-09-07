@@ -29,15 +29,20 @@ class DeclineRequest(BaseModel):
 class ApproveRequest(BaseModel):
     """C1 gate approval, carrying the route the scientist chose.
 
-    `pipeline` is the historical behaviour and the default, so an approval that says nothing about
-    the route spends compute exactly as it always did. `deposit` starts from the pre-processed data
-    the authors published: minutes instead of hours, and it tests the analysis rather than the whole
-    processing chain (see the route qualifier on the verdict).
+    `deposit` is the DEFAULT (owner's instruction, 2026-09-07): start from the pre-processed data the
+    authors published, and spend on raw reads only when a person asks for it. Minutes instead of
+    hours, and it tests the analysis rather than the whole processing chain.
 
-    Literal rather than str: a typo must not fall through to the route that spends hours of compute.
+    `pipeline` re-runs the paper from its raw reads: hours and real cloud compute, and it is the only
+    route that tests the processing itself.
+
+    `both` runs each as its OWN study. A study carries one state and one classification, so "both"
+    cannot be a single study; the two also answer different questions and deserve separate verdicts.
+
+    Literal rather than str: a typo must not silently pick a route, in either direction.
     """
 
-    route: Literal["pipeline", "deposit"] = "pipeline"
+    route: Literal["deposit", "pipeline", "both"] = "deposit"
 
 
 class DepositOverrideRequest(BaseModel):

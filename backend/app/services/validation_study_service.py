@@ -291,20 +291,86 @@ class ValidationStudyService:
         return study
 
     @staticmethod
+    async def _spawn_sibling(session: AsyncSession, study: ValidationStudy, user_id: int) -> ValidationStudy:
+        """A second study over the same paper, approved onto the RAW READS route.
+
+        Its plan is copied, not re-extracted: the paper has already been read and a second LLM call
+        would cost money to produce the same answer. Each study names the other, so neither reads as
+        an orphan duplicate in the list.
+        """
+        from app.models.reproduction_plan import ReproductionPlan
+
+        sibling = ValidationStudy(
+            organization_id=study.organization_id,
+            paper_id=study.paper_id,
+            source_doi=study.source_doi,
+            source_accession=study.source_accession,
+            requested_by_user_id=study.requested_by_user_id,
+            approved_by_user_id=user_id,
+            approved_at=datetime.now(timezone.utc),
+            state="acquiring_data",
+            evidence_json={"route": "pipeline", "sibling_study_id": study.id},
+        )
+        session.add(sibling)
+        await session.flush()
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        if plan is not None:
+            copy = ReproductionPlan(
+                validation_study_id=sibling.id,
+                accessions_json=plan.accessions_json,
+                sample_sheet_json=plan.sample_sheet_json,
+                pipeline_key=plan.pipeline_key,
+                pipeline_version=plan.pipeline_version,
+                parameters_json=plan.parameters_json,
+                differential_design_json=plan.differential_design_json,
+                finding_claim_json=plan.finding_claim_json,
+                tools_json=plan.tools_json,
+                code_availability_json=plan.code_availability_json,
+                library_strategy=plan.library_strategy,
+                reference_genome=plan.reference_genome,
+                reference_build=plan.reference_build,
+                mapping_confidence=plan.mapping_confidence,
+                mapping_notes=plan.mapping_notes,
+                blockers_json=plan.blockers_json,
+                extractor_model=plan.extractor_model,
+                extractor_provider=plan.extractor_provider,
+            )
+            session.add(copy)
+            await session.flush()
+            sibling.reproduction_plan_id = copy.id
+            await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=sibling.id,
+            action="create",
+            details={"spawned_from": study.id, "route": "pipeline", "reason": "approved with route=both"},
+        )
+        return sibling
+
+    @staticmethod
     async def approve_plan(
-        session: AsyncSession, study_id: int, org_id: int, user_id: int, *, route: str = "pipeline"
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, *, route: str = "deposit"
     ) -> ValidationStudy:
         """C1 gate: ratify the plan and start the chosen route, stamping the approver.
 
-        ``pipeline`` (the default) advances to ``acquiring_data`` and re-runs the paper from its raw
-        reads, which is the historical behaviour. ``deposit`` advances to ``acquiring_processed`` and
-        starts from the pre-processed data the authors published.
+        ``deposit`` (the default) advances to ``acquiring_processed`` and starts from the
+        pre-processed data the authors published. ``pipeline`` advances to ``acquiring_data`` and
+        re-runs the paper from its raw reads, which costs hours and real compute.
+
+        ``both`` approves THIS study on the deposit route and spawns a sibling on the pipeline route.
+        A study carries one state and one classification, so both cannot be one study, and the two
+        answer different questions anyway: the deposit route tests the authors' analysis, the raw
+        route tests their processing.
 
         The route is recorded on the study's evidence rather than on the plan, because it is a
         property of THIS attempt: the same plan can be tried both ways.
         """
         study = await ValidationStudyService._load(session, study_id, org_id)
-        target = "acquiring_processed" if route == "deposit" else "acquiring_data"
+        target = "acquiring_data" if route == "pipeline" else "acquiring_processed"
         if not can_transition(study.state, target):
             raise HTTPException(
                 400,
@@ -330,7 +396,13 @@ class ValidationStudyService:
         evidence.pop("awaiting_refetch_approval", None)
         # Recorded on BOTH routes, so a verdict can always say which kind of validation produced it
         # instead of inferring it from an absence.
-        evidence["route"] = "deposit" if route == "deposit" else "pipeline"
+        evidence["route"] = "pipeline" if route == "pipeline" else "deposit"
+
+        # `both`: the sibling reuses this study's PLAN rather than re-reading the paper. Same paper,
+        # same extraction, and a second LLM read would spend money to produce a plan we already have.
+        if route == "both":
+            sibling = await ValidationStudyService._spawn_sibling(session, study, user_id)
+            evidence["sibling_study_id"] = sibling.id
         study.evidence_json = evidence
         old_state = study.state
         study.state = target

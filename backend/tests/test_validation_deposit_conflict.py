@@ -150,7 +150,7 @@ class TestUsingThePipelineTheDepositNames:
         study, _ = await _conflicted(session, admin_user)
         await ReproductionPlanService.use_deposit_pipeline(session, study.id, admin_user.organization_id, admin_user.id)
         approved = await ValidationStudyService.approve_plan(
-            session, study.id, admin_user.organization_id, admin_user.id
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
         )
         assert approved.state == "acquiring_data"
 
@@ -196,7 +196,9 @@ class TestRunningItAnyway:
     async def test_approving_is_refused_while_the_conflict_stands(self, session, admin_user):
         study, _ = await _conflicted(session, admin_user)
         with pytest.raises(HTTPException) as ei:
-            await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+            await ValidationStudyService.approve_plan(
+                session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+            )
         assert ei.value.status_code == 400
 
     @pytest.mark.asyncio
@@ -221,7 +223,7 @@ class TestRunningItAnyway:
             session, study.id, admin_user.organization_id, admin_user.id, reason="deposit is mislabelled"
         )
         approved = await ValidationStudyService.approve_plan(
-            session, study.id, admin_user.organization_id, admin_user.id
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
         )
         assert approved.state == "acquiring_data"
 
@@ -251,7 +253,7 @@ class TestRunningItAnyway:
             session, study.id, admin_user.organization_id, admin_user.id, reason="deposit is mislabelled"
         )
         approved = await ValidationStudyService.approve_plan(
-            session, study.id, admin_user.organization_id, admin_user.id
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
         )
         assert (approved.evidence_json or {})["deposit_override"]["reason"] == "deposit is mislabelled"
 

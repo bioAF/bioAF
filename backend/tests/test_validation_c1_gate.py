@@ -27,7 +27,9 @@ async def _study_at_plan_ready(session, admin_user):
 @pytest.mark.asyncio
 async def test_approve_plan_advances_to_acquiring_data_and_stamps_approver(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
-    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+    approved = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+    )
     await session.commit()
     assert approved.state == "acquiring_data"
     assert approved.approved_by_user_id == admin_user.id
@@ -39,7 +41,9 @@ async def test_approve_plan_rejected_when_not_in_plan_ready(session, admin_user)
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.commit()  # still in 'requested'
     with pytest.raises(HTTPException) as ei:
-        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+        )
     assert ei.value.status_code == 400
     assert "plan_ready" in ei.value.detail
 
@@ -208,7 +212,9 @@ async def test_approving_a_plan_the_deposit_contradicts_is_refused(session, admi
     study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
 
     with pytest.raises(HTTPException) as ei:
-        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+        )
 
     assert ei.value.status_code == 400
     # Names both sides, so the refusal is actionable rather than merely a stop.
@@ -222,7 +228,9 @@ async def test_a_refused_approval_leaves_the_study_at_the_gate(session, admin_us
     study = await _study_with_plan(session, admin_user, pipeline_key="nf-core/atacseq", blockers=[conflict])
 
     with pytest.raises(HTTPException):
-        await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+        )
 
     assert study.state == "plan_ready"
     assert study.approved_by_user_id is None
@@ -251,12 +259,16 @@ async def test_an_ordinary_blocker_never_blocks_approval(session, admin_user):
         blockers=["could not map the paper's reference genome 'hg18' to a known assembly"],
     )
 
-    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+    approved = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+    )
     assert approved.state == "acquiring_data"
 
 
 @pytest.mark.asyncio
 async def test_a_study_with_no_plan_at_all_still_approves(session, admin_user):
     study = await _study_at_plan_ready(session, admin_user)
-    approved = await ValidationStudyService.approve_plan(session, study.id, admin_user.organization_id, admin_user.id)
+    approved = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
+    )
     assert approved.state == "acquiring_data"
