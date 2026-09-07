@@ -416,7 +416,16 @@ async def test_reentry_does_not_download_twice(session, deposit_study):
 @pytest.mark.asyncio
 async def test_a_study_with_no_selection_holds_for_the_gate(session, admin_user):
     """Assisted mode reaches acquiring_processed with nothing chosen yet. That is a wait, not a
-    failure."""
+    failure.
+
+    The GEO listing boundary is faked because step 11 wired the inventory into this handler: with
+    no selection on the evidence the driver now lists the deposit first, and an un-injected fetcher
+    would reach NCBI from a unit test. The behaviour asserted here is unchanged.
+    """
+
+    async def _no_listing(url: str) -> str:
+        raise RuntimeError("GEO not reachable from a unit test")
+
     study = ValidationStudy(
         organization_id=admin_user.organization_id,
         requested_by_user_id=admin_user.id,
@@ -427,7 +436,7 @@ async def test_a_study_with_no_selection_holds_for_the_gate(session, admin_user)
     session.add(study)
     await session.flush()
     await ValidationDriverService._handle_acquiring_processed(
-        session, study, fetcher=_bytes_fetcher({}), storage_adapter=_FakeStorage()
+        session, study, fetcher=_bytes_fetcher({}), storage_adapter=_FakeStorage(), inventory_fetcher=_no_listing
     )
     assert study.state == "acquiring_processed"
 
