@@ -114,7 +114,10 @@ class TestOpenAiRefusal:
     @pytest.mark.asyncio
     async def test_an_explicit_refusal_field_is_a_refusal(self, monkeypatch, no_sleep):
         rec = _Recorder(
-            _json(200, {"choices": [{"message": {"content": None, "refusal": "I won't do that"}, "finish_reason": "stop"}]})
+            _json(
+                200,
+                {"choices": [{"message": {"content": None, "refusal": "I won't do that"}, "finish_reason": "stop"}]},
+            )
         )
         _patch_transport(monkeypatch, openai_client, rec)
         with pytest.raises(ProviderError) as e:
