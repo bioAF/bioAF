@@ -42,6 +42,11 @@ _ENA_FIELDS = (
     "sample_title",
     "experiment_title",
     "library_strategy",
+    # plan_7 step 13. Run rows alone only prove the runs are REGISTERED. Measured live on GSE96583
+    # (2026-09-07): ENA returns rows and a read count with zero fastq bytes, because that study
+    # deposits 10x BAMs rather than FASTQ. "Raw sample data available" has to mean fastq bytes exist,
+    # or the checklist says YES for a study nothing can fetch.
+    "fastq_bytes",
 )
 _GEO_FTP = "https://ftp.ncbi.nlm.nih.gov/geo/series"
 _TIMEOUT = httpx.Timeout(30.0)

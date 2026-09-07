@@ -108,3 +108,26 @@ def test_the_kind_is_corrected_from_the_url(url, expected_kind):
     Same precedence the depositor's Type takes over a filename in step 1."""
     out = parse_code_availability([{"kind": "supplementary", "url": url}])
     assert out[0]["kind"] == expected_kind
+
+
+def test_the_extraction_actually_carries_the_field_through():
+    """The defect step 13 found: `parse_extraction` returned a fixed dict that never included
+    `code_availability`, so `extract`'s `parsed.get("code_availability")` was always None and the
+    column shipped empty for every study. The prompt asked for it, the column existed, and the
+    parser dropped it on the floor between them.
+    """
+    from app.services.validation_extraction_service import parse_extraction
+
+    parsed = parse_extraction(
+        '```json\n{"accessions": ["GSE1"], '
+        '"code_availability": [{"kind": "github", "url": "https://github.com/lab/paper"}]}\n```'
+    )
+    assert parsed["code_availability"] == [{"kind": "github", "url": "https://github.com/lab/paper"}]
+
+
+def test_a_paper_naming_no_code_is_an_empty_list_not_a_missing_key():
+    """`[]` is "we read the paper and it named none"; the absence of the key would be "we never
+    asked", and step 13 renders those as NO and UNKNOWN respectively."""
+    from app.services.validation_extraction_service import parse_extraction
+
+    assert parse_extraction('```json\n{"accessions": []}\n```')["code_availability"] == []
