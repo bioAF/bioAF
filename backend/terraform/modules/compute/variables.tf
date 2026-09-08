@@ -120,3 +120,10 @@ variable "gke_default_pool_zone" {
   default     = ""
   description = "Zone selected by the pre-flight capacity probe for the throwaway default node pool. When set, the cluster's top-level node_locations is constrained to this single zone so cluster bootstrap is not blocked by a per-zone GCE stockout on the implicit e2-medium default pool. The real node pools (system/pipelines/interactive/pipeline_head) set their own node_locations and remain multi-zone. Empty default is backward-compatible: GKE falls back to placing the default pool in all zones of the region (today's behaviour)."
 }
+
+# plan_7 step 16a: the one bucket the untrusted-execution identity can reach. Passed in from the
+# storage module rather than derived, so the binding and the bucket cannot drift apart.
+variable "untrusted_bucket_name" {
+  description = "Name of the untrusted-execution GCS bucket (plan_7 step 16a)"
+  type        = string
+}

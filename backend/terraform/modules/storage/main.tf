@@ -100,6 +100,37 @@ resource "google_storage_bucket" "results" {
   }
 }
 
+# plan_7 step 16a: the ONE place untrusted code can write.
+#
+# Step 17 runs code fetched from a paper's authors. The existing notebook runner holds project-wide
+# `roles/storage.objectAdmin`, so anything in that pod can delete this project's backups and its
+# terraform state. Scoping it to `bioaf-` (Tier 1) is the right fix for code we WROTE and is not
+# sufficient here, because `bioaf-backups-*` and `bioaf-tfstate-*` share that prefix.
+#
+# This bucket exists so the untrusted identity can hold a bucket-level grant and nothing else. The
+# lifecycle rule is not tidiness: an abandoned run would otherwise accumulate cost in the one bucket
+# whose contents nobody is watching.
+resource "google_storage_bucket" "untrusted" {
+  name          = "${local.bucket_prefix}-untrusted-${var.org_slug}-${var.stack_uid}"
+  project       = var.project_id
+  location      = var.region
+  storage_class = "STANDARD"
+
+  uniform_bucket_level_access = true
+  # No versioning: a version history of a stranger's intermediate output is cost with no reader.
+  force_destroy = false
+
+  lifecycle_rule {
+    condition { age = 7 }
+    action { type = "Delete" }
+  }
+
+  labels = {
+    managed_by = "bioaf"
+    purpose    = "untrusted-execution"
+  }
+}
+
 # Reference data bucket: backing store for ReferenceDataset rows. Per
 # spec-reference-data-ingest §1, browsers PUT chunks directly via GCS
 # resumable session URLs returned by ReferenceDataService.init_upload.

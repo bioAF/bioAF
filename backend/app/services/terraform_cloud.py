@@ -146,6 +146,16 @@ class AwsTerraformCloud(TerraformCloud):
             if compute_suffix:
                 tfvars["stack_uid"] = compute_suffix
             tfvars["account_id"] = config.get("aws_account_id") or ""
+            # plan_7 step 16a: the one bucket the untrusted-execution role may reach, named the way
+            # the storage module names it so the policy and the bucket cannot drift apart. Omitted
+            # when there is no suffix to name it from, so the module's own "" default applies rather
+            # than a policy pointing at a bucket that cannot exist.
+            storage_uid = config.get("storage_stack_uid") or deploy_suffix
+            untrusted_bucket = config.get("untrusted_bucket_name") or (
+                f"bioaf-untrusted-{org_slug}-{storage_uid}" if storage_uid else ""
+            )
+            if untrusted_bucket:
+                tfvars["untrusted_bucket_name"] = untrusted_bucket
             app_role_arn = config.get("aws_app_role_arn")
             if app_role_arn:
                 tfvars["app_role_arn"] = app_role_arn

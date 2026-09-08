@@ -13,6 +13,11 @@ output "working_bucket_name" {
   value       = google_storage_bucket.working.name
 }
 
+output "untrusted_bucket_name" {
+  description = "Name of the untrusted-execution GCS bucket (plan_7 step 16a)"
+  value       = google_storage_bucket.untrusted.name
+}
+
 output "results_bucket_name" {
   description = "Name of the results GCS bucket"
   value       = google_storage_bucket.results.name

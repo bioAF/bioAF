@@ -104,6 +104,10 @@ class TestAwsTerraformCloud:
             "account_id": "123456789012",
             "app_role_arn": "arn:aws:iam::123456789012:role/bioaf-app",
         }
+        # plan_7 step 16a: the untrusted bucket belongs to the STORAGE stack, so it is named from
+        # that suffix and omitted when only the compute suffix is known. Naming it from the compute
+        # suffix would produce a policy pointing at a bucket that does not exist.
+        assert "untrusted_bucket_name" not in tf
 
     def test_write_tfvars_compute_omits_optional_when_absent(self, tmp_path):
         # No app role / account / suffix -> the module's own defaults apply, and

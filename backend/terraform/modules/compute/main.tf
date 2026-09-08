@@ -398,10 +398,65 @@ resource "google_service_account" "notebook_runner" {
   description  = "GCP service account for notebook session pods (Workload Identity)"
 }
 
+# plan_7 step 16a, Tier 1: bring GCP to the parity AWS already has.
+#
+# This grant was project-wide, so a notebook pod could read, overwrite and DELETE any object in any
+# bucket in the project, including `backups`, `config-backups` and `tfstate`. The exposure is the
+# CREDENTIAL, not the node: Workload Identity means the pod does not use the node's SA.
+#
+# The condition is the idiom `install-gcp.sh` already uses for `bioaf-app`, and the AWS module has
+# scoped its own notebook runner by ARN since it was written, with a comment naming this condition
+# as the thing it mirrors. The two had diverged, and terraform (not the installers) is where the
+# grant comes from, so a fresh install got the over-grant too.
+#
+# This is a real tightening for the CURATED templates. It is NOT sufficient for untrusted code:
+# `bioaf-backups-*` and `bioaf-tfstate-*` share the prefix. That is what the untrusted runner below
+# exists for.
 resource "google_project_iam_member" "notebook_runner_storage" {
   project = var.project_id
   role    = "roles/storage.objectAdmin"
   member  = "serviceAccount:${google_service_account.notebook_runner.email}"
+
+  condition {
+    title       = "bioaf_buckets_only"
+    description = "Objects in bioAF-owned buckets only"
+    expression  = "resource.name.startsWith(\"projects/_/buckets/bioaf-\")"
+  }
+}
+
+# --- plan_7 step 16a, Tier 2: a separate identity for untrusted execution ------
+#
+# Step 17 installs and runs code fetched from a paper's authors. Running it as `notebook_runner`
+# would hand a stranger's code delete access to every bioAF bucket, so it gets its own identity
+# with NO project-level role at all: one bucket-level binding on one dedicated bucket, in its own
+# namespace. `notebook_execution_service`'s `is_builtin` gate is relaxed only for THIS identity;
+# the existing boundary is preserved, not deleted.
+#
+# The honest gap, stated rather than implied: `objectAdmin` on a shared untrusted bucket means
+# study A's code can reach study B's prefix. For a single-tenant lab instance that is acceptable;
+# for a shared deployment it is the point at which Tier 3 (no identity in the pod, signed URLs)
+# stops being optional.
+
+resource "google_service_account" "untrusted_runner" {
+  project      = var.project_id
+  account_id   = "bioaf-untrusted-runner"
+  display_name = "bioAF Untrusted Code Runner"
+  description  = "GCP service account for pods executing code fetched from a paper (plan_7 step 17)"
+}
+
+resource "google_storage_bucket_iam_member" "untrusted_runner_bucket" {
+  bucket = var.untrusted_bucket_name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.untrusted_runner.email}"
+}
+
+resource "google_service_account_iam_member" "untrusted_runner_workload_identity" {
+  service_account_id = google_service_account.untrusted_runner.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[bioaf-untrusted/bioaf-untrusted-runner]"
+
+  # Same asynchronous-pool race the notebook runner's binding documents below.
+  depends_on = [google_container_cluster.primary]
 }
 
 resource "google_service_account_iam_member" "notebook_runner_workload_identity" {

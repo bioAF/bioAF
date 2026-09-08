@@ -31,6 +31,11 @@ locals {
     references     = { purpose = "references" }
     literature     = { purpose = "literature" }
     config_backups = { purpose = "config-backups" }
+    # plan_7 step 16a: the ONE place code fetched from a paper's authors can write. The GCS mirror
+    # of this bucket carries the same rationale at length; the short version is that scoping the
+    # runner to `bioaf-*` is right for code we wrote and insufficient for code we fetched, because
+    # `bioaf-backups-*` shares that prefix.
+    untrusted = { purpose = "untrusted-execution" }
   }
 
   bucket_names = {

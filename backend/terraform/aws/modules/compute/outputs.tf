@@ -90,3 +90,10 @@ output "work_node_instance_profile" {
   value       = aws_iam_instance_profile.work_node.name
   description = "IAM instance profile (S3 access) attached to work-node EC2 instances."
 }
+
+# plan_7 step 16a: the AWS mirror of the untrusted-execution identity, so the two providers do not
+# diverge the way they already did on the notebook runner.
+output "untrusted_runner_role_arn" {
+  description = "ARN of the untrusted-execution IRSA role"
+  value       = aws_iam_role.untrusted_runner.arn
+}
