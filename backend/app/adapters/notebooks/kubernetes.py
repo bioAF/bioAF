@@ -91,6 +91,101 @@ def namespace_for(session_spec: dict) -> str:
     return requested if requested in _ALLOWED_NAMESPACES else DEFAULT_NOTEBOOK_NAMESPACE
 
 
+# plan_7 step 17: how a fetched analysis is actually run.
+#
+# The checkout lives at /work and the results at /outputs, kept apart on purpose: the repository's
+# own files are not results, and syncing the checkout back would fill the bucket with the paper's
+# source instead of its findings.
+_FETCHED_CODE_DIR = "/work"
+
+# How to run each kind of entry point. A published analysis is an R script, a Python script or a
+# notebook; anything else is run through the shell as the authors presumably intended.
+_INTERPRETERS = (
+    (".r", "Rscript"),
+    (".rmd", 'Rscript -e "rmarkdown::render(commandArgs(TRUE)[1])"'),
+    (".py", "python"),
+    (".sh", "sh"),
+)
+
+
+def build_fetched_code_script(fetched: dict, *, copy_in: str, auth: str, timeout_seconds: int) -> str:
+    """The shell the pod runs to install and execute a paper's own analysis.
+
+    **Failure is the RESULT.** The whole thing runs under one transcript at ``/outputs``, and the
+    transcript is written whatever happens: a repository whose dependencies will not install is a
+    real finding about that paper, and it is only a finding if the log survives to be read. So the
+    script deliberately does NOT `set -e`; each step reports and continues to the next.
+
+    Dependencies install the ordinary way, over the network, because that is what a notebook session
+    does. The isolation is the identity (step 16a), not a severed network.
+    """
+    entry = str(fetched.get("entry_point") or "").strip()
+    safe = _safe_entry_point(entry)
+    if safe is None:
+        raise ValidationError(f"'{entry}' is not a path inside the fetched code, so there is nothing safe to run")
+
+    uri = str(fetched.get("code_uri") or "").strip()
+    arguments = str(fetched.get("arguments") or "").strip()
+    lowered = safe.lower()
+    if lowered.endswith(".ipynb"):
+        run = (
+            f"jupyter nbconvert --to notebook --execute --output /outputs/executed.ipynb "
+            f"--ExecutePreprocessor.timeout={timeout_seconds} '{safe}'"
+        )
+    else:
+        interpreter = next((cmd for suffix, cmd in _INTERPRETERS if lowered.endswith(suffix)), "sh")
+        run = f"{interpreter} '{safe}' {arguments}".strip()
+
+    log = "/outputs/transcript.txt"
+    return " ".join(
+        [
+            f"mkdir -p /outputs {_FETCHED_CODE_DIR} &&",
+            f"cd {_FETCHED_CODE_DIR} &&",
+            # From here on nothing aborts: every step appends to the transcript and the next one
+            # runs, so a failure is reported rather than losing the log that explains it.
+            "set +e;",
+            f"{{ {auth or 'true'}; }} >> {log} 2>&1;",
+            f"echo '== fetching the published code ==' >> {log} 2>&1;",
+            f"{{ {copy_in.format(uri=uri, local=_FETCHED_CODE_DIR + '/code.archive')}; }} >> {log} 2>&1;",
+            f"echo '== unpacking ==' >> {log} 2>&1;",
+            # Three shapes: a gzipped tar (GitHub's tarball and most supplementary archives), a zip
+            # (the journal shape), and a bare script published on its own.
+            "{ tar xzf code.archive --strip-components=1 2>/dev/null "
+            "|| tar xf code.archive --strip-components=1 2>/dev/null "
+            "|| unzip -o code.archive 2>/dev/null "
+            f"|| cp code.archive '{safe}'; }} >> {log} 2>&1;",
+            f"echo '== installing dependencies ==' >> {log} 2>&1;",
+            f"{{ [ -f renv.lock ] && Rscript -e 'renv::restore(prompt=FALSE)'; }} >> {log} 2>&1;",
+            f"{{ [ -f requirements.txt ] && pip install -r requirements.txt; }} >> {log} 2>&1;",
+            f"{{ [ -f environment.yml ] && conda env update -f environment.yml; }} >> {log} 2>&1;",
+            f"echo '== running {safe} ==' >> {log} 2>&1;",
+            # Capped, so a hang becomes an outcome with a reason rather than a study that ticks
+            # forever. The exit status is recorded because the driver classifies from it.
+            f"timeout {int(timeout_seconds)} {run} >> {log} 2>&1;",
+            f'echo "== exit status $? ==" >> {log} 2>&1;',
+            # Anything the run left beside the outputs directory is still its output.
+            f"cp -r {_FETCHED_CODE_DIR}/results/* /outputs/ 2>/dev/null || true",
+        ]
+    )
+
+
+def _safe_entry_point(entry: str) -> str | None:
+    """The entry point as a path inside the checkout, or None when it climbs out of it.
+
+    The entry point is a model's reading of a file listing. A path that escapes would run something
+    we never fetched, which is the one thing an isolated identity does not protect against.
+    """
+    import posixpath
+
+    raw = (entry or "").strip().replace("\\", "/")
+    if not raw or raw.startswith("/") or ":" in raw.split("/", 1)[0]:
+        return None
+    normalized = posixpath.normpath(raw)
+    if normalized in (".", "..") or normalized.startswith("../"):
+        return None
+    return normalized
+
+
 HOME_DIR = "/home/jovyan"
 
 
@@ -344,6 +439,60 @@ class KubernetesNotebookProvider(NotebookProvider):
         logger.info("Created role binding in %s", namespace)
         self._namespaces_ready.add(namespace)
 
+    def _headless_command(self, session_spec: dict) -> list[str]:
+        """What a headless pod runs: a curated template notebook, or a paper's own fetched code.
+
+        Two inputs, deliberately separate. `notebook_json` is the template arm's, already
+        parameterized; `fetched_code` is step 17's, and a fetched repository has no notebook at all.
+        The branch that required `notebook_json` unconditionally is why every fetched-code launch
+        would have failed at this boundary.
+        """
+        import base64
+        import json as _json
+
+        fetched = session_spec.get("fetched_code")
+        if fetched:
+            from app.adapters.registry import get_storage_adapter
+
+            # The same mounted key path the sync sidecar uses. On S3 the auth command is empty:
+            # IRSA authenticates ambiently, which is why the script tolerates a blank auth step.
+            storage = get_storage_adapter()
+            return [
+                "/bin/sh",
+                "-c",
+                build_fetched_code_script(
+                    fetched,
+                    copy_in=storage.cli_copy_in("{uri}", "{local}"),
+                    auth=storage.cli_auth_command("/secrets/gcp/key.json"),
+                    timeout_seconds=int(session_spec.get("timeout_seconds", 3600)),
+                ),
+            ]
+
+        notebook_json = session_spec.get("notebook_json")
+        if notebook_json is None:
+            raise ValidationError(
+                "headless execution requires notebook_json (a curated template) or fetched_code "
+                "(a paper's own analysis) in the session spec"
+            )
+        # Run the injected, already-parameterized notebook to completion with nbconvert, writing any
+        # result files to /outputs, then exit. Completion is detected off THIS container's terminated
+        # state (the gcs-sync sidecar keeps the pod phase Running), and terminate_session syncs
+        # /outputs the same way it does for interactive sessions. The kernel is whatever the template
+        # declares (IRkernel for the R DE/DA templates; python3 otherwise).
+        nb_b64 = base64.b64encode(_json.dumps(notebook_json).encode()).decode()
+        cell_timeout = int(session_spec.get("cell_timeout_seconds", 3600))
+        return [
+            "/bin/sh",
+            "-c",
+            (
+                "set -e && mkdir -p /outputs /tmp/exec && cd /tmp/exec && "
+                f"printf '%s' '{nb_b64}' | base64 -d > input.ipynb && "
+                "jupyter nbconvert --to notebook --execute --output executed.ipynb "
+                f"--ExecutePreprocessor.timeout={cell_timeout} input.ipynb && "
+                "cp -f /tmp/exec/executed.ipynb /outputs/ 2>/dev/null || true"
+            ),
+        ]
+
     def _ensure_gcs_secret(self, namespace: str) -> bool:
         """Create a K8s Secret with the GCP SA key for GCS access.
 
@@ -469,23 +618,8 @@ class KubernetesNotebookProvider(NotebookProvider):
             # (the gcs-sync sidecar keeps the pod phase Running), and terminate_session syncs /outputs
             # the same way it does for interactive sessions. The kernel is whatever the template
             # declares (IRkernel for the R DE/DA templates; python3 otherwise).
-            import base64
-            import json as _json
-
-            notebook_json = session_spec.get("notebook_json")
-            if notebook_json is None:
-                raise ValidationError("headless execution requires notebook_json in the session spec")
-            nb_b64 = base64.b64encode(_json.dumps(notebook_json).encode()).decode()
-            cell_timeout = int(session_spec.get("cell_timeout_seconds", 3600))
             container_port = 8888  # unused; a headless run exposes no server
-            exec_script = (
-                "set -e && mkdir -p /outputs /tmp/exec && cd /tmp/exec && "
-                f"printf '%s' '{nb_b64}' | base64 -d > input.ipynb && "
-                "jupyter nbconvert --to notebook --execute --output executed.ipynb "
-                f"--ExecutePreprocessor.timeout={cell_timeout} input.ipynb && "
-                "cp -f /tmp/exec/executed.ipynb /outputs/ 2>/dev/null || true"
-            )
-            container_command = ["/bin/sh", "-c", exec_script]
+            container_command = self._headless_command(session_spec)
         else:
             # RStudio uses PAM auth -- session credentials are required.
             # User creation must happen inside the main container (not an

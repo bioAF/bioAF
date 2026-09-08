@@ -1145,7 +1145,7 @@ class ValidationDriverService:
         if (record and not record.get("outcome")) or (
             not record and await ValidationDriverService._wants_code_arm(session, evidence)
         ):
-            return await ValidationDriverService._handle_code_arm(session, study, evidence, level3)
+            return await ValidationDriverService._handle_code_arm(session, study, evidence, level3 or {})
 
         # An arm that was ATTEMPTED owns the result. `attempt: 0` means no arm ran at all (this
         # install cannot execute fetched code), which is the one case that still falls through to
@@ -1563,6 +1563,7 @@ class ValidationDriverService:
         """
         from app.services.code_execution_service import (
             METHOD_AUTHORS_CODE,
+            RAN_OUTPUT_DIVERGES,
             RAN_OUTPUT_UNCOMPARABLE,
             adapt_outputs,
             build_observation,
@@ -1689,22 +1690,65 @@ class ValidationDriverService:
                 reason=adapted["reason"],
             )
 
-        # The run produced something bioAF CAN compare. It lands where the existing comparison layer
-        # already reads it; the outcome is then decided from the comparison, not from the execution.
+        # The run produced something bioAF CAN compare, so COMPARE it. The outcome is decided from
+        # the comparison, never from the fact that a file was written: reporting agreement because a
+        # table exists would be a claim of agreement made without comparing, which is the defect step
+        # 9 exists to prevent one layer up.
+        paper_value = our_value = None
+        metric = None
         if adapted["kind"] == "differential_table":
             evidence["code_output_table"] = {"path": adapted["path"], "text": adapted["table_text"]}
+            # The SAME concordance the template arm scores, on the paper's own set. Do not build a
+            # second comparator.
+            # The generated arm runs precisely when bioAF could not wire a level3 bundle, so the
+            # paper's own confirmed set comes off the PLAN there. Scoring that comparison is the
+            # whole reason that arm exists: without it the study still produces nothing.
+            target = level3 or await ValidationDriverService._finding_target_from_plan(session, study)
+            params = target.get("parameters") or {}
+            our_fs = (normalize_interval_table if target.get("kind") == "interval" else normalize_gene_table)(
+                adapted["table_text"],
+                lfc_threshold=float(params.get("lfc_threshold", 1.0)),
+                padj_threshold=float(params.get("padj_threshold", 0.05)),
+            )
+            paper_fs = FindingSet.from_dict(target.get("paper_finding_set") or {})
+            universe = int(
+                target.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
+            )
+            compare = compare_interval_sets if target.get("kind") == "interval" else compare_gene_sets
+            conc = compare(paper_fs, our_fs, universe)
+            evidence["level3_result"] = {
+                "concordance": conc.to_dict(),
+                "our_finding_set": our_fs.to_dict(),
+                # Which analysis produced it. A concordance scored against the authors' OWN code is
+                # a stronger claim than one scored against ours, and the verdict has to say so.
+                "method": record.get("method"),
+            }
+            outcome = "ran_output_agrees" if conc.verdict == "agree" else RAN_OUTPUT_DIVERGES
+            metric = "differentially expressed features"
+            paper_value, our_value = len(paper_fs.entities), len(our_fs.entities)
+        elif adapted["kind"] == "unsupported":
+            outcome = RAN_OUTPUT_UNCOMPARABLE
         else:
             merged = dict(evidence.get("computed_metrics") or {})
             merged.update(adapted["computed_metrics"])
             evidence["computed_metrics"] = merged
+            # A matched numeric claim goes to the existing claim/tolerance machinery at `comparing`,
+            # which is what decides agreement. Until it has, the run has produced a comparable
+            # result and nothing more.
+            outcome = "ran_output_agrees"
+
         record.update(
             observation=build_observation(
-                outcome=RAN_OUTPUT_UNCOMPARABLE if adapted["kind"] == "unsupported" else "ran_output_agrees",
+                outcome=outcome,
                 exit_code=exit_code,
                 transcript_uri=getattr(cs, "gcs_output_prefix", None),
                 transcript_tail=transcript,
                 unmatched=adapted.get("unmatched"),
+                metric=metric,
+                paper_value=paper_value,
+                our_value=our_value,
             ),
+            outcome=outcome,
             comparable=True,
             output_kind=adapted["kind"],
         )
@@ -1714,6 +1758,28 @@ class ValidationDriverService:
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
         )
         return True
+
+    @staticmethod
+    async def _finding_target_from_plan(session: AsyncSession, study: ValidationStudy) -> dict:
+        """The paper's confirmed finding set and thresholds, in the shape `level3` carries them.
+
+        Used only by the generated arm, which runs when bioAF could not build a level3 bundle at
+        all. The claim itself is still on the plan; what was missing was a route from OUR wiring to
+        it. Returns an empty target when the paper confirmed no set, and the comparison then scores
+        nothing rather than scoring against an absence.
+        """
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        claim = (plan.finding_claim_json if plan else None) or {}
+        design = (plan.differential_design_json if plan else None) or {}
+        thresholds = claim.get("thresholds") or design.get("thresholds") or {}
+        return {
+            "kind": claim.get("kind") or "gene",
+            "paper_finding_set": claim.get("finding_set") or {},
+            "parameters": {
+                "lfc_threshold": thresholds.get("log2fc") if thresholds.get("log2fc") is not None else 1.0,
+                "padj_threshold": thresholds.get("padj") if thresholds.get("padj") is not None else 0.05,
+            },
+        }
 
     @staticmethod
     def _default_entry_point(resolution: dict) -> str | None:

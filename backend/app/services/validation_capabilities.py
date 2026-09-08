@@ -112,16 +112,16 @@ def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dic
 
     repos = [s for s in sources if s["kind"] in _REPO_KINDS]
     artifacts = [s for s in sources if s["kind"] not in _REPO_KINDS]
+
+    def _where(rows: list[dict]) -> str | None:
+        """Where each source is, for the checklist's detail cell. A row with neither a URL nor an
+        identifier still names its kind, because "Download" is more use than an empty cell."""
+        return ", ".join(str(s.get("url") or s.get("identifier") or s.get("kind")) for s in rows) or None
+
     return (
         sources,
-        _answer(
-            YES if artifacts else NO,
-            evidence=(", ".join(s["url"] or s["identifier"] or s["kind"] for s in artifacts) or None),
-        ),
-        _answer(
-            YES if repos else NO,
-            evidence=(", ".join(s["url"] or s["identifier"] or s["kind"] for s in repos) or None),
-        ),
+        _answer(YES if artifacts else NO, evidence=_where(artifacts)),
+        _answer(YES if repos else NO, evidence=_where(repos)),
     )
 
 
