@@ -28,7 +28,8 @@ import re
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from fastapi import HTTPException
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.registry import get_storage_adapter
@@ -97,6 +98,57 @@ _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 # acquiring_data); terminals and the pre-approval states are left alone. `comparing` is included so the
 # driver runs the automatic classifier (E2/E3/E4) once; a clean `validated` auto-finalizes, everything
 # else is left AT `comparing` with a suggested verdict for a human to ratify (the hybrid policy).
+# The two front-half states the driver owns ONLY for a study whose route was chosen at the button.
+# A study with no `intended_route` keeps the manual "Read paper" and "Approve" clicks, so every other
+# entry point behaves exactly as it did.
+_SELF_DRIVING_FRONT_HALF_STATES = ("requested", "plan_ready")
+
+# What each route needs the paper to actually have. plan_7 amendment 3: a route is refused only on
+# an ESTABLISHED absence ("no"), never on UNKNOWN, because treating a GEO timeout as an absence would
+# hide a workable route behind a transient failure.
+_ROUTE_REQUIREMENTS: dict[str, tuple[str, str]] = {
+    "deposit": (
+        "preprocessed_data",
+        "This paper's GEO deposit holds no pre-processed data, so there is nothing to reproduce the "
+        "finding from. Validating from the raw reads is the remaining route.",
+    ),
+    "pipeline": (
+        "raw_data",
+        "No raw sequencing reads are published for this paper, so there is nothing to fetch and "
+        "re-run. Validating from the deposited data is the remaining route.",
+    ),
+}
+
+
+def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
+    """Why the chosen route cannot be taken, in the reader's language, or None when it can.
+
+    ``both`` is checked against BOTH requirements: it spawns a sibling, so a leg that cannot run
+    would produce a study created only to fail.
+    """
+    checks = ("deposit", "pipeline") if route == "both" else (route,)
+    for leg in checks:
+        requirement = _ROUTE_REQUIREMENTS.get(leg)
+        if requirement is None:
+            continue
+        key, message = requirement
+        if ((capabilities.get(key) or {}).get("value")) == "no":
+            return message
+    return None
+
+
+def _driver_owns(study: "ValidationStudy") -> bool:
+    """Whether this loop may advance the study on this tick.
+
+    The back half is always the driver's. The front half is only the driver's when the requester
+    already chose a route at the button; otherwise `requested` waits for "Read paper" and
+    `plan_ready` waits at the C1 gate, exactly as they did before.
+    """
+    if study.state in _ACTIVE_BACK_HALF_STATES:
+        return True
+    return study.state in _SELF_DRIVING_FRONT_HALF_STATES and study.intended_route is not None
+
+
 _ACTIVE_BACK_HALF_STATES = (
     "acquiring_data",
     # plan_7: the deposit route's two states.
@@ -458,7 +510,17 @@ class ValidationDriverService:
         ids = list(
             (
                 await session.execute(
-                    select(ValidationStudy.id).where(ValidationStudy.state.in_(_ACTIVE_BACK_HALF_STATES))
+                    select(ValidationStudy.id).where(
+                        or_(
+                            ValidationStudy.state.in_(_ACTIVE_BACK_HALF_STATES),
+                            # Self-driving front half: the route was chosen at the button, so the read
+                            # and the approval are this loop's work rather than two more clicks.
+                            and_(
+                                ValidationStudy.state.in_(_SELF_DRIVING_FRONT_HALF_STATES),
+                                ValidationStudy.intended_route.is_not(None),
+                            ),
+                        )
+                    )
                 )
             ).scalars()
         )
@@ -468,7 +530,7 @@ class ValidationDriverService:
                 study = (
                     await session.execute(select(ValidationStudy).where(ValidationStudy.id == study_id))
                 ).scalar_one_or_none()
-                if study is None or study.state not in _ACTIVE_BACK_HALF_STATES:
+                if study is None or not _driver_owns(study):
                     continue
                 changed = await ValidationDriverService._advance_one(session, study)
                 await session.commit()
@@ -492,9 +554,69 @@ class ValidationDriverService:
             "extracting": ValidationDriverService._handle_extracting,
             "reproducing": ValidationDriverService._handle_reproducing,
             "comparing": ValidationDriverService._handle_comparing,
+            "requested": ValidationDriverService._handle_requested,
+            "plan_ready": ValidationDriverService._handle_plan_ready,
         }
         handler = handlers.get(study.state)
         return await handler(session, study) if handler else False
+
+    @staticmethod
+    async def _handle_requested(session: AsyncSession, study: ValidationStudy) -> bool:
+        """Read the paper without waiting for a "Read paper" click.
+
+        Reached only when the requester chose a route at the button. The click it replaces was the
+        first of two hidden stops: the study sat in `requested` rendering "Step 1 of 9" with an
+        in-progress badge while nothing at all was happening.
+        """
+        await ValidationDriverService.read_and_plan(
+            session, study, None, study.organization_id, study.requested_by_user_id
+        )
+        return True
+
+    @staticmethod
+    async def _handle_plan_ready(session: AsyncSession, study: ValidationStudy) -> bool:
+        """Approve onto the route chosen at the button, or hold and say why it cannot be taken.
+
+        This is where the capability check the upfront modal could not do actually happens.
+        `discover_capabilities` needs the GEO accession, which only exists once the paper has been
+        read, so the choice is taken early and VALIDATED here. plan_7 amendment 3 governs the
+        reading: UNKNOWN is not NO, and a route is only refused on an ESTABLISHED absence, never on a
+        discovery failure.
+        """
+        route = study.intended_route
+        if not route:  # pragma: no cover - the loop's predicate already filtered these out
+            return False
+
+        evidence = dict(study.evidence_json or {})
+        if evidence.get("route_blocked"):
+            return False  # already held and explained; re-deciding every 30s would just churn
+
+        unavailable = _route_unavailable_reason(route, evidence.get("capabilities") or {})
+        if unavailable is None:
+            try:
+                await ValidationStudyService.approve_plan(
+                    session,
+                    study.id,
+                    study.organization_id,
+                    study.requested_by_user_id,
+                    route=route,
+                )
+                return True
+            except HTTPException as exc:
+                # The gate's own factual refusals still stand: a species mismatch and a deposit
+                # conflict refuse on facts, and choosing a route upfront does not authorise
+                # overriding either. Carry the gate's own words rather than inventing new ones.
+                unavailable = str(exc.detail)
+
+        evidence["route_blocked"] = {
+            "chosen": route,
+            "reason": unavailable,
+            "at": _now().isoformat(),
+        }
+        study.evidence_json = evidence
+        await session.flush()
+        logger.info("study %s: chosen route %r cannot be taken: %s", study.id, route, unavailable)
+        return True
 
     @staticmethod
     async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy) -> bool:

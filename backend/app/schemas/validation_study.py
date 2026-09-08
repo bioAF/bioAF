@@ -13,6 +13,9 @@ class ValidationStudyRequest(BaseModel):
     paper_id: int | None = None
     source_doi: str | None = None
     source_accession: str | None = None
+    # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
+    # from one decision; validated after the read, because nothing about the deposit is known yet.
+    intended_route: Literal["deposit", "pipeline", "both"] | None = None
 
 
 class ReadRequest(BaseModel):
@@ -196,6 +199,9 @@ class ValidationStudySummary(BaseModel):
     paper_id: int | None = None
     source_doi: str | None = None
     source_accession: str | None = None
+    # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
+    # from one decision; validated after the read, because nothing about the deposit is known yet.
+    intended_route: Literal["deposit", "pipeline", "both"] | None = None
     experiment_id: int | None = None
     created_at: datetime | None = None
 
@@ -214,6 +220,9 @@ class ValidationStudyResponse(BaseModel):
     paper_id: int | None = None
     source_doi: str | None = None
     source_accession: str | None = None
+    # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
+    # from one decision; validated after the read, because nothing about the deposit is known yet.
+    intended_route: Literal["deposit", "pipeline", "both"] | None = None
     experiment_id: int | None = None
     reproduction_plan_id: int | None = None
     approved_by_user_id: int | None = None

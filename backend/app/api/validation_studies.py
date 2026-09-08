@@ -226,6 +226,7 @@ async def request_validation(
         paper_id=data.paper_id,
         source_doi=data.source_doi,
         source_accession=data.source_accession,
+        intended_route=data.intended_route,
     )
     await session.commit()
     return await _study_response(session, study, org_id)
