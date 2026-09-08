@@ -197,6 +197,12 @@ class ValidationStudy(Base):
     approved_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # The route chosen at the button, BEFORE the paper was read. Distinct from
+    # `evidence_json["route"]`, which records what the study actually ran: this is the intent, taken
+    # when nothing about the paper's deposit is known yet, and the two disagree when that intent
+    # turns out to be impossible. Null keeps the manual C1 gate, so other entry points are unchanged.
+    intended_route: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 

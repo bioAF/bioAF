@@ -117,14 +117,22 @@ class ValidationStudyService:
         paper_id: int | None = None,
         source_doi: str | None = None,
         source_accession: str | None = None,
+        intended_route: str | None = None,
     ) -> ValidationStudy:
-        """Create a study in the initial ``requested`` state, with an audited create."""
+        """Create a study in the initial ``requested`` state, with an audited create.
+
+        ``intended_route`` is the route the requester chose at the button, before anything about the
+        paper is known. When it is set the driver reads the paper and approves onto that route by
+        itself; when it is None the manual C1 gate stands, which is what every other entry point
+        still gets.
+        """
         study = ValidationStudy(
             organization_id=org_id,
             requested_by_user_id=user_id,
             paper_id=paper_id,
             source_doi=source_doi,
             source_accession=source_accession,
+            intended_route=intended_route,
             state="requested",
         )
         session.add(study)

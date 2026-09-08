@@ -106,6 +106,8 @@ type Plan7Evidence = DepositEvidence &
     capabilities?: Capabilities | null;
     precompute_checks?: PrecomputeChecks | null;
     species_override?: SpeciesOverride | null;
+    // Set when the route chosen at the button turned out to be impossible once the paper was read.
+    route_blocked?: { chosen?: string | null; reason?: string | null } | null;
   };
 
 /**
@@ -402,7 +404,22 @@ export default function ValidationStudyPage() {
             study={{
               id: study.id,
               state: study.state,
-              evidence: { awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval },
+              evidence: {
+                awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval,
+                // Threading these through is what makes the gate capability-aware. Passing only
+                // `awaiting_refetch_approval` left `capabilities` null on every study, so plan_7
+                // step 15's availability notes could never render and the modal offered three
+                // equal-looking routes, which is the defect step 13 exists to remove.
+                // Narrowed to the two answers the route chooser reads. The checklist's fuller
+                // `Capabilities` shape carries `code_sources`, which the chooser has no use for.
+                capabilities: plan7.capabilities
+                  ? {
+                      preprocessed_data: plan7.capabilities.preprocessed_data,
+                      raw_data: plan7.capabilities.raw_data,
+                    }
+                  : null,
+                route_blocked: plan7.route_blocked ?? null,
+              },
               plan: { deposit_conflict: plan?.deposit_conflict ?? null },
             }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}

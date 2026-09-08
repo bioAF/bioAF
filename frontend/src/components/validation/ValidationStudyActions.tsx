@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 import { usePermissions } from "@/hooks/usePermissions";
 import { VALIDATION_CLASSIFICATIONS } from "@/lib/validationClassification";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { RouteChooser } from "@/components/validation/RouteChooser";
+import { RouteBlockedNotice } from "@/components/validation/RouteBlockedNotice";
 
 /**
  * What step 13 established about this paper, as far as the route modal cares.
@@ -82,6 +84,9 @@ export function ValidationStudyActions({
     evidence?: {
       awaiting_refetch_approval?: boolean | null;
       capabilities?: RouteCapabilities | null;
+      // The route chosen at the button, discovered to be impossible once the paper was read. The
+      // study is held at `plan_ready` and this is what says so; without it the hold is invisible.
+      route_blocked?: { chosen?: string | null; reason?: string | null } | null;
     } | null;
     // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
     // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
@@ -173,6 +178,7 @@ export function ValidationStudyActions({
     const blocked = !!study.plan?.deposit_conflict && !study.plan.deposit_conflict.override;
     controls = (
       <div className="space-y-2">
+        <RouteBlockedNotice blocked={study.evidence?.route_blocked} />
         <div className="flex flex-wrap items-center gap-3">
           {!blocked && (
             <button
@@ -218,67 +224,8 @@ export function ValidationStudyActions({
                 <p className="text-xs text-gray-600">{intendedMethod(capabilities)}</p>
               )}
 
-              <label className="flex items-start gap-2">
-                <input
-                  type="radio"
-                  name="validation-route"
-                  className="mt-1"
-                  checked={route === "deposit"}
-                  onChange={() => setRoute("deposit")}
-                />
-                <span>
-                  <span className="font-medium">Deposited data and available code</span>
-                  <span className="block text-xs text-gray-600">
-                    Reproduces the paper&apos;s analysis from the processed data it deposited in GEO,
-                    using the study&apos;s own differential design. Validates the computational
-                    findings. Takes minutes. It cannot detect a processing error, a swapped sample or
-                    a contaminated library, because the upstream processing is not repeated.
-                  </span>
-                  {depositNote && <span className="block text-xs text-amber-800">{depositNote}</span>}
-                </span>
-              </label>
+              <RouteChooser route={route} onChange={setRoute} capabilities={capabilities} idPrefix="gate" />
 
-              <label className="flex items-start gap-2">
-                <input
-                  type="radio"
-                  name="validation-route"
-                  className="mt-1"
-                  checked={route === "pipeline"}
-                  onChange={() => setRoute("pipeline")}
-                />
-                <span>
-                  <span className="font-medium">Raw reads</span>
-                  <span className="block text-xs text-gray-600">
-                    Fetches the sequencing reads and re-runs the whole analysis. Validates the
-                    pre-processing and sample quality. Takes hours.
-                  </span>
-                  {rawNote && <span className="block text-xs text-amber-800">{rawNote}</span>}
-                </span>
-              </label>
-
-              <label className="flex items-start gap-2">
-                <input
-                  type="radio"
-                  name="validation-route"
-                  className="mt-1"
-                  checked={route === "both"}
-                  onChange={() => setRoute("both")}
-                />
-                <span>
-                  <span className="font-medium">Both</span>
-                  <span className="block text-xs text-gray-600">
-                    Runs each route as its own study, so each carries its own verdict. The deposited
-                    run starts now; the raw-reads run starts alongside it.
-                  </span>
-                </span>
-              </label>
-
-              {route !== "deposit" && (
-                <p className="text-xs text-amber-800">
-                  The raw-reads route spends compute on your cloud account, and the spend cannot be
-                  recovered once the run starts.
-                </p>
-              )}
               {study.evidence?.awaiting_refetch_approval && route !== "deposit" && (
                 <p className="text-xs text-amber-800">
                   This study has run before. The data it downloaded is no longer here, so this
