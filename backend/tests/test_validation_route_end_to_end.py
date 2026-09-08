@@ -130,6 +130,9 @@ class _FakeStorage:
             raise FileNotFoundError(uri)
         return self.objects[uri].decode()
 
+    def build_uri(self, bucket: str, path: str) -> str:
+        return f"gs://{bucket}/{path}"
+
 
 class _FakeGeo:
     """GEO's two surfaces: the supplementary listing (text) and the files themselves (bytes)."""
@@ -162,13 +165,26 @@ class _FakeLlm:
         self.answers = answers
         self.calls: list[str] = []
 
+    # Every decision the route can ask for, keyed by a phrase from its own system prompt. An
+    # unrecognised prompt is an assertion failure rather than a default, so a new model call added
+    # to the route without a fixture is loud instead of silently answered with the wrong shape.
+    _ROUTES = (
+        ("choosing which file from a public GEO deposit", "select_deposit"),
+        ("ratifying the verdict", "ratify"),
+        ("judging whether a paper says enough", "sufficiency"),
+        ("choosing which file in a published analysis repository", "entry_point"),
+        ("writing the analysis a paper describes", "generate"),
+        ("could the paper's number plausibly be noise", "signal"),
+        ("naming the MOST LIKELY explanation", "cause"),
+    )
+
     async def submit(self, prompt, payload, model, api_key, attachments=None):
-        if "choosing which file from a public GEO deposit" in prompt:
-            self.calls.append("select_deposit")
-            return self.answers["select_deposit"]
-        if "ratifying the verdict" in prompt:
-            self.calls.append("ratify")
-            return self.answers["ratify"]
+        for marker, key in self._ROUTES:
+            if marker in prompt:
+                self.calls.append(key)
+                if key not in self.answers:
+                    raise AssertionError(f"the route asked for '{key}' and this test supplied no answer")
+                return self.answers[key]
         self.calls.append("unknown")
         raise AssertionError(f"unexpected LLM call: {prompt[:120]}")
 
@@ -190,6 +206,43 @@ _SELECTION_ANSWER = _fenced(
 
 _RATIFY_ACCEPT = _fenced({"action": "accept", "reasoning": "the finding reproduced on the authors' own matrix"})
 
+_SUFFICIENT = _fenced({"answer": "yes", "reason": "the methods name the tool and the thresholds", "confidence": 0.9})
+
+_ENTRY_POINT_ANSWER = _fenced(
+    {
+        "entry_point": "analysis.R",
+        "arguments": "",
+        "reason": "the only script in the repository",
+        "confidence": 0.9,
+    }
+)
+
+_GENERATED_ANSWER = _fenced(
+    {
+        "language": "R",
+        "source": "library(DESeq2)\n# the analysis the paper describes\n",
+        "entry_point": "generated_analysis.R",
+        "assumptions": ["the paper does not state the FDR threshold, so 0.05 was assumed"],
+        "reason": "the methods name DESeq2 and a two-arm design",
+        "confidence": 0.6,
+    }
+)
+
+_SIGNAL_ANSWER = _fenced({"verdict": "not likely", "reason": "the paper's number looks real", "confidence": 0.6})
+_CAUSE_ANSWER = _fenced(
+    {"candidate": "bioaf_input_mapping", "reason": "we chose the file and the column mapping", "confidence": 0.5}
+)
+
+_ALL_ANSWERS = {
+    "select_deposit": _SELECTION_ANSWER,
+    "ratify": _RATIFY_ACCEPT,
+    "sufficiency": _SUFFICIENT,
+    "entry_point": _ENTRY_POINT_ANSWER,
+    "generate": _GENERATED_ANSWER,
+    "signal": _SIGNAL_ANSWER,
+    "cause": _CAUSE_ANSWER,
+}
+
 
 class _NotebookRunner:
     """Kubernetes, faked at the service boundary but writing REAL rows.
@@ -199,10 +252,24 @@ class _NotebookRunner:
     output File and the link, and writes the table into the fake storage.
     """
 
-    def __init__(self, storage: _FakeStorage, *, output: str | None = _REPRODUCED_TABLE, status="completed"):
+    def __init__(
+        self,
+        storage: _FakeStorage,
+        *,
+        output: str | None = _REPRODUCED_TABLE,
+        status="completed",
+        code_output: str | None = _REPRODUCED_TABLE,
+        code_output_name: str = "findings.csv",
+        code_status: str = "completed",
+        code_transcript: str = "",
+    ):
         self.storage = storage
         self.output = output
         self.status = status
+        self.code_output = code_output
+        self.code_output_name = code_output_name
+        self.code_status = code_status
+        self.code_transcript = code_transcript
         self.launches: list[dict] = []
 
     async def execute_template(self, session, *, org_id, user_id, template_id, parameters, input_file_ids, **kw):
@@ -236,6 +303,40 @@ class _NotebookRunner:
             await session.flush()
         return cs
 
+    async def execute_fetched_code(self, session, *, org_id, user_id, code_uri, entry_point, arguments, **kw):
+        """The untrusted-execution entry point, faked at the same boundary and writing the same
+        real rows, so the code arm's output travels the path the template arm's does."""
+        self.launches.append({"code_uri": code_uri, "entry_point": entry_point, "arguments": arguments})
+        cs = ComputeSession(
+            user_id=user_id,
+            organization_id=org_id,
+            session_type="headless",
+            resource_profile="small",
+            cpu_cores=2,
+            memory_gb=8,
+            status=self.code_status,
+            experiment_id=kw.get("experiment_id"),
+        )
+        cs.failure_message = self.code_transcript
+        session.add(cs)
+        await session.flush()
+        if self.code_output is not None:
+            uri = f"gs://bioaf-untrusted/sessions/{cs.id}/{self.code_output_name}"
+            await self.storage.write_text(uri, self.code_output)
+            f = File(
+                organization_id=org_id,
+                filename=self.code_output_name,
+                storage_uri=uri,
+                file_type="table",
+                source_type="notebook_output",
+                uploader_user_id=user_id,
+            )
+            session.add(f)
+            await session.flush()
+            session.add(NotebookSessionFile(session_id=cs.id, file_id=f.id, access_type="output"))
+            await session.flush()
+        return cs
+
     async def poll_execution(self, session, cs):
         return cs
 
@@ -246,7 +347,19 @@ class _NotebookRunner:
 class _Route:
     """Every external boundary of the deposit route, wired at once."""
 
-    def __init__(self, monkeypatch, *, llm_answers=None, notebook_output=_REPRODUCED_TABLE):
+    def __init__(
+        self,
+        monkeypatch,
+        *,
+        llm_answers=None,
+        notebook_output=_REPRODUCED_TABLE,
+        code_repo=None,
+        code_output=_REPRODUCED_TABLE,
+        code_output_name="findings.csv",
+        code_status="completed",
+        code_transcript="",
+        untrusted=False,
+    ):
         from app.services import validation_driver_service as drv
         from app.services.literature import deposit_inventory_service as inv
 
@@ -258,8 +371,17 @@ class _Route:
                 _SUPPL + f"{_GSE}_sample_metadata.tsv": _METADATA.encode(),
             },
         )
-        self.llm = _FakeLlm(llm_answers or {"select_deposit": _SELECTION_ANSWER, "ratify": _RATIFY_ACCEPT})
-        self.notebook = _NotebookRunner(self.storage, output=notebook_output)
+        self.llm = _FakeLlm({**_ALL_ANSWERS, **(llm_answers or {})})
+        self.notebook = _NotebookRunner(
+            self.storage,
+            output=notebook_output,
+            code_output=code_output,
+            code_output_name=code_output_name,
+            code_status=code_status,
+            code_transcript=code_transcript,
+        )
+        self.code_repo = code_repo
+        self.untrusted = untrusted
 
         monkeypatch.setattr(drv, "get_storage_adapter", lambda: self.storage)
         monkeypatch.setattr(drv, "_deposit_bytes_fetcher", self.geo.fetch_bytes)
@@ -271,7 +393,30 @@ class _Route:
 
         monkeypatch.setattr(drv.llm_provider_config_service, "get_for_feature", _cfg)
         monkeypatch.setattr(NotebookExecutionService, "execute_template", self.notebook.execute_template)
+        monkeypatch.setattr(NotebookExecutionService, "execute_fetched_code", self.notebook.execute_fetched_code)
         monkeypatch.setattr(NotebookExecutionService, "poll_execution", self.notebook.poll_execution)
+
+        if code_repo is not None:
+            # GitHub, at the same byte boundary GEO uses: the driver reaches both through
+            # `_deposit_bytes_fetcher`, so one fake serves them both.
+            geo_bytes = self.geo.fetch_bytes
+
+            async def _bytes(url: str) -> bytes:
+                if "github.com" in url or "api.github.com" in url:
+                    if "/commits/" in url:
+                        return json.dumps({"sha": "abc1234def"}).encode()
+                    return code_repo
+                return await geo_bytes(url)
+
+            monkeypatch.setattr(drv, "_deposit_bytes_fetcher", _bytes)
+
+    async def enable_untrusted_execution(self, session):
+        """What step 16a's terraform writes. Without it the code arm cannot run anywhere, which is
+        itself one of the cases this file holds."""
+        from app.platform.platform_config_service import PlatformConfigService
+
+        await PlatformConfigService.set(session, "untrusted_bucket_name", "bioaf-untrusted-lab-abc")
+        await PlatformConfigService.set(session, "untrusted_runner_sa_email", "bioaf-untrusted-runner@p.iam.g.com")
 
 
 async def _tick_to_rest(session, study, *, limit=40, twice=False, settle=2):
@@ -323,7 +468,22 @@ async def deseq2_template(session, admin_user):
     return tmpl
 
 
-async def _plan_ready_study(session, admin_user, *, accession=_GSE):
+def _code_repo(files: dict[str, bytes] | None = None) -> bytes:
+    """A GitHub tarball, in the shape GitHub actually serves: everything under `<repo>-<sha>/`."""
+    import io
+    import tarfile
+
+    members = files or {"analysis.R": b"library(DESeq2)\n", "README.md": b"# the paper's analysis\n"}
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name=f"lab-paper-abc1234/{name}")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+async def _plan_ready_study(session, admin_user, *, accession=_GSE, code_availability=None):
     """A study read, planned and parked at the C1 gate, as `read_and_plan` leaves it."""
     study = await ValidationStudyService.create_study(
         session, admin_user.organization_id, admin_user.id, source_doi="10.1000/plan7", source_accession=accession
@@ -340,9 +500,28 @@ async def _plan_ready_study(session, admin_user, *, accession=_GSE):
         differential_design=_DESIGN,
     )
     plan.finding_claim_json = _CLAIM
+    # Where the authors said their code lives. `None` means the paper named none, which is what
+    # sends the route down the generated arm.
+    plan.code_availability_json = code_availability
     study.state = "plan_ready"
     await session.flush()
     return study
+
+
+async def _report_text(session, study, admin_user) -> str:
+    """The exported report, which is where step 12's coverage ends. Reaching an intermediate state
+    with a well-formed bundle is the shape of proof that produced the step 11 blocker."""
+    from app.services.provenance.report_service import ProvenanceReportService
+
+    result = await ProvenanceReportService.generate(
+        session=session,
+        entity_type="validation_study",
+        entity_id=study.id,
+        org_id=admin_user.organization_id,
+        user_email=admin_user.email,
+        format="md",
+    )
+    return result.content if isinstance(result.content, str) else result.content.decode()
 
 
 class TestTheDepositRouteReachesAVerdict:
@@ -623,3 +802,275 @@ class TestBothRoutesRunSideBySide:
         assert study.evidence_json["route"] == "deposit"
         assert sibling.evidence_json["route"] == "pipeline"
         assert sibling.state == "acquiring_data"
+
+
+class TestThePublishedCodeArm:
+    """Case 2 of plan_7 step 12: published code runs and its output is comparable."""
+
+    @pytest.mark.asyncio
+    async def test_the_authors_own_code_is_fetched_pinned_and_run(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        route = _Route(monkeypatch, code_repo=_code_repo())
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        state = await _tick_to_rest(session, study)
+
+        assert state == "classified"
+        execution = study.evidence_json["code_execution"]
+        assert execution["method"] == "authors_code"
+        assert execution["source"]["repo_url"] == "https://github.com/lab/paper"
+        assert execution["source"]["commit_sha"] == "abc1234def"
+
+    @pytest.mark.asyncio
+    async def test_the_repo_and_commit_reach_the_report(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        route = _Route(monkeypatch, code_repo=_code_repo())
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        await _tick_to_rest(session, study)
+
+        text = await _report_text(session, study, admin_user)
+        assert "github.com/lab/paper" in text
+        assert "abc1234def" in text
+
+    @pytest.mark.asyncio
+    async def test_the_template_arm_is_not_also_run(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        """Once an arm is attempted its result is the result."""
+        route = _Route(monkeypatch, code_repo=_code_repo())
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        await _tick_to_rest(session, study)
+
+        assert all("template_id" not in launch for launch in route.notebook.launches)
+
+
+class TestThePublishedCodeArmFails:
+    """Case 3: published code is attempted and fails. Its outcome and transcript survive to the
+    report, NO generated run starts behind it, and the study still reaches a terminal state."""
+
+    async def _run(self, session, admin_user, monkeypatch, transcript):
+        route = _Route(
+            monkeypatch,
+            code_repo=_code_repo(),
+            code_status="failed",
+            code_output=None,
+            code_transcript=transcript,
+        )
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        state = await _tick_to_rest(session, study)
+        return route, study, state
+
+    @pytest.mark.asyncio
+    async def test_dependencies_that_will_not_install_are_the_finding(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        _, study, state = await self._run(
+            session,
+            admin_user,
+            monkeypatch,
+            "ERROR: Could not find a version that satisfies the requirement DESeq2==1.2.3",
+        )
+        assert state == "classified"
+        assert study.evidence_json["code_execution"]["outcome"] == "dependency_unresolvable"
+
+    @pytest.mark.asyncio
+    async def test_the_transcript_survives_to_the_report(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        _, study, _ = await self._run(
+            session, admin_user, monkeypatch, "ERROR: Could not find a version that satisfies DESeq2"
+        )
+        observation = study.evidence_json["code_execution"]["observation"]
+        assert "Could not find a version" in observation["transcript_tail"]
+
+        text = await _report_text(session, study, admin_user)
+        assert "dependencies would not install" in text
+
+    @pytest.mark.asyncio
+    async def test_no_generated_run_starts_behind_it(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        """Silently replacing `dependency_unresolvable` with a generated run that agrees would turn
+        the single most useful finding this feature can produce into a false reproduction."""
+        route, study, _ = await self._run(
+            session, admin_user, monkeypatch, "ERROR: Could not find a version that satisfies DESeq2"
+        )
+        assert "generate" not in route.llm.calls
+        assert study.evidence_json["code_execution"]["method"] == "authors_code"
+
+
+class TestTheGeneratedArm:
+    """Case 4: no usable code, generated fallback. One execution only, ranked last.
+
+    These studies deliberately do NOT register the deseq2 template, so `resolve_level3_from_deposit`
+    declines with `no_template` and the study reaches `reproducing` with nothing bioAF can run. That
+    is where the generated arm belongs: it gives a study a finding-tier result when bioAF's own
+    wiring cannot produce one, rather than displacing a deterministic template with a
+    nondeterministic generation. See `TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate`.
+    """
+
+    async def _run(self, session, admin_user, monkeypatch, **kw):
+        route = _Route(monkeypatch, **kw)
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(session, admin_user, code_availability=[])
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        state = await _tick_to_rest(session, study)
+        return route, study, state
+
+    @pytest.mark.asyncio
+    async def test_a_paper_with_no_code_still_gets_an_analysis(self, session, admin_user, monkeypatch, autonomous_org):
+        _, study, state = await self._run(session, admin_user, monkeypatch)
+        assert state == "classified"
+        assert study.evidence_json["code_execution"]["method"] == "llm_from_methods"
+
+    @pytest.mark.asyncio
+    async def test_the_generated_source_and_its_assumptions_are_on_the_bundle(
+        self, session, admin_user, monkeypatch, autonomous_org
+    ):
+        """A reader disputing the result has to be able to read exactly what ran."""
+        _, study, _ = await self._run(session, admin_user, monkeypatch)
+        source = study.evidence_json["code_execution"]["source"]
+        assert source["generated_by_model"] == "claude-opus-4-8"
+        assert any("FDR" in a for a in source["assumptions"])
+        assert study.evidence_json["generated_analysis"]["source"].startswith("library(DESeq2)")
+
+    @pytest.mark.asyncio
+    async def test_it_generates_exactly_once(self, session, admin_user, monkeypatch, autonomous_org):
+        """Repeating measures the generator, not the paper."""
+        route, _, _ = await self._run(session, admin_user, monkeypatch)
+        assert route.llm.calls.count("generate") == 1
+
+    @pytest.mark.asyncio
+    async def test_the_report_says_it_was_generated_rather_than_published(
+        self, session, admin_user, monkeypatch, autonomous_org
+    ):
+        _, study, _ = await self._run(session, admin_user, monkeypatch)
+        text = await _report_text(session, study, admin_user)
+        assert "generated from the paper" in text
+        assert "claude-opus-4-8" in text
+
+
+class TestDiscoveryCouldNotEstablishACapability:
+    """Case 5: UNKNOWN reaches the checklist and the issues section, and NO is never rendered for a
+    timeout."""
+
+    @pytest.mark.asyncio
+    async def test_a_geo_outage_at_read_time_is_unknown_not_absent(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_issue_service import ValidationIssueService
+
+        route = _Route(monkeypatch)
+        study = await _plan_ready_study(session, admin_user)
+
+        async def _dead(url):
+            raise RuntimeError("connection reset by peer")
+
+        monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", _dead)
+        monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", _dead)
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=True)
+
+        caps = study.evidence_json["capabilities"]
+        assert caps["geo_entry"]["value"] == "unknown"
+        assert caps["preprocessed_data"]["value"] != "no"
+
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert any("GEO entry" in i["step"] for i in issues)
+        assert route.geo.byte_calls == []
+
+    @pytest.mark.asyncio
+    async def test_the_report_shows_unknown_with_its_reason(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        from app.services.validation_driver_service import ValidationDriverService
+
+        _Route(monkeypatch)
+        study = await _plan_ready_study(session, admin_user)
+
+        async def _dead(url):
+            raise RuntimeError("connection reset by peer")
+
+        monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", _dead)
+        monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", _dead)
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=True)
+
+        text = await _report_text(session, study, admin_user)
+        assert "Unknown" in text
+        assert "GEO entry exists" in text
+
+
+class TestAnUnsupportedOutput:
+    """Case 6: an execution produced an unsupported output. Reported as uncomparable with the output
+    retained, NOT as `ran_no_output`."""
+
+    @pytest.mark.asyncio
+    async def test_output_bioaf_cannot_compare_is_named_as_our_limitation(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        route = _Route(
+            monkeypatch,
+            code_repo=_code_repo(),
+            code_output="%PDF-1.4 a figure",
+            code_output_name="figure3.pdf",
+        )
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        state = await _tick_to_rest(session, study)
+
+        assert state == "classified"
+        assert study.evidence_json["code_execution"]["outcome"] == "ran_output_uncomparable"
+
+        text = await _report_text(session, study, admin_user)
+        assert "limitation of bioAF" in text
+
+    @pytest.mark.asyncio
+    async def test_it_is_not_reported_as_having_written_nothing(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        """ "Wrote nothing" and "wrote something we cannot compare" are two different findings about
+        a paper."""
+        route = _Route(monkeypatch, code_repo=_code_repo(), code_output="%PDF-1.4", code_output_name="figure3.pdf")
+        await route.enable_untrusted_execution(session)
+        study = await _plan_ready_study(
+            session, admin_user, code_availability=[{"kind": "github", "url": "https://github.com/lab/paper"}]
+        )
+        await ValidationStudyService.approve_plan(
+            session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
+        )
+        await _tick_to_rest(session, study)
+        assert study.evidence_json["code_execution"]["outcome"] != "ran_no_output"
