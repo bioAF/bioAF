@@ -555,3 +555,110 @@ class TestTheCodeArmsOutputIsActuallyCompared:
         study = await self._run(session, admin_user, table)
 
         assert study.evidence_json["level3_result"]["method"] == "authors_code"
+
+
+class TestTheTranscriptIsReadFromWhereItLands:
+    """The pod writes its transcript to `/outputs/transcript.txt`, so for a run that COMPLETES it
+    arrives as an output file, not on the compute session.
+
+    Two consequences if it is not read from there. A script that raised and still exited its pod
+    cleanly would be classified from an empty string and reported as having produced output bioAF
+    cannot compare, rather than as code that does not execute: two of the four findings step 19
+    insists on telling apart, swapped. And the log itself would be listed as an unmatched result.
+    """
+
+    def _patch(self, monkeypatch, outputs):
+        async def _load(_session, sid):
+            return SimpleNamespace(id=sid, status="completed", gcs_output_prefix=None, failure_message=None)
+
+        async def _poll(_session, cs):
+            return SimpleNamespace(id=cs.id, status="completed", failure_message=None, gcs_output_prefix=None)
+
+        async def _outputs(_session, _cs):
+            return outputs
+
+        monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+        monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+        monkeypatch.setattr(ValidationDriverService, "_read_code_outputs", _outputs)
+
+    async def _run(self, session, admin_user):
+        study = await _study_at_reproducing(
+            session,
+            admin_user,
+            {
+                "level3": _LEVEL3,
+                "code_resolution": _RESOLVED_CODE,
+                "code_execution": {"attempt": 1, "method": "authors_code", "session_id": 901, "source": {}},
+            },
+        )
+        await ValidationDriverService._handle_reproducing(session, study)
+        return study
+
+    @pytest.mark.asyncio
+    async def test_a_script_that_raised_is_code_error_not_uncomparable_output(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        self._patch(
+            monkeypatch,
+            [
+                {
+                    "path": "transcript.txt",
+                    "text": "== running analysis.R ==\nError in dds$condition : object is not subsettable\n",
+                }
+            ],
+        )
+        study = await self._run(session, admin_user)
+        assert study.evidence_json["code_execution"]["outcome"] == "code_error"
+
+    @pytest.mark.asyncio
+    async def test_a_failed_install_is_read_from_the_transcript_file(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        self._patch(
+            monkeypatch,
+            [
+                {
+                    "path": "transcript.txt",
+                    "text": "ERROR: Could not find a version that satisfies the requirement DESeq2\n",
+                }
+            ],
+        )
+        study = await self._run(session, admin_user)
+        assert study.evidence_json["code_execution"]["outcome"] == "dependency_unresolvable"
+
+    @pytest.mark.asyncio
+    async def test_the_transcript_is_not_offered_to_the_output_adapters(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """It is the argument behind the outcome, not a result the run produced."""
+        self._patch(
+            monkeypatch,
+            [
+                {"path": "transcript.txt", "text": "== running ==\ndone\n"},
+                {"path": "results/de.csv", "text": "gene,log2FoldChange,padj\nA,2.0,0.01\n"},
+            ],
+        )
+        study = await self._run(session, admin_user)
+        assert study.evidence_json["code_execution"]["output_kind"] == "differential_table"
+
+    @pytest.mark.asyncio
+    async def test_a_run_whose_only_output_is_its_own_log_wrote_nothing(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """ "Wrote nothing" is the honest finding there: a log is not a result."""
+        self._patch(monkeypatch, [{"path": "transcript.txt", "text": "== running ==\nfinished cleanly\n"}])
+        study = await self._run(session, admin_user)
+        assert study.evidence_json["code_execution"]["outcome"] == "ran_no_output"
+
+    @pytest.mark.asyncio
+    async def test_the_transcript_still_reaches_the_observation(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """It is the argument behind the outcome, and a scientist disputing `code_error` needs to
+        see what it actually said."""
+        self._patch(
+            monkeypatch,
+            [{"path": "transcript.txt", "text": "== running ==\nError in dds : boom\n"}],
+        )
+        study = await self._run(session, admin_user)
+        assert "boom" in study.evidence_json["code_execution"]["observation"]["transcript_tail"]

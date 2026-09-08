@@ -76,6 +76,10 @@ def _accessibility_update(answer: dict | None) -> dict:
 
 # plan_7 step 13: each capability question in the user's language, for the issues section. A row
 # that could not be established says which question went unanswered, not which key was empty.
+# plan_7 step 17: where the pod writes its log. It arrives as an output file for a run that
+# completed, and is read as the transcript rather than offered as a result.
+_TRANSCRIPT_FILENAME = "transcript.txt"
+
 _CAPABILITY_STEPS = {
     "geo_entry": "checking whether this paper has a GEO entry",
     "raw_data": "checking whether raw sequencing data is available",
@@ -1654,7 +1658,20 @@ class ValidationDriverService:
         if getattr(cs, "status", None) not in ("completed", "failed"):
             return False  # still running
 
+        # The pod writes its log to `/outputs/transcript.txt`, so for a run that COMPLETED the
+        # transcript arrives as an output file rather than on the session. Reading only
+        # `failure_message` would classify a script that raised (and still exited its pod cleanly)
+        # from an empty string, and then list its own log as an uncomparable result: two of the four
+        # findings step 19 insists on telling apart, swapped.
+        outputs = await ValidationDriverService._read_code_outputs(session, cs)
         transcript = str(getattr(cs, "failure_message", "") or "")
+        results = []
+        for out in outputs:
+            if str(out.get("path", "")).rsplit("/", 1)[-1] == _TRANSCRIPT_FILENAME:
+                transcript = f"{transcript}\n{out.get('text') or ''}".strip()
+            else:
+                results.append(out)
+
         exit_code = 1 if cs.status == "failed" else 0
         established = classify_transcript(transcript, exit_code=exit_code)
         if established:
@@ -1672,8 +1689,9 @@ class ValidationDriverService:
                 reason=transcript,
             )
 
-        outputs = await ValidationDriverService._read_code_outputs(session, cs)
-        adapted = adapt_outputs(outputs=outputs, claims=evidence.get("comparison_targets") or [])
+        # The log is the ARGUMENT behind the outcome, not a result the run produced, so it never
+        # reaches the output adapters. A run whose only output is its own log wrote nothing.
+        adapted = adapt_outputs(outputs=results, claims=evidence.get("comparison_targets") or [])
         if adapted.get("outcome"):
             return await ValidationDriverService._land_code_outcome(
                 session,
