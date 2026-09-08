@@ -502,6 +502,63 @@ resource "aws_iam_role_policy" "runner_s3" {
   policy   = data.aws_iam_policy_document.runner_s3[each.key].json
 }
 
+# --- plan_7 step 16a: an identity for untrusted execution ----------------------
+#
+# The mirror of the GCP module's untrusted runner, and it exists so the two providers do not diverge
+# again the way they already did on the notebook runner. Step 17 runs code fetched from a paper's
+# authors; the ordinary notebook role can reach every `bioaf-*` bucket, which includes this
+# install's backups, so untrusted execution gets its own role reaching ONE bucket.
+
+locals {
+  untrusted_bucket_arn = "arn:${data.aws_partition.current.partition}:s3:::${var.untrusted_bucket_name}"
+}
+
+data "aws_iam_policy_document" "untrusted_runner_trust" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+    principals {
+      type        = "Federated"
+      identifiers = [local.oidc_provider_arn]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:sub"
+      values   = ["system:serviceaccount:bioaf-untrusted:bioaf-untrusted-runner"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "untrusted_runner" {
+  name               = "bioaf-untrusted-runner-${var.stack_uid}"
+  assume_role_policy = data.aws_iam_policy_document.untrusted_runner_trust.json
+  tags               = merge(local.tags, { runner = "untrusted" })
+}
+
+data "aws_iam_policy_document" "untrusted_runner_s3" {
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${local.untrusted_bucket_arn}/*"]
+  }
+  statement {
+    effect    = "Allow"
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [local.untrusted_bucket_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "untrusted_runner_s3" {
+  name   = "bioaf-untrusted-runner-s3"
+  role   = aws_iam_role.untrusted_runner.id
+  policy = data.aws_iam_policy_document.untrusted_runner_s3.json
+}
+
 # --- Work-node (EC2) networking + instance profile (cleanup item 8b) ----------
 #
 # Standalone EC2 work nodes (SSH-accessible analysis VMs, the AWS analog of the

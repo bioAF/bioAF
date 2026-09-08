@@ -73,6 +73,24 @@ def _session_termination_from_dict(d: dict) -> TerminationResult:
 _local_sessions: dict[str, dict] = {}
 
 DEFAULT_NOTEBOOK_NAMESPACE = "bioaf-notebooks"
+
+# plan_7 step 16a: where code fetched from a paper's authors runs. Its own namespace, with its own
+# KSA bound to an identity holding no project-level role, so an untrusted pod cannot be scheduled
+# beside a trusted one and cannot pick up its service account.
+UNTRUSTED_NAMESPACE = "bioaf-untrusted"
+
+# A session spec is DATA. Letting it name any namespace would let a bug (or a crafted spec) schedule
+# a pod into `kube-system`, so only the two namespaces bioAF owns are accepted and anything else
+# falls back to the default rather than being created.
+_ALLOWED_NAMESPACES = (DEFAULT_NOTEBOOK_NAMESPACE, UNTRUSTED_NAMESPACE)
+
+
+def namespace_for(session_spec: dict) -> str:
+    """Which namespace this session runs in, from the spec, defaulting to the notebook namespace."""
+    requested = str((session_spec or {}).get("namespace") or "").strip()
+    return requested if requested in _ALLOWED_NAMESPACES else DEFAULT_NOTEBOOK_NAMESPACE
+
+
 HOME_DIR = "/home/jovyan"
 
 
@@ -105,7 +123,9 @@ class KubernetesNotebookProvider(NotebookProvider):
             invalidate_client_on_force=False,
             refresh_strategy="fingerprint",
         )
-        self._namespace_ready = False
+        # One entry per namespace: a single boolean marked the untrusted namespace ready as soon
+        # as the notebook one was prepared, so it would never have been created.
+        self._namespaces_ready: set[str] = set()
         self._pod_identity_provider = None
 
     @property
@@ -253,7 +273,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         # the namespace was already set up on a previous call.  The annotation
         # may be missing if the namespace was created before Workload Identity
         # was configured.
-        if self._namespace_ready:
+        if namespace in self._namespaces_ready:
             if gcp_sa_email:
                 core_v1 = self._get_k8s_core_client()
                 self._patch_sa_annotation(core_v1, namespace, gcp_sa_email)
@@ -268,7 +288,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             # Patch the SA annotation in case it was created before WI was configured
             if gcp_sa_email:
                 self._patch_sa_annotation(core_v1, namespace, gcp_sa_email)
-            self._namespace_ready = True
+            self._namespaces_ready.add(namespace)
             return
         except ApiException as e:
             if e.status != 404:
@@ -322,7 +342,7 @@ class KubernetesNotebookProvider(NotebookProvider):
             ),
         )
         logger.info("Created role binding in %s", namespace)
-        self._namespace_ready = True
+        self._namespaces_ready.add(namespace)
 
     def _ensure_gcs_secret(self, namespace: str) -> bool:
         """Create a K8s Secret with the GCP SA key for GCS access.
@@ -781,7 +801,8 @@ class KubernetesNotebookProvider(NotebookProvider):
         await self._get_api_client_async()
 
         session_id = session_spec.get("session_id", 0)
-        namespace = DEFAULT_NOTEBOOK_NAMESPACE
+        # plan_7 step 16a: the spec names the namespace, so untrusted execution lands in its own.
+        namespace = namespace_for(session_spec)
 
         await self.ensure_notebook_namespace(namespace, gcp_sa_email=session_spec.get("notebook_runner_sa_email", ""))
 

@@ -365,6 +365,8 @@ async def deploy_stack(
                     "references_bucket_name",
                     "literature_bucket_name",
                     "config_backups_bucket_name",
+                    # plan_7 step 16a: the ONE bucket code fetched from a paper's authors can write.
+                    "untrusted_bucket_name",
                     "pubsub_topic_name",
                     "pubsub_subscription_name",
                 ]:
@@ -567,6 +569,10 @@ async def deploy_stack(
             cluster_ca_cert = outputs.get("cluster_ca_cert", {}).get("value", "")
             notebook_runner_sa = outputs.get("notebook_runner_sa_email", {}).get("value", "")
             cellxgene_runner_sa = outputs.get("cellxgene_runner_sa_email", {}).get("value", "")
+            # plan_7 step 16a: the identity code fetched from a paper's authors runs as. Absent on an
+            # install that has not applied the compute update, and there is deliberately no fallback:
+            # borrowing the notebook runner's credential is the exposure this identity exists to end.
+            untrusted_runner_sa = outputs.get("untrusted_runner_sa_email", {}).get("value", "")
 
             await _set_config(session, "compute_stack", "kubernetes")
             await _set_config(session, "compute_deployed", "true")
@@ -575,6 +581,7 @@ async def deploy_stack(
             await _set_config(session, "gke_cluster_ca_cert", cluster_ca_cert or "null")
             await _set_config(session, "notebook_runner_sa_email", notebook_runner_sa or "null")
             await _set_config(session, "cellxgene_runner_sa_email", cellxgene_runner_sa or "null")
+            await _set_config(session, "untrusted_runner_sa_email", untrusted_runner_sa or "null")
 
             # AWS (EKS) outputs the same cluster_* keys (reused above), plus the
             # IRSA role ARNs + OIDC issuer the AWS pod-identity / cluster-auth
@@ -874,6 +881,7 @@ _BUCKET_CONFIG_KEYS = [
     "references_bucket_name",
     "literature_bucket_name",
     "config_backups_bucket_name",
+    "untrusted_bucket_name",
 ]
 
 

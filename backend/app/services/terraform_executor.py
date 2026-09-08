@@ -1001,6 +1001,11 @@ class TerraformExecutor:
         elif module_name == "compute":
             tfvars["zone"] = zone
             tfvars["org_slug"] = org_slug
+            # plan_7 step 16a: the one bucket the untrusted-execution identity may reach. Named
+            # from the same prefix and suffix the storage module builds it from, so the binding and
+            # the bucket cannot drift apart. The compute module holds only a bucket-level binding on
+            # it, never a project-level role.
+            tfvars["untrusted_bucket_name"] = f"bioaf-untrusted-{org_slug}-{storage_suffix or compute_suffix or ''}"
             if compute_suffix:
                 tfvars["stack_uid"] = compute_suffix
             # Multi-zone node placement: derive all zones in the region so
