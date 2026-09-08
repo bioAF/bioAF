@@ -1141,6 +1141,25 @@ class ValidationDriverService:
             not record and await ValidationDriverService._wants_code_arm(session, evidence)
         ):
             return await ValidationDriverService._handle_code_arm(session, study, evidence, level3)
+
+        # An arm that was ATTEMPTED owns the result. `attempt: 0` means no arm ran at all (this
+        # install cannot execute fetched code), which is the one case that still falls through to
+        # bioAF's own template; anything else goes to comparison carrying what it found. Re-entered
+        # here only after a restart, since the landing path transitions on its own.
+        if record.get("outcome") and record.get("attempt", 0) >= 1:
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+            )
+            return True
+
+        # plan_7 step 18, rung 3: no usable published code was AVAILABLE, so write the analysis from
+        # what the paper describes and run that. It does NOT run behind an attempted code arm that
+        # failed: that failure is the result of its own arm, and replacing it with a generated run
+        # that agrees would turn the most useful finding this feature can produce into a false
+        # reproduction. `record` being present at this point means an arm already finished.
+        if not record and await ValidationDriverService._wants_generated_arm(session, evidence):
+            return await ValidationDriverService._handle_generated_arm(session, study, evidence, level3)
+
         # Published code we resolved and pinned, on an install that cannot run it. A true statement
         # about this bioAF rather than about the paper, and the report has to be able to say it, so
         # it is recorded before the template arm takes over.
@@ -1234,6 +1253,137 @@ class ValidationDriverService:
         if resolution.get("outcome") != "resolved":
             return False
         return await untrusted_identity(session) is not None
+
+    @staticmethod
+    async def _wants_generated_arm(session: AsyncSession, evidence: dict) -> bool:
+        """Rung 3: the paper published no usable code, and this install can run a generated analysis.
+
+        A thin methods section is NOT part of this test. Step 14's sufficiency judgment is advisory,
+        and reading it as a veto would contradict the plan's own rule that nothing about a paper
+        rules it in or out. It is carried as a qualifier instead.
+        """
+        from app.services.untrusted_execution import untrusted_identity
+
+        resolution = evidence.get("code_resolution") or {}
+        if resolution.get("outcome") not in ("code_absent", "code_unreachable"):
+            return False
+        return await untrusted_identity(session) is not None
+
+    @staticmethod
+    async def _handle_generated_arm(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, level3: dict
+    ) -> bool:
+        """plan_7 step 18: generate the paper's analysis from its prose, ONCE, and run it.
+
+        Two terminal shapes and neither waits: an executable analysis that goes down the same
+        execution path the authors' code uses, or ``generation_failed`` with a named limitation.
+        There is no loop through fresh generations and no hold for an unspecified intervention:
+        repeating measures the GENERATOR rather than the paper.
+        """
+        from app.services.code_execution_service import GENERATION_FAILED, build_observation
+        from app.services.generated_analysis import generate_analysis
+        from app.services.untrusted_execution import untrusted_identity
+        from app.services.validation_precompute_checks import CHECK_METHODS, MISMATCH
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            return False  # nothing to generate with; the template arm takes over on this tick
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        design = ((plan.differential_design_json if plan else None) or {}).get("contrasts") or [{}]
+        inspection = evidence.get("deposit_inspection") or {}
+        parameters = level3.get("parameters") or {}
+        checks = evidence.get("precompute_checks") or {}
+        methods_inadequate = (checks.get(CHECK_METHODS) or {}).get("verdict") == MISMATCH
+
+        generated = await generate_analysis(
+            methods_text=str((plan.mapping_notes if plan else "") or "") or evidence.get("paper_text", ""),
+            matrix_description=(
+                f"{inspection.get('n_rows', 'an unknown number of')} rows and "
+                f"{inspection.get('n_columns', 'an unknown number of')} sample columns "
+                f"({', '.join(inspection.get('columns') or [])}) at {parameters.get('counts_path', '/data')}"
+            ),
+            design=design[0],
+            methods_inadequate=methods_inadequate,
+            client=get_client(cfg.provider),
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
+
+        if generated["outcome"] == GENERATION_FAILED:
+            return await ValidationDriverService._land_code_outcome(
+                session,
+                study,
+                evidence,
+                record={
+                    "attempt": 1,
+                    "method": generated["method"],
+                    "qualifiers": generated["qualifiers"],
+                    "source": {"generated_by_model": generated["model"], "assumptions": []},
+                },
+                observation=build_observation(
+                    outcome=GENERATION_FAILED,
+                    exit_code=None,
+                    transcript_uri=None,
+                    transcript_tail="",
+                    qualifiers=generated["qualifiers"],
+                ),
+                reason=generated["reason"],
+            )
+
+        identity = await untrusted_identity(session)
+        storage = get_storage_adapter()
+        uri = storage.build_uri(identity.bucket, f"{identity.prefix_for(study.id)}/{generated['entry_point']}")
+        try:
+            await storage.write_text(uri, generated["source"], content_type="text/plain")
+        except Exception as exc:  # noqa: BLE001 - a staging failure is an outcome, not a crash
+            return await ValidationDriverService._land_code_outcome(
+                session,
+                study,
+                evidence,
+                record={
+                    "attempt": 1,
+                    "method": generated["method"],
+                    "qualifiers": generated["qualifiers"],
+                    "source": {},
+                },
+                observation=build_observation(
+                    outcome=GENERATION_FAILED, exit_code=None, transcript_uri=None, transcript_tail=str(exc)
+                ),
+                reason=f"the generated analysis could not be staged for execution ({exc})",
+            )
+
+        cs = await NotebookExecutionService.execute_fetched_code(
+            session,
+            org_id=study.organization_id,
+            user_id=study.requested_by_user_id,
+            code_uri=uri,
+            entry_point=generated["entry_point"],
+            arguments="",
+            input_file_ids=level3.get("input_file_ids") or [],
+            experiment_id=study.experiment_id,
+        )
+
+        # The generated source itself, kept whole. A reader disputing this result has to be able to
+        # read exactly what ran, and "an analysis a model wrote" is not readable without it.
+        evidence["generated_analysis"] = generated
+        evidence["code_execution"] = {
+            "attempt": 1,
+            "method": generated["method"],
+            "qualifiers": generated["qualifiers"],
+            "source": {
+                "generated_by_model": generated["model"],
+                "generated_source_uri": uri,
+                "assumptions": generated["assumptions"],
+            },
+            "session_id": cs.id,
+            "entry_point": generated["entry_point"],
+        }
+        study.evidence_json = dict(evidence)
+        await session.flush()
+        return True
 
     @staticmethod
     async def _resolve_authors_code(
@@ -1356,6 +1506,10 @@ class ValidationDriverService:
 
         resolution = evidence.get("code_resolution") or {}
         if resolution.get("outcome") != "resolved":
+            return
+        if evidence.get("code_execution"):
+            # An arm already ran and owns the record. Overwriting it here would replace a real
+            # finding with a statement about this install's configuration.
             return
         evidence["code_execution"] = {
             "attempt": 0,
