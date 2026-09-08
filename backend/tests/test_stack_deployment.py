@@ -1350,6 +1350,62 @@ async def test_sync_compute_config_writes_runner_sa_emails(session):
 
 
 @pytest.mark.asyncio
+async def test_sync_compute_config_writes_the_untrusted_runner_sa(session):
+    """plan_7 step 16a, through the path the owner actually uses.
+
+    `deploy_stack` persists this key, but a provisioned install adds 16a's identity through "Check
+    for Infrastructure Updates", which lands in `sync_compute_config` instead. Without this the
+    terraform apply creates the service account in GCP and `untrusted_identity()` still returns
+    None, so BOTH execution arms silently fall back to bioAF's own template and an acceptance run
+    exercises neither step 17 nor step 18.
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import sync_compute_config
+
+    mock_outputs = {
+        "cluster_name": {"value": "bioaf-test"},
+        "untrusted_runner_sa_email": {"value": "bioaf-untrusted-runner@p.iam.gserviceaccount.com"},
+    }
+
+    with patch(
+        "app.services.stack_deployment.TerraformExecutor.read_module_outputs",
+        new=AsyncMock(return_value=mock_outputs),
+    ):
+        populated = await sync_compute_config(session)
+
+    await session.commit()
+
+    assert populated["untrusted_runner_sa_email"] == "bioaf-untrusted-runner@p.iam.gserviceaccount.com"
+    assert await _get_config(session, "untrusted_runner_sa_email") == "bioaf-untrusted-runner@p.iam.gserviceaccount.com"
+
+
+@pytest.mark.asyncio
+async def test_sync_storage_config_writes_the_untrusted_bucket(session):
+    """The other half of the same identity: a service account with no bucket can write nowhere, and
+    `untrusted_identity()` requires both keys before it will let anything run."""
+    from unittest.mock import AsyncMock
+
+    from app.services.stack_deployment import sync_storage_config
+
+    mock_outputs = {
+        "raw_bucket_name": {"value": "bioaf-raw-lab-abc123"},
+        "untrusted_bucket_name": {"value": "bioaf-untrusted-lab-abc123"},
+    }
+
+    with patch(
+        "app.services.stack_deployment.TerraformExecutor.read_module_outputs",
+        new=AsyncMock(return_value=mock_outputs),
+    ):
+        populated = await sync_storage_config(session)
+
+    await session.commit()
+
+    assert populated["untrusted_bucket_name"] == "bioaf-untrusted-lab-abc123"
+    assert await _get_config(session, "untrusted_bucket_name") == "bioaf-untrusted-lab-abc123"
+
+
+@pytest.mark.asyncio
 async def test_sync_compute_config_skips_empty_outputs(session):
     """sync_compute_config does not overwrite config with empty values."""
     from unittest.mock import AsyncMock

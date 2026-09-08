@@ -1052,6 +1052,10 @@ _STORAGE_BUCKET_OUTPUT_KEYS = [
     "references_bucket_name",
     "literature_bucket_name",
     "config_backups_bucket_name",
+    # plan_7 step 16a: the ONE bucket code fetched from a paper's authors can write. A provisioned
+    # install adds it through "Check for Infrastructure Updates", which lands here rather than in
+    # `deploy_stack`, so leaving it out creates the bucket in the cloud and tells the app nothing.
+    "untrusted_bucket_name",
 ]
 
 
@@ -1083,6 +1087,10 @@ _COMPUTE_OUTPUT_MAP = {
     # the adapters read these to annotate their runner KSA.
     "notebook_runner_sa_email": "notebook_runner_sa_email",
     "cellxgene_runner_sa_email": "cellxgene_runner_sa_email",
+    # plan_7 step 16a. `untrusted_identity()` reads this key and has no fallback by design, so an
+    # apply that creates the service account without recording it leaves both execution arms
+    # silently falling back to bioAF's own template.
+    "untrusted_runner_sa_email": "untrusted_runner_sa_email",
 }
 
 
