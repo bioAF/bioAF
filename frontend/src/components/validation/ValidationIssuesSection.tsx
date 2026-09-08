@@ -38,7 +38,7 @@ const IMPACT_LABEL: Record<string, string> = {
 
 const IMPACT_CLASS: Record<string, string> = {
   degraded: "bg-amber-50 text-amber-700",
-  blocked: "bg-rose-50 text-rose-700",
+  blocked: "bg-red-50 text-red-700",
 };
 
 export function ValidationIssuesSection({ issues }: { issues: ValidationIssue[] }) {
@@ -57,7 +57,7 @@ export function ValidationIssuesSection({ issues }: { issues: ValidationIssue[] 
         {issues.map((issue, i) => (
           <li key={i} className="flex flex-wrap items-baseline gap-x-2 py-2 text-sm">
             <span className="text-gray-800">{issue.step}</span>
-            <span aria-hidden className="text-gray-400">
+            <span aria-hidden className="text-gray-500">
               &middot;
             </span>
             <span className="text-gray-600">

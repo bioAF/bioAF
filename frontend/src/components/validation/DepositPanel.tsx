@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { Button } from "@/components/ui/Button";
+
 /**
  * plan_7 step 15: the rest of the C1 gate, which step 10 only half built.
  *
@@ -195,9 +197,9 @@ export function DepositPanel({
                 ))}
               </select>
             </label>
-            <button
+            <Button
               type="button"
-              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              size="sm"
               disabled={!matrix}
               onClick={() => {
                 const chosen = candidates.find((c) => c.filename === matrix);
@@ -226,7 +228,7 @@ export function DepositPanel({
               }}
             >
               Use this file
-            </button>
+            </Button>
           </div>
         </div>
       )}
