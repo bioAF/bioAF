@@ -743,6 +743,63 @@ def _concordance_desc(c: dict) -> str:
     )
 
 
+# What each execution outcome MEANS, in the words the report should read in. The token itself says
+# nothing to a scientist, and "inconclusive" says less: a paper whose dependencies will not install
+# is a real finding about that paper's reproducibility, and it is the reason this vocabulary exists.
+_CODE_OUTCOME_SENTENCE = {
+    "code_absent": " The paper published no analysis code, so its own analysis could not be run.",
+    "code_unreachable": (
+        " The paper's analysis code could not be fetched, so its own analysis could not be run. That is "
+        "a statement about the link, not about the science."
+    ),
+    "dependency_unresolvable": (
+        " The paper's own code was fetched and its dependencies would not install, so the analysis could "
+        "not be run as published."
+    ),
+    "code_incomplete": (
+        " The paper's own code was fetched and refers to something that was never published, so the "
+        "analysis could not be run as published."
+    ),
+    "code_error": " The paper's own code was fetched and installed, and then failed while running.",
+    "data_mismatch": (
+        " The paper's own code ran and did not receive the inputs it expected. bioAF chose which "
+        "deposited file to mount and how its columns map, so that choice is among the candidate causes."
+    ),
+    "generation_failed": " No analysis could be generated from the paper's described methods.",
+    "ran_no_output": " The paper's own code ran to completion and wrote nothing.",
+    "ran_output_uncomparable": (
+        " The code ran to completion and produced real output that bioAF's comparison layer does not "
+        "support. That is a limitation of bioAF, not a defect of the paper."
+    ),
+    "ran_output_diverges": (
+        " The code ran and produced a result that disagrees with the paper's own. Both numbers are "
+        "reported side by side; the difference is not attributed without evidence."
+    ),
+    "ran_output_agrees": " The code ran and reproduced the paper's own result.",
+}
+
+_QUALIFIER_SENTENCE = {
+    "generated_from_prose": (
+        " This analysis was generated from the paper's prose by a language model rather than published "
+        "by the authors, so it tests our reading of their methods as much as the methods themselves."
+    ),
+    "methods_inadequate": (
+        " The paper's methods description was assessed as too thin to follow closely, so our "
+        "interpretation of it may not be the authors'."
+    ),
+}
+
+
+def _code_arm_sentence(outcome: str | None, qualifiers: list[str] | None) -> str:
+    """What the execution arm did, in plain language, or nothing when no arm ran."""
+    if not outcome:
+        return ""
+    text = _CODE_OUTCOME_SENTENCE.get(outcome, f" The execution arm finished as {outcome}.")
+    for qualifier in qualifiers or []:
+        text += _QUALIFIER_SENTENCE.get(qualifier, "")
+    return text
+
+
 def classify_study(
     targets: list[dict],
     computed_metrics: dict | None,
@@ -755,6 +812,8 @@ def classify_study(
     pipeline_key: str | None = None,
     route: str | None = None,
     reproduction_method: str | None = None,
+    code_outcome: str | None = None,
+    code_qualifiers: list[str] | None = None,
 ) -> dict:
     """E4: the spec-03 verdict over the E2 comparison + E3 attribution.
 
@@ -973,9 +1032,19 @@ def classify_study(
                 "method, a difference here can be the method rather than the result."
             )
 
+    # plan_7 step 17: what an execution arm DID, folded in beside the QC and concordance evidence.
+    # Received as separate inputs rather than as a pre-collapsed token, because "diverged, cause
+    # unresolved" and "agreed, generated from a description assessed as inadequate" are different
+    # claims and a token that has already decided the cause would hide both.
+    reasoning += _code_arm_sentence(code_outcome, code_qualifiers)
+
     return {
         "comparisons": comparisons,
         "attribution": attribution,
+        # Carried out so the report and the badge can qualify a verdict by what the execution arm
+        # actually did, without re-deriving it from the evidence bundle.
+        "code_outcome": code_outcome,
+        "code_qualifiers": list(code_qualifiers or []),
         # Which kind of validation produced this verdict. Carried out so the badge and the provenance
         # report can qualify it without re-deriving it from the study's state.
         "route": route or "pipeline",

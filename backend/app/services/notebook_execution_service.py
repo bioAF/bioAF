@@ -38,6 +38,11 @@ logger = logging.getLogger("bioaf.notebook_execution")
 
 HEADLESS_SESSION_TYPE = "headless"
 
+# plan_7 step 17: how long a fetched analysis may run before it is a finding rather than a wait.
+# Six hours is generous for a differential analysis on a deposited matrix and far short of a study
+# that ticks forever; a run that reaches it is `code_error` with a reason.
+_UNTRUSTED_TIMEOUT_SECONDS = 6 * 60 * 60
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -187,6 +192,158 @@ class NotebookExecutionService:
             entity_id=cs.id,
             action="execute_template",
             details={"template_id": template_id, "status": cs.status},
+        )
+        return cs
+
+    @staticmethod
+    async def execute_fetched_code(
+        session: AsyncSession,
+        *,
+        org_id: int,
+        user_id: int,
+        code_uri: str,
+        entry_point: str,
+        arguments: str = "",
+        input_file_ids: list[int] | None = None,
+        resource_profile: str = "medium",
+        experiment_id: int | None = None,
+        project_id: int | None = None,
+        timeout_seconds: int = _UNTRUSTED_TIMEOUT_SECONDS,
+    ) -> ComputeSession:
+        """plan_7 step 17: run code fetched from a paper's authors against the deposited data.
+
+        A SECOND ENTRY POINT on this service rather than a parallel one. The spec assembly, the
+        adapter, ``poll_execution`` and ``_finalize_success`` are all generic, and a fork would
+        double the surface that image, storage and service-account wiring must be kept correct in.
+
+        **The trust boundary is preserved, not deleted.** ``execute_template``'s ``is_builtin`` gate
+        is untouched and this path never consults a template at all. What makes running untrusted
+        code acceptable is the IDENTITY: step 16a's ``bioaf-untrusted-runner``, holding no
+        project-level role, in its own namespace, with one bucket-level binding.
+
+        **There is no fallback.** An install without that identity refuses, because borrowing the
+        notebook runner's credential is the exposure step 16a exists to end.
+        """
+        from app.services.untrusted_execution import UNCONFIGURED_MESSAGE, untrusted_identity
+
+        identity = await untrusted_identity(session)
+        if identity is None:
+            raise ValidationError(UNCONFIGURED_MESSAGE)
+
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
+        if not allowed:
+            raise ConflictError(f"Quota exceeded: {message}")
+
+        cpu_cores, memory_gb = NotebookService.get_resource_profile(resource_profile)
+        cs = ComputeSession(
+            user_id=user_id,
+            organization_id=org_id,
+            session_type=HEADLESS_SESSION_TYPE,
+            experiment_id=experiment_id,
+            project_id=project_id,
+            resource_profile=resource_profile,
+            cpu_cores=cpu_cores,
+            memory_gb=memory_gb,
+            requested_disk_gb=100,
+            status="pending",
+            started_at=_now(),
+        )
+        session.add(cs)
+        await session.flush()
+
+        spec: dict = {
+            "session_type": HEADLESS_SESSION_TYPE,
+            "resource_profile": resource_profile,
+            "cpu_cores": cpu_cores,
+            "memory_gb": memory_gb,
+            "experiment_id": experiment_id,
+            "project_id": project_id,
+            "user_id": user_id,
+            "session_id": cs.id,
+            # The isolated identity and its namespace. Both are read from the spec by the adapter,
+            # so nothing about this launch can land in the trusted namespace.
+            "namespace": identity.namespace,
+            "notebook_runner_sa_email": identity.sa_email,
+            "working_bucket": identity.bucket,
+            # Dependencies install the ordinary way, over the network, because that is what a
+            # notebook session does. Failure is the RESULT: a repo whose dependencies will not
+            # resolve is a real finding about that paper, not an error to refuse on.
+            "fetched_code": {
+                "code_uri": code_uri,
+                "entry_point": entry_point,
+                "arguments": arguments or "",
+            },
+            # A hang has to become an outcome with a reason rather than a study that ticks forever.
+            "timeout_seconds": timeout_seconds,
+        }
+
+        config_map = await PlatformConfigService.get_many(session, ["bioaf_scrna_image"])
+        image = (config_map.get("bioaf_scrna_image") or "").strip()
+        if image and image != "null":
+            spec["image"] = image
+
+        if input_file_ids:
+            from app.models.file import File
+
+            file_results = await session.execute(select(File).where(File.id.in_(input_file_ids)))
+            found_files = {f.id: f for f in file_results.scalars().all()}
+            name_cache = await _resolve_input_file_context(session, found_files)
+            input_files_spec: list[dict] = []
+            for fid in input_file_ids:
+                f = found_files.get(fid)
+                if not f or f.organization_id != org_id:
+                    raise ValidationError(f"File {fid} not found or not accessible")
+                input_files_spec.append(
+                    {
+                        "file_id": f.id,
+                        "gcs_uri": f.storage_uri,
+                        "relative_path": _build_relative_path(f, name_cache),
+                    }
+                )
+            spec["input_files"] = input_files_spec
+
+        try:
+            adapter = get_notebook_adapter()
+            result = await adapter.launch_session(spec)
+            cs.compute_job_ref = result.provider_details.get("pod_name")
+            cs.k8s_pod_name = result.provider_details.get("pod_name")
+            cs.k8s_namespace = result.provider_details.get("namespace") or identity.namespace
+            cs.provider_metadata = {
+                k: v
+                for k, v in {
+                    "pod_name": result.provider_details.get("pod_name"),
+                    "namespace": cs.k8s_namespace,
+                    "untrusted": True,
+                }.items()
+                if v is not None
+            }
+            cs.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
+            cs.status = "failed" if result.status == ServiceState.ERROR else "running"
+
+            if input_file_ids:
+                from app.models.notebook_session_file import NotebookSessionFile
+
+                for fid in input_file_ids:
+                    session.add(NotebookSessionFile(session_id=cs.id, file_id=fid, access_type="input"))
+        except (ConflictError, NotFoundError, ValidationError):
+            raise
+        except Exception as e:
+            from app.adapters.failure_classification import classify_gce_vm_failure
+
+            cs.status = "failed"
+            reason, msg = classify_gce_vm_failure(str(e))
+            cs.failure_reason = reason
+            cs.failure_message = msg
+            logger.error("Fetched-code launch failed for session %s: %s", cs.id, e)
+
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="notebook_session",
+            entity_id=cs.id,
+            action="execute_fetched_code",
+            details={"entry_point": entry_point, "status": cs.status, "namespace": cs.k8s_namespace},
         )
         return cs
 

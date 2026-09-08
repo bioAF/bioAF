@@ -25,6 +25,7 @@ machinery; this driver is the orchestration glue that sequences it and moves the
 import hashlib
 import logging
 import re
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -60,6 +61,18 @@ from app.services.validation_level3_service import resolve_level3, resolve_level
 from app.services.validation_study_service import ValidationStudyService, record_study_error
 
 logger = logging.getLogger("bioaf.validation_driver")
+
+
+def _accessibility_update(answer: dict | None) -> dict:
+    """A capability source's accessibility fields, from what an attempted fetch established.
+
+    Absent means this source was never reached in the ordering (an earlier one resolved), so it
+    keeps `not_attempted` rather than being marked as a failure it never had.
+    """
+    if not answer:
+        return {}
+    return {"accessible": answer.get("accessible", "unknown"), "accessible_reason": answer.get("reason")}
+
 
 # plan_7 step 13: each capability question in the user's language, for the issues section. A row
 # that could not be established says which question went unanswered, not which key was empty.
@@ -1111,6 +1124,28 @@ class ValidationDriverService:
             )
             return True
 
+        # plan_7 step 17: the method ladder. Evaluated ONCE, on the first visit, and once an arm is
+        # attempted its result is the result: an attempted published-code execution that fails is
+        # preserved as that arm's outcome, and no generated or template run starts behind it.
+        # Silently replacing `dependency_unresolvable` with a run that agrees would turn the single
+        # most useful finding this feature can produce into a false reproduction.
+        # plan_7 step 16, wired: fetch and pin the authors' code on the FIRST visit. Post-approval
+        # network work belongs to the driver, for the reason step 11 gives: a GitHub blip must not
+        # fail an approval, and this retries for free on the next tick. A service nothing calls is
+        # not a feature, which is the lesson step 11 exists to record.
+        if "code_resolution" not in evidence:
+            await ValidationDriverService._resolve_authors_code(session, study, evidence)
+
+        record = evidence.get("code_execution") or {}
+        if (record and not record.get("outcome")) or (
+            not record and await ValidationDriverService._wants_code_arm(session, evidence)
+        ):
+            return await ValidationDriverService._handle_code_arm(session, study, evidence, level3)
+        # Published code we resolved and pinned, on an install that cannot run it. A true statement
+        # about this bioAF rather than about the paper, and the report has to be able to say it, so
+        # it is recorded before the template arm takes over.
+        await ValidationDriverService._record_code_arm_unavailable(session, study, evidence)
+
         sid = evidence.get("level3_run_session_id")
         if sid is None:
             cs = await NotebookExecutionService.execute_template(
@@ -1185,6 +1220,397 @@ class ValidationDriverService:
         return True
 
     @staticmethod
+    async def _wants_code_arm(session: AsyncSession, evidence: dict) -> bool:
+        """Rungs 1 and 2 of the ladder: is there published code we resolved and pinned, and can this
+        install actually run it?
+
+        An install with no isolated identity (step 16a) falls to bioAF's own template rather than
+        holding: the study still gets a reproduction, and the report says the authors' code could
+        not be run here. Borrowing the notebook runner's credential is never the fallback.
+        """
+        from app.services.untrusted_execution import untrusted_identity
+
+        resolution = evidence.get("code_resolution") or {}
+        if resolution.get("outcome") != "resolved":
+            return False
+        return await untrusted_identity(session) is not None
+
+    @staticmethod
+    async def _resolve_authors_code(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, *, fetcher=None, storage_adapter=None
+    ) -> None:
+        """plan_7 step 16: fetch, pin and stage the authors' code. Never raises.
+
+        Also answers ACCESSIBILITY, which step 13 deliberately left open: existence was established
+        at read time, and only an attempted fetch can settle whether a source can be reached. The
+        answer is written back onto each capability source so the checklist can say "GitHub, exists,
+        not accessible: repository is private" rather than flattening the two facts into one cell.
+        """
+        from app.services.code_fetch_service import RESOLVED, resolve_code
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        sources = (plan.code_availability_json if plan else None) or []
+        inventory = (evidence.get("deposit_inventory") or {}).get("entries") or []
+        entries = [
+            SimpleNamespace(
+                filename=e.get("filename"),
+                url=e.get("url"),
+                classification=e.get("classification"),
+                level=e.get("level"),
+            )
+            for e in inventory
+        ]
+
+        resolution = await resolve_code(
+            sources=sources, deposit_entries=entries, fetcher=fetcher or _deposit_bytes_fetcher
+        )
+        record = {
+            "outcome": resolution.outcome,
+            "kind": resolution.kind,
+            "url": resolution.url,
+            "commit_sha": resolution.commit_sha,
+            "files": resolution.files,
+            "reason": resolution.reason,
+            "attempts": resolution.attempts,
+        }
+
+        # Step 13 recorded `accessible: not_attempted`. This is the attempt.
+        capabilities = dict(evidence.get("capabilities") or {})
+        if capabilities.get("code_sources"):
+            capabilities["code_sources"] = [
+                {**src, **_accessibility_update(resolution.accessibility.get(src.get("url") or ""))}
+                for src in capabilities["code_sources"]
+            ]
+            evidence["capabilities"] = capabilities
+
+        if resolution.outcome == RESOLVED and resolution.archive:
+            uri = await ValidationDriverService._stage_untrusted_code(
+                session, study, resolution, storage_adapter=storage_adapter
+            )
+            if uri:
+                record["archive_uri"] = uri
+            entry = await ValidationDriverService._choose_code_entry_point(session, study, resolution)
+            if entry:
+                evidence["code_entry_point"] = entry
+
+        evidence["code_resolution"] = record
+        study.evidence_json = dict(evidence)
+        await session.flush()
+
+    @staticmethod
+    async def _stage_untrusted_code(
+        session: AsyncSession, study: ValidationStudy, resolution, *, storage_adapter=None
+    ) -> str | None:
+        """Copy the fetched archive into the ONE bucket untrusted code can reach (step 16a).
+
+        None when this install has no such bucket, which is the same condition that stops the arm
+        running at all; the caller records why and falls to bioAF's own template.
+        """
+        from app.services.untrusted_execution import untrusted_identity
+
+        identity = await untrusted_identity(session)
+        if identity is None:
+            return None
+        storage = storage_adapter or get_storage_adapter()
+        uri = storage.build_uri(identity.bucket, f"{identity.prefix_for(study.id)}/code.tar.gz")
+        try:
+            await storage.write_bytes(uri, resolution.archive, content_type="application/gzip")
+        except Exception as exc:  # noqa: BLE001 - a staging failure is an outcome, not a crash
+            logger.warning("validation study %s: could not stage the fetched code: %s", study.id, exc)
+            return None
+        return uri
+
+    @staticmethod
+    async def _choose_code_entry_point(session: AsyncSession, study: ValidationStudy, resolution) -> dict | None:
+        """Which script starts the analysis. A stated choice, a reason, a confidence.
+
+        None when the org has no provider: the driver then falls back to the lone-script rule, which
+        needs no model at all, and reports honestly when there is no single obvious answer.
+        """
+        from app.services.code_execution_service import choose_entry_point
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            return None
+        readme = next((f for f in resolution.files if str(f.get("path", "")).lower().startswith("readme")), None)
+        return await choose_entry_point(
+            files=resolution.files,
+            readme=str(readme.get("path", "")) if readme else "",
+            client=get_client(cfg.provider),
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
+
+    @staticmethod
+    async def _record_code_arm_unavailable(session: AsyncSession, study: ValidationStudy, evidence: dict) -> None:
+        """Say why the authors' code was not run, when there was code to run.
+
+        Silence here would read as "the paper published no code", which is a different and false
+        statement. Nothing is recorded for a paper that genuinely published none: step 16's
+        `code_absent` already carries that.
+        """
+        from app.services.code_execution_service import METHOD_AUTHORS_CODE, build_observation
+        from app.services.untrusted_execution import UNCONFIGURED_MESSAGE
+
+        resolution = evidence.get("code_resolution") or {}
+        if resolution.get("outcome") != "resolved":
+            return
+        evidence["code_execution"] = {
+            "attempt": 0,
+            "method": METHOD_AUTHORS_CODE,
+            "source": {"repo_url": resolution.get("url"), "commit_sha": resolution.get("commit_sha")},
+            "session_id": None,
+            "outcome": "code_unreachable",
+            "qualifiers": [],
+            "reason": UNCONFIGURED_MESSAGE,
+            "observation": build_observation(
+                outcome="code_unreachable", exit_code=None, transcript_uri=None, transcript_tail=""
+            ),
+        }
+        study.evidence_json = dict(evidence)
+        await session.flush()
+
+    @staticmethod
+    async def _handle_code_arm(session: AsyncSession, study: ValidationStudy, evidence: dict, level3: dict) -> bool:
+        """Launch, poll and land the authors' own code. **Every path here reaches a terminal state.**
+
+        The same first-visit / persisted-session-id / poll shape the template arm already uses, with
+        one difference that matters: a failure does NOT go through `_degrade_to_level2`. That helper
+        writes `evidence["level3_failed"] = {"reason": <prose>}`, which is correct for the template
+        arm and destroys the product here: the outcome vocabulary, the transcript and the observation
+        record all collapse into one string, and step 19's code section has nothing to render.
+        """
+        from app.services.code_execution_service import (
+            METHOD_AUTHORS_CODE,
+            RAN_OUTPUT_UNCOMPARABLE,
+            adapt_outputs,
+            build_observation,
+            classify_transcript,
+        )
+
+        record = dict(evidence.get("code_execution") or {})
+        resolution = evidence.get("code_resolution") or {}
+
+        # `session_id` is the idempotency key, exactly as `level3_run_session_id` is for the template
+        # arm. Deliberately NOT that key: a study can carry both results and one key would lose one.
+        if not record.get("session_id"):
+            entry = evidence.get("code_entry_point") or {}
+            entry_point = entry.get("entry_point") or ValidationDriverService._default_entry_point(resolution)
+            if not entry_point:
+                return await ValidationDriverService._land_code_outcome(
+                    session,
+                    study,
+                    evidence,
+                    record={
+                        "attempt": 1,
+                        "method": METHOD_AUTHORS_CODE,
+                        "source": {
+                            "repo_url": resolution.get("url"),
+                            "commit_sha": resolution.get("commit_sha"),
+                        },
+                    },
+                    observation=build_observation(
+                        outcome="code_incomplete",
+                        exit_code=None,
+                        transcript_uri=None,
+                        transcript_tail="",
+                    ),
+                    reason="no script in the fetched code could be identified as the analysis entry point",
+                )
+
+            try:
+                cs = await NotebookExecutionService.execute_fetched_code(
+                    session,
+                    org_id=study.organization_id,
+                    user_id=study.requested_by_user_id,
+                    code_uri=resolution.get("archive_uri") or resolution.get("url") or "",
+                    entry_point=entry_point,
+                    arguments=entry.get("arguments") or "",
+                    input_file_ids=level3.get("input_file_ids") or [],
+                    experiment_id=study.experiment_id,
+                )
+            except ValidationError as exc:
+                # The install cannot run untrusted code. A true statement about this bioAF, not
+                # about the paper, so it is recorded and the template arm still runs.
+                return await ValidationDriverService._land_code_outcome(
+                    session,
+                    study,
+                    evidence,
+                    record={"attempt": 1, "method": METHOD_AUTHORS_CODE, "source": {}},
+                    observation=build_observation(
+                        outcome="code_unreachable", exit_code=None, transcript_uri=None, transcript_tail=str(exc)
+                    ),
+                    reason=str(exc),
+                    advance=False,
+                )
+
+            evidence["code_execution"] = {
+                "attempt": 1,
+                "method": METHOD_AUTHORS_CODE,
+                "source": {"repo_url": resolution.get("url"), "commit_sha": resolution.get("commit_sha")},
+                "session_id": cs.id,
+                "entry_point": entry_point,
+            }
+            study.evidence_json = dict(evidence)
+            await session.flush()
+            return True
+
+        cs = await ValidationDriverService._load_compute_session(session, record["session_id"])
+        if cs is None:
+            return await ValidationDriverService._land_code_outcome(
+                session,
+                study,
+                evidence,
+                record=record,
+                observation=build_observation(
+                    outcome="code_error", exit_code=None, transcript_uri=None, transcript_tail=""
+                ),
+                reason="the execution session could not be found",
+            )
+
+        cs = await NotebookExecutionService.poll_execution(session, cs)
+        if getattr(cs, "status", None) not in ("completed", "failed"):
+            return False  # still running
+
+        transcript = str(getattr(cs, "failure_message", "") or "")
+        exit_code = 1 if cs.status == "failed" else 0
+        established = classify_transcript(transcript, exit_code=exit_code)
+        if established:
+            return await ValidationDriverService._land_code_outcome(
+                session,
+                study,
+                evidence,
+                record=record,
+                observation=build_observation(
+                    outcome=established,
+                    exit_code=exit_code,
+                    transcript_uri=getattr(cs, "gcs_output_prefix", None),
+                    transcript_tail=transcript,
+                ),
+                reason=transcript,
+            )
+
+        outputs = await ValidationDriverService._read_code_outputs(session, cs)
+        adapted = adapt_outputs(outputs=outputs, claims=evidence.get("comparison_targets") or [])
+        if adapted.get("outcome"):
+            return await ValidationDriverService._land_code_outcome(
+                session,
+                study,
+                evidence,
+                record=record,
+                observation=build_observation(
+                    outcome=adapted["outcome"],
+                    exit_code=exit_code,
+                    transcript_uri=getattr(cs, "gcs_output_prefix", None),
+                    transcript_tail=transcript,
+                    unmatched=adapted.get("unmatched"),
+                ),
+                reason=adapted["reason"],
+            )
+
+        # The run produced something bioAF CAN compare. It lands where the existing comparison layer
+        # already reads it; the outcome is then decided from the comparison, not from the execution.
+        if adapted["kind"] == "differential_table":
+            evidence["code_output_table"] = {"path": adapted["path"], "text": adapted["table_text"]}
+        else:
+            merged = dict(evidence.get("computed_metrics") or {})
+            merged.update(adapted["computed_metrics"])
+            evidence["computed_metrics"] = merged
+        record.update(
+            observation=build_observation(
+                outcome=RAN_OUTPUT_UNCOMPARABLE if adapted["kind"] == "unsupported" else "ran_output_agrees",
+                exit_code=exit_code,
+                transcript_uri=getattr(cs, "gcs_output_prefix", None),
+                transcript_tail=transcript,
+                unmatched=adapted.get("unmatched"),
+            ),
+            comparable=True,
+            output_kind=adapted["kind"],
+        )
+        evidence["code_execution"] = record
+        study.evidence_json = dict(evidence)
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+        )
+        return True
+
+    @staticmethod
+    def _default_entry_point(resolution: dict) -> str | None:
+        """The obvious entry point when nothing chose one: a lone script.
+
+        A repository with one analysis file needs no model call, and asking for one would spend a
+        request to answer a question with one possible answer.
+        """
+        scripts = [
+            f["path"]
+            for f in resolution.get("files") or []
+            if str(f.get("path", "")).lower().endswith((".r", ".py", ".ipynb", ".rmd", ".sh"))
+        ]
+        return scripts[0] if len(scripts) == 1 else None
+
+    @staticmethod
+    async def _land_code_outcome(
+        session: AsyncSession,
+        study: ValidationStudy,
+        evidence: dict,
+        *,
+        record: dict,
+        observation: dict,
+        reason: str,
+        advance: bool = True,
+    ) -> bool:
+        """Record a terminal code-arm outcome with its full record, and advance.
+
+        **A code-arm failure is a terminal OUTCOME that carries its record**, not a degrade. Level-2
+        evidence is still preserved, by the same additive rule `_degrade_to_level2` documents; what
+        changes is that the reason is structured rather than prose.
+        """
+        record = {**record, "outcome": observation["outcome"], "observation": observation, "reason": reason}
+        record.setdefault("qualifiers", [])
+        evidence["code_execution"] = record
+        study.evidence_json = dict(evidence)
+        logger.info("validation study %s: code arm finished as %s (%s)", study.id, observation["outcome"], reason[:200])
+        if not advance:
+            return False
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+        )
+        return True
+
+    @staticmethod
+    async def _read_code_outputs(session: AsyncSession, cs) -> list[dict]:
+        """Everything the fetched code wrote, as ``{path, text}``. Live seam; mocked in unit tests.
+
+        Reads the same `notebook_session_files` join the template arm's output reader uses, so a run
+        whose outputs were registered normally is readable without a second mechanism.
+        """
+        from app.models.file import File
+        from app.models.notebook_session_file import NotebookSessionFile
+
+        rows = list(
+            (
+                await session.execute(
+                    select(File)
+                    .join(NotebookSessionFile, NotebookSessionFile.file_id == File.id)
+                    .where(NotebookSessionFile.session_id == cs.id, NotebookSessionFile.access_type == "output")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        storage = get_storage_adapter()
+        outputs: list[dict] = []
+        for row in rows:
+            try:
+                text = await storage.read_text(row.storage_uri)
+            except Exception:  # noqa: BLE001 - a file we cannot read is still a file the run wrote
+                text = ""
+            outputs.append({"path": row.filename or row.storage_uri, "text": text})
+        return outputs
+
+    @staticmethod
     async def _handle_comparing(session: AsyncSession, study: ValidationStudy) -> bool:
         """Run the automatic classifier (E2/E3/E4) exactly once. A clean, solid ``validated`` auto-
         finalizes (comparing -> classified); everything else stays at ``comparing`` with the suggested
@@ -1225,9 +1651,27 @@ class ValidationDriverService:
             # plan_7 step 9: which KIND of validation this was. A deposit-route verdict tests the
             # authors' statistics rather than their processing, and the verdict has to say so.
             route=evidence.get("route"),
-            reproduction_method=(evidence.get("level3") or {}).get("method"),
+            # plan_7 step 17: the method the verdict was actually reached by. The code arm outranks
+            # bioAF's own templates, which outrank an analysis generated from prose, so the verdict
+            # can say which claim it is making. The ladder's choice wins over the bundle's default.
+            reproduction_method=(
+                (evidence.get("code_execution") or {}).get("method") or (evidence.get("level3") or {}).get("method")
+            ),
+            # Passed as SEPARATE inputs, never as a pre-collapsed token that has already decided the
+            # cause: the classifier may reason from "diverged, cause unresolved, candidates include
+            # our input mapping" and from "agreed, but generated from a description assessed as
+            # inadequate", and it must not be handed a conclusion dressed as evidence.
+            code_outcome=(evidence.get("code_execution") or {}).get("outcome"),
+            code_qualifiers=(evidence.get("code_execution") or {}).get("qualifiers"),
         )
         evidence["classification_result"] = result
+
+        # plan_7 step 17: was this noise read as signal? Asked only after an arm that RAN CODE
+        # diverged, and carried BESIDE the verdict as a hedged possible issue, never as the verdict.
+        # The tool never concludes the authors got it wrong.
+        assessment = await ValidationDriverService._assess_execution(session, study, evidence, result)
+        if assessment:
+            evidence.update(assessment)
 
         # plan_6 step 8: in autonomous mode the model has the last word on what the measurements
         # MEAN. The measurement itself stays on the record either way, beside the ratification, so a
@@ -1252,6 +1696,71 @@ class ValidationDriverService:
             # Persist the suggested verdict; leave the study at comparing for the human gate.
             await session.flush()
         return True
+
+    @staticmethod
+    async def _assess_execution(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, result: dict
+    ) -> dict | None:
+        """plan_7 step 17's two hedged calls, when an execution arm diverged. None otherwise.
+
+        Both are scoped to the arms that ran code: only they give a like-for-like result to set
+        against the paper's own. A pipeline-route divergence like study 26's 7,389 vs 4,054 peaks
+        still gets prose only, deliberately.
+
+        **Evidence is passed explicitly**, not re-read off the study, per plan_7 defect 4 and the
+        ordering trap `_handle_extracting` documents at length.
+        """
+        from app.services.signal_assessment import assess_causes, assess_signal
+
+        execution = evidence.get("code_execution") or {}
+        observation = execution.get("observation") or {}
+        method = execution.get("method") or ""
+        if not method:
+            return None
+
+        diverged = next(
+            (c for c in result.get("comparisons") or [] if c.get("verdict") == "diverge"),
+            None,
+        )
+        if observation.get("paper_value") is None and diverged:
+            observation = {
+                **observation,
+                "paper_value": diverged.get("claimed_normalized") or diverged.get("claimed_value"),
+                "our_value": diverged.get("computed_value"),
+                "metric": diverged.get("mapped_key") or diverged.get("metric_key"),
+            }
+
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            return None
+        client = get_client(cfg.provider)
+
+        out: dict = {}
+        signal = await assess_signal(
+            method=method,
+            paper_value=observation.get("paper_value"),
+            our_value=observation.get("our_value"),
+            metric=observation.get("metric"),
+            context=str(result.get("reasoning") or "")[:1500],
+            client=client,
+            model=cfg.model,
+            api_key=cfg.api_key,
+        )
+        if signal:
+            # Its own top-level key, matching `capabilities`, `precompute_checks`,
+            # `deposit_selection` and `level3`, so step 19 reads one place whichever arm ran.
+            out["signal_assessment"] = signal
+
+        causes = await assess_causes(
+            observation=observation, method=method, client=client, model=cfg.model, api_key=cfg.api_key
+        )
+        if causes:
+            # Stored apart from the observation, so a candidate explanation is never mistaken for
+            # something the run established.
+            out["execution_assessment"] = causes
+        return out or None
 
     @staticmethod
     async def _ratify(session: AsyncSession, study: ValidationStudy, result: dict) -> dict | None:
