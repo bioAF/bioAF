@@ -22,6 +22,7 @@ from app.services.validation_autonomy import decision_list
 from app.schemas.validation_study import (
     ApproveRequest,
     DepositOverrideRequest,
+    DepositSelectionRequest,
     ClassifyRequest,
     ComparisonTargetResponse,
     DeclineRequest,
@@ -478,6 +479,33 @@ async def override_species(
     user_id = int(current_user["sub"])
     study = await ValidationStudyService.override_species_mismatch(
         session, study_id, org_id, user_id, reason=data.reason
+    )
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/deposit-selection", response_model=ValidationStudyResponse)
+async def choose_deposit_file(
+    study_id: int,
+    data: DepositSelectionRequest,
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """plan_7 step 15: a person picks which deposited file to reproduce from.
+
+    What makes `assisted` a working mode rather than a state that holds forever. The driver lists
+    the deposit and waits; this is the control it waits for."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.set_deposit_selection(
+        session,
+        study_id,
+        org_id,
+        user_id,
+        primary_matrix=data.primary_matrix,
+        matrix_files=data.matrix_files,
+        metadata_file=data.metadata_file,
+        reason=data.reason,
     )
     await session.commit()
     return await _study_response(session, study, org_id)

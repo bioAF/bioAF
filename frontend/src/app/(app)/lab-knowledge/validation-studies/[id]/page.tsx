@@ -32,6 +32,13 @@ import {
   ValidationIssuesSection,
   type ValidationIssue,
 } from "@/components/validation/ValidationIssuesSection";
+import { CapabilityChecklist, type Capabilities } from "@/components/validation/CapabilityChecklist";
+import {
+  PrecomputeChecksPanel,
+  type PrecomputeChecks,
+  type SpeciesOverride,
+} from "@/components/validation/PrecomputeChecksPanel";
+import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/components/validation/DepositPanel";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -87,6 +94,15 @@ interface ValidationStudy {
   // case and renders nothing.
   issues?: ValidationIssue[] | null;
 }
+
+// The evidence keys the plan_7 panels read. The bundle carries more than this; these are the ones
+// with a surface. Kept beside the page rather than widened into `Evidence`, which belongs to the
+// computed-vs-claimed table.
+type Plan7Evidence = DepositEvidence & {
+  capabilities?: Capabilities | null;
+  precompute_checks?: PrecomputeChecks | null;
+  species_override?: SpeciesOverride | null;
+};
 
 /**
  * F1 study view: fetches one validation study and renders its outcome, reproduction plan, and the
@@ -166,6 +182,7 @@ export default function ValidationStudyPage() {
   }
 
   const plan = study.plan;
+  const plan7 = (study.evidence ?? {}) as Plan7Evidence;
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
 
@@ -231,6 +248,49 @@ export default function ValidationStudyPage() {
               result={study.evidence.classification_result}
               level3Skipped={study.evidence.level3_skipped}
               level3Failed={study.evidence.level3_failed}
+            />
+          </section>
+        )}
+
+        {plan7.capabilities && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              What this paper has
+            </h2>
+            <CapabilityChecklist capabilities={plan7.capabilities} />
+          </section>
+        )}
+
+        {plan7.precompute_checks && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Checks before spending compute
+            </h2>
+            <PrecomputeChecksPanel
+              checks={plan7.precompute_checks}
+              override={plan7.species_override ?? null}
+              onOverride={async (reason) => {
+                await api.post(`/api/validation-studies/${study.id}/override-species`, { reason });
+                await refresh();
+              }}
+            />
+          </section>
+        )}
+
+        {(plan7.deposit_inventory || plan7.deposit_selection || plan7.deposit_failed) && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Deposited data
+            </h2>
+            <DepositPanel
+              evidence={plan7}
+              // A person picks only while the study is waiting for one. After acquisition the
+              // choice is made and re-offering it would suggest it could still be changed.
+              canPick={study.state === "acquiring_processed" && !plan7.deposit_selection}
+              onPick={async (selection: DepositSelection) => {
+                await api.post(`/api/validation-studies/${study.id}/deposit-selection`, selection);
+                await refresh();
+              }}
             />
           </section>
         )}

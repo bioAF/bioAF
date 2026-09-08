@@ -56,6 +56,23 @@ class DepositOverrideRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=1000)
 
 
+class DepositSelectionRequest(BaseModel):
+    """plan_7 step 15: a person's pick of which deposited file to reproduce from.
+
+    The assisted counterpart of the model's `select_deposit`. Without it `assisted` is not a working
+    mode: the driver lists the deposit, holds for a person, and that person has no control to answer
+    with.
+
+    `value_type` is deliberately not asked for. Step 6 MEASURES what the values are and its answer
+    overrules any claim, so asking for a guess we then ignore would be theatre.
+    """
+
+    primary_matrix: str
+    matrix_files: list[str] = []
+    metadata_file: str | None = None
+    reason: str = "chosen at the approval gate"
+
+
 class ClassifyRequest(BaseModel):
     """A human's by-hand verdict at the ``comparing`` gate (Phase 1 keeps comparison manual)."""
 

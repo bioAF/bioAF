@@ -529,6 +529,74 @@ class ValidationStudyService:
         return study
 
     @staticmethod
+    async def set_deposit_selection(
+        session: AsyncSession,
+        study_id: int,
+        org_id: int,
+        user_id: int,
+        *,
+        primary_matrix: str,
+        matrix_files: list[str],
+        metadata_file: str | None,
+        reason: str,
+    ) -> ValidationStudy:
+        """plan_7 step 15: a person picks which deposited file to reproduce from.
+
+        The assisted counterpart of the model's ``select_deposit``, and it takes the SAME guard: a
+        filename the deposit does not hold would send the download at a 404, whoever named it. The
+        choice is recorded as a person's so the report never credits a model for it.
+        """
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if study.state != "acquiring_processed":
+            raise HTTPException(
+                400,
+                f"Cannot choose a deposited file from '{study.state}'; the study must be waiting at "
+                "'acquiring_processed'.",
+            )
+
+        evidence = dict(study.evidence_json or {})
+        inventory = evidence.get("deposit_inventory") or {}
+        known = {e.get("filename") for e in inventory.get("entries") or []}
+        wanted = list(dict.fromkeys([primary_matrix, *(matrix_files or [])]))
+        unknown = [name for name in wanted if name not in known]
+        if unknown:
+            raise HTTPException(
+                400,
+                f"This study's GEO deposit does not hold {', '.join(unknown)}. Choose from the files listed.",
+            )
+        if metadata_file and metadata_file not in known:
+            raise HTTPException(400, f"This study's GEO deposit does not hold {metadata_file}.")
+
+        evidence["deposit_selection"] = {
+            "primary_matrix": primary_matrix,
+            "matrix_files": wanted,
+            "metadata_file": metadata_file,
+            # Measured by step 6, which overrules any claim about it. Recording a guess here would
+            # put a number on the record that the next step discards.
+            "value_type": "unknown",
+            "reason": (reason or "chosen at the approval gate").strip(),
+            "confidence": 1.0,
+            "declined": False,
+            "decided_by": "human",
+            "model": None,
+            "chosen_by_user_id": user_id,
+        }
+        # A person answering the hold clears it: the study is no longer waiting on the thing the
+        # hold recorded.
+        evidence.pop("deposit_failed", None)
+        study.evidence_json = evidence
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study_id,
+            action="deposit_file_chosen",
+            details={"primary_matrix": primary_matrix, "matrix_files": wanted},
+        )
+        return study
+
+    @staticmethod
     async def classify_by_hand(
         session: AsyncSession, study_id: int, org_id: int, user_id: int, classification: str
     ) -> ValidationStudy:
