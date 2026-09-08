@@ -406,3 +406,102 @@ class TestNoProviderIsNotAFailure:
         assert unwired_study.state == "acquiring_processed"
         assert unwired_study.evidence_json["deposit_inventory"]["entries"]
         assert unwired_study.evidence_json.get("deposit_selection") is None
+
+
+class TestAPersonCanPickAtTheGate:
+    """plan_7 step 15: `assisted` is only a working mode if a person has a control to answer with.
+
+    The driver lists the deposit and holds; without this endpoint it holds forever.
+    """
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _enable(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_a_posted_pick_is_stored_as_the_selection(
+        self, session, unwired_study, admin_user, admin_token, client
+    ):
+        evidence = dict(unwired_study.evidence_json)
+        evidence["deposit_inventory"] = {
+            "accession": "GSE1",
+            "source": "directory",
+            "listed_at": "2026-09-07T00:00:00Z",
+            "entries": [
+                {
+                    "filename": "GSE1_counts.tsv.gz",
+                    "url": "https://x/GSE1_counts.tsv.gz",
+                    "classification": "matrix_counts",
+                    "level": "series",
+                    "gsm": None,
+                    "size_bytes": 1024,
+                    "deposited_type": None,
+                }
+            ],
+            "triplets": [],
+        }
+        unwired_study.evidence_json = evidence
+        await session.commit()
+
+        r = await client.post(
+            f"/api/validation-studies/{unwired_study.id}/deposit-selection",
+            json={
+                "primary_matrix": "GSE1_counts.tsv.gz",
+                "matrix_files": ["GSE1_counts.tsv.gz"],
+                "metadata_file": None,
+                "value_type": "unknown",
+                "reason": "chosen at the approval gate",
+                "confidence": 1.0,
+                "declined": False,
+            },
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+        assert r.status_code == 200
+        selection = r.json()["evidence"]["deposit_selection"]
+        assert selection["primary_matrix"] == "GSE1_counts.tsv.gz"
+        # Recorded as a person's, so the report never credits a model for a human choice.
+        assert selection["decided_by"] == "human"
+        assert selection["model"] is None
+
+    @pytest.mark.asyncio
+    async def test_a_file_the_deposit_does_not_hold_is_refused(self, session, unwired_study, admin_token, client):
+        """The same guard the model's pick gets. A filename that is not in the inventory would send
+        the download at a 404."""
+        evidence = dict(unwired_study.evidence_json)
+        evidence["deposit_inventory"] = {
+            "accession": "GSE1",
+            "source": "directory",
+            "listed_at": "x",
+            "entries": [],
+            "triplets": [],
+        }
+        unwired_study.evidence_json = evidence
+        await session.commit()
+
+        r = await client.post(
+            f"/api/validation-studies/{unwired_study.id}/deposit-selection",
+            json={"primary_matrix": "invented.tsv", "matrix_files": ["invented.tsv"]},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert r.status_code == 400
+        assert "invented.tsv" in r.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_it_only_applies_while_the_study_is_waiting_for_one(
+        self, session, unwired_study, admin_token, client
+    ):
+        """After acquisition the choice is made, and re-applying it would suggest a decision that is
+        already spent can still be changed."""
+        unwired_study.state = "reproducing"
+        await session.commit()
+
+        r = await client.post(
+            f"/api/validation-studies/{unwired_study.id}/deposit-selection",
+            json={"primary_matrix": "x.tsv", "matrix_files": ["x.tsv"]},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert r.status_code == 400

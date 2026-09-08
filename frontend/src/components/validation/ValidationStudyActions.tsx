@@ -6,6 +6,60 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { VALIDATION_CLASSIFICATIONS } from "@/lib/validationClassification";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 
+/**
+ * What step 13 established about this paper, as far as the route modal cares.
+ *
+ * **An UNKNOWN capability is offered, not hidden.** The three answers mean three different things
+ * at the gate: YES enables a route, NO says the route cannot work and why, and UNKNOWN says "we
+ * could not establish this" with the reason and STILL offers the route. Treating UNKNOWN as NO
+ * would hide a workable route behind a GEO timeout; treating it as YES would promise a route that
+ * may not exist.
+ */
+interface RouteCapability {
+  value: "yes" | "no" | "unknown";
+  evidence: string | null;
+  failure_reason: string | null;
+}
+
+interface RouteCapabilities {
+  preprocessed_data?: RouteCapability;
+  raw_data?: RouteCapability;
+  code_artifact?: RouteCapability;
+  code_repository?: RouteCapability;
+  code_sources?: { kind: string; url: string | null; identifier: string | null; [key: string]: unknown }[];
+}
+
+/**
+ * What the modal may say about a capability: nothing when it is there, a plain statement when it is
+ * not, and the discovery failure when we could not tell.
+ */
+function capabilityNote(cap: RouteCapability | undefined, absent: string): string | null {
+  if (!cap || cap.value === "yes") return null;
+  if (cap.value === "unknown") {
+    return cap.failure_reason || "bioAF could not establish this, so the route is offered with that uncertainty.";
+  }
+  return absent;
+}
+
+/**
+ * Which reproduction method the driver intends to try first, derived from the capabilities ALONE.
+ *
+ * The gate is pre-approval, so it can only state an intention. The outcome of the attempt belongs
+ * to the report; a gate built to wait on an execution result would be waiting for something that
+ * cannot exist yet.
+ */
+function intendedMethod(caps: RouteCapabilities | null | undefined): string | null {
+  if (!caps) return null;
+  const source = (caps.code_sources || [])[0];
+  if (source) {
+    return `Published code at ${source.url || source.identifier}, so the authors' own code will be attempted first.`;
+  }
+  if (caps.code_artifact?.value === "no" && caps.code_repository?.value === "no") {
+    return "No code source was found, so an analysis will be generated from the methods the paper describes.";
+  }
+  return null;
+}
+
 // The human gates on a validation study, rendered per state. `requested` needs a Read (B1 fetches the
 // full text by DOI, or paste a body); `plan_ready` is the C1 approve/decline gate; `comparing` is the
 // manual classification gate (Phase 1 keeps comparison manual). The automated stages in between are
@@ -21,7 +75,14 @@ export function ValidationStudyActions({
     state: string;
     // Set when the study reached `plan_ready` from a retry with nothing left to reuse, so approving
     // pays for the download a second time.
-    evidence?: { awaiting_refetch_approval?: boolean | null } | null;
+    //
+    // `capabilities` is step 13's read-time discovery. The modal used to offer all three routes
+    // blind, so a person could choose the deposited-data route on a paper with no deposited matrix
+    // and only find out after approving.
+    evidence?: {
+      awaiting_refetch_approval?: boolean | null;
+      capabilities?: RouteCapabilities | null;
+    } | null;
     // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
     // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
     plan?: {
@@ -64,6 +125,16 @@ export function ValidationStudyActions({
       setBusy(false);
     }
   }
+
+  const capabilities = study.evidence?.capabilities ?? null;
+  const depositNote = capabilityNote(
+    capabilities?.preprocessed_data,
+    "No pre-processed data was found in this study's GEO deposit, so this route has nothing to reproduce from.",
+  );
+  const rawNote = capabilityNote(
+    capabilities?.raw_data,
+    "No raw sequencing reads are published for this study, so this route has nothing to fetch.",
+  );
 
   const base = `/api/validation-studies/${study.id}`;
   const btn = "rounded px-4 py-2 text-sm font-medium disabled:opacity-50";
@@ -143,6 +214,9 @@ export function ValidationStudyActions({
           message={
             <div className="space-y-3">
               <p>Choose what to validate. The two routes answer different questions.</p>
+              {intendedMethod(capabilities) && (
+                <p className="text-xs text-gray-600">{intendedMethod(capabilities)}</p>
+              )}
 
               <label className="flex items-start gap-2">
                 <input
@@ -160,6 +234,7 @@ export function ValidationStudyActions({
                     findings. Takes minutes. It cannot detect a processing error, a swapped sample or
                     a contaminated library, because the upstream processing is not repeated.
                   </span>
+                  {depositNote && <span className="block text-xs text-amber-800">{depositNote}</span>}
                 </span>
               </label>
 
@@ -177,6 +252,7 @@ export function ValidationStudyActions({
                     Fetches the sequencing reads and re-runs the whole analysis. Validates the
                     pre-processing and sample quality. Takes hours.
                   </span>
+                  {rawNote && <span className="block text-xs text-amber-800">{rawNote}</span>}
                 </span>
               </label>
 

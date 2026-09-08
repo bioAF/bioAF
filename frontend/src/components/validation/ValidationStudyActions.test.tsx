@@ -195,3 +195,112 @@ describe("the route modal", () => {
     expect(screen.getByText(/cannot detect a processing error/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * plan_7 step 15: the route modal must show what is actually available.
+ *
+ * `7d36acad` shipped the modal offering all three routes blind, so a person could choose the
+ * deposited-data route on a paper with no deposited matrix and only discover it after approving.
+ *
+ * An UNKNOWN capability is OFFERED, not hidden: treating it as NO would hide a workable route
+ * behind a GEO timeout, and treating it as YES would promise a route that may not exist.
+ */
+
+const yes = { value: "yes" as const, evidence: null, failure_reason: null };
+const no = { value: "no" as const, evidence: null, failure_reason: null };
+
+const CAPS = {
+  paper_readable: yes,
+  geo_entry: yes,
+  raw_data: yes,
+  preprocessed_data: yes,
+  sample_metadata: yes,
+  code_artifact: no,
+  code_repository: no,
+  code_sources: [] as { kind: string; url: string | null; identifier: string | null }[],
+};
+
+async function openApprove() {
+  await userEvent.click(screen.getByRole("button", { name: /^approve/i }));
+}
+
+test("a route with no data behind it says so instead of looking equal to the others", async () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "plan_ready",
+        evidence: { capabilities: { ...CAPS, preprocessed_data: no } },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  await openApprove();
+  expect(screen.getByText(/no pre-processed data was found/i)).toBeInTheDocument();
+});
+
+test("an unknown capability is still offered, with the uncertainty stated", async () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "plan_ready",
+        evidence: {
+          capabilities: {
+            ...CAPS,
+            preprocessed_data: {
+              value: "unknown" as const,
+              evidence: null,
+              failure_reason: "bioAF could not reach GEO to check for a deposited matrix",
+            },
+          },
+        },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  await openApprove();
+  expect(screen.getByText(/could not reach GEO/i)).toBeInTheDocument();
+  // Offered, not hidden: the radio is still selectable.
+  expect(screen.getByRole("radio", { name: /deposited data/i })).toBeEnabled();
+});
+
+test("it states which method the run will try first, and why", async () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "plan_ready",
+        evidence: {
+          capabilities: {
+            ...CAPS,
+            code_repository: yes,
+            code_sources: [{ kind: "github", url: "https://github.com/lab/paper", identifier: null }],
+          },
+        },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  await openApprove();
+  expect(screen.getByText(/authors.*code will be attempted first/i)).toBeInTheDocument();
+  expect(screen.getByText(/github\.com\/lab\/paper/)).toBeInTheDocument();
+});
+
+test("with no published code it says an analysis will be generated from the described methods", async () => {
+  render(
+    <ValidationStudyActions
+      study={{ id: 7, state: "plan_ready", evidence: { capabilities: CAPS } }}
+      onChanged={jest.fn()}
+    />,
+  );
+  await openApprove();
+  expect(screen.getByText(/generated from the methods the paper describes/i)).toBeInTheDocument();
+});
+
+test("the modal is unchanged when discovery never ran", async () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "plan_ready" }} onChanged={jest.fn()} />);
+  await openApprove();
+  expect(screen.queryByText(/no pre-processed data was found/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /approve and run/i })).toBeInTheDocument();
+});
