@@ -1118,7 +1118,11 @@ class ValidationDriverService:
         straight through to comparing (Level-2 only)."""
         evidence = dict(study.evidence_json or {})
         level3 = evidence.get("level3")
-        if not level3:
+        # plan_7 step 18: a study bioAF could not wire a template for is exactly the study the
+        # generated arm exists for, so the early return to `comparing` cannot come before the
+        # ladder. Study 26 is the shape: a confirmed finding, no route from bioAF's own wiring to
+        # it, and nothing produced at all.
+        if not level3 and not evidence.get("level3_skipped") and not evidence.get("code_execution"):
             await ValidationStudyService.transition(
                 session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
             )
@@ -1135,6 +1139,7 @@ class ValidationDriverService:
         # not a feature, which is the lesson step 11 exists to record.
         if "code_resolution" not in evidence:
             await ValidationDriverService._resolve_authors_code(session, study, evidence)
+            level3 = evidence.get("level3")
 
         record = evidence.get("code_execution") or {}
         if (record and not record.get("outcome")) or (
@@ -1158,12 +1163,18 @@ class ValidationDriverService:
         # that agrees would turn the most useful finding this feature can produce into a false
         # reproduction. `record` being present at this point means an arm already finished.
         if not record and await ValidationDriverService._wants_generated_arm(session, evidence):
-            return await ValidationDriverService._handle_generated_arm(session, study, evidence, level3)
+            return await ValidationDriverService._handle_generated_arm(session, study, evidence, level3 or {})
 
         # Published code we resolved and pinned, on an install that cannot run it. A true statement
         # about this bioAF rather than about the paper, and the report has to be able to say it, so
         # it is recorded before the template arm takes over.
         await ValidationDriverService._record_code_arm_unavailable(session, study, evidence)
+
+        if not level3:
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+            )
+            return True
 
         sid = evidence.get("level3_run_session_id")
         if sid is None:
@@ -1256,7 +1267,19 @@ class ValidationDriverService:
 
     @staticmethod
     async def _wants_generated_arm(session: AsyncSession, evidence: dict) -> bool:
-        """Rung 3: the paper published no usable code, and this install can run a generated analysis.
+        """Rung 3: the paper published no usable code, bioAF cannot wire its own reproduction, and
+        this install can execute one.
+
+        **Where the ladder's rungs 3 and 4 divide, and why here.** plan_7 words both rungs as "no
+        usable published code", which read literally would run a NONDETERMINISTIC generated analysis
+        in preference to a deterministic template on every paper that published none. That would
+        move study 6, which the plan names as a falsifier ("the pipeline route is byte-for-byte
+        unchanged... if step 4 or 8 moves it, the plan is wrong"), and it would weaken every such
+        verdict, since this arm is the weakest of the three and ranks last under step 9's qualifier.
+        So the generated arm is what gives a study a finding-tier result when bioAF's own wiring
+        cannot produce one, which is what "the reason a paper with no published code is still worth
+        running" means. Rungs 1 and 2 are untouched: the authors' own code is the STRONGEST method
+        and does displace the template.
 
         A thin methods section is NOT part of this test. Step 14's sufficiency judgment is advisory,
         and reading it as a veto would contradict the plan's own rule that nothing about a paper
@@ -1266,6 +1289,8 @@ class ValidationDriverService:
 
         resolution = evidence.get("code_resolution") or {}
         if resolution.get("outcome") not in ("code_absent", "code_unreachable"):
+            return False
+        if evidence.get("level3"):
             return False
         return await untrusted_identity(session) is not None
 
