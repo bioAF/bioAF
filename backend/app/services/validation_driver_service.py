@@ -1161,8 +1161,9 @@ class ValidationDriverService:
             )
             return True
 
-        # plan_7 step 18, rung 3: no usable published code was AVAILABLE, so write the analysis from
-        # what the paper describes and run that. It does NOT run behind an attempted code arm that
+        # plan_7 step 18, rung 2 of the owner's ladder: no usable published code was AVAILABLE, so
+        # write the analysis from what the paper describes and run that. A wired template does not
+        # pre-empt it (see `_wants_generated_arm`). It does NOT run behind an attempted code arm that
         # failed: that failure is the result of its own arm, and replacing it with a generated run
         # that agrees would turn the most useful finding this feature can produce into a false
         # reproduction. `record` being present at this point means an arm already finished.
@@ -1271,30 +1272,31 @@ class ValidationDriverService:
 
     @staticmethod
     async def _wants_generated_arm(session: AsyncSession, evidence: dict) -> bool:
-        """Rung 3: the paper published no usable code, bioAF cannot wire its own reproduction, and
-        this install can execute one.
+        """Rung 2 of the owner's ladder: the paper published no usable code, so reverse-engineer its
+        analysis from the methods section. Requires an install that can execute one.
 
-        **Where the ladder's rungs 3 and 4 divide, and why here.** plan_7 words both rungs as "no
-        usable published code", which read literally would run a NONDETERMINISTIC generated analysis
-        in preference to a deterministic template on every paper that published none. That would
-        move study 6, which the plan names as a falsifier ("the pipeline route is byte-for-byte
-        unchanged... if step 4 or 8 moves it, the plan is wrong"), and it would weaken every such
-        verdict, since this arm is the weakest of the three and ranks last under step 9's qualifier.
-        So the generated arm is what gives a study a finding-tier result when bioAF's own wiring
-        cannot produce one, which is what "the reason a paper with no published code is still worth
-        running" means. Rungs 1 and 2 are untouched: the authors' own code is the STRONGEST method
-        and does displace the template.
+        **The ladder has three rungs and no template rung** (owner, 2026-09-07, verbatim): "If code
+        exists, we use the code. If no code exists, we attempt to reverse engineer from the methods
+        section. If the methods section has no computational methods or not enough for us to come up
+        with anything, we stop and report this."
 
-        A thin methods section is NOT part of this test. Step 14's sufficiency judgment is advisory,
-        and reading it as a veto would contradict the plan's own rule that nothing about a paper
-        rules it in or out. It is carried as a qualifier instead.
+        So a wired `level3` template is NOT a reason to skip this arm. bioAF's four notebook
+        templates are not a third reproduction METHOD ranked between the authors' code and a
+        generated analysis: ``template_for_value_type`` picks one from the measured SHAPE of the data
+        (counts vs normalized, gene vs interval) and nothing from the paper's methods reaches that
+        choice. Running our generic two-arm DESeq2 or limma-trend test on their data is a different
+        claim from reproducing their analysis, and only the second is what this feature promises.
+
+        The third rung is decided by the ATTEMPT, not by a veto: step 18 generates once, and where
+        the description does not support a runnable analysis it lands ``generation_failed`` with a
+        named reason and reaches a terminal state. A thin methods section is therefore not part of
+        this test either. Step 14's sufficiency judgment is advisory and is carried as a qualifier,
+        which is what plan_7 amendment 2 requires.
         """
         from app.services.untrusted_execution import untrusted_identity
 
         resolution = evidence.get("code_resolution") or {}
         if resolution.get("outcome") not in ("code_absent", "code_unreachable"):
-            return False
-        if evidence.get("level3"):
             return False
         return await untrusted_identity(session) is not None
 

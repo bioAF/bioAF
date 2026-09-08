@@ -188,16 +188,19 @@ class TestTheFactualChecksStillApply:
 
 
 class TestTheDriverWiresRungThree:
-    """Rung 3 of step 17's method ladder. Without this wire the generated arm is a service nothing
-    calls, which is exactly the shape of the step 11 blocker.
+    """Rung 2 of the owner's ladder. Without this wire the generated arm is a service nothing calls,
+    which is exactly the shape of the step 11 blocker.
 
-    The studies here carry `level3_skipped` rather than `level3`: the generated arm is what gives a
-    study a finding-tier result when bioAF's own wiring cannot produce one. See
-    `TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate` for why that is where rungs 3 and 4 divide.
+    The owner stated the rule, 2026-09-07: "If code exists, we use the code. If no code exists, we
+    attempt to reverse engineer from the methods section. If the methods section has no computational
+    methods or not enough for us to come up with anything, we stop and report this."
+
+    So the studies here carry a plain `level3`: a wired template does NOT keep the generated arm from
+    firing, because running bioAF's own generic analysis on the authors' data is a different claim
+    from reproducing the authors' analysis, and only the second is what this feature promises.
     """
 
-    # Study 26's shape: a confirmed finding, and no route from bioAF's own wiring to it. That study
-    # produced nothing at all, which is what the generated arm exists to change.
+    # Study 26's shape: a confirmed finding, and no route from bioAF's own wiring to it.
     _UNWIRED = {"reason": "no published file matched the interval route", "reason_code": "no_input_file"}
 
     _LEVEL3 = {
@@ -273,7 +276,7 @@ class TestTheDriverWiresRungThree:
             session,
             admin_user,
             {
-                "level3_skipped": TestTheDriverWiresRungThree._UNWIRED,
+                "level3": self._LEVEL3,
                 "code_resolution": {"outcome": "code_absent", "reason": "none published"},
             },
         )
@@ -295,7 +298,7 @@ class TestTheDriverWiresRungThree:
         study = await self._study(
             session,
             admin_user,
-            {"level3_skipped": TestTheDriverWiresRungThree._UNWIRED, "code_resolution": {"outcome": "code_absent"}},
+            {"level3": self._LEVEL3, "code_resolution": {"outcome": "code_absent"}},
         )
         await ValidationDriverService._handle_reproducing(session, study)
 
@@ -345,7 +348,7 @@ class TestTheDriverWiresRungThree:
         study = await self._study(
             session,
             admin_user,
-            {"level3_skipped": TestTheDriverWiresRungThree._UNWIRED, "code_resolution": {"outcome": "code_absent"}},
+            {"level3": self._LEVEL3, "code_resolution": {"outcome": "code_absent"}},
         )
         await ValidationDriverService._handle_reproducing(session, study)
 
@@ -369,22 +372,24 @@ class TestTheDriverWiresRungThree:
         assert [c["method"] for c in launches] == ["template"]
 
 
-class TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate:
-    """plan_7's ladder puts the generated arm at rung 3 and bioAF's own template at rung 4, and its
-    text for both rungs is "no usable published code". Read literally, a provisioned install would
-    run a NONDETERMINISTIC generated analysis in preference to a deterministic template on every
-    paper that published no code, which would move study 6.
+class TestTheOwnersLadder:
+    """The owner's rule, stated verbatim 2026-09-07:
 
-    plan_7 states that outcome as a falsifier: "The pipeline route is byte-for-byte unchanged. Study
-    6 must still reach Level 4 the same way. If step 4 or 8 moves it, the plan is wrong." The
-    generated arm is also the weakest of the three methods and ranks last under step 9's qualifier,
-    so preferring it over a validated template would weaken every such verdict.
+        "If code exists, we use the code. If no code exists, we attempt to reverse engineer from the
+        methods section. If the methods section has no computational methods or not enough for us to
+        come up with anything, we stop and report this. Jupyter and RStudio are tools for reproducing
+        this, but do nothing on their own. They need code to function."
 
-    So the boundary between the two rungs is: the generated arm is what gives a study a finding-tier
-    result when bioAF's own wiring cannot produce one. That is what "the reason a paper with no
-    published code is still worth running" means, and it is the reading that satisfies both
-    requirements. **Flagged to the owner rather than settled silently.**
+    Three rungs and no template rung. bioAF's four notebook templates are not a third reproduction
+    METHOD: `template_for_value_type` picks one from the measured SHAPE of the data, and nothing from
+    the paper's methods reaches that choice. Running our generic analysis on their data is a different
+    claim from reproducing their analysis, and only the second is what this feature promises.
+
+    This class replaces `TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate`, which asserted the
+    opposite and was overruled.
     """
+
+    _LEVEL3 = TestTheDriverWiresRungThree._LEVEL3
 
     @staticmethod
     async def _study(session, admin_user, evidence):
@@ -396,69 +401,66 @@ class TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate:
         await session.flush()
         return study
 
-    _LEVEL3 = TestTheDriverWiresRungThree._LEVEL3
-
-    @pytest.mark.asyncio
-    async def test_a_study_with_a_wired_template_still_runs_it(self, session, admin_user, monkeypatch):
+    @staticmethod
+    async def _provisioned(session):
         from app.platform.platform_config_service import PlatformConfigService
-        from app.services.validation_driver_service import ValidationDriverService
 
         await PlatformConfigService.set(session, "untrusted_bucket_name", "bioaf-untrusted-lab-abc")
         await PlatformConfigService.set(session, "untrusted_runner_sa_email", "u@p.iam.g.com")
-        TestTheDriverWiresRungThree._patch(monkeypatch, _GENERATED)
 
-        launches: list[dict] = []
+    @staticmethod
+    def _launches(monkeypatch):
         from types import SimpleNamespace
 
         from app.services.notebook_execution_service import NotebookExecutionService
 
+        calls: list[dict] = []
+
         async def _template(session_, **kw):
-            launches.append({"method": "template", **kw})
+            calls.append({"method": "template", **kw})
             return SimpleNamespace(id=900, status="running")
 
         async def _fetched(session_, **kw):
-            launches.append({"method": "fetched_code", **kw})
+            calls.append({"method": "fetched_code", **kw})
             return SimpleNamespace(id=901, status="running")
 
         monkeypatch.setattr(NotebookExecutionService, "execute_template", _template)
         monkeypatch.setattr(NotebookExecutionService, "execute_fetched_code", _fetched)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_no_code_reverse_engineers_even_where_a_template_is_wired(self, session, admin_user, monkeypatch):
+        """The reversal. A wired template is not a reason to skip reproducing the paper's own
+        analysis, because the template does not reproduce the paper's analysis at all."""
+        from app.services.validation_driver_service import ValidationDriverService
+
+        await self._provisioned(session)
+        TestTheDriverWiresRungThree._patch(monkeypatch, _GENERATED)
+        launches = self._launches(monkeypatch)
 
         study = await self._study(
             session, admin_user, {"level3": self._LEVEL3, "code_resolution": {"outcome": "code_absent"}}
         )
         await ValidationDriverService._handle_reproducing(session, study)
 
-        assert [c["method"] for c in launches] == ["template"]
+        assert [c["method"] for c in launches] == ["fetched_code"]
+        assert study.evidence_json["code_execution"]["method"] == "llm_from_methods"
 
     @pytest.mark.asyncio
-    async def test_a_study_bioaf_cannot_wire_gets_the_generated_arm(self, session, admin_user, monkeypatch):
-        """Study 26's shape: a confirmed finding, and no route from bioAF's own wiring to it. That
-        study produced nothing at all, which is what the generated arm exists to change."""
-        from app.platform.platform_config_service import PlatformConfigService
-        from app.services.notebook_execution_service import NotebookExecutionService
+    async def test_a_study_bioaf_cannot_wire_still_gets_the_generated_arm(self, session, admin_user, monkeypatch):
+        """Study 26's shape: a confirmed finding and no route from bioAF's own wiring to it. It
+        reached the generated arm before this change and still does."""
         from app.services.validation_driver_service import ValidationDriverService
 
-        await PlatformConfigService.set(session, "untrusted_bucket_name", "bioaf-untrusted-lab-abc")
-        await PlatformConfigService.set(session, "untrusted_runner_sa_email", "u@p.iam.g.com")
+        await self._provisioned(session)
         TestTheDriverWiresRungThree._patch(monkeypatch, _GENERATED)
-
-        launches: list[dict] = []
-        from types import SimpleNamespace
-
-        async def _fetched(session_, **kw):
-            launches.append({"method": "fetched_code", **kw})
-            return SimpleNamespace(id=901, status="running")
-
-        monkeypatch.setattr(NotebookExecutionService, "execute_fetched_code", _fetched)
+        launches = self._launches(monkeypatch)
 
         study = await self._study(
             session,
             admin_user,
             {
-                "level3_skipped": {
-                    "reason": "no published file matched the interval route",
-                    "reason_code": "no_input_file",
-                },
+                "level3_skipped": TestTheDriverWiresRungThree._UNWIRED,
                 "code_resolution": {"outcome": "code_absent"},
             },
         )
@@ -468,25 +470,36 @@ class TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate:
         assert study.evidence_json["code_execution"]["method"] == "llm_from_methods"
 
     @pytest.mark.asyncio
-    async def test_published_code_still_outranks_the_template(self, session, admin_user, monkeypatch):
-        """The ladder's rungs 1 and 2 are unaffected: the authors' own code is the STRONGEST method
-        and does displace bioAF's template, which is the whole point of step 17."""
-        from app.platform.platform_config_service import PlatformConfigService
-        from app.services.notebook_execution_service import NotebookExecutionService
+    async def test_unreachable_code_reverse_engineers_too(self, session, admin_user, monkeypatch):
+        """A dead or private link is "no code exists" for the purpose of the ladder: there is nothing
+        to run, and the methods section is the remaining route to the paper's analysis."""
         from app.services.validation_driver_service import ValidationDriverService
 
-        await PlatformConfigService.set(session, "untrusted_bucket_name", "bioaf-untrusted-lab-abc")
-        await PlatformConfigService.set(session, "untrusted_runner_sa_email", "u@p.iam.g.com")
+        await self._provisioned(session)
         TestTheDriverWiresRungThree._patch(monkeypatch, _GENERATED)
+        launches = self._launches(monkeypatch)
 
-        launches: list[dict] = []
-        from types import SimpleNamespace
+        study = await self._study(
+            session,
+            admin_user,
+            {
+                "level3": self._LEVEL3,
+                "code_resolution": {"outcome": "code_unreachable", "reason": "the repository is private"},
+            },
+        )
+        await ValidationDriverService._handle_reproducing(session, study)
 
-        async def _fetched(session_, **kw):
-            launches.append({"method": "fetched_code", **kw})
-            return SimpleNamespace(id=901, status="running")
+        assert [c["method"] for c in launches] == ["fetched_code"]
 
-        monkeypatch.setattr(NotebookExecutionService, "execute_fetched_code", _fetched)
+    @pytest.mark.asyncio
+    async def test_published_code_still_outranks_the_generated_arm(self, session, admin_user, monkeypatch):
+        """Rung 1 is unaffected: the authors' own code is the strongest method, and where it exists
+        nothing else runs."""
+        from app.services.validation_driver_service import ValidationDriverService
+
+        await self._provisioned(session)
+        TestTheDriverWiresRungThree._patch(monkeypatch, _GENERATED)
+        self._launches(monkeypatch)
 
         study = await self._study(
             session,
