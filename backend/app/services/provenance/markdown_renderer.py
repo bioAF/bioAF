@@ -711,6 +711,9 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append(_table(["Step", "Entity"], chain_rows))
     parts.append("")
 
+    _append_capability_checklist(parts, evidence.get("capabilities") or {})
+    _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
+    _append_code_section(parts, evidence)
     _append_issues(parts, entity.get("issues") or [])
 
     _append_audit_trail(parts, report.get("audit_trail", []))
@@ -764,6 +767,231 @@ def _append_issues(parts: list[str], issues: list[dict[str, Any]]) -> None:
         )
     )
     parts.append("")
+
+
+# ---- plan_7 step 19: the findings report, in the export -----------------------------------------
+#
+# The export is NOT a second, thinner report. A report that is right on screen and lossy on export
+# fails the same reader, so the checklist with its UNKNOWNs, the pre-compute checks, the code
+# section's observation-and-explanation split, the side-by-side numbers and the issues list all
+# appear here too.
+
+_CHECKLIST_ROWS = [
+    ("paper_readable", "Paper text available"),
+    ("geo_entry", "GEO entry exists"),
+    ("raw_data", "Raw sample data available"),
+    ("preprocessed_data", "Pre-processed data available"),
+    ("sample_metadata", "Sample metadata available"),
+    ("code_artifact", "Code artifact exists"),
+    ("code_repository", "Code repository linked"),
+]
+
+_TRISTATE_LABEL = {"yes": "Yes", "no": "No", "unknown": "Unknown", "not_attempted": "Not attempted"}
+
+# What each execution outcome MEANS. A reader gets "the code does not execute: dependencies do not
+# install" rather than a token from a state machine.
+_CODE_OUTCOME_TEXT = {
+    "code_absent": "The paper published no analysis code, so its own analysis could not be run.",
+    "code_unreachable": (
+        "The paper's analysis code could not be fetched. That is a statement about the link, not about the science."
+    ),
+    "dependency_unresolvable": (
+        "The code does not execute: its dependencies would not install, so the analysis could not be run as published."
+    ),
+    "code_incomplete": (
+        "The code does not execute: it refers to something that was never published, so the analysis "
+        "could not be run as published."
+    ),
+    "code_error": "The code does not execute: it installed and started, then failed while running.",
+    "data_mismatch": (
+        "The code ran and did not receive the inputs it expected. bioAF chose which deposited file to "
+        "mount and how its columns map, so that choice is among the candidate explanations."
+    ),
+    "generation_failed": "No runnable analysis could be generated from the methods the paper describes.",
+    "ran_no_output": "The code executed and wrote nothing at all.",
+    "ran_output_uncomparable": (
+        "The code executed and produced real output that bioAF's comparison layer does not support. "
+        "That is a limitation of bioAF, not a defect of the paper."
+    ),
+    "ran_output_diverges": (
+        "The code executed and produced a result that disagrees with the paper's own. Both numbers "
+        "are below; the difference is not attributed without evidence."
+    ),
+    "ran_output_agrees": "The code executed and reproduced the paper's own result.",
+}
+
+_CAUSE_LABEL = {
+    "bioaf_input_mapping": "bioAF's own choice of input file and column mapping",
+    "bioaf_arguments": "bioAF's own choice of entry point and arguments",
+    "bioaf_environment": "the environment bioAF built to run it in",
+    "deposit_problem": "the deposited data not matching what the analysis expects",
+    "code_defect": "the published code not doing what the paper describes",
+}
+
+_CHECK_LABEL = {
+    "species_matches": "Species matches the deposit",
+    "sample_data_matches_paper": "Sample data matches the paper",
+    "methods_detailed_enough": "Methods described in enough detail",
+    "samples_described_enough": "Samples described in enough detail",
+}
+
+
+def _append_capability_checklist(parts: list[str], capabilities: dict[str, Any]) -> None:
+    """What this paper actually has. UNKNOWN is rendered AS UNKNOWN, with the reason beside it: a
+    checklist showing NO for a GEO timeout tells the reader something false about the paper."""
+    if not capabilities:
+        return
+    parts.append("## What This Paper Has")
+    parts.append("")
+    rows: list[list[Any]] = []
+    for key, label in _CHECKLIST_ROWS:
+        answer = capabilities.get(key)
+        if not isinstance(answer, dict):
+            continue
+        rows.append(
+            [
+                label,
+                _TRISTATE_LABEL.get(answer.get("value"), answer.get("value")),
+                answer.get("failure_reason") or answer.get("evidence") or "--",
+            ]
+        )
+    for source in capabilities.get("code_sources") or []:
+        rows.append(
+            [
+                f"Code published ({source.get('kind')})",
+                f"exists: {_TRISTATE_LABEL.get(source.get('exists'), source.get('exists'))}, "
+                f"accessible: {_TRISTATE_LABEL.get(source.get('accessible'), source.get('accessible'))}",
+                source.get("accessible_reason") or source.get("url") or source.get("identifier") or "--",
+            ]
+        )
+    if rows:
+        parts.append(_table(["Item", "Answer", "Detail"], rows))
+        parts.append("")
+
+
+def _append_precompute_checks(parts: list[str], checks: dict[str, Any]) -> None:
+    """The cheap checks that decided whether spending compute was worthwhile."""
+    if not checks:
+        return
+    parts.append("## Checks Before Spending Compute")
+    parts.append("")
+    parts.append(
+        _table(
+            ["Check", "Answer", "Detail", "Decided by"],
+            [
+                [
+                    _CHECK_LABEL.get(key, key),
+                    {"ok": "Yes", "mismatch": "No"}.get(check.get("verdict"), "Unknown"),
+                    check.get("detail") or "--",
+                    check.get("model") or check.get("decided_by") or "--",
+                ]
+                for key, check in checks.items()
+                if isinstance(check, dict)
+            ],
+        )
+    )
+    parts.append("")
+
+
+def _append_code_section(parts: list[str], evidence: dict[str, Any]) -> None:
+    """Whether the methods are clearly defined and reproducible, and whether the code executes.
+
+    Observation first, then explanation, and visibly different things. Candidate explanations
+    include bioAF's own input mapping, arguments and environment, so this can say "the difference
+    may be ours" without attributing anything to the paper.
+    """
+    resolution = evidence.get("code_resolution") or {}
+    execution = evidence.get("code_execution") or {}
+    if not resolution and not execution:
+        return
+
+    parts.append("## The Authors' Code")
+    parts.append("")
+
+    source = execution.get("source") or {}
+    parts.append("**What was attempted.** ")
+    attempted = resolution.get("url") or source.get("repo_url")
+    if attempted:
+        pinned = resolution.get("commit_sha") or source.get("commit_sha") or "unpinned"
+        entry = execution.get("entry_point")
+        parts[-1] += f"{attempted} at commit `{pinned}`" + (f", entry point `{entry}`" if entry else "") + "."
+    else:
+        parts[-1] += resolution.get("reason") or "No code source was resolved."
+    if source.get("generated_by_model"):
+        parts[-1] += (
+            f" This analysis was generated from the paper's described methods by "
+            f"`{source['generated_by_model']}`, not published by the authors."
+        )
+    parts.append("")
+
+    outcome = execution.get("outcome") or resolution.get("outcome")
+    observation = execution.get("observation") or {}
+    if outcome:
+        parts.append(f"**What happened.** {_CODE_OUTCOME_TEXT.get(outcome, outcome)}")
+        if "methods_inadequate" in (execution.get("qualifiers") or []):
+            parts.append("")
+            parts.append(
+                "The paper's methods description was assessed as thin, so this result is reported "
+                "under that limitation rather than as a clean reproduction."
+            )
+        parts.append("")
+
+    if observation.get("paper_value") is not None:
+        parts.append(
+            _table(
+                ["Metric", "The paper", "Our re-run"],
+                [[observation.get("metric") or "--", observation.get("paper_value"), observation.get("our_value")]],
+            )
+        )
+        parts.append("")
+
+    unmatched = observation.get("unmatched") or []
+    if unmatched:
+        names = ", ".join(str(u.get("name") or u.get("path")) for u in unmatched if u)
+        parts.append(
+            f"**Produced but not compared:** {names}. bioAF's comparison layer does not support "
+            "these, so they are retained rather than scored."
+        )
+        parts.append("")
+
+    for assumption in source.get("assumptions") or []:
+        parts.append(f"- Assumption: {assumption}")
+    if source.get("assumptions"):
+        parts.append("")
+
+    assessment = evidence.get("execution_assessment") or {}
+    if assessment:
+        candidate = assessment.get("candidate")
+        parts.append(
+            "**What might explain it.** "
+            + (
+                f"Most likely: {_CAUSE_LABEL.get(candidate, candidate)}."
+                if candidate
+                else "The cause could not be resolved from the evidence."
+            )
+            + f" {assessment.get('reason') or ''} "
+            + f"(assessed by `{assessment.get('model')}`, confidence {assessment.get('confidence')})"
+        )
+        considered = [_CAUSE_LABEL.get(c, c) for c in assessment.get("candidates_offered") or [] if c != "unresolved"]
+        if considered:
+            parts.append("")
+            parts.append(f"Considered: {'; '.join(considered)}.")
+        parts.append("")
+
+    signal = evidence.get("signal_assessment") or {}
+    if signal:
+        if signal.get("verdict") == "likely":
+            parts.append(
+                "**Possible issue.** The paper's result may be a reading of noise as signal: "
+                f"{signal.get('reason')} This is a flagged possibility, not a conclusion, and the "
+                f"numbers above are what a reader should judge from. (`{signal.get('model')}`)"
+            )
+        else:
+            parts.append(
+                "We could not reproduce the paper's finding, and the difference does not look like "
+                f"noise read as signal: {signal.get('reason')}"
+            )
+        parts.append("")
 
 
 _LEVEL3_VERDICT_LABEL = {
