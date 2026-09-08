@@ -301,3 +301,173 @@ class TestTheExportCarriesTheSection:
         assert "Issues Encountered" in text
         assert "binding the paper's claims to measurable metrics" in text
         assert "claude-opus-4-8" in text
+
+
+class TestTheExportCarriesTheWholeReport:
+    """plan_7 step 19: the provenance export is not a second, thinner report.
+
+    Step 12's coverage asserts the rendered report AND the export, because a report that is right on
+    screen and lossy on export fails the same reader.
+    """
+
+    _EVIDENCE = {
+        "route": "deposit",
+        "capabilities": {
+            "geo_entry": {"value": "yes", "evidence": "GEO published a series record", "failure_reason": None},
+            "preprocessed_data": {
+                "value": "unknown",
+                "evidence": None,
+                "failure_reason": "bioAF could not reach GEO to list the supplementary files",
+            },
+            "code_sources": [
+                {
+                    "kind": "github",
+                    "url": "https://github.com/lab/paper",
+                    "identifier": None,
+                    "exists": "yes",
+                    "accessible": "no",
+                    "accessible_reason": "the repository is private",
+                }
+            ],
+        },
+        "precompute_checks": {
+            "species_matches": {
+                "check": "species_matches",
+                "verdict": "ok",
+                "detail": "the paper and the deposit both name Homo sapiens",
+                "blocking": False,
+                "decided_by": "measurement",
+                "model": None,
+                "reason": "",
+                "confidence": 0,
+            }
+        },
+        "code_resolution": {
+            "outcome": "resolved",
+            "url": "https://github.com/lab/paper",
+            "commit_sha": "abc1234",
+            "reason": "pinned",
+        },
+        "code_execution": {
+            "attempt": 1,
+            "method": "authors_code",
+            "qualifiers": ["methods_inadequate"],
+            "outcome": "ran_output_diverges",
+            "entry_point": "scripts/run.R",
+            "source": {"repo_url": "https://github.com/lab/paper", "commit_sha": "abc1234"},
+            "observation": {
+                "outcome": "ran_output_diverges",
+                "qualifiers": [],
+                "exit_code": 0,
+                "transcript_uri": "gs://x/log",
+                "transcript_tail": "done",
+                "metric": "peak_count",
+                "paper_value": 7389,
+                "our_value": 4054,
+                "unmatched": [{"path": "summary.json", "name": "figure_ratio", "value": 0.4}],
+            },
+        },
+        "execution_assessment": {
+            "candidate": "bioaf_input_mapping",
+            "candidates_offered": ["bioaf_input_mapping", "code_defect", "unresolved"],
+            "reason": "we chose the input file and the column mapping",
+            "confidence": 0.6,
+            "model": "claude-opus-4-8",
+            "assessed_at": "2026-09-07T00:00:00Z",
+        },
+        "signal_assessment": {
+            "verdict": "likely",
+            "reason": "weak enrichment",
+            "confidence": 0.7,
+            "model": "claude-opus-4-8",
+            "assessed_at": "2026-09-07T00:00:00Z",
+        },
+    }
+
+    async def _report(self, session, admin_user, fmt="md"):
+        from app.services.provenance.report_service import ProvenanceReportService
+
+        study = await _study(session, admin_user)
+        study.evidence_json = self._EVIDENCE
+        await session.flush()
+        await ValidationIssueService.record(session, study, [_row()])
+        result = await ProvenanceReportService.generate(
+            session=session,
+            entity_type="validation_study",
+            entity_id=study.id,
+            org_id=admin_user.organization_id,
+            user_email=admin_user.email,
+            format=fmt,
+        )
+        return result.content if isinstance(result.content, str) else result.content.decode()
+
+    @pytest.mark.asyncio
+    async def test_the_capability_checklist_is_in_the_export(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "GEO entry exists" in text
+        assert "Yes" in text
+
+    @pytest.mark.asyncio
+    async def test_unknown_is_exported_as_unknown_with_its_reason(self, session, admin_user):
+        """A checklist that shows NO for a GEO timeout tells the reader something false about the
+        paper, on screen or in an export."""
+        text = await self._report(session, admin_user)
+        assert "Unknown" in text
+        assert "could not reach GEO" in text
+
+    @pytest.mark.asyncio
+    async def test_existence_and_accessibility_stay_separate_in_the_export(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "the repository is private" in text
+
+    @pytest.mark.asyncio
+    async def test_the_code_section_reads_in_plain_language(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "scripts/run.R" in text
+        assert "abc1234" in text
+        assert "disagrees with the paper" in text
+
+    @pytest.mark.asyncio
+    async def test_both_numbers_are_exported_side_by_side(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "7389" in text or "7,389" in text
+        assert "4054" in text or "4,054" in text
+
+    @pytest.mark.asyncio
+    async def test_the_explanation_is_exported_after_the_observation_and_hedged(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert text.index("What happened") < text.index("What might explain it")
+        assert "bioAF's own choice of input" in text
+
+    @pytest.mark.asyncio
+    async def test_a_possible_noise_flag_is_exported_hedged_not_as_a_verdict(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "Possible issue" in text
+        assert "may" in text
+
+    @pytest.mark.asyncio
+    async def test_claims_we_could_not_compare_are_listed_not_omitted(self, session, admin_user):
+        """A reader must be able to see the boundary of what was tested rather than infer a verdict
+        from silence."""
+        text = await self._report(session, admin_user)
+        assert "figure_ratio" in text
+
+    @pytest.mark.asyncio
+    async def test_the_pre_compute_checks_are_exported(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "Homo sapiens" in text
+
+    @pytest.mark.asyncio
+    async def test_the_issues_section_is_still_there(self, session, admin_user):
+        text = await self._report(session, admin_user)
+        assert "Issues Encountered" in text
+
+    @pytest.mark.asyncio
+    async def test_the_json_export_carries_the_same_bundle(self, session, admin_user):
+        import json as _json
+
+        body = _json.loads(await self._report(session, admin_user, fmt="json"))
+        entity = body["report"]["entity"] if "report" in body else body["entity"]
+        assert entity["evidence"]["capabilities"]["geo_entry"]["value"] == "yes"
+        assert entity["evidence"]["code_execution"]["outcome"] == "ran_output_diverges"
+        assert entity["issues"]

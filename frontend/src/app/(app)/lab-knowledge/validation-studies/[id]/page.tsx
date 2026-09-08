@@ -39,6 +39,8 @@ import {
   type SpeciesOverride,
 } from "@/components/validation/PrecomputeChecksPanel";
 import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/components/validation/DepositPanel";
+import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSection";
+import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -98,11 +100,13 @@ interface ValidationStudy {
 // The evidence keys the plan_7 panels read. The bundle carries more than this; these are the ones
 // with a surface. Kept beside the page rather than widened into `Evidence`, which belongs to the
 // computed-vs-claimed table.
-type Plan7Evidence = DepositEvidence & {
-  capabilities?: Capabilities | null;
-  precompute_checks?: PrecomputeChecks | null;
-  species_override?: SpeciesOverride | null;
-};
+type Plan7Evidence = DepositEvidence &
+  CodeEvidence &
+  ExpectedEvidence & {
+    capabilities?: Capabilities | null;
+    precompute_checks?: PrecomputeChecks | null;
+    species_override?: SpeciesOverride | null;
+  };
 
 /**
  * F1 study view: fetches one validation study and renders its outcome, reproduction plan, and the
@@ -406,10 +410,31 @@ export default function ValidationStudyPage() {
           />
         </section>
 
-        <section>
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
           <ValidationEvidenceTable evidence={study.evidence} />
         </section>
+
+        {/* plan_7 step 19 part 2's sibling: what the deposit and its metadata led us to expect,
+            against what the acquired data turned out to be. The metric comparison above is not
+            rebuilt; this is the second comparison it has no home for. */}
+        {(plan7.deposit_inspection || plan7.precompute_checks) && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              What we expected, and what we saw
+            </h2>
+            <ExpectedVsObserved evidence={plan7} />
+          </section>
+        )}
+
+        {(plan7.code_resolution || plan7.code_execution) && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              The authors&apos; code
+            </h2>
+            <CodeSection evidence={plan7} />
+          </section>
+        )}
 
         <ValidationIssuesSection issues={study.issues ?? []} />
       </main>
