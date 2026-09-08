@@ -530,3 +530,53 @@ def test_node_pools_are_created_after_nat_exists():
     for block in pool_blocks:
         name = re.search(r'"(\w+)"', block).group(1)
         assert "google_compute_router_nat" in block, f"node pool {name} must depend on NAT"
+
+
+# --- Every depends_on has to name a resource that exists ----------------------------------------
+#
+# plan_7 step 16a shipped `depends_on = [google_container_cluster.primary]` on the untrusted
+# runner's Workload Identity binding. There is no `google_container_cluster.primary` in this module;
+# the cluster is `google_container_cluster.bioaf`. Nothing caught it, because every terraform test
+# here asserts that a specific string is PRESENT and none of them asks whether a reference RESOLVES.
+#
+# The cost was not theoretical: `terraform plan` failed with "Reference to undeclared resource", and
+# because `check_for_updates` re-plans every deployed module and raises on the first failure, the
+# whole "Check for Infrastructure Updates" flow was dead for storage and compute alike.
+
+_TF_MODULE_DIRS = [
+    Path(__file__).resolve().parents[1] / "terraform" / "modules" / name for name in ("compute", "storage")
+] + [Path(__file__).resolve().parents[1] / "terraform" / "aws" / "modules" / name for name in ("compute", "storage")]
+
+_RESOURCE_DECL_RE = re.compile(r'^resource\s+"([^"]+)"\s+"([^"]+)"', re.MULTILINE)
+_DEPENDS_ON_RE = re.compile(r"depends_on\s*=\s*\[(.*?)\]", re.DOTALL)
+# A depends_on entry is an address like `google_container_cluster.bioaf`, optionally indexed.
+_ADDRESS_RE = re.compile(r"\b([a-z][a-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_-]*)")
+
+
+def test_every_depends_on_names_a_resource_that_exists():
+    """A depends_on pointing at an undeclared resource fails `terraform plan`, and this suite would
+    otherwise only notice once someone ran an apply against a real cloud."""
+    problems: list[str] = []
+
+    for module_dir in _TF_MODULE_DIRS:
+        if not module_dir.exists():
+            continue
+        declared: set[str] = set()
+        sources: dict[str, str] = {}
+        for tf in sorted(module_dir.glob("*.tf")):
+            text = tf.read_text()
+            sources[tf.name] = text
+            for kind, name in _RESOURCE_DECL_RE.findall(text):
+                declared.add(f"{kind}.{name}")
+
+        for filename, text in sources.items():
+            for block in _DEPENDS_ON_RE.findall(text):
+                for kind, name in _ADDRESS_RE.findall(block):
+                    # `data.*`, `var.*`, `local.*` and `module.*` are not managed resources.
+                    if kind in ("data", "var", "local", "module", "each", "count"):
+                        continue
+                    address = f"{kind}.{name}"
+                    if address not in declared:
+                        problems.append(f"{module_dir.name}/{filename}: depends_on [{address}] is not declared")
+
+    assert not problems, "depends_on references an undeclared resource:\n" + "\n".join(problems)

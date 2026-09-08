@@ -455,8 +455,14 @@ resource "google_service_account_iam_member" "untrusted_runner_workload_identity
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${var.project_id}.svc.id.goog[bioaf-untrusted/bioaf-untrusted-runner]"
 
-  # Same asynchronous-pool race the notebook runner's binding documents below.
-  depends_on = [google_container_cluster.primary]
+  # Same asynchronous-pool race the notebook runner's binding documents below: the Workload Identity
+  # pool is registered asynchronously after the cluster's create call returns.
+  depends_on = [
+    google_container_cluster.bioaf,
+    google_container_node_pool.pipelines,
+    google_container_node_pool.interactive,
+    google_container_node_pool.system,
+  ]
 }
 
 resource "google_service_account_iam_member" "notebook_runner_workload_identity" {
