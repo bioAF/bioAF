@@ -454,3 +454,104 @@ class TestStepSixteenIsActuallyCalled:
         study.state = "reproducing"
         await ValidationDriverService._handle_reproducing(session, study)
         assert len(calls) == first
+
+
+class TestTheCodeArmsOutputIsActuallyCompared:
+    """Step 17's differential-table adapter "lands where `_extract_reproduced_set` and the
+    concordance service already read it. This is today's path."
+
+    Without that, the arm reports `ran_output_agrees` on the strength of having written a table,
+    which is a claim of agreement made without comparing anything. That is the exact defect step 9
+    exists to prevent, one layer down.
+    """
+
+    _PAPER_SET = {
+        "kind": "gene",
+        "namespace": "symbol",
+        "entities": [{"id": "A", "direction": "up"}, {"id": "B", "direction": "down"}],
+        "n_sig": 2,
+    }
+
+    def _level3(self):
+        return {**_LEVEL3, "paper_finding_set": self._PAPER_SET, "universe": 20000}
+
+    def _patch_poll(self, monkeypatch, table: str):
+        async def _load(_session, sid):
+            return SimpleNamespace(id=sid, status="completed", gcs_output_prefix=None, failure_message=None)
+
+        async def _poll(_session, cs):
+            return SimpleNamespace(id=cs.id, status="completed", failure_message=None, gcs_output_prefix=None)
+
+        async def _outputs(_session, _cs):
+            return [{"path": "results/de.csv", "text": table}]
+
+        monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+        monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+        monkeypatch.setattr(ValidationDriverService, "_read_code_outputs", _outputs)
+
+    async def _run(self, session, admin_user, table):
+        study = await _study_at_reproducing(
+            session,
+            admin_user,
+            {
+                "level3": self._level3(),
+                "code_resolution": _RESOLVED_CODE,
+                "code_execution": {"attempt": 1, "method": "authors_code", "session_id": 901, "source": {}},
+            },
+        )
+        await ValidationDriverService._handle_reproducing(session, study)
+        return study
+
+    @pytest.mark.asyncio
+    async def test_a_table_that_reproduces_the_paper_scores_agreement(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        table = "gene,log2FoldChange,padj\nA,2.0,0.001\nB,-2.1,0.002\n" + "".join(
+            f"FLAT{i},0.05,0.9\n" for i in range(200)
+        )
+        self._patch_poll(monkeypatch, table)
+        study = await self._run(session, admin_user, table)
+
+        assert study.evidence_json["code_execution"]["outcome"] == "ran_output_agrees"
+        assert study.evidence_json["level3_result"]["concordance"]["verdict"] == "agree"
+
+    @pytest.mark.asyncio
+    async def test_a_table_that_does_not_is_a_divergence_not_an_agreement(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """The load-bearing case. Reporting agreement because a table was written would be a claim
+        made without comparing."""
+        table = "gene,log2FoldChange,padj\nX,2.0,0.001\nY,-2.1,0.002\n" + "".join(
+            f"FLAT{i},0.05,0.9\n" for i in range(200)
+        )
+        self._patch_poll(monkeypatch, table)
+        study = await self._run(session, admin_user, table)
+
+        assert study.evidence_json["code_execution"]["outcome"] == "ran_output_diverges"
+        assert study.evidence_json["level3_result"]["concordance"]["verdict"] != "agree"
+
+    @pytest.mark.asyncio
+    async def test_both_numbers_reach_the_observation(self, session, admin_user, monkeypatch, untrusted_ready):
+        """The report always shows ours beside the paper's, and the observation is where it reads
+        them from."""
+        table = "gene,log2FoldChange,padj\nX,2.0,0.001\n" + "".join(f"FLAT{i},0.05,0.9\n" for i in range(200))
+        self._patch_poll(monkeypatch, table)
+        study = await self._run(session, admin_user, table)
+
+        observation = study.evidence_json["code_execution"]["observation"]
+        assert observation["paper_value"] == 2
+        assert observation["our_value"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_concordance_is_attributed_to_the_authors_own_code(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """A concordance scored against the authors' OWN code is a stronger claim than one scored
+        against ours, and step 9's rule says the verdict has to be able to say so."""
+        table = "gene,log2FoldChange,padj\nA,2.0,0.001\nB,-2.1,0.002\n" + "".join(
+            f"FLAT{i},0.05,0.9\n" for i in range(200)
+        )
+        self._patch_poll(monkeypatch, table)
+        study = await self._run(session, admin_user, table)
+
+        assert study.evidence_json["level3_result"]["method"] == "authors_code"
