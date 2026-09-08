@@ -12,9 +12,10 @@ with no published code is still worth running.
 | `authors_code` | deterministic given a pinned commit | strongest: tests it using THEIRS |
 | `llm_from_methods` | **nondeterministic, variable run to run** | weakest, and the variability is part of the claim |
 
-**When it runs**: rung 3 of step 17's method ladder, meaning no usable published code was AVAILABLE.
-It does NOT run behind a published-code execution that was attempted and failed; that failure is the
-result of its own arm.
+**When it runs**: rung 2 of the owner's ladder, meaning no usable published code was AVAILABLE. A
+wired `deseq2` / `limma_trend` template does not pre-empt it: that row above tests the finding using
+OUR analysis, which is a different claim from reproducing the paper's. It does NOT run behind a
+published-code execution that was attempted and failed; that failure is the result of its own arm.
 
 **A thin methods section does not stop it.** Step 14's sufficiency judgment is advisory and refusing
 on it would contradict this plan's rule that nothing about a paper rules it in or out. An inadequate

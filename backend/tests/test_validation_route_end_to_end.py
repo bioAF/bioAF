@@ -927,11 +927,10 @@ class TestThePublishedCodeArmFails:
 class TestTheGeneratedArm:
     """Case 4: no usable code, generated fallback. One execution only, ranked last.
 
-    These studies deliberately do NOT register the deseq2 template, so `resolve_level3_from_deposit`
-    declines with `no_template` and the study reaches `reproducing` with nothing bioAF can run. That
-    is where the generated arm belongs: it gives a study a finding-tier result when bioAF's own
-    wiring cannot produce one, rather than displacing a deterministic template with a
-    nondeterministic generation. See `TestTheGeneratedArmDoesNotDisplaceBioafsOwnTemplate`.
+    Under the owner's ladder (2026-09-07) a wired template does not keep this arm from firing: "if no
+    code exists, we attempt to reverse engineer from the methods section". So these studies register
+    the deseq2 template like any other and the generated arm still wins, which is the assertion
+    `test_a_wired_template_does_not_keep_the_paper_from_being_reproduced` exists to hold.
     """
 
     async def _run(self, session, admin_user, monkeypatch, **kw):
@@ -943,6 +942,16 @@ class TestTheGeneratedArm:
         )
         state = await _tick_to_rest(session, study)
         return route, study, state
+
+    @pytest.mark.asyncio
+    async def test_a_wired_template_does_not_keep_the_paper_from_being_reproduced(
+        self, session, admin_user, monkeypatch, autonomous_org, deseq2_template
+    ):
+        """bioAF's template runs OUR analysis on their data. That is a different claim from
+        reproducing THEIR analysis, so it is not a reason to skip the attempt."""
+        _, study, state = await self._run(session, admin_user, monkeypatch)
+        assert state == "classified"
+        assert study.evidence_json["code_execution"]["method"] == "llm_from_methods"
 
     @pytest.mark.asyncio
     async def test_a_paper_with_no_code_still_gets_an_analysis(self, session, admin_user, monkeypatch, autonomous_org):
