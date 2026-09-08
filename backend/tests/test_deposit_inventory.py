@@ -403,3 +403,50 @@ def test_a_normalized_matrix_keeps_its_shape_and_its_normalization():
 
 def test_the_depositors_type_still_outranks_the_shape():
     assert classify_deposit_filename("GSM1_feature_bc_matrix.h5", deposited_type="BIGWIG") == "coverage"
+
+
+# ---- plan_7 step 16: a deposited code archive has somewhere to go ----
+
+
+class TestCodeClassification:
+    """`classify_deposit_filename` returned raw / da_table / de_table / matrix_* / barcodes /
+    features / peaks / coverage / metadata / other, and a code archive landed in `other`. Step 16
+    resolves the code ARTIFACT before the repository, so it needs a class it can find.
+
+    The ordering of that function is load-bearing and held by tests for specific filename
+    collisions, so the new group goes where it cannot claim a result table.
+    """
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "GSE1_analysis.R",
+            "GSE1_pipeline.py",
+            "GSE1_figures.ipynb",
+            "GSE1_workflow.Rmd",
+            "GSE1_analysis_code.tar.gz",
+            "GSE1_scripts.zip",
+            "GSE1_code.tgz",
+        ],
+    )
+    def test_a_published_script_or_code_archive_is_code(self, name):
+        assert classify_deposit_filename(name) == "code"
+
+    @pytest.mark.parametrize(
+        "name,expected",
+        [
+            # A result table whose name happens to carry a script-ish word is still the ANSWER, and
+            # classifying it as code would offer the paper's own output as something to run.
+            ("GSE1_deseq2_results.csv", "de_table"),
+            ("GSE1_csaw.dba_window.set.csv.gz", "da_table"),
+            # The raw archive keeps its own class: a tar of reads is not a code archive.
+            ("GSE1_RAW.tar", "raw"),
+            # A counts matrix stays a matrix even though .zip archives can hold code.
+            ("GSE1_counts.tsv.gz", "matrix_counts"),
+        ],
+    )
+    def test_the_ordering_still_holds(self, name, expected):
+        assert classify_deposit_filename(name) == expected
+
+    def test_a_supplementary_table_is_not_mistaken_for_code(self):
+        assert classify_deposit_filename("GSE1_sample_metadata.tsv") == "metadata"
