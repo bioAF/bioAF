@@ -139,6 +139,21 @@ _PEAK_TOKENS = ("narrowpeak", "broadpeak", "gappedpeak", ".bed", "_peaks")
 _COVERAGE_TOKENS = ("bigwig", ".bw", "bedgraph", ".wig")
 _METADATA_TOKENS = ("metadata", "meta_", "_meta.", "pheno", "sample_info", "sampleinfo", "coldata", "annotation")
 
+# plan_7 step 16. A published analysis script or code archive used to land in `other`, so step 16's
+# "resolve the code ARTIFACT first" had nothing to resolve from a GEO deposit.
+#
+# Extensions, not word tokens, and that is deliberate: "code", "script" and "analysis" appear in
+# plenty of result-table filenames, and a token list would let one of them claim the paper's own
+# answer. An extension is what the file IS.
+_CODE_SUFFIXES = (".r", ".py", ".ipynb", ".rmd", ".sh", ".snakefile", ".nf")
+# Archive extensions only count as code when the NAME says so, because `.zip` and `.tar.gz` carry
+# result tables at least as often as they carry scripts.
+_CODE_ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".gz")
+# Anchored on a separator, because a bare "code" claims `GSM123_barcodes.tsv.gz`: "barcodes"
+# contains it. Found immediately by the triplet tests, which is the collision this function's
+# ordering comment exists to warn about.
+_CODE_ARCHIVE_TOKENS = ("_code", "code_", "-code", "code.", "script", "notebook")
+
 # GEO's controlled `Type` column in filelist.txt -> our bucket. The depositor stated it, so it wins
 # over any filename guess. Only unambiguous types are mapped: `TSV` says nothing about content.
 _TYPE_TO_CLASSIFICATION = {
@@ -159,9 +174,9 @@ _TYPE_TO_CLASSIFICATION = {
 
 
 def classify_deposit_filename(name: str, deposited_type: str | None = None) -> str:
-    """What a deposited file holds: one of ``raw``, ``da_table``, ``de_table``, ``barcodes``,
-    ``features``, ``matrix_counts``, ``matrix_normalized``, ``peaks``, ``coverage``, ``metadata``,
-    ``other``.
+    """What a deposited file holds: one of ``raw``, ``da_table``, ``de_table``, ``code``,
+    ``barcodes``, ``features``, ``matrix_counts``, ``matrix_normalized``, ``peaks``, ``coverage``,
+    ``metadata``, ``other``.
 
     ``deposited_type`` is GEO's own ``Type`` from ``filelist.txt`` and wins when it is one we
     recognise. An unrecognised type falls through to the filename, so a new GEO type degrades to
@@ -180,6 +195,16 @@ def classify_deposit_filename(name: str, deposited_type: str | None = None) -> s
         return "da_table"
     if any(t in n for t in _DE_TOKENS):
         return "de_table"
+
+    # AFTER the result tables and BEFORE everything else. Ordering here is load-bearing: a
+    # `deseq2_results.R` is a script and a `deseq2_results.csv` is the paper's answer, and putting
+    # code first would let the extension claim a table whose name merely mentions a tool. Putting it
+    # last would let `_COUNT_TOKENS` claim `analysis_code_matrix.zip`.
+    stem_for_code = n[:-3] if n.endswith(".gz") else n
+    if stem_for_code.endswith(_CODE_SUFFIXES):
+        return "code"
+    if n.endswith(_CODE_ARCHIVE_SUFFIXES) and any(t in n for t in _CODE_ARCHIVE_TOKENS):
+        return "code"
 
     # Shape before vocabulary, for the reason given at _MATRIX_SUFFIXES. Result tables stay ahead of
     # it: a `deseq2_results.h5` is the paper's ANSWER, not an input to recompute from. The name still decides
