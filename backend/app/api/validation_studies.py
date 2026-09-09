@@ -584,6 +584,46 @@ async def approve_plan(
     return await _study_response(session, study, org_id)
 
 
+@router.post("/{study_id}/cancel-acquisition", response_model=ValidationStudyResponse)
+async def cancel_acquisition(
+    study_id: int,
+    body: DeclineRequest = DeclineRequest(),
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Stop a study that is acquiring data, and state an outcome.
+
+    change_7.2 section 3: there was no product action that could stop a study in this state.
+    ``/decline`` needs ``plan_ready`` and ``/classify`` needs ``comparing``, so studies 29 and 33 were
+    parked in ``error`` by a direct database write. Stopping a run must never require database access.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.cancel_acquisition(session, study_id, org_id, user_id, body.reason)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/resume", response_model=ValidationStudyResponse)
+async def resume_study(
+    study_id: int,
+    body: DeclineRequest = DeclineRequest(),
+    current_user: dict = require_permission("lit_validation", "approve"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Pick a stopped or failed study back up at the C1 gate.
+
+    Credentials, a data access agreement, a corrected accession or a newly public deposit can make a
+    blocked study runnable later. Resuming returns it to the gate, where the route is chosen, rather
+    than to a run: new access is a reason to decide again, not to spend automatically.
+    """
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await ValidationStudyService.resume_study(session, study_id, org_id, user_id, body.reason)
+    await session.commit()
+    return await _study_response(session, study, org_id)
+
+
 @router.post("/{study_id}/retry", response_model=ValidationStudyResponse)
 async def retry_study(
     study_id: int,

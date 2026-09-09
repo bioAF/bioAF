@@ -78,6 +78,15 @@ _PROCESSED_EXTENSIONS = ("tsv", "csv", "txt", "xlsx", "xls", "h5", "h5ad", "rds"
 _SAMPLE_PATTERN = re.compile(r"^(GSM|EGAF|SRR|ERR|DRR|SRS|SAMN|SAMEA)\d+$", re.I)
 
 
+def can_acquire_from(archive: str | None) -> bool:
+    """Whether bioAF has an adapter that can ACQUIRE data from this archive.
+
+    A fact about bioAF's own registry, and only that: it is never a function of an organization or a
+    dataset, so it can never be an UNKNOWN misread as a NO.
+    """
+    return (archive or "").lower() in _ACQUIRABLE
+
+
 def is_sample_accession(accession: str) -> bool:
     """Whether an accession names a sample or file rather than a deposit."""
     return bool(_SAMPLE_PATTERN.match((accession or "").strip()))

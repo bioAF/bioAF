@@ -759,6 +759,12 @@ class TestThePipelineRouteStillWorks:
         await ValidationStudyService.approve_plan(
             session, study.id, admin_user.organization_id, admin_user.id, route="pipeline"
         )
+        # change_7.2 section 4: the public assessment runs first, on both routes. The tick that
+        # follows is the one that launches, and the assessment record exists before it does.
+        await ValidationDriverService.advance_active_studies(session)
+        await session.refresh(study)
+        assert (study.evidence_json or {}).get("assessment") is not None
+
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
 

@@ -24,6 +24,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.services.validation_measurement_basis import basis_conflicts, basis_of
+from app.services.validation_metric_contract import contract_limitation, unsettled_axes
 
 # How a target came to be bound, when the binding call could not answer AT ALL. Distinct from
 # `alias_table`, which is a deliberate decline falling back to a real lookup, and from `model`,
@@ -651,6 +652,7 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         # own unit ("consensus peaks", "reads after trimming") with the key exactly right. Giving the
         # model the specs made that the common shape, and it bypasses the key-side qualifier strip.
         advisory_reason: str | None = None
+        row_axes: list[str] = []
         if basis_mismatch:
             advisory_reason = (
                 f"the paper measures this per {claim_basis}; bioAF computes it per "
@@ -673,11 +675,24 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
                     "the claim's key qualifies the metric, so the paper's basis may differ from "
                     f"{_SPEC_BY_KEY[mapped].basis or 'the computed value'}"
                 )
+            else:
+                # change_7.2 section 6: the name matched, and matching a name is not the same as
+                # satisfying the metric's contract. Where the paper leaves an axis that contract
+                # fixes unstated, the claim is shown beside bioAF's number rather than scored
+                # against an assumption about what the authors meant.
+                open_axes = unsettled_axes(mapped, t)
+                if open_axes:
+                    advisory = True
+                    advisory_reason = contract_limitation(mapped, open_axes)
+                    row_axes = [axis.key for axis in open_axes]
         row = {
             "metric_key": key,
             "mapped_key": mapped,
             "advisory": advisory,
             "advisory_reason": advisory_reason,
+            # Which parts of the metric's contract the paper left open, so a reader can see what
+            # would make this claim comparable rather than only that it was not compared.
+            "unsettled_contract_axes": row_axes,
             "claimed_value": claimed,
             "claimed_normalized": None,
             "computed_value": None,

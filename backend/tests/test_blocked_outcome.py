@@ -120,7 +120,7 @@ class TestPubliclyCheckableWorkStillHappens:
     def test_a_blocked_route_does_not_skip_the_checks_that_need_no_compute(self):
         """The assessment is what merges, not the reproduction. Reading the metadata, inspecting
         the supplied code and checking the results table need no cluster and no credentials."""
-        from app.services.validation_driver_service import independent_checks_outstanding
+        from app.services.validation_assessment import independent_checks_outstanding
 
         study_evidence = {
             "capabilities": _EGA_CAPS,
@@ -129,7 +129,7 @@ class TestPubliclyCheckableWorkStillHappens:
         assert independent_checks_outstanding(study_evidence) is True
 
     def test_nothing_is_outstanding_once_the_supplements_are_inspected(self):
-        from app.services.validation_driver_service import independent_checks_outstanding
+        from app.services.validation_assessment import independent_checks_outstanding
 
         study_evidence = {
             "capabilities": _EGA_CAPS,

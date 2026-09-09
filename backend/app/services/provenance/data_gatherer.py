@@ -29,6 +29,7 @@ from app.models.sample import Sample
 from app.models.user import User
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.validation_issue_service import ValidationIssueService
+from app.services.validation_provenance import provenance_summary
 from app.services.provenance.schema import (
     ArtifactProvenanceData,
     ExperimentProvenanceData,
@@ -1099,13 +1100,36 @@ class ProvenanceDataGatherer:
                     "extractor_model": plan.extractor_model,
                     "extractor_provider": plan.extractor_provider,
                 }
+                # change_7.2 section 5: report what is already recorded. Every target on study 33's
+                # plan carried `sample_subset`, `threshold`, `threshold_kind` and `output_type` at
+                # confidences between 0.9 and 0.96, and NONE of it reached the export: this
+                # serializer emitted five fields and dropped every column migrations 134 and 135
+                # added, plus every binding attribution field plan_6 added. That context exists on
+                # past studies as well as future ones, so serializing it exposes both.
                 comparison_targets = [
                     {
                         "metric_key": t.metric_key,
+                        "claim_text": t.claim_text,
                         "claimed_value": t.claimed_value,
                         "unit": t.unit,
                         "tolerance": t.tolerance,
                         "source_locator": t.source_locator,
+                        # What was actually measured, as structure rather than prose (migration 134).
+                        "sample_subset": t.sample_subset,
+                        "qc_stage": t.qc_stage,
+                        "direction": t.direction,
+                        "threshold": t.threshold,
+                        "threshold_kind": t.threshold_kind,
+                        "output_type": t.output_type,
+                        # What the number is measured PER (migration 135).
+                        "measurement_basis": t.measurement_basis,
+                        # How this claim came to be measured against a controlled metric (plan_6).
+                        # An AI decision that cannot be attributed is a defect.
+                        "bound_key": t.bound_key,
+                        "binding_reason": t.binding_reason,
+                        "binding_confidence": t.binding_confidence,
+                        "bound_by_model": t.bound_by_model,
+                        "bound_by": t.bound_by,
                     }
                     for t in (plan.comparison_targets or [])
                 ]
@@ -1171,6 +1195,10 @@ class ProvenanceDataGatherer:
                 "failure_reason": study.failure_reason,
                 "created_at": _dt(study.created_at),
                 "updated_at": _dt(study.updated_at),
+                # change_7.2 section 7: which build produced each stage. Studies 32 and 33 both
+                # reported version 2026.9.1 and ran on different code, so the version tag alone
+                # cannot attribute a behavioural difference to anything.
+                "build_provenance": provenance_summary(study),
             },
             source_paper=source_paper,
             reproduction_plan=reproduction_plan,

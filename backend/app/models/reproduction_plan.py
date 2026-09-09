@@ -9,7 +9,7 @@ what a scientist ratifies at the C1 gate before any compute is spent. See
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -18,6 +18,18 @@ from app.database import Base
 
 class ReproductionPlan(Base):
     __tablename__ = "reproduction_plans"
+
+    # change_7.2 section 2: exactly one ACTIVE plan per study, enforced in the schema rather than by
+    # convention. Superseded plans are kept, so the constraint is partial: history is unconstrained
+    # and the live row is unique.
+    __table_args__ = (
+        Index(
+            "ux_reproduction_plans_one_active_per_study",
+            "validation_study_id",
+            unique=True,
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     validation_study_id: Mapped[int] = mapped_column(
@@ -89,6 +101,14 @@ class ReproductionPlan(Base):
     # Provenance of the AI extraction that produced this plan.
     extractor_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     extractor_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # change_7.2 section 2: a study carries exactly one ACTIVE plan, and the ones it replaced are
+    # kept as history. Two writers produced two plans on every recent study, each with a full set of
+    # comparison targets, and a back-link query read both. The discarded plan is evidence about that
+    # run (it records a different model interpretation of the same claim), so it is superseded rather
+    # than deleted. Enforced by a partial unique index on the studies that have an active plan.
+    superseded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    superseded_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

@@ -112,6 +112,16 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: str = "production"
 
+    # change_7.2 section 7: which BUILD produced a result.
+    #
+    # Studies 32 and 33 both reported version `2026.9.1` and ran on different code: the tag is
+    # mutable and the container had been rebuilt between them, so the exports establish that observed
+    # behaviour differed and cannot attribute the difference to anything. Both default to empty,
+    # which the feature records as an explicit UNKNOWN rather than guessing: stamping a stage with
+    # the current build would manufacture exactly that false certainty.
+    build_commit: str = ""
+    build_image_digest: str = ""
+
     # Database
     database_url: str = "postgresql+asyncpg://bioaf_app:password@localhost:5432/bioaf"
 

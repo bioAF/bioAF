@@ -131,6 +131,11 @@ def _groff_world(monkeypatch):
     monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", _fetch_text)
     monkeypatch.setattr("app.services.validation_driver_service.FullTextFetchService.fetch", staticmethod(_full_text))
     monkeypatch.setattr("app.services.validation_driver_service._deposit_bytes_fetcher", _fetch_bytes)
+    # change_7.2 section 4: the public assessment is its own module now, so the gate can run it too.
+    # Its boundaries are the same ones, patched where they are used.
+    monkeypatch.setattr("app.services.validation_assessment.deposit_bytes_fetcher", _fetch_bytes)
+    monkeypatch.setattr("app.services.validation_assessment.get_client", lambda _p: client)
+    monkeypatch.setattr("app.services.validation_assessment.llm_provider_config_service.get_active", _cfg)
     return client
 
 

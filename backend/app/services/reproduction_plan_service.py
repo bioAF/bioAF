@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
+from app.services.validation_measurement_basis import basis_of
 from app.services.audit_service import log_action
 from app.services.pipeline_mapper import declared_route_version, deposit_conflict, is_library_strategy_conflict
 from app.services import llm_provider_config_service
@@ -233,6 +234,13 @@ class ReproductionPlanService:
                 binding_confidence=t.get("binding_confidence"),
                 bound_by_model=_clamp(t.get("bound_by_model"), 255),
                 bound_by=_clamp(t.get("bound_by"), 20),
+                # change_7.2 section 5: what the number is measured PER, filled deterministically
+                # from the claim's own unit when the extractor left it null. The parser already
+                # reads "reads per library (mean)" correctly; asking a model for a derivable value
+                # adds cost and a failure mode for nothing.
+                measurement_basis=_clamp(
+                    t.get("measurement_basis") or basis_of(t.get("unit")) or basis_of(metric_key), 32
+                ),
             )
             session.add(target)
             created.append(target)

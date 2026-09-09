@@ -43,7 +43,24 @@ from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.literature.fulltext_service import FullTextFetchService
-from app.services.validation_completion import completion_for
+from app.services.validation_assessment import (
+    conclude_without_execution,
+    record_refusal,
+    deposit_bytes_fetcher as _deposit_bytes_fetcher,
+    run_assessment,
+)
+from app.services.validation_acquisition_outcome import (
+    AWAITING_INPUT,
+    MAX_ATTEMPTS,
+    acquisition_accession,
+    backoff_for,
+    classify_hold,
+    exhausted,
+)
+from app.services.validation_completion import KIND_FOR_ACTION
+from app.services.validation_route_policy import UNDETERMINED, decide_route
+from app.services.validation_ownership import ClaimLost, assert_held, owned
+from app.services.validation_provenance import record_stage
 from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -104,69 +121,15 @@ _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 # entry point behaves exactly as it did.
 _SELF_DRIVING_FRONT_HALF_STATES = ("requested", "plan_ready")
 
-# What each route needs the paper to actually have. plan_7 amendment 3: a route is refused only on
-# an ESTABLISHED absence ("no"), never on UNKNOWN, because treating a GEO timeout as an absence would
-# hide a workable route behind a transient failure.
-#
-# change_7.1 section 4: existence is no longer sufficient. Groff's raw reads exist (108 FASTQ files,
-# established from EGA's public listing) and bioAF cannot fetch a single one of them, so a route
-# offered on existence alone approves a run that cannot start. The requirement is now that some
-# deposit both HOLDS the data and can be ACQUIRED.
-_ROUTE_REQUIREMENTS: dict[str, str] = {
-    "deposit": "preprocessed_data",
-    "pipeline": "raw_data",
-}
-
-_ROUTE_NEEDS = {
-    "deposit": "pre-processed data to reproduce the finding from",
-    "pipeline": "raw sequencing reads to fetch and re-run",
-}
-
-
 def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
     """Why the chosen route cannot be taken, in the reader's language, or None when it can.
 
-    **The explanation is generated from what discovery actually found.** The messages this replaced
-    were fixed strings that named GEO on a paper with no GEO deposit, and each ended by recommending
-    "the remaining route" without establishing that the remaining route could run either. A blocked
-    study was therefore told to try something that was equally blocked.
-
-    ``both`` is checked against BOTH requirements: it spawns a sibling, so a leg that cannot run
-    would produce a study created only to fail.
+    change_7.2 section 1: the judgment itself now lives in ``validation_route_policy`` so that the
+    driver and the C1 gate cannot disagree. This is the wording, for callers that only want the
+    sentence.
     """
-    deposits = [d for d in (capabilities.get("deposits") or []) if isinstance(d, dict)]
-    for leg in ("deposit", "pipeline") if route == "both" else (route,):
-        key = _ROUTE_REQUIREMENTS.get(leg)
-        if key is None:
-            continue
-        answer = (capabilities.get(key) or {}).get("value")
-        if answer == "no":
-            return f"No {_ROUTE_NEEDS[leg]} is published for this paper."
-        if answer != "yes":
-            # UNKNOWN. A discovery failure is not an absence, and refusing here would hide a
-            # workable route behind a timeout.
-            continue
-        holders = [d for d in deposits if d.get(key) == "yes"]
-        acquirable = [d for d in holders if d.get("supported") == "yes"]
-        if holders and not acquirable:
-            return _unacquirable_reason(holders, _ROUTE_NEEDS[leg])
-    return None
-
-
-def _unacquirable_reason(holders: list[dict], need: str) -> str:
-    """Why data that demonstrably exists still cannot be used.
-
-    Both halves are stated on purpose. The authors published the data, and the obstacle is ours: a
-    reader who sees only "cannot run" will read it as a fault of the paper.
-    """
-    described = ", ".join(
-        f"{d.get('accession')} ({str(d.get('archive') or 'archive').upper()}, {d.get('access')} access)"
-        for d in holders
-    )
-    return (
-        f"This paper published {need}, in {described}. bioAF cannot obtain it: the deposit is not "
-        "openly downloadable and bioAF holds no credentials for that archive."
-    )
+    decision = decide_route(route=route, capabilities=capabilities)
+    return None if decision.authorizes_execution else decision.reason
 
 
 def _has_organism_source(evidence: dict) -> bool:
@@ -177,31 +140,6 @@ def _has_organism_source(evidence: dict) -> bool:
     """
     deposits = (evidence.get("capabilities") or {}).get("deposits") or []
     return any(d.get("archive") == "geo" for d in deposits if isinstance(d, dict))
-
-
-def _propagate_retrieval(capabilities: dict, supplements: list[dict]) -> dict:
-    """Carry retrieval outcomes from the inventory onto the capability answers.
-
-    change_7.1 section 7: a resource cannot be recorded as retrieved and as accessibility-not-
-    attempted at the same time, and a consumer that never hears about the retrieval keeps
-    reporting the stale answer beside the new fact.
-    """
-    from app.services.supplement_inventory import apply_retrieval_to_code_sources
-
-    updated = dict(capabilities)
-    updated["code_sources"] = apply_retrieval_to_code_sources(capabilities.get("code_sources") or [], supplements)
-    return updated
-
-
-def independent_checks_outstanding(evidence: dict) -> bool:
-    """Whether anything can still be established without compute or credentials.
-
-    change_7.1 section 4: a blocked execution route does not end the assessment. Reading the sample
-    metadata, inspecting the code the authors supplied and checking their results table need no
-    cluster and no data access agreement, and the assessment is what merges, not the reproduction.
-    """
-    supplements = (evidence or {}).get("supplements") or []
-    return any(not s.get("resolved") for s in supplements if isinstance(s, dict))
 
 
 def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
@@ -238,6 +176,11 @@ def _driver_owns(study: "ValidationStudy") -> bool:
         return True
     return study.state in _SELF_DRIVING_FRONT_HALF_STATES and study.intended_route is not None
 
+
+# change_7.2 section 4: where the public assessment runs. Both routes' first post-approval state, so
+# the assessment record exists before any acquisition is attempted and regardless of whether the
+# acquisition then succeeds.
+_ASSESSMENT_STATES = ("acquiring_data", "acquiring_processed")
 
 _ACTIVE_BACK_HALF_STATES = (
     "acquiring_data",
@@ -293,17 +236,6 @@ def classify_acquisition_failure(failure_reason: str | None, error_message: str 
     if any(sig in text for sig in _PERMANENT_ACQUISITION_SIGNATURES):
         return "permanent"
     return "transient"
-
-
-async def _deposit_bytes_fetcher(url: str) -> bytes:
-    """Default byte fetcher for a deposited file. Bytes, not text: the format is decided from magic
-    bytes and a text decode would destroy a spreadsheet before it could be recognised."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.content
 
 
 async def _resolve_deposit_prefix(session: AsyncSession, study: ValidationStudy) -> str:
@@ -417,12 +349,49 @@ class ValidationDriverService:
         full_text: str | None,
         org_id: int,
         user_id: int,
+        *,
+        claim=None,
+        holder: str = "api",
     ) -> ValidationStudy:
         """Drive a requested study to plan_ready (or an early-exit classification).
 
         ``full_text`` may be pasted in; when it is absent, B1 fetches the paper's full text from its
         DOI. The fetch happens BEFORE any state change so a failure leaves the study in ``requested``
-        and the caller can retry (e.g. by pasting a body)."""
+        and the caller can retry (e.g. by pasting a body).
+
+        change_7.2 section 2: the study is OWNED first. Both `POST /{id}/read` and the driver called
+        this on study 33 within three seconds of each other, and the `state != "requested"` guard
+        below could not see the other transaction's uncommitted state, so the paper was extracted
+        twice and two plans were written. ``claim`` is passed when the caller already owns the study,
+        so the driver's tick does not contend with itself.
+        """
+        if claim is not None:
+            return await ValidationDriverService._read_and_plan_owned(
+                session, study, full_text, org_id, user_id, claim=claim
+            )
+        async with owned(session, study.id, holder=holder) as own:
+            if own is None:
+                raise ValidationError(
+                    "Another worker is already reading this paper. Its result will appear when it finishes."
+                )
+            # Re-read after claiming: the state that justified the attempt may have changed while the
+            # claim was contended, which is exactly what happened when two writers raced.
+            await session.refresh(study)
+            return await ValidationDriverService._read_and_plan_owned(
+                session, study, full_text, org_id, user_id, claim=own
+            )
+
+    @staticmethod
+    async def _read_and_plan_owned(
+        session: AsyncSession,
+        study: ValidationStudy,
+        full_text: str | None,
+        org_id: int,
+        user_id: int,
+        *,
+        claim,
+    ) -> ValidationStudy:
+        """The read itself, performed under a claim this caller holds."""
         if study.state != "requested":
             raise ValidationError(f"read_and_plan can only start from 'requested'; study is in '{study.state}'.")
 
@@ -447,6 +416,7 @@ class ValidationDriverService:
         # stage is a pass-through.
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "acquiring_text")
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
+        record_stage(study, "reading")
 
         plan = await ValidationExtractionService.extract(session, study, full_text, org_id, user_id)
 
@@ -466,6 +436,14 @@ class ValidationDriverService:
         # plan_7 step 14: the cheap checks, beside step 13 and for the same reason. The gate is
         # pre-approval, so an answer produced after approval cannot inform the decision to approve.
         await ValidationDriverService._run_precompute_checks(session, study, plan, full_text=full_text)
+
+        # The fence. A claim that expired under this work means somebody else owns the study now, and
+        # landing this extraction over theirs is the duplicate the claim exists to prevent.
+        try:
+            await assert_held(session, claim)
+        except ClaimLost:
+            await session.rollback()
+            raise
 
         classification = _early_exit_classification(plan)
         if classification is not None:
@@ -639,13 +617,20 @@ class ValidationDriverService:
         advanced = 0
         for study_id in ids:
             try:
-                study = (
-                    await session.execute(select(ValidationStudy).where(ValidationStudy.id == study_id))
-                ).scalar_one_or_none()
-                if study is None or not _driver_owns(study):
-                    continue
-                changed = await ValidationDriverService._advance_one(session, study)
-                await session.commit()
+                # change_7.2 section 2: own the study for the length of this step. The id query takes
+                # no lock and the loop commits per study, so a lock taken there would be released at
+                # the first commit; a claim is what actually keeps two workers off one study.
+                async with owned(session, study_id, holder="driver") as claim:
+                    if claim is None:
+                        continue  # somebody else is working on it; not this tick's business
+                    study = (
+                        await session.execute(select(ValidationStudy).where(ValidationStudy.id == study_id))
+                    ).scalar_one_or_none()
+                    if study is None or not _driver_owns(study):
+                        continue
+                    changed = await ValidationDriverService._advance_one(session, study, claim=claim)
+                    await assert_held(session, claim)
+                    await session.commit()
                 if changed:
                     advanced += 1
             except Exception as exc:
@@ -656,7 +641,20 @@ class ValidationDriverService:
         return advanced
 
     @staticmethod
-    async def _advance_one(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _advance_one(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
+        # change_7.2 section 4: the public assessment runs on EVERY authorized study, on both routes,
+        # after authorization and before the final execution-feasibility decision. change_7.1 built
+        # supplement resolution, retrieval propagation and reconciliation and attached all of it to
+        # the refusal path, so the first study approved by hand walked past every one of them.
+        # change_7.2 section 7: stamp the build that is about to do this stage's work. Per stage,
+        # because a study can span deployments, and never backwards over stages that ran before this
+        # existed.
+        record_stage(study, study.state)
+
+        if study.state in _ASSESSMENT_STATES and not (study.evidence_json or {}).get("assessment"):
+            await run_assessment(session, study)
+            return True
+
         handlers = {
             "acquiring_data": ValidationDriverService._handle_acquiring_data,
             "acquiring_processed": ValidationDriverService._handle_acquiring_processed,
@@ -670,10 +668,16 @@ class ValidationDriverService:
             "plan_ready": ValidationDriverService._handle_plan_ready,
         }
         handler = handlers.get(study.state)
-        return await handler(session, study) if handler else False
+        if handler is None:
+            return False
+        if study.state == "requested":
+            # The read is the step that races, so it is the one that must run under this tick's own
+            # claim rather than taking a second one and finding itself already held.
+            return await ValidationDriverService._handle_requested(session, study, claim=claim)
+        return await handler(session, study)
 
     @staticmethod
-    async def _handle_requested(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _handle_requested(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         """Read the paper without waiting for a "Read paper" click.
 
         Reached only when the requester chose a route at the button. The click it replaces was the
@@ -681,19 +685,17 @@ class ValidationDriverService:
         in-progress badge while nothing at all was happening.
         """
         await ValidationDriverService.read_and_plan(
-            session, study, None, study.organization_id, study.requested_by_user_id
+            session, study, None, study.organization_id, study.requested_by_user_id, claim=claim, holder="driver"
         )
         return True
 
     @staticmethod
     async def _handle_plan_ready(session: AsyncSession, study: ValidationStudy) -> bool:
-        """Approve onto the route chosen at the button, or hold and say why it cannot be taken.
+        """Approve onto the route chosen at the button, or state why it cannot be taken.
 
-        This is where the capability check the upfront modal could not do actually happens.
-        `discover_capabilities` needs the GEO accession, which only exists once the paper has been
-        read, so the choice is taken early and VALIDATED here. plan_7 amendment 3 governs the
-        reading: UNKNOWN is not NO, and a route is only refused on an ESTABLISHED absence, never on a
-        discovery failure.
+        change_7.2 section 1: the decision comes from the shared policy, so this entrance and the C1
+        gate cannot disagree. Study 32 was refused here and reached an outcome; study 33 was approved
+        by hand against a byte-identical capability block and ran into an unbounded acquisition loop.
         """
         route = study.intended_route
         if not route:  # pragma: no cover - the loop's predicate already filtered these out
@@ -703,8 +705,8 @@ class ValidationDriverService:
         if evidence.get("route_blocked"):
             return False  # already held and explained; re-deciding every 30s would just churn
 
-        unavailable = _route_unavailable_reason(route, evidence.get("capabilities") or {})
-        if unavailable is None:
+        decision = await ValidationStudyService.route_decision_for(session, study, route)
+        if decision.authorizes_execution:
             try:
                 await ValidationStudyService.approve_plan(
                     session,
@@ -715,156 +717,30 @@ class ValidationDriverService:
                 )
                 return True
             except HTTPException as exc:
-                # The gate's own factual refusals still stand: a species mismatch and a deposit
-                # conflict refuse on facts, and choosing a route upfront does not authorise
-                # overriding either. Carry the gate's own words rather than inventing new ones.
+                # A contested judgment still refuses, and choosing a route upfront does not authorise
+                # overriding it. Carry the gate's own words rather than inventing new ones.
                 unavailable = str(exc.detail)
+        else:
+            unavailable = decision.reason
 
-        evidence["route_blocked"] = {
-            "chosen": route,
-            "reason": unavailable,
-            "at": _now().isoformat(),
-        }
-        study.evidence_json = evidence
+        record_refusal(study, route, decision, unavailable)
         await session.flush()
-        logger.info("study %s: chosen route %r cannot be taken: %s", study.id, route, unavailable)
+        logger.info("study %s: chosen route %r cannot be taken (%s): %s", study.id, route, decision.action, unavailable)
 
         # change_7.1 section 4: a blocked route is not the end of the assessment, and it is not an
-        # indefinite hold either. Everything that needs no compute and no credentials still gets
-        # done, and then the study reaches a stated outcome. It used to return here, leaving the
-        # study at plan_ready for ever, indistinguishable from one waiting for someone to approve it.
+        # indefinite hold either. Everything that needs no compute and no credentials still gets done,
+        # and then the study reaches a stated outcome.
         await ValidationDriverService._finish_without_execution(session, study, unavailable)
         return True
 
     @staticmethod
     async def _finish_without_execution(session: AsyncSession, study: ValidationStudy, reason: str) -> None:
-        """Complete every independent check, then classify. Never raises.
+        """Assess everything that needs no compute, then state the outcome. Never raises.
 
-        The merge requirement is an accurate, completed assessment, not a successful reproduction.
-        Reading the authors' sample metadata, inspecting the code they published and checking their
-        results table are all public work, and none of it needs the data bioAF cannot obtain.
+        change_7.2 section 4: the assessment itself lives in ``validation_assessment`` so the C1 gate
+        can run it too. This is the step that concludes.
         """
-        evidence = dict(study.evidence_json or {})
-        if independent_checks_outstanding(evidence):
-            evidence["supplements"] = await ValidationDriverService._resolve_supplements(session, study, evidence)
-            # What retrieval established has to reach the rows that answer for it. Study 32 recorded
-            # Supplemental File S2 as "not attempted" in the same bundle that had downloaded and
-            # read it.
-            evidence["capabilities"] = _propagate_retrieval(evidence.get("capabilities") or {}, evidence["supplements"])
-            study.evidence_json = evidence
-            await session.flush()
-
-        # change_7.1 section 6: the evidence is in hand, so the provisional reading gets revised
-        # before anything is concluded from it. Retrieval on its own changed no decision.
-        await ValidationDriverService._reconcile(session, study, evidence.get("supplements") or [])
-
-        # change_7.1 section 7: the outcome comes from the evidence, not from one label standing in
-        # for every kind of blockage.
-        evidence = dict(study.evidence_json or {})
-        outcome = completion_for(
-            route=study.intended_route or "deposit",
-            capabilities=evidence.get("capabilities") or {},
-            supplements=evidence.get("supplements") or [],
-        )
-        evidence["completion"] = outcome
-        study.evidence_json = evidence
-        study.failure_reason = outcome["reason"] or reason
-        await session.flush()
-
-        await ValidationStudyService.transition(
-            session,
-            study.id,
-            study.organization_id,
-            study.requested_by_user_id,
-            "classified",
-            classification=outcome["classification"],
-        )
-
-    @staticmethod
-    async def _claimed_thresholds(session: AsyncSession, study: ValidationStudy) -> list[float]:
-        """The fold-change cutoffs this paper's claims actually name.
-
-        change_7.1 section 7: measuring a results table at fixed cutoffs of 1 and 2 is Groff's
-        rule in production code. A paper claiming a 1.5-fold cutoff needs 1.5 measured.
-        """
-        from app.models.comparison_target import ComparisonTarget
-        from app.models.reproduction_plan import ReproductionPlan
-
-        # Queried, not lazy-loaded off the plan: touching the relationship attempts IO outside the
-        # async context and errors the study.
-        rows = (
-            (
-                await session.execute(
-                    select(ComparisonTarget)
-                    .join(ReproductionPlan, ReproductionPlan.id == ComparisonTarget.reproduction_plan_id)
-                    .where(ReproductionPlan.validation_study_id == study.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        wanted = {
-            float(t.threshold)
-            for t in rows
-            if t.threshold is not None and (t.threshold_kind or "").lower() in ("abs_log2fc", "log2fc", "fold_change")
-        }
-        return sorted(wanted)
-
-    @staticmethod
-    async def _reconcile(session: AsyncSession, study: ValidationStudy, supplements: list[dict]) -> None:
-        """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
-        from app.services.reproduction_plan_service import ReproductionPlanService
-        from app.services.validation_reconciliation import reconcile
-
-        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
-        if plan is None:
-            return
-        cfg = await llm_provider_config_service.get_active(session, study.organization_id)
-        if cfg is None:
-            logger.info("study %s: no active provider, so nothing can reconcile the plan", study.id)
-            return
-        try:
-            await reconcile(
-                session,
-                study,
-                plan,
-                supplements=supplements,
-                client=get_client(cfg.provider),
-                model=cfg.model,
-                api_key=cfg.api_key,
-            )
-        except Exception as exc:  # noqa: BLE001 - a reconciliation failure degrades the report only
-            logger.warning("reconciliation failed for study %s: %s", study.id, exc)
-
-    @staticmethod
-    async def _resolve_supplements(session: AsyncSession, study: ValidationStudy, evidence: dict) -> list[dict]:
-        """Download the paper's attachments and establish what each one is. Never raises.
-
-        This is the point where the read-time manifest of NAMES becomes an inventory of FILES with
-        roles. An article with no PMC id has nothing to download, which is a limitation of the run
-        and leaves the references exactly as they were.
-        """
-        from app.services.supplement_inventory import merge_resource_identity, resolve_supplements
-
-        references = evidence.get("supplements") or []
-        pmcid = (evidence.get("pmcid") or "").strip()
-        if not pmcid:
-            return references
-        try:
-            resolved = await resolve_supplements(
-                pmcid,
-                references,
-                fetcher=_deposit_bytes_fetcher,
-                # The cutoffs the paper's own claims name. A fixed pair of cutoffs would measure
-                # Groff's numbers on every paper and the claimed one on none of them.
-                thresholds=await ValidationDriverService._claimed_thresholds(session, study),
-            )
-        except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
-            logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
-            return references
-        # One file is one resource. The prose reference and the manifest entry resolve to the same
-        # bytes, and study 32 listed each of S1, S2 and S3 twice as a result.
-        return merge_resource_identity(resolved)
+        await conclude_without_execution(session, study, reason)
 
     @staticmethod
     async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy) -> bool:
@@ -999,6 +875,12 @@ class ValidationDriverService:
         """
         evidence = dict(study.evidence_json or {})
 
+        # change_7.2 section 3: a transient failure waits out its backoff. Never a fixed 30-second
+        # interval, and never unbounded.
+        retry_at = evidence.get("acquisition_retry_at")
+        if retry_at and _now() < _parse_iso(retry_at):
+            return False
+
         # The driver ticks repeatedly; re-downloading each time would hammer NCBI and duplicate the
         # File rows.
         if evidence.get("deposit"):
@@ -1029,7 +911,7 @@ class ValidationDriverService:
         wanted = list(selection.get("matrix_files") or [])
         if not wanted:
             if blocker:
-                return ValidationDriverService._hold_deposit(session, study, evidence, blocker)
+                return await ValidationDriverService._hold_deposit(session, study, evidence, blocker)
             # Assisted mode arrives here with nothing chosen yet. A wait, not a failure.
             return False
 
@@ -1041,7 +923,8 @@ class ValidationDriverService:
         from app.services.file_service import FileService
         from app.services.literature.deposit_inventory_service import series_suppl_url
 
-        base = series_suppl_url(study.source_accession or "")
+        listed = (evidence.get("deposit_inventory") or {}).get("accession") or study.source_accession or ""
+        base = series_suppl_url(listed)
         if not base:
             return await ValidationDriverService._fail(session, study, "the deposit route needs a GEO series accession")
 
@@ -1071,13 +954,13 @@ class ValidationDriverService:
             except Exception as exc:  # noqa: BLE001
                 # A partial deposit is worse than none: step 8 would build a matrix missing an arm.
                 # Held on the route rather than failed, so the gate can escalate to raw reads.
-                return ValidationDriverService._hold_deposit(
+                return await ValidationDriverService._hold_deposit(
                     session, study, evidence, f"{filename} could not be downloaded from GEO ({exc})"
                 )
             try:
                 text, fmt = decode_deposit(filename, raw)
             except (UnreadableDepositError, DepositTooLargeError) as exc:
-                return ValidationDriverService._hold_deposit(session, study, evidence, str(exc))
+                return await ValidationDriverService._hold_deposit(session, study, evidence, str(exc))
 
             # Stored DECODED, so step 8's notebook reads a table rather than re-deriving the format
             # from magic bytes inside R.
@@ -1143,7 +1026,7 @@ class ValidationDriverService:
         deposit = evidence.get("deposit") or {}
         matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]
         if not matrices:
-            return ValidationDriverService._hold_deposit(
+            return await ValidationDriverService._hold_deposit(
                 session, study, evidence, "no deposited matrix was acquired to inspect"
             )
 
@@ -1151,7 +1034,7 @@ class ValidationDriverService:
         try:
             text = await storage.read_text(matrices[0]["storage_uri"])
         except Exception as exc:  # noqa: BLE001
-            return ValidationDriverService._hold_deposit(
+            return await ValidationDriverService._hold_deposit(
                 session, study, evidence, f"the acquired deposit could not be read back: {exc}"
             )
 
@@ -1179,7 +1062,7 @@ class ValidationDriverService:
             # The study-13 lesson, enforced BEFORE the notebook rather than after it. That run
             # completed cleanly having written nothing, and the empty output was scored as a real
             # comparison of zero against the paper's 5,607.
-            return ValidationDriverService._hold_deposit(
+            return await ValidationDriverService._hold_deposit(
                 session, study, evidence, inspection["unusable_reason"] or "the deposited matrix is not usable"
             )
 
@@ -1217,7 +1100,7 @@ class ValidationDriverService:
         if design.get("contrasts"):
             rewritten, status, reason = rewrite_design_to_columns(design, associations)
             if status == "mismatch":
-                return ValidationDriverService._hold_deposit(session, study, evidence, reason or "design mismatch")
+                return await ValidationDriverService._hold_deposit(session, study, evidence, reason or "design mismatch")
             plan.differential_design_json = rewritten
             await session.flush()
 
@@ -1252,13 +1135,41 @@ class ValidationDriverService:
         """
         from dataclasses import asdict
 
+        from app.services.archive_discovery import GEO, can_acquire_from
         from app.services.deposit_selection import deposit_blocker, select_deposit, selectable
         from app.services.literature.deposit_inventory_service import list_deposit
 
-        accession = (study.source_accession or "").strip()
+        # change_7.2 section 3: resolve the accession the way discovery already does, and dispatch by
+        # ARCHIVE. This read `study.source_accession` alone, which is NULL on a study requested by
+        # DOI, so `list_deposit` received an empty string and answered "the accession is not a GEO
+        # series id" -- the `or 'the accession'` fallback rather than a statement about EGA. The
+        # requested accession keeps its authority over what a run actually fetches.
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        target = acquisition_accession(_named_accessions(study, plan), prefer_archive=GEO)
+        if target is None:
+            return await ValidationDriverService._hold_deposit(
+                session,
+                study,
+                evidence,
+                "this paper names no deposit accession that an acquisition could be pointed at",
+            )
+        accession = target["accession"]
+        archive = target["archive"]
+        if not can_acquire_from(archive):
+            # An EGA study must be refused because bioAF has no adapter for EGA, not because an empty
+            # string failed a GEO pattern test.
+            return await ValidationDriverService._hold_deposit(
+                session,
+                study,
+                evidence,
+                f"{accession} is deposited in {archive.upper()}",
+                archive=archive,
+            )
         inventory = await list_deposit(accession, fetcher=fetcher)
         if inventory.unavailable_reason:
-            return ValidationDriverService._hold_deposit(session, study, evidence, inventory.unavailable_reason)
+            return await ValidationDriverService._hold_deposit(
+                session, study, evidence, inventory.unavailable_reason, archive=archive
+            )
 
         entries = inventory.entries
         # `deposit_blocker` names what IS deposited and why it cannot serve (GSE312719's nine
@@ -1272,7 +1183,7 @@ class ValidationDriverService:
             )
         if reason:
             evidence["deposit_unusable"] = reason
-            return ValidationDriverService._hold_deposit(session, study, evidence, reason)
+            return await ValidationDriverService._hold_deposit(session, study, evidence, reason)
 
         # The inventory is kept whichever way the choice is made: in `assisted` it is the list the
         # C1 gate shows a person, and in `autonomous` it is what the model chose FROM, which is part
@@ -1302,7 +1213,6 @@ class ValidationDriverService:
             logger.warning("study %s is autonomous but the org has no LLM provider; the deposit pick waits", study.id)
             return False
 
-        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         claim = (plan.finding_claim_json if plan else None) or {}
         issues: list[dict] = []
         chosen = await select_deposit(
@@ -1325,24 +1235,104 @@ class ValidationDriverService:
             # Looked and said no. A finding, and not the same as never having looked.
             declined = chosen.get("reason") or "the model found nothing in this deposit worth reproducing from"
             evidence["deposit_unusable"] = declined
-            return ValidationDriverService._hold_deposit(session, study, evidence, declined)
+            return await ValidationDriverService._hold_deposit(session, study, evidence, declined)
 
         study.evidence_json = dict(evidence)
         return True
 
     @staticmethod
-    def _hold_deposit(session: AsyncSession, study: ValidationStudy, evidence: dict, reason: str) -> bool:
-        """Record why the deposit could not be taken and HOLD on the route.
+    async def _hold_deposit(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, reason: str, *, archive: str | None = None
+    ) -> bool:
+        """Classify why acquisition could not proceed, and ACT on the classification.
 
-        Not `error`: a legacy .xls or a withdrawn supplementary file is a fact about the deposit, not
-        an infrastructure failure, and marking it `error` would put it in the bucket the driver is
-        forbidden to retry. The gate reads this and either fixes the selection or escalates to raw
-        reads, which is what the `acquiring_processed -> acquiring_data` edge is for.
+        change_7.2 section 3: this used to produce one behaviour for three situations. It recorded a
+        reason, logged it, and returned False with no transition and no backoff, so study 33 repeated
+        the same failing listing every 30 seconds until a person stopped it with a database write and
+        study 29 has been in that loop since 2026-09-07.
+
+        Not `error` in any of the three cases: a legacy .xls or a withdrawn supplementary file is a
+        fact about the deposit, not an infrastructure failure.
         """
-        evidence["deposit_failed"] = {"reason": reason, "at": _now().isoformat()}
+        outcome = classify_hold(reason, archive=archive)
+        evidence["deposit_failed"] = {
+            "reason": outcome.reason,
+            "kind": outcome.kind,
+            "action": outcome.action,
+            "at": _now().isoformat(),
+        }
+
+        if outcome.kind == AWAITING_INPUT:
+            # A person's turn. Visible, and logged ONCE rather than on every tick.
+            if not evidence.get("awaiting_choice"):
+                logger.info("validation study %d: waiting for a person to choose: %s", study.id, outcome.reason)
+            evidence["awaiting_choice"] = {
+                "reason": outcome.reason,
+                "at": _now().isoformat(),
+                "action": "choose a deposited file at the gate, or cancel the acquisition",
+            }
+            study.evidence_json = dict(evidence)
+            return False
+
+        if outcome.is_transient:
+            attempts = int(evidence.get("acquisition_attempts") or 0) + 1
+            evidence["acquisition_attempts"] = attempts
+            if not exhausted(attempts):
+                wait = backoff_for(attempts)
+                evidence["acquisition_retry_at"] = (_now() + timedelta(seconds=wait)).isoformat()
+                study.evidence_json = dict(evidence)
+                logger.info(
+                    "validation study %d: acquisition failed transiently (attempt %d of %d), retrying in %ds: %s",
+                    study.id,
+                    attempts,
+                    MAX_ATTEMPTS,
+                    wait,
+                    outcome.reason,
+                )
+                return False
+            # Exhausted. Nothing was established, so the evidence conclusion stays UNDETERMINED and
+            # the workflow closes: an exhausted discovery must never harden into an inferred absence,
+            # and it must not stay open either.
+            evidence.pop("acquisition_retry_at", None)
+            evidence["discovery_unresolved"] = {
+                "reason": outcome.reason,
+                "attempts": attempts,
+                "at": _now().isoformat(),
+                "resume": "a further attempt needs explicit resumption or new evidence",
+            }
+            study.evidence_json = dict(evidence)
+            logger.info("validation study %d: acquisition attempts exhausted: %s", study.id, outcome.reason)
+            await conclude_without_execution(
+                session,
+                study,
+                outcome.reason,
+                limitation={
+                    "kind": KIND_FOR_ACTION[UNDETERMINED],
+                    "resource": study.source_accession or "this paper's deposits",
+                    "operation": study.intended_route or "deposit",
+                    "detail": (
+                        f"bioAF could not reach the deposit after {attempts} attempts, so whether it "
+                        f"holds usable data was never established ({outcome.reason})"
+                    ),
+                },
+            )
+            return True
+
+        # Terminal, and it says which of the three it is.
         study.evidence_json = dict(evidence)
-        logger.info("validation study %d: deposit held: %s", study.id, reason)
-        return False
+        logger.info("validation study %d: acquisition refused (%s): %s", study.id, outcome.action, outcome.reason)
+        await conclude_without_execution(
+            session,
+            study,
+            outcome.reason,
+            limitation={
+                "kind": KIND_FOR_ACTION.get(outcome.action, KIND_FOR_ACTION[UNDETERMINED]),
+                "resource": study.source_accession or "this paper's deposits",
+                "operation": study.intended_route or "deposit",
+                "detail": outcome.reason,
+            },
+        )
+        return True
 
     @staticmethod
     async def _handle_setup(session: AsyncSession, study: ValidationStudy) -> bool:
@@ -1427,13 +1417,30 @@ class ValidationDriverService:
             logger.exception("validation study %d: QC extraction failed; continuing with no metrics", study.id)
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # change_7.2 sections 5 and 6: the comparison branches on the binding decision, the basis and
+        # the claim's own wording, and none of them reached it. Five fields were serialized here and
+        # every column migrations 134 and 135 added was dropped on the way, so a recorded binding was
+        # invisible to the code whose whole job is to use it.
         targets = [
             {
                 "metric_key": t.metric_key,
+                "claim_text": t.claim_text,
                 "claimed_value": t.claimed_value,
                 "unit": t.unit,
                 "tolerance": t.tolerance,
                 "source_locator": t.source_locator,
+                "sample_subset": t.sample_subset,
+                "qc_stage": t.qc_stage,
+                "direction": t.direction,
+                "threshold": t.threshold,
+                "threshold_kind": t.threshold_kind,
+                "output_type": t.output_type,
+                "measurement_basis": t.measurement_basis,
+                "bound_key": t.bound_key,
+                "binding_reason": t.binding_reason,
+                "binding_confidence": t.binding_confidence,
+                "bound_by_model": t.bound_by_model,
+                "bound_by": t.bound_by,
             }
             for t in (plan.comparison_targets if plan else [])
         ]

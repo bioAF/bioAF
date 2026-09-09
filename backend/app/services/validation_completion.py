@@ -40,7 +40,25 @@ _ROUTE_NEEDS = {
 }
 
 
-def completion_for(*, route: str, capabilities: dict, supplements: list[dict] | None) -> dict:
+# change_7.2 section 1: one vocabulary for a refusal, wherever it arose. A limitation discovered at
+# acquisition time is the same kind of fact as one discovered at the gate, and a report that names
+# them differently makes a reader work out that they are the same thing.
+KIND_FOR_ACTION = {
+    "no_adapter": UNSUPPORTED_ACQUISITION,
+    "not_authorized": CONTROLLED_ACCESS,
+    "no_input": MISSING_INPUT,
+    "undetermined": FAILED_DISCOVERY,
+}
+
+
+def classification_for(limitations: list[dict]) -> str:
+    """The terminal bucket a set of limitations produces."""
+    return _classification(limitations)
+
+
+def completion_for(
+    *, route: str, capabilities: dict, supplements: list[dict] | None, extra_limitations: list[dict] | None = None
+) -> dict:
     """The terminal outcome for a study whose route(s) cannot run.
 
     Returns the classification, a reader-facing reason, every limitation with the resource it
@@ -105,6 +123,13 @@ def completion_for(*, route: str, capabilities: dict, supplements: list[dict] | 
                     "which can be checked for consistency but cannot be reproduced from"
                 )
             limitations.append({"kind": MISSING_INPUT, "resource": named, "operation": leg, "detail": detail})
+
+    # A limitation the caller established for itself: an acquisition that ran out of attempts, or a
+    # deposit that turned out to hold nothing usable. Discovery answered "yes" for both, so nothing
+    # above can derive them, and dropping them would report a route as refused for no stated reason.
+    for extra in extra_limitations or []:
+        if isinstance(extra, dict) and extra.get("kind"):
+            limitations.append(extra)
 
     checks_completed = [
         f"{s.get('label')}: {_CHECK_DESCRIPTION.get(s.get('role'), 'inspected')}"

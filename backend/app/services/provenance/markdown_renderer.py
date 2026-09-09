@@ -346,6 +346,7 @@ def _render_sample_md(report: dict[str, Any]) -> str:
         )
     parts.append("")
 
+    _append_build_provenance(parts, entity.get("build_provenance") or {})
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
 
@@ -677,8 +678,20 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
         if targets:
             parts.append(
                 _table(
-                    ["Claimed metric", "Claimed", "Unit"],
-                    [[t.get("metric_key"), t.get("claimed_value"), t.get("unit")] for t in targets],
+                    ["Claimed metric", "Claimed", "Unit", "Population", "Stage", "Cutoff", "Per", "Bound by"],
+                    [
+                        [
+                            t.get("metric_key") or t.get("claim_text"),
+                            t.get("claimed_value"),
+                            t.get("unit"),
+                            t.get("sample_subset") or "--",
+                            t.get("qc_stage") or "--",
+                            _cutoff(t),
+                            t.get("measurement_basis") or "--",
+                            t.get("bound_by") or "--",
+                        ]
+                        for t in targets
+                    ],
                 )
             )
         else:
@@ -713,6 +726,7 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     _append_capability_checklist(parts, evidence.get("capabilities") or {})
     _append_supplement_inventory(parts, evidence.get("supplements") or [])
+    _append_what_was_not_attempted(parts, plan, evidence, result)
     _append_completion(parts, evidence.get("completion") or {})
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
@@ -729,12 +743,56 @@ _ISSUE_OUTCOME_LABEL = {
     "unreachable": "bioAF could not reach the language model",
     "internal": "bioAF hit an internal error",
     "unparseable": "the model's answer was not in the format bioAF asked for",
+    "truncated": "the model's answer was cut off at its token limit",
 }
 
 _ISSUE_IMPACT_LABEL = {
     "degraded": "continued with a fallback",
     "blocked": "produced nothing",
 }
+
+
+def _append_build_provenance(parts: list[str], provenance: dict[str, Any]) -> None:
+    """Which build produced each stage of this study, and where that cannot be established.
+
+    change_7.2 section 7. Studies 32 and 33 both reported version 2026.9.1, on different code. A
+    stage whose build is unknown says so: stamping it with the current build would manufacture the
+    same false certainty in a new place.
+    """
+    stages = provenance.get("stages") or []
+    parts.append("## Build Provenance")
+    parts.append("")
+    if not stages:
+        parts.append(
+            "The build that produced this study is unknown. Every stage here ran before bioAF "
+            "recorded per-stage build provenance, and no build may be attributed to them after the "
+            "fact."
+        )
+        parts.append("")
+        return
+
+    parts.append(
+        _table(
+            ["Stage", "When", "Commit", "Image digest", "Version"],
+            [
+                [
+                    row.get("stage"),
+                    row.get("at"),
+                    row.get("commit") or "unknown",
+                    row.get("image_digest") or "unknown",
+                    row.get("version") or "unknown",
+                ]
+                for row in stages
+            ],
+        )
+    )
+    parts.append("")
+    if provenance.get("spans_more_than_one_build"):
+        parts.append(
+            "**This study spans more than one build.** Its stages were not all produced by the same "
+            "code, so results from different stages are not directly comparable."
+        )
+        parts.append("")
 
 
 def _append_issues(parts: list[str], issues: list[dict[str, Any]]) -> None:
@@ -958,6 +1016,54 @@ def _append_completion(parts: list[str], completion: dict[str, Any]) -> None:
         parts.append("")
         parts.extend(f"- {row}" for row in rows)
         parts.append("")
+
+
+def _cutoff(target: dict[str, Any]) -> str:
+    """The cutoff a claim names, with the kind that makes it meaningful.
+
+    A bare 2.0 says nothing: the same number is a fold change, a log2 fold change or an adjusted
+    p-value depending on the kind beside it.
+    """
+    threshold = target.get("threshold")
+    if threshold is None:
+        return "--"
+    kind = target.get("threshold_kind")
+    return f"{threshold} ({kind})" if kind else str(threshold)
+
+
+def _append_what_was_not_attempted(
+    parts: list[str], plan: dict[str, Any], evidence: dict[str, Any], result: dict[str, Any]
+) -> None:
+    """Say plainly what this run did NOT do, so nothing has to be inferred from an absence.
+
+    change_7.2 section 5. A finding-selection policy is outside this change, and deferring it is
+    acceptable only if the report says so without ambiguity. Inspected supplements are evidence about
+    what a paper published; they are not validation of any claim, and a report that lists them
+    without that statement invites the opposite reading.
+    """
+    finding = plan.get("finding_claim") or {}
+    selected = bool(finding.get("finding_set") or finding.get("confirmed"))
+    reproduced = bool((result or {}).get("comparisons")) or bool(evidence.get("level3"))
+    resolved = [s for s in (evidence.get("supplements") or []) if isinstance(s, dict) and s.get("resolved")]
+
+    if selected and reproduced:
+        return
+
+    parts.append("## What This Run Did Not Attempt")
+    parts.append("")
+    if not selected:
+        parts.append(
+            "- No finding was selected from this paper, so no specific published result was put "
+            "under test. bioAF does not yet choose among a paper's findings automatically."
+        )
+    if not reproduced:
+        parts.append("- No reproduction was attempted, so nothing here is a reproduction of the paper's analysis.")
+    if resolved:
+        parts.append(
+            f"- {len(resolved)} of the paper's own attachments were retrieved and inspected. That "
+            "establishes what the authors published. It is not validation of any claim in the paper."
+        )
+    parts.append("")
 
 
 def _yes_no(value: Any) -> str:

@@ -51,8 +51,25 @@ OUTCOME_REFUSAL = "refusal"
 OUTCOME_UNREACHABLE = "unreachable"
 OUTCOME_INTERNAL = "internal"
 OUTCOME_UNPARSEABLE = "unparseable"
+# change_7.2 section 7: an answer cut off at the token limit is its own event. It is not a
+# refusal, not a transport failure, and not a badly formatted answer, and calling it any of
+# those sends whoever reads the report to the wrong remedy.
+OUTCOME_TRUNCATED = "truncated"
 
-OUTCOMES = (OUTCOME_OK, OUTCOME_REFUSAL, OUTCOME_UNREACHABLE, OUTCOME_INTERNAL, OUTCOME_UNPARSEABLE)
+# How much of an unreadable answer reaches the log. It was 400 characters, which is not enough to
+# attribute a failure to a cause: no unparseable response in either of the owner's runs could be
+# explained afterwards. The answer does NOT go on the issue record, because that is what a user
+# reads on screen and the repo's rule is plain language there and technical detail in the logs.
+_LOG_ANSWER_CHARS = 20000
+
+OUTCOMES = (
+    OUTCOME_OK,
+    OUTCOME_REFUSAL,
+    OUTCOME_UNREACHABLE,
+    OUTCOME_INTERNAL,
+    OUTCOME_UNPARSEABLE,
+    OUTCOME_TRUNCATED,
+)
 
 # What each provider failure means to a person. `refusal` names the model so an admin can request an
 # account exception; the reach failures say bioAF could not get to the LLM; everything else says
@@ -64,6 +81,7 @@ _ERROR_CLASS_OUTCOMES = {
     "transport": OUTCOME_UNREACHABLE,
     "server": OUTCOME_UNREACHABLE,
     "parse": OUTCOME_UNPARSEABLE,
+    "truncated": OUTCOME_TRUNCATED,
 }
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
@@ -174,6 +192,11 @@ def _failure_reason(outcome: str, *, intent: str, model: str | None) -> str:
         return f"bioAF could not reach the language model while {intent}."
     if outcome == OUTCOME_UNPARSEABLE:
         return f"The model's answer while {intent} was not in the format bioAF asked for."
+    if outcome == OUTCOME_TRUNCATED:
+        return (
+            f"The model's answer while {intent} was cut off at its token limit before it finished, "
+            "so the part bioAF received could not be read as a complete answer."
+        )
     return f"bioAF hit an internal error while {intent}."
 
 
@@ -197,7 +220,7 @@ async def decide(
     """
     allow = tuple(str(a) for a in allowed) if allowed is not None else None
 
-    def _failed(outcome: str, detail: str) -> Decision:
+    def _failed(outcome: str, detail: str, *, full_text: str = "") -> Decision:
         logger.warning("llm decision failed (%s) while %s: %s", outcome, intent, detail)
         return Decision(
             outcome=outcome,
@@ -205,6 +228,9 @@ async def decide(
             model=model,
             intent=intent,
             allowed=allow,
+            # Kept on the decision so the issue record carries the answer that could not be read.
+            # A cause that is only in a truncated log line cannot be established later.
+            text=full_text,
         )
 
     try:
@@ -217,7 +243,10 @@ async def decide(
 
     data = fenced_json(text)
     if data is None:
-        return _failed(OUTCOME_UNPARSEABLE, (text or "")[:400])
+        # change_7.2 section 7: the whole answer, not 400 characters of it. No unparseable response
+        # in either of the owner's runs could be attributed to a cause, because the evidence needed
+        # to attribute it had already been thrown away by the time anyone read the log.
+        return _failed(OUTCOME_UNPARSEABLE, (text or "")[:_LOG_ANSWER_CHARS], full_text=text or "")
 
     if "confidence" in data:
         data["confidence"] = confidence_of(data.get("confidence"))
