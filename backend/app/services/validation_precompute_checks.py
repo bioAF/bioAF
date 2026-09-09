@@ -76,7 +76,12 @@ def _norm(organism: str | None) -> str:
     return " ".join((organism or "").strip().lower().split())
 
 
-def check_species(plan_organism: str | None, deposit_organisms: list[str] | None) -> dict:
+def check_species(
+    plan_organism: str | None,
+    deposit_organisms: list[str] | None,
+    *,
+    organism_source: bool = True,
+) -> dict:
     """The plan's organism against the deposit's own declaration. **This one blocks approval.**
 
     Nothing in the product checks species today. A human-genome run on mouse data produces numbers
@@ -93,7 +98,20 @@ def check_species(plan_organism: str | None, deposit_organisms: list[str] | None
     if not declared:
         # Not knowing is not the same as disagreeing, and blocking here would refuse every deposit
         # whose series matrix omits the field.
-        return _result(CHECK_SPECIES, UNKNOWN, detail="the deposit declares no organism to compare against")
+        #
+        # change_7.1 section 7: never having looked and having looked and found nothing are
+        # different statements, and only the second is about the deposit. An EGA study has no
+        # series matrix to read an organism from, and study 32 reported that as the deposit
+        # declaring none.
+        return _result(
+            CHECK_SPECIES,
+            UNKNOWN,
+            detail=(
+                "the deposit declares no organism to compare against"
+                if organism_source
+                else "bioAF has no organism declaration for this deposit to compare against"
+            ),
+        )
     if wanted in declared:
         return _result(CHECK_SPECIES, OK, detail=f"the paper and the deposit both name {plan_organism}")
     return _result(
@@ -108,7 +126,7 @@ def check_species(plan_organism: str | None, deposit_organisms: list[str] | None
     )
 
 
-def check_sample_data(*, paper_sample_count: int | None, entries: list) -> dict:
+def check_sample_data(*, paper_sample_count: int | None, entries: list, supplements: list | None = None) -> dict:
     """The deposit's per-sample files against the number of samples the paper describes.
 
     Advisory. A deposit holding ONE series-level matrix with every sample as a column is the
@@ -118,8 +136,29 @@ def check_sample_data(*, paper_sample_count: int | None, entries: list) -> dict:
     if not paper_sample_count:
         return _result(CHECK_SAMPLE_DATA, UNKNOWN, detail="the paper does not state how many samples it used")
     if not entries:
-        # Nothing listed is a discovery problem, and step 13's own row already says so. Calling it a
-        # mismatch here would report the same failure twice, as two different kinds of thing.
+        # change_7.1 section 7: the paper's own sample table answers this when the deposit cannot.
+        # Study 32 said "no deposited files were listed" in the same bundle that held Supplemental
+        # File S1, resolved, 54 rows, one per sample. A known listing cannot produce a
+        # nothing-was-listed explanation.
+        from_supplement = _sample_count_from_supplements(supplements)
+        if from_supplement is not None:
+            rows, label = from_supplement
+            if rows == paper_sample_count:
+                return _result(
+                    CHECK_SAMPLE_DATA,
+                    OK,
+                    detail=f"{label} describes {rows} sample(s), matching the {paper_sample_count} the paper states",
+                )
+            return _result(
+                CHECK_SAMPLE_DATA,
+                MISMATCH,
+                detail=(
+                    f"the paper states {paper_sample_count} sample(s) and {label} describes {rows}. "
+                    "One of the two is not describing the set that was analysed."
+                ),
+            )
+        # Nothing listed anywhere is a discovery problem, and step 13's own row already says so.
+        # Calling it a mismatch here would report the same failure twice, as two different things.
         return _result(CHECK_SAMPLE_DATA, UNKNOWN, detail="no deposited files were listed to compare against")
 
     reproducible = {"matrix_counts", "matrix_normalized", "peaks", "barcodes", "features"}
@@ -226,7 +265,9 @@ async def run_precompute_checks(
     deposit_organisms: list[str] | None,
     paper_sample_count: int | None,
     entries: list,
-    client,
+    supplements: list | None = None,
+    organism_source: bool = True,
+    client=None,
     model: str,
     api_key: str | None,
     on_issue=None,
@@ -237,8 +278,12 @@ async def run_precompute_checks(
     take the species hold with it.
     """
     checks = {
-        CHECK_SPECIES: check_species(plan_organism, deposit_organisms),
-        CHECK_SAMPLE_DATA: check_sample_data(paper_sample_count=paper_sample_count, entries=entries),
+        CHECK_SPECIES: check_species(plan_organism, deposit_organisms, organism_source=organism_source),
+        # change_7.1 section 7: the paper's own attachments are evidence for these checks, not just
+        # for the report. A check that contradicts the inventory beside it is worse than no check.
+        CHECK_SAMPLE_DATA: check_sample_data(
+            paper_sample_count=paper_sample_count, entries=entries, supplements=supplements
+        ),
     }
     checks[CHECK_METHODS] = await _judge(
         check=CHECK_METHODS,
@@ -275,3 +320,20 @@ def species_hold(precompute_checks: dict | None) -> str | None:
     if check.get("verdict") != MISMATCH:
         return None
     return check.get("detail") or "the paper's organism and the deposit's declared organism disagree"
+
+
+def _sample_count_from_supplements(supplements: list | None) -> tuple[int, str] | None:
+    """(rows, label) from a resolved sample-metadata supplement, or None.
+
+    Only a RESOLVED row can answer: an unfetched reference holds no row count, and reading one off
+    its name would be inventing the evidence this check exists to supply.
+    """
+    for row in supplements or []:
+        if not isinstance(row, dict) or not row.get("resolved"):
+            continue
+        if row.get("role") != "sample_metadata":
+            continue
+        rows = row.get("row_count")
+        if isinstance(rows, int) and rows > 0:
+            return rows, str(row.get("label") or row.get("filename") or "a metadata supplement")
+    return None

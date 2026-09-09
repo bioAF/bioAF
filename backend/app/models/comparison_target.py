@@ -69,6 +69,10 @@ class ComparisonTarget(Base):
     threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     threshold_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
     output_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # What the number is measured PER: cell, sample, library, subject, cohort. Study 32 filed a
+    # per-library depth as `mean_reads_per_cell`, which compared against a run would be wrong by
+    # the number of cells in an embryo and reported as the paper's divergence.
+    measurement_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

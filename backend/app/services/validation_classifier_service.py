@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from app.services.validation_measurement_basis import basis_conflicts, basis_of
+
 # How a target came to be bound, when the binding call could not answer AT ALL. Distinct from
 # `alias_table`, which is a deliberate decline falling back to a real lookup, and from `model`,
 # which is a decision. Defined here because the comparison is what has to refuse it, and the
@@ -631,6 +633,13 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         # change_7.1 section 3: a binding the model could not make is not a decline, and must not
         # reach the alias table. `total_genes_detected` is IN that table, so a failed binding on a
         # claim keyed that way used to compare cleanly and report an agreement nobody established.
+        # change_7.1 section 7: a per-library number compared against a per-cell metric is wrong by
+        # the size of the thing it was measured over, and the gap gets reported as the paper's.
+        # The basis is stated in the claim's own unit; where it contradicts the metric's, this is a
+        # contract mismatch and no verdict is available.
+        claim_basis = t.get("measurement_basis") or basis_of(t.get("unit"))
+        basis_mismatch = basis_conflicts(claim_basis=claim_basis, metric_key=t.get("bound_key") or key)
+
         binding_failed = t.get("bound_by") == BINDING_FAILED
         if binding_failed:
             mapped, advisory = None, False
@@ -642,10 +651,14 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         # own unit ("consensus peaks", "reads after trimming") with the key exactly right. Giving the
         # model the specs made that the common shape, and it bypasses the key-side qualifier strip.
         advisory_reason: str | None = None
+        if basis_mismatch:
+            advisory_reason = (
+                f"the paper measures this per {claim_basis}; bioAF computes it per "
+                f"{basis_of(t.get('bound_key') or key)}"
+            )
         if binding_failed:
             advisory_reason = (
-                "the binding call could not be read, so which metric this claim measures could not "
-                "be established"
+                "the binding call could not be read, so which metric this claim measures could not be established"
             )
         if mapped is not None:
             conflict = _basis_conflict(_SPEC_BY_KEY[mapped], key, unit)
@@ -673,10 +686,12 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
             "within_tolerance": None,
             "verdict": None,
         }
-        if binding_failed:
+        if binding_failed or basis_mismatch:
             # Distinct from `not_computed`: we did compute metrics, and the gap is that nothing
-            # established which one this claim is about.
+            # established which one this claim is about, or that it is not the same kind of number.
             row["verdict"] = "not_compared"
+            if basis_mismatch:
+                row["mapped_key"] = None
             rows.append(row)
             continue
         if not _is_number(claimed):
