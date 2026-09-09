@@ -211,13 +211,14 @@ const no = { value: "no" as const, evidence: null, failure_reason: null };
 
 const CAPS = {
   paper_readable: yes,
-  geo_entry: yes,
+  deposit_exists: yes,
   raw_data: yes,
   preprocessed_data: yes,
   sample_metadata: yes,
   code_artifact: no,
   code_repository: no,
   code_sources: [] as { kind: string; url: string | null; identifier: string | null }[],
+  deposits: [] as unknown[],
 };
 
 async function openApprove() {

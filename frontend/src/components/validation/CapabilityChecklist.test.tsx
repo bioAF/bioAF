@@ -14,7 +14,8 @@ import { CapabilityChecklist, type Capabilities } from "./CapabilityChecklist";
 
 const caps = (over: Partial<Capabilities> = {}): Capabilities => ({
   paper_readable: { value: "yes", evidence: "bioAF holds the paper's full text", failure_reason: null },
-  geo_entry: { value: "yes", evidence: "GEO published a series record", failure_reason: null },
+  deposit_exists: { value: "yes", evidence: "GEO published a series record", failure_reason: null },
+  deposits: [],
   raw_data: { value: "yes", evidence: "ENA publishes FASTQ for 6 runs", failure_reason: null },
   preprocessed_data: { value: "yes", evidence: "1 of 3 files could serve", failure_reason: null },
   sample_metadata: { value: "yes", evidence: "6 samples", failure_reason: null },
@@ -42,7 +43,7 @@ describe("CapabilityChecklist", () => {
   it("answers every phase-1 question", () => {
     render(<CapabilityChecklist capabilities={caps()} />);
     for (const label of [
-      /GEO entry exists/i,
+      /Data deposit exists/i,
       /Raw sample data available/i,
       /Pre-processed data available/i,
       /Sample metadata available/i,
@@ -55,11 +56,11 @@ describe("CapabilityChecklist", () => {
     render(
       <CapabilityChecklist
         capabilities={caps({
-          geo_entry: { value: "unknown", evidence: null, failure_reason: "bioAF could not reach GEO" },
+          deposit_exists: { value: "unknown", evidence: null, failure_reason: "bioAF could not reach GEO" },
         })}
       />,
     );
-    const row = screen.getByText(/GEO entry exists/i).closest("tr")!;
+    const row = screen.getByText(/Data deposit exists/i).closest("tr")!;
     expect(within(row).getByText(/unknown/i)).toBeInTheDocument();
     expect(within(row).queryByText(/^no$/i)).not.toBeInTheDocument();
   });
@@ -146,5 +147,67 @@ describe("CapabilityChecklist", () => {
       />,
     );
     expect(screen.getByText(/no code source/i)).toBeInTheDocument();
+  });
+});
+
+describe("CapabilityChecklist deposits (change_7.1 section 1)", () => {
+  const ega = {
+    archive: "ega",
+    accession: "EGAS00001003667",
+    provenance: "extracted",
+    scoped: true,
+    exists: "yes" as const,
+    access: "controlled" as const,
+    supported: "no" as const,
+    raw_data: "yes" as const,
+    preprocessed_data: "no" as const,
+    sample_metadata: "yes" as const,
+    evidence: "EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s)",
+    failure_reason: null,
+  };
+
+  it("names the archive a deposit lives in", () => {
+    render(<CapabilityChecklist capabilities={caps({ deposits: [ega] })} />);
+    const row = screen.getByTestId("deposit-EGAS00001003667");
+    expect(within(row).getByText(/^\(EGA\)$/)).toBeInTheDocument();
+  });
+
+  it("keeps existence, access and support as three separate answers", () => {
+    /* The paper deposited its reads AND bioAF cannot fetch them. One chip cannot say both, and
+       the half it drops is the half that stops the reader blaming the authors. */
+    render(<CapabilityChecklist capabilities={caps({ deposits: [ega] })} />);
+    const row = screen.getByTestId("deposit-EGAS00001003667");
+    expect(within(row).getByText(/^Yes$/)).toBeInTheDocument();
+    expect(within(row).getByText(/^Controlled$/)).toBeInTheDocument();
+    expect(within(row).getByText(/^bioAF cannot acquire$/)).toBeInTheDocument();
+  });
+
+  it("says where an accession came from when nobody requested it", () => {
+    render(<CapabilityChecklist capabilities={caps({ deposits: [ega] })} />);
+    expect(screen.getByText(/from the paper/i)).toBeInTheDocument();
+  });
+
+  it("renders a deposit bioAF could not look up as unknown, never as absent", () => {
+    render(
+      <CapabilityChecklist
+        capabilities={caps({
+          deposits: [
+            {
+              ...ega,
+              archive: "arrayexpress",
+              accession: "E-MTAB-1234",
+              exists: "unknown" as const,
+              access: "unknown" as const,
+              raw_data: "unknown" as const,
+              evidence: null,
+              failure_reason: "bioAF cannot look up deposits in arrayexpress",
+            },
+          ],
+        })}
+      />,
+    );
+    const row = screen.getByTestId("deposit-E-MTAB-1234");
+    expect(within(row).getAllByText(/Unknown/i).length).toBeGreaterThan(0);
+    expect(within(row).getByText(/cannot look up/i)).toBeInTheDocument();
   });
 });

@@ -28,9 +28,11 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 
-from app.services.validation_capabilities import NO, UNKNOWN, YES
-
 logger = logging.getLogger("bioaf.archive_discovery")
+
+YES = "yes"
+NO = "no"
+UNKNOWN = "unknown"
 
 Fetcher = Callable[[str], Awaitable[str]]
 
@@ -48,6 +50,10 @@ ACCESS_UNKNOWN = "unknown"
 NOT_ATTEMPTED = "not_attempted"
 
 _EGA_METADATA = "https://metadata.ega-archive.org"
+
+# Which archives bioAF can actually acquire data FROM, as opposed to merely read about. GEO and SRA
+# have download paths (the deposit route and fetchngs); EGA does not, at any access level.
+_ACQUIRABLE = (GEO, SRA)
 
 # A study can register more deposits than a read-time budget can describe. Five covers every real
 # paper seen so far and bounds the call count; the rest are named without being described.
@@ -85,6 +91,9 @@ def _deposit(accession: str, archive: str, **overrides) -> dict:
         "archive": archive,
         "accession": accession,
         "provenance": None,
+        # The deposit a run would actually use. Scoping decides what runs; it does not license a
+        # report that the other deposits are not there.
+        "scoped": False,
         "exists": UNKNOWN,
         "access": ACCESS_UNKNOWN,
         "supported": NO,
@@ -227,3 +236,171 @@ async def describe_ega_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         sample_metadata=YES if samples else UNKNOWN,
         evidence=evidence,
     )
+
+
+async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
+    """One GEO series, described exactly as step 13 described it. Never raises.
+
+    The series matrix answers TWO questions in one fetch (the record exists, because it parsed, and
+    it carries per-sample metadata, because it listed samples), and the manifest service already
+    caches the multi-platform fallback a combined-matrix 404 needs.
+
+    **Existence comes from the series matrix, never from the supplementary listing.** A failed
+    listing of ``.../suppl/`` says nothing about whether the record is there, and deriving existence
+    from it read "GEO entry: NO" for a study that is plainly published.
+    """
+    from app.services.literature.accession_manifest_service import AccessionManifestService, ManifestResult
+    from app.services.literature.deposit_inventory_service import list_deposit
+    from app.services.deposit_selection import selectable
+
+    acc = (accession or "").strip()
+    try:
+        manifest = await AccessionManifestService.fetch_manifest(acc, fetcher=fetcher)
+    except Exception as exc:  # noqa: BLE001 - the service does not raise, but discovery must not either
+        logger.info("series matrix discovery failed for %s: %s", acc, exc)
+        manifest = ManifestResult(unavailable_reason="bioAF could not reach GEO to read this study's record")
+
+    evidence: list[str] = []
+    if manifest.samples:
+        exists = YES
+        sample_metadata = YES
+        evidence.append(f"GEO published a series record for {acc} describing {len(manifest.samples)} sample(s)")
+        failure_reason = None
+    else:
+        exists = UNKNOWN
+        sample_metadata = UNKNOWN
+        failure_reason = manifest.unavailable_reason or f"GEO returned no series record for {acc}"
+
+    rows, ena_failure = await _ena_rows(acc, fetcher, manifest)
+    if rows is None:
+        raw_data = UNKNOWN
+        failure_reason = failure_reason or ena_failure
+    else:
+        raw_data, raw_evidence = _raw_read_answer(rows)
+        evidence.append(raw_evidence)
+
+    inventory = await list_deposit(acc, fetcher=fetcher)
+    if inventory.unavailable_reason:
+        # An unlistable directory is a discovery failure. It says nothing about whether the record
+        # exists, which is why that question was answered from the series matrix instead.
+        preprocessed = UNKNOWN
+        failure_reason = failure_reason or inventory.unavailable_reason
+    else:
+        usable = selectable(inventory.entries)
+        preprocessed = YES if usable else NO
+        evidence.append(
+            f"{len(usable)} of {len(inventory.entries)} deposited file(s) could serve as a reproduction input"
+            if usable
+            else f"GEO lists {len(inventory.entries)} supplementary file(s), none holding per-feature values"
+        )
+
+    return _deposit(
+        acc,
+        GEO,
+        exists=exists,
+        access=PUBLIC if exists == YES else ACCESS_UNKNOWN,
+        supported=YES,
+        raw_data=raw_data,
+        preprocessed_data=preprocessed,
+        sample_metadata=sample_metadata,
+        evidence="; ".join(evidence) or None,
+        failure_reason=failure_reason,
+    )
+
+
+async def describe_sra_deposit(accession: str, *, fetcher: Fetcher) -> dict:
+    """An SRA/ENA study, which publishes reads and no processed matrix of its own."""
+    acc = (accession or "").strip()
+    rows, failure = await _ena_rows(acc, fetcher, None)
+    if rows is None:
+        return _deposit(acc, SRA, supported=YES, failure_reason=failure)
+    raw, evidence = _raw_read_answer(rows)
+    return _deposit(
+        acc,
+        SRA,
+        exists=YES if rows else NO,
+        access=PUBLIC,
+        supported=YES,
+        raw_data=raw,
+        # ENA holds reads. A processed matrix, when a paper has one, lives somewhere else.
+        preprocessed_data=NO,
+        sample_metadata=YES if any((r.get("sample_title") or "").strip() for r in rows) else UNKNOWN,
+        evidence=evidence,
+    )
+
+
+def _unsupported_deposit(accession: str, archive: str) -> dict:
+    """An accession bioAF cannot look up. UNKNOWN, and the reason names the archive.
+
+    Answering NO here would report our own gap as a fact about the paper, which is the precise
+    error this change exists to remove.
+    """
+    named = archive if archive != OTHER else "an archive bioAF does not recognise"
+    return _deposit(
+        accession,
+        archive,
+        failure_reason=f"bioAF cannot look up deposits in {named}, so what {accession} holds is unknown",
+    )
+
+
+def _raw_read_answer(rows: list[dict]) -> tuple[str, str]:
+    """Whether there are raw reads something could actually fetch, and the evidence for it.
+
+    **Registered is not the same as available**, measured live on GSE96583 (2026-09-07): ENA returns
+    run rows and a read count with ZERO ``fastq_bytes``, because the study deposits 10x BAMs rather
+    than FASTQ. Answering YES off the run rows alone would put a route on the checklist that nothing
+    can run.
+    """
+    if not rows:
+        return NO, "ENA lists no sequencing runs for this study"
+    with_fastq = [r for r in rows if (r.get("fastq_bytes") or "").strip()]
+    if not with_fastq:
+        return NO, (
+            f"ENA lists {len(rows)} run(s) for this study, none of which publishes FASTQ files "
+            "(a study can register its runs and deposit aligned reads instead)"
+        )
+    return YES, f"ENA publishes FASTQ files for {len(with_fastq)} of {len(rows)} run(s)"
+
+
+async def _ena_rows(accession: str, fetch: Fetcher, manifest) -> tuple[list[dict] | None, str | None]:
+    """The ENA run rows for this study, or a reason we could not get them.
+
+    Reuses ``accession_manifest_service``'s ENA client rather than adding a second one. A GEO series
+    is not itself queryable at ENA; its SRA study is, and the manifest resolved that link already,
+    so re-deriving it would be a second round trip for an answer we are holding.
+    """
+    from app.services.literature.accession_manifest_service import _ena_filereport_url, parse_ena_filereport
+
+    target = accession
+    if manifest is not None and manifest.samples:
+        exp = next((s.get("experiment_accession") for s in manifest.samples if s.get("experiment_accession")), None)
+        target = exp or accession
+    try:
+        tsv = await fetch(_ena_filereport_url(target))
+    except Exception as exc:  # noqa: BLE001 - a discovery failure is UNKNOWN, never an absence
+        logger.info("ENA availability check failed for %s: %s", target, exc)
+        return None, "bioAF could not reach ENA to check whether raw reads are published"
+    return parse_ena_filereport(tsv), None
+
+
+async def describe_deposit(accession: str, *, provenance: str, scoped: bool, fetcher: Fetcher) -> dict:
+    """One deposit, described by whichever archive it lives in.
+
+    ``provenance`` records whether the accession was requested by a person or extracted from the
+    paper, and ``scoped`` marks the one a run would actually use. Both travel with the answer,
+    because "the paper also deposited this" and "this is what we are about to fetch" are different
+    claims and the report makes both.
+    """
+    acc = (accession or "").strip()
+    archive = classify_archive(acc)
+    if archive == GEO:
+        deposit = await describe_geo_deposit(acc, fetcher=fetcher)
+    elif archive == EGA:
+        deposit = await describe_ega_deposit(acc, fetcher=fetcher)
+    elif archive == SRA:
+        deposit = await describe_sra_deposit(acc, fetcher=fetcher)
+    else:
+        deposit = _unsupported_deposit(acc, archive)
+    deposit["provenance"] = provenance
+    deposit["scoped"] = scoped
+    return deposit
