@@ -359,6 +359,10 @@ class ValidationDriverService:
         if study.state != "requested":
             raise ValidationError(f"read_and_plan can only start from 'requested'; study is in '{study.state}'.")
 
+        # change_7.1 section 2: the article's supplement manifest comes from the SAME document the
+        # body text does. A pasted body is not a document, so it carries none, and an empty manifest
+        # there means "nobody looked" rather than "the paper published none".
+        supplements: list[dict] = []
         if not full_text:
             result = await FullTextFetchService.fetch(doi=study.source_doi)
             if result is None:
@@ -367,6 +371,7 @@ class ValidationDriverService:
                     "DOI that resolves to an open-access Europe PMC article."
                 )
             full_text = result.text
+            supplements = result.supplements
 
         # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
         # stage is a pass-through.
@@ -374,6 +379,11 @@ class ValidationDriverService:
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
 
         plan = await ValidationExtractionService.extract(session, study, full_text, org_id, user_id)
+
+        evidence = dict(study.evidence_json or {})
+        evidence["supplements"] = supplements
+        study.evidence_json = evidence
+        await session.flush()
 
         # plan_7 step 13: establish what this paper actually has, BEFORE the C1 gate, so the route
         # modal offers what is available rather than three equal-looking options. Runs here rather
