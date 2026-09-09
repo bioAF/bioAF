@@ -198,9 +198,26 @@ class TestResolvingAReferenceToAFile:
 
 class TestWhatResolutionMeasures:
     @pytest.mark.asyncio
-    async def test_a_results_table_reports_its_rows_and_threshold_splits(self):
-        """194 rows, 88 of them above |log2FC| > 2, 146 sex-linked. These are the numbers the paper
-        states, and computing them here is what lets a claim be checked against the right one."""
+    async def test_a_results_table_reports_its_rows_and_the_claimed_threshold(self):
+        """194 rows, 88 above the cutoff THE PAPER CLAIMS. The cutoff is an input now: a fixed pair
+        would measure Groff's numbers on every paper and the claimed one on none."""
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements(
+            "PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch, thresholds=[2.0]
+        )
+        s3 = next(s for s in resolved if s["label"] == "Supplemental File S3")
+        assert s3["row_count"] == 194
+        assert s3["threshold_splits"]["abs_log2fc>2"] == 88
+        assert "log2FoldChange" in s3["columns"]
+
+    @pytest.mark.asyncio
+    async def test_the_sex_linked_count_is_available_from_the_chromosome_column(self):
+        """Groff's 146 sex-linked genes. No fold-change threshold produces that number; only
+        reading the chromosome column can."""
         from app.services.supplement_inventory import resolve_supplements
 
         async def _fetch(_url):
@@ -208,9 +225,8 @@ class TestWhatResolutionMeasures:
 
         resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
         s3 = next(s for s in resolved if s["label"] == "Supplemental File S3")
-        assert s3["row_count"] == 194
-        assert s3["threshold_splits"]["abs_log2fc>2"] == 88
-        assert "log2FoldChange" in s3["columns"]
+        chromosomes = s3["category_counts"]["chr"]
+        assert chromosomes.get("chrX", 0) + chromosomes.get("chrY", 0) == 146
 
     @pytest.mark.asyncio
     async def test_a_metadata_table_reports_its_rows_and_columns(self):

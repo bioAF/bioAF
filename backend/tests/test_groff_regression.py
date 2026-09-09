@@ -40,7 +40,10 @@ _EXTRACTION = (
     '```json\n{"accessions": ["EGAS00001003667"], "sample_structure": {"organism": "Homo sapiens"}, '
     '"method": {"assay": "bulk RNA-seq"}, '
     '"claims": [{"metric_key": "", "claim_text": "digital karyotypes were concordant with PGT-A", '
-    '"source_locator": "Results"}], '
+    '"source_locator": "Results"}, '
+    '{"metric_key": "differentially_expressed_genes", "value": 88, "unit": "genes", '
+    '"claim_text": "88 of the 194 significant genes had |log2FC| > 2", '
+    '"threshold": 2.0, "threshold_kind": "abs_log2fc", "source_locator": "Results"}], '
     '"data_availability": "restricted", '
     '"code_availability": [{"kind": "supplementary", "identifier": "Supplemental File S2"}], '
     '"blockers": []}\n```'
@@ -188,11 +191,24 @@ class TestTheSupplementsAreFoundAndRead:
         assert "expression_matrix" not in roles
 
     @pytest.mark.asyncio
-    async def test_the_results_table_counts_are_measured(self, session, admin_user, _groff_world):
+    async def test_the_results_table_is_measured_at_the_cutoff_the_paper_claims(
+        self, session, admin_user, _groff_world
+    ):
+        """The cutoff comes from the claim, not from a constant. A paper claiming 1.5-fold gets
+        1.5 measured; this one claims 2."""
         study = await _run(session, admin_user)
         s3 = next(s for s in study.evidence_json["supplements"] if s["label"] == "Supplemental File S3")
         assert s3["row_count"] == 194
         assert s3["threshold_splits"]["abs_log2fc>2"] == 88
+
+    @pytest.mark.asyncio
+    async def test_the_sex_linked_count_comes_from_the_chromosome_column(self, session, admin_user, _groff_world):
+        """Groff claims 146 sex-linked genes. No fold-change threshold can produce that number, and
+        no constant in production code should: the chromosome column has to be read."""
+        study = await _run(session, admin_user)
+        s3 = next(s for s in study.evidence_json["supplements"] if s["label"] == "Supplemental File S3")
+        chromosomes = s3["category_counts"]["chr"]
+        assert chromosomes.get("chrX", 0) + chromosomes.get("chrY", 0) == 146
 
 
 class TestTheStudyReachesAnOutcome:

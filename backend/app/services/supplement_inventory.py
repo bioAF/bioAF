@@ -290,7 +290,9 @@ _MAX_BUNDLE_BYTES = 200 * 1024 * 1024
 _IDENTIFIER_RE = re.compile(r"\bS?(\d+)\b")
 
 
-async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) -> list[dict]:
+async def resolve_supplements(
+    pmcid: str, references: list[dict], *, fetcher, thresholds: list[float] | None = None
+) -> list[dict]:
     """Resolve named references to real files and classify each by its content. Never raises.
 
     The prose says "Supplemental File S2" and the publisher deposits
@@ -338,7 +340,7 @@ async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) ->
             role=classify_supplement(filename, contents[filename]),
             resolved=True,
             failure_reason=None,
-            **_measurements(contents[filename]),
+            **measure_table(contents[filename], thresholds=thresholds),
         )
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
@@ -356,7 +358,7 @@ async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) ->
                 "size_bytes": len(blob_bytes),
                 "resolved": True,
                 "failure_reason": None,
-                **_measurements(blob_bytes),
+                **measure_table(blob_bytes, thresholds=thresholds),
             }
         )
     return rows
@@ -426,13 +428,26 @@ def build_inventory_digest(supplements: list[dict]) -> str:
     return "The paper's supplements:\n" + "\n".join(lines)
 
 
-def _measurements(blob: bytes) -> dict:
-    """Row count, column names and threshold splits for a tabular supplement. Never raises.
+# A column with few distinct values is a category (chromosome, sample type, call). One with a
+# distinct value per row is an identifier, and counting it would be storing the table.
+_MAX_CATEGORY_VALUES = 25
 
-    **The rows themselves are never kept.** These numbers go into a prompt, where 194 rows of gene
-    identifiers are cost and "194 rows, 88 of them above |log2FC| > 2" is the evidence. Computing
-    the splits here is what lets a claim be checked against the number it actually refers to: the
-    paper states both 194 and 88 in one sentence, and they are different claims.
+
+def measure_table(blob: bytes, *, thresholds: list[float] | None = None) -> dict:
+    """What a tabular supplement holds, measured against what the paper claims. Never raises.
+
+    change_7.1 section 7. The first pass hard-coded |log2FC| > 1 and > 2, which are Groff's cutoffs
+    and therefore a paper-specific rule sitting in production code: a paper claiming a 1.5-fold
+    cutoff got two numbers it never mentioned and not the one it did. The thresholds now come from
+    the claims, so the table is measured for what was actually asserted about it.
+
+    Groff also claims 146 sex-linked genes, which no fold-change threshold can produce: it needs
+    the chromosome column read. Counting the values of any low-cardinality column is generic, works
+    for sample types and morphokinetic calls just as well, and is what lets a claim about a
+    column's contents be checked at all.
+
+    **The rows themselves are never kept.** These summaries go into a prompt and a report; 194 rows
+    of gene identifiers are cost, and "194 rows, 88 above the claimed cutoff" is the evidence.
     """
     text = _decode(blob)
     if text is None:
@@ -445,16 +460,16 @@ def _measurements(blob: bytes) -> dict:
     if len(columns) < 2:
         return {}
 
-    measured: dict = {"row_count": len(lines) - 1, "columns": columns}
+    rows = [line.split(delimiter) for line in lines[1:]]
+    measured: dict = {"row_count": len(rows), "columns": columns}
 
     index = {c.lower(): i for i, c in enumerate(columns)}
     fold_change = next((index[c] for c in ("log2foldchange", "log2fc", "logfc") if c in index), None)
-    if fold_change is not None:
+    if fold_change is not None and thresholds:
         splits: dict[str, int] = {}
-        for cutoff in (1.0, 2.0):
+        for cutoff in thresholds:
             count = 0
-            for line in lines[1:]:
-                cells = line.split(delimiter)
+            for cells in rows:
                 if fold_change >= len(cells):
                     continue
                 try:
@@ -464,7 +479,31 @@ def _measurements(blob: bytes) -> dict:
                     continue
             splits[f"abs_log2fc>{cutoff:g}"] = count
         measured["threshold_splits"] = splits
+
+    categories = {}
+    for position, name in enumerate(columns):
+        values = [c[position].strip().strip('"') for c in rows if position < len(c)]
+        distinct = {v for v in values if v}
+        # All-distinct means an identifier column, whatever the table's size. Counting one stores
+        # the identifiers, which is the table by another name.
+        if not distinct or len(distinct) > _MAX_CATEGORY_VALUES:
+            continue
+        if len(values) > 1 and len(distinct) == len(values):
+            continue
+        if all(_is_number(v) for v in distinct):
+            continue
+        categories[name] = {value: values.count(value) for value in sorted(distinct)}
+    if categories:
+        measured["category_counts"] = categories
     return measured
+
+
+def _is_number(value: str) -> bool:
+    try:
+        float(value)
+    except ValueError:
+        return False
+    return True
 
 
 def merge_resource_identity(supplements: list[dict] | None) -> list[dict]:

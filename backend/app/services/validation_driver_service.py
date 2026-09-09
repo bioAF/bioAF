@@ -781,6 +781,36 @@ class ValidationDriverService:
         )
 
     @staticmethod
+    async def _claimed_thresholds(session: AsyncSession, study: ValidationStudy) -> list[float]:
+        """The fold-change cutoffs this paper's claims actually name.
+
+        change_7.1 section 7: measuring a results table at fixed cutoffs of 1 and 2 is Groff's
+        rule in production code. A paper claiming a 1.5-fold cutoff needs 1.5 measured.
+        """
+        from app.models.comparison_target import ComparisonTarget
+        from app.models.reproduction_plan import ReproductionPlan
+
+        # Queried, not lazy-loaded off the plan: touching the relationship attempts IO outside the
+        # async context and errors the study.
+        rows = (
+            (
+                await session.execute(
+                    select(ComparisonTarget)
+                    .join(ReproductionPlan, ReproductionPlan.id == ComparisonTarget.reproduction_plan_id)
+                    .where(ReproductionPlan.validation_study_id == study.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        wanted = {
+            float(t.threshold)
+            for t in rows
+            if t.threshold is not None and (t.threshold_kind or "").lower() in ("abs_log2fc", "log2fc", "fold_change")
+        }
+        return sorted(wanted)
+
+    @staticmethod
     async def _reconcile(session: AsyncSession, study: ValidationStudy, supplements: list[dict]) -> None:
         """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
         from app.services.reproduction_plan_service import ReproductionPlanService
@@ -821,7 +851,14 @@ class ValidationDriverService:
         if not pmcid:
             return references
         try:
-            resolved = await resolve_supplements(pmcid, references, fetcher=_deposit_bytes_fetcher)
+            resolved = await resolve_supplements(
+                pmcid,
+                references,
+                fetcher=_deposit_bytes_fetcher,
+                # The cutoffs the paper's own claims name. A fixed pair of cutoffs would measure
+                # Groff's numbers on every paper and the claimed one on none of them.
+                thresholds=await ValidationDriverService._claimed_thresholds(session, study),
+            )
         except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
             logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
             return references
