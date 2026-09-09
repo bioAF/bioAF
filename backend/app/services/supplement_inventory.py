@@ -335,6 +335,7 @@ async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) ->
             role=classify_supplement(filename, contents[filename]),
             resolved=True,
             failure_reason=None,
+            **_measurements(contents[filename]),
         )
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
@@ -352,6 +353,7 @@ async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) ->
                 "size_bytes": len(blob_bytes),
                 "resolved": True,
                 "failure_reason": None,
+                **_measurements(blob_bytes),
             }
         )
     return rows
@@ -375,3 +377,88 @@ def _match_filename(row: dict, contents: dict[str, bytes]) -> str | None:
         if re.search(rf"(?:file|table|data|dataset|material)s?_{wanted}(?:_|\b)", normalized):
             return filename
     return None
+
+
+# The digest is what a binding call sees of a supplement. Bounded ON PURPOSE: headers, counts and
+# threshold splits are a few hundred bytes whatever the file holds, so a paper with a 20,000-row
+# matrix costs the same as one with none. A number buried in row 5000 is not here, and the claim
+# that needs it binds unresolved rather than wrong.
+_MAX_DIGEST_COLUMNS = 12
+
+
+def build_inventory_digest(supplements: list[dict]) -> str:
+    """What the paper's supplements ARE, compactly enough to put in a prompt.
+
+    change_7.1 section 3: the binding call was shown a metric name, a value and a unit, and asked
+    which controlled metric the claim measures. For Groff that meant deciding what "54 samples"
+    counts without the table saying 54 were collected and 51 analysed, and what "194 genes" counts
+    without the results table where 88 of those rows clear the fold-change cutoff.
+
+    An unresolved reference says so. "We have not fetched it" is not "the paper does not have it",
+    and a model told the second would reason from an absence that is ours.
+    """
+    if not supplements:
+        return ""
+
+    lines: list[str] = []
+    for row in supplements:
+        if not isinstance(row, dict):
+            continue
+        label = row.get("label") or row.get("filename") or "supplement"
+        if not row.get("resolved"):
+            lines.append(f"- {label}: named by the paper; bioAF has not been retrieved it yet")
+            continue
+
+        parts = [f"role={row.get('role') or UNKNOWN_ROLE}"]
+        if row.get("row_count") is not None:
+            parts.append(f"{row['row_count']} rows")
+        columns = [str(c) for c in (row.get("columns") or [])][:_MAX_DIGEST_COLUMNS]
+        if columns:
+            more = "" if len(row.get("columns") or []) <= _MAX_DIGEST_COLUMNS else ", ..."
+            parts.append("columns: " + ", ".join(columns) + more)
+        for name, count in (row.get("threshold_splits") or {}).items():
+            parts.append(f"{count} rows with {name}")
+        lines.append(f"- {label}: " + "; ".join(parts))
+
+    return "The paper's supplements:\n" + "\n".join(lines)
+
+
+def _measurements(blob: bytes) -> dict:
+    """Row count, column names and threshold splits for a tabular supplement. Never raises.
+
+    **The rows themselves are never kept.** These numbers go into a prompt, where 194 rows of gene
+    identifiers are cost and "194 rows, 88 of them above |log2FC| > 2" is the evidence. Computing
+    the splits here is what lets a claim be checked against the number it actually refers to: the
+    paper states both 194 and 88 in one sentence, and they are different claims.
+    """
+    text = _decode(blob)
+    if text is None:
+        return {}
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return {}
+    delimiter = "\t" if "\t" in lines[0] else ","
+    columns = [c.strip().strip('"') for c in lines[0].split(delimiter)]
+    if len(columns) < 2:
+        return {}
+
+    measured: dict = {"row_count": len(lines) - 1, "columns": columns}
+
+    index = {c.lower(): i for i, c in enumerate(columns)}
+    fold_change = next((index[c] for c in ("log2foldchange", "log2fc", "logfc") if c in index), None)
+    if fold_change is not None:
+        splits: dict[str, int] = {}
+        for cutoff in (1.0, 2.0):
+            count = 0
+            for line in lines[1:]:
+                cells = line.split(delimiter)
+                if fold_change >= len(cells):
+                    continue
+                try:
+                    if abs(float(cells[fold_change].strip().strip('"'))) > cutoff:
+                        count += 1
+                except ValueError:
+                    continue
+            splits[f"abs_log2fc>{cutoff:g}"] = count
+        measured["threshold_splits"] = splits
+    return measured
