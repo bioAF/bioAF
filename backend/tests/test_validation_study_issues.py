@@ -313,7 +313,7 @@ class TestTheExportCarriesTheWholeReport:
     _EVIDENCE = {
         "route": "deposit",
         "capabilities": {
-            "geo_entry": {"value": "yes", "evidence": "GEO published a series record", "failure_reason": None},
+            "deposit_exists": {"value": "yes", "evidence": "GEO published a series record", "failure_reason": None},
             "preprocessed_data": {
                 "value": "unknown",
                 "evidence": None,
@@ -404,7 +404,7 @@ class TestTheExportCarriesTheWholeReport:
     @pytest.mark.asyncio
     async def test_the_capability_checklist_is_in_the_export(self, session, admin_user):
         text = await self._report(session, admin_user)
-        assert "GEO entry exists" in text
+        assert "Data deposit exists" in text
         assert "Yes" in text
 
     @pytest.mark.asyncio
@@ -468,6 +468,6 @@ class TestTheExportCarriesTheWholeReport:
 
         body = _json.loads(await self._report(session, admin_user, fmt="json"))
         entity = body["report"]["entity"] if "report" in body else body["entity"]
-        assert entity["evidence"]["capabilities"]["geo_entry"]["value"] == "yes"
+        assert entity["evidence"]["capabilities"]["deposit_exists"]["value"] == "yes"
         assert entity["evidence"]["code_execution"]["outcome"] == "ran_output_diverges"
         assert entity["issues"]

@@ -72,6 +72,17 @@ _RAW_EXTENSIONS = ("fastq", "fq", "bam", "cram", "sra", "fasta")
 _PROCESSED_EXTENSIONS = ("tsv", "csv", "txt", "xlsx", "xls", "h5", "h5ad", "rds", "mtx", "loom")
 
 
+# Accessions that name one SAMPLE inside a deposit rather than a deposit. A GSM belongs to its GSE
+# and an EGAF to its EGAD; neither is something a route can be pointed at, and describing one costs
+# a full round of lookups to establish nothing.
+_SAMPLE_PATTERN = re.compile(r"^(GSM|EGAF|SRR|ERR|DRR|SRS|SAMN|SAMEA)\d+$", re.I)
+
+
+def is_sample_accession(accession: str) -> bool:
+    """Whether an accession names a sample or file rather than a deposit."""
+    return bool(_SAMPLE_PATTERN.match((accession or "").strip()))
+
+
 def classify_archive(accession: str) -> str:
     """Which archive an accession names, or ``OTHER`` when nothing recognises it."""
     acc = (accession or "").strip()

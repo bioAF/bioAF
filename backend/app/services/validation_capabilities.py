@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from app.services.archive_discovery import NO, UNKNOWN, YES, describe_deposit
+from app.services.archive_discovery import NO, UNKNOWN, YES, describe_deposit, is_sample_accession
 
 logger = logging.getLogger("bioaf.validation_capabilities")
 
@@ -102,8 +102,6 @@ def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dic
     )
 
 
-
-
 async def discover_capabilities(
     *,
     accessions: list[dict],
@@ -166,6 +164,11 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
         acc = str((entry or {}).get("accession") or "").strip()
         if not acc or acc.upper() in seen:
             continue
+        # A sample is not a deposit. An extraction naming GSM1 and GSM2 is naming two samples of a
+        # series, and describing each as its own deposit would put "Deposit (GEO) GSM1" on the
+        # checklist and spend a round of lookups per sample on every paper read.
+        if is_sample_accession(acc):
+            continue
         seen.add(acc.upper())
         wanted.append({"accession": acc, "provenance": (entry or {}).get("provenance") or "extracted"})
 
@@ -173,7 +176,9 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
     ordered = requested + [e for e in wanted if e["provenance"] != "requested"]
     # The scoped deposit is the requested one, or the only one when nothing was scoped. A paper
     # naming three deposits and no request has no scope until someone picks one.
-    scoped_accession = requested[0]["accession"] if requested else (ordered[0]["accession"] if len(ordered) == 1 else None)
+    scoped_accession = (
+        requested[0]["accession"] if requested else (ordered[0]["accession"] if len(ordered) == 1 else None)
+    )
 
     described: list[dict] = []
     for entry in ordered[:_MAX_DEPOSITS]:
