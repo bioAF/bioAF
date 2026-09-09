@@ -132,11 +132,22 @@ class SampleManifestResponse(BaseModel):
 
 
 class ComparisonTargetResponse(BaseModel):
-    metric_key: str
+    # Optional since change_7.1 section 3: a claim no controlled metric measures is preserved
+    # rather than dropped, and a required metric name would reject exactly those rows.
+    metric_key: str | None = None
+    claim_text: str | None = None
     claimed_value: float | None = None
     unit: str | None = None
     tolerance: float | None = None
     source_locator: str | None = None
+    # What was actually measured: which samples, at which QC stage, above which threshold, in which
+    # direction. A number checked against the wrong population is not a check.
+    sample_subset: str | None = None
+    qc_stage: str | None = None
+    direction: str | None = None
+    threshold: float | None = None
+    threshold_kind: str | None = None
+    output_type: str | None = None
 
 
 class ReproductionPlanResponse(BaseModel):

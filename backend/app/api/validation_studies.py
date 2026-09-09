@@ -91,10 +91,17 @@ async def _plan_response(
         comparison_targets=[
             ComparisonTargetResponse(
                 metric_key=t.metric_key,
+                claim_text=t.claim_text,
                 claimed_value=t.claimed_value,
                 unit=t.unit,
                 tolerance=t.tolerance,
                 source_locator=t.source_locator,
+                sample_subset=t.sample_subset,
+                qc_stage=t.qc_stage,
+                direction=t.direction,
+                threshold=t.threshold,
+                threshold_kind=t.threshold_kind,
+                output_type=t.output_type,
             )
             for t in (plan.comparison_targets or [])
         ],
