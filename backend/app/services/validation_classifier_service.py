@@ -23,6 +23,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+# How a target came to be bound, when the binding call could not answer AT ALL. Distinct from
+# `alias_table`, which is a deliberate decline falling back to a real lookup, and from `model`,
+# which is a decision. Defined here because the comparison is what has to refuse it, and the
+# extraction service imports this module rather than the other way round.
+BINDING_FAILED = "binding_failed"
+
 
 @dataclass(frozen=True)
 class MetricSpec:
@@ -622,7 +628,13 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         # so a stored binding outranks the alias table. A stored key outside the vocabulary is not a
         # binding at all (nothing computes it), so that falls back rather than claiming a mapping.
         bound = t.get("bound_key")
-        if bound in _SPEC_BY_KEY:
+        # change_7.1 section 3: a binding the model could not make is not a decline, and must not
+        # reach the alias table. `total_genes_detected` is IN that table, so a failed binding on a
+        # claim keyed that way used to compare cleanly and report an agreement nobody established.
+        binding_failed = t.get("bound_by") == BINDING_FAILED
+        if binding_failed:
+            mapped, advisory = None, False
+        elif bound in _SPEC_BY_KEY:
             mapped, advisory = bound, False
         else:
             mapped, advisory = _resolve_key(key)
@@ -630,6 +642,11 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         # own unit ("consensus peaks", "reads after trimming") with the key exactly right. Giving the
         # model the specs made that the common shape, and it bypasses the key-side qualifier strip.
         advisory_reason: str | None = None
+        if binding_failed:
+            advisory_reason = (
+                "the binding call could not be read, so which metric this claim measures could not "
+                "be established"
+            )
         if mapped is not None:
             conflict = _basis_conflict(_SPEC_BY_KEY[mapped], key, unit)
             if conflict:
@@ -656,6 +673,12 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
             "within_tolerance": None,
             "verdict": None,
         }
+        if binding_failed:
+            # Distinct from `not_computed`: we did compute metrics, and the gap is that nothing
+            # established which one this claim is about.
+            row["verdict"] = "not_compared"
+            rows.append(row)
+            continue
         if not _is_number(claimed):
             row["verdict"] = "not_reported"
             rows.append(row)
