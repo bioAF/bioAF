@@ -1,0 +1,276 @@
+"""change_7.1 section 2: the paper's own attachments, found independently of any deposit.
+
+There was no supplement discovery. Code availability came from what a model read in the prose, the
+deposit inventory listed GEO and nothing else, and an article's attachments were never looked at.
+For Groff et al. that lost a 54-row sample metadata table, the authors' complete R analysis, and
+the differential-results table, every one of them public the whole time. The study was then
+reported as having no accessible data.
+
+**A reference and an attachment are different things.** The prose says "Supplemental File S2"; the
+bytes live in a bundle behind a separate request. Naming the first is free at read time, because
+the JATS is already fetched and thrown away; resolving it to the second costs a download. The
+inventory therefore carries both states and always says which one a row is in.
+
+**An unresolved reference is a discovery limitation, never an established absence.** "We have not
+fetched it yet" and "it is not there" are different statements, and only one of them is a finding
+about the authors.
+
+**Role comes from inspected content, not from the filename.** A file called ``embryo_metadata.txt``
+holding DESeq2 output is a results table. The name is the author's habit; the header is evidence.
+The distinction that matters most is the last one below: a results table is NOT the sample-level
+matrix needed to rerun the analysis that produced it, and accepting it as one would produce a
+"reproduction" that reads its own answer back.
+"""
+
+from __future__ import annotations
+
+import io
+import logging
+import re
+import xml.etree.ElementTree as ET
+import zipfile
+
+logger = logging.getLogger("bioaf.supplement_inventory")
+
+# Where a row came from, which is also how far discovery got with it.
+ATTACHED = "attached"  # a media element in the JATS, with a filename
+NAMED_IN_TEXT = "named_in_text"  # the prose cites it; nothing has resolved it to a file yet
+
+# What a resource IS, established by looking inside it.
+SAMPLE_METADATA = "sample_metadata"
+EXPRESSION_MATRIX = "expression_matrix"
+RESULTS_TABLE = "results_table"
+CODE = "code"
+SUPPORTING_INPUT = "supporting_input"
+UNKNOWN_ROLE = "unknown"
+
+_DOCX_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+# "Supplemental File S2", "Supplementary Table S1", "Supplemental Data Set S3". Journals differ on
+# every word except the pattern.
+_NAMED_SUPPLEMENT_RE = re.compile(
+    r"\bSupplement(?:al|ary)\s+(?:File|Table|Data\s*Set|Dataset|Material)s?\s+(S\d+[A-Za-z]?)", re.I
+)
+
+# A differential-results table announces itself in its header. These are the DESeq2/edgeR/limma
+# column names, and two of them together are conclusive.
+_RESULT_COLUMNS = ("log2foldchange", "log2fc", "padj", "pvalue", "p.value", "adj.p.val", "basemean", "logfc")
+
+# Per-sample descriptors. A metadata table is samples down the rows and attributes across.
+_METADATA_COLUMNS = (
+    "sample",
+    "sampletype",
+    "condition",
+    "treatment",
+    "genotype",
+    "sex",
+    "age",
+    "grade",
+    "batch",
+    "tissue",
+    "group",
+    "replicate",
+    "patient",
+    "subject",
+    "timepoint",
+)
+
+_CODE_MARKERS = ("library(", "import ", "def ", "<-", "```{r", "#!/", "install.packages", "source(")
+
+_TEXTUAL_EXTENSIONS = (".txt", ".tsv", ".csv", ".tab", ".md", ".r", ".rmd", ".py", ".sh", ".ipynb")
+
+
+def parse_jats_supplements(xml_text: str) -> list[dict]:
+    """Every supplement the article names or attaches. Free: the JATS is already in hand.
+
+    Two sources, deliberately merged into one list. ``<supplementary-material>`` gives attachments
+    with filenames; the prose gives the identifiers a reader would recognise ("Supplemental File
+    S2"), which for many journals is the ONLY place a specific file is named. Groff's JATS attaches
+    one ``index.html`` wrapper and names S1, S2 and S3 in the body, so a manifest built from the
+    markup alone would find the wrapper and miss the analysis.
+
+    Never raises: a malformed document is a discovery limitation, not a reason to fail a read.
+    """
+    rows: dict[str, dict] = {}
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        logger.info("could not parse JATS for supplements: %s", exc)
+        return []
+
+    for element in root.iter():
+        if not element.tag.endswith("supplementary-material"):
+            continue
+        label = _text_of(element, "label") or _text_of(element, "title") or "Supplementary material"
+        for media in element.iter():
+            if not (media.tag.endswith("media") or media.tag.endswith("graphic")):
+                continue
+            href = next((v for k, v in media.attrib.items() if k.endswith("href")), None)
+            if not href:
+                continue
+            # Keyed by the file, because one <supplementary-material> can carry several media and
+            # they are different attachments. The label is disambiguated only when it collides, so
+            # the common single-file case keeps the caption the reader would recognise.
+            taken = {row["label"] for row in rows.values()}
+            rows.setdefault(
+                href,
+                {
+                    "label": label if label not in taken else f"{label} ({href})",
+                    "filename": href,
+                    "mimetype": _mimetype_of(media),
+                    "source": ATTACHED,
+                    "role": UNKNOWN_ROLE,
+                    "size_bytes": None,
+                    "resolved": False,
+                },
+            )
+
+    body_text = " ".join(t for t in root.itertext() if t)
+    for match in _NAMED_SUPPLEMENT_RE.finditer(body_text):
+        # Normalised so "Supplementary File S2" and "Supplemental file s2" are one row, not three.
+        identifier = match.group(1).upper()
+        label = f"Supplemental File {identifier}"
+        rows.setdefault(
+            label,
+            {
+                "label": label,
+                "filename": None,
+                "mimetype": None,
+                "source": NAMED_IN_TEXT,
+                "role": UNKNOWN_ROLE,
+                "size_bytes": None,
+                "resolved": False,
+            },
+        )
+
+    return list(rows.values())
+
+
+def _text_of(element, tag: str) -> str | None:
+    for child in element.iter():
+        if child.tag.endswith(tag):
+            text = " ".join(t.strip() for t in child.itertext() if t and t.strip())
+            if text:
+                return text
+    return None
+
+
+def _mimetype_of(media) -> str | None:
+    mime = media.attrib.get("mimetype")
+    sub = media.attrib.get("mime-subtype")
+    if mime and sub:
+        return f"{mime}/{sub}"
+    return mime or sub
+
+
+def extract_docx_text(blob: bytes) -> str | None:
+    """The text of a .docx, or None when the blob is not one.
+
+    A DOCX is a zip holding ``word/document.xml``, so this needs no dependency. Groff's Supplemental
+    File S2 is 2933 non-empty paragraphs of R Markdown: the paper's entire analysis, stored as an
+    opaque blob and never read. Paragraph structure is preserved as newlines, because code whose
+    line breaks are gone is not code any more.
+    """
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            document = zf.read("word/document.xml")
+    except (zipfile.BadZipFile, KeyError, OSError) as exc:
+        logger.info("blob is not a readable .docx: %s", exc)
+        return None
+
+    try:
+        root = ET.fromstring(document)
+    except ET.ParseError:
+        return None
+
+    paragraphs = ["".join(node.text or "" for node in para.iter(f"{_DOCX_NS}t")) for para in root.iter(f"{_DOCX_NS}p")]
+    return "\n".join(paragraphs)
+
+
+def classify_supplement(filename: str, blob: bytes) -> str:
+    """What a supplement IS, from its content. Never raises.
+
+    Order matters. A ``.docx`` is opened as a document before anything looks at its extension,
+    because the only way to tell the authors' code from a page of figure legends is to read it.
+    """
+    name = (filename or "").lower()
+
+    if name.endswith(".docx") or blob[:2] == b"PK":
+        text = extract_docx_text(blob)
+        if text and _looks_like_code(text):
+            return CODE
+
+    if name.endswith((".r", ".rmd", ".py", ".ipynb", ".sh")):
+        return CODE
+
+    text = _decode(blob)
+    if text is None:
+        return UNKNOWN_ROLE
+
+    if _looks_like_code(text) and not name.endswith((".txt", ".tsv", ".csv")):
+        return CODE
+
+    header = _header_of(text)
+    if header is None:
+        return UNKNOWN_ROLE
+
+    columns = [c.strip().strip('"').lower() for c in header]
+    if sum(1 for c in columns if c in _RESULT_COLUMNS) >= 2:
+        # A results table, and specifically NOT an expression matrix: these are one row per gene of
+        # an analysis that already ran, not the per-sample values needed to run it again.
+        return RESULTS_TABLE
+
+    if any(any(m in c for m in _METADATA_COLUMNS) for c in columns):
+        return SAMPLE_METADATA
+
+    if _looks_like_matrix(text):
+        return EXPRESSION_MATRIX
+
+    return SUPPORTING_INPUT if name.endswith(_TEXTUAL_EXTENSIONS) else UNKNOWN_ROLE
+
+
+def _decode(blob: bytes) -> str | None:
+    try:
+        text = blob.decode("utf-8")
+    except (UnicodeDecodeError, AttributeError):
+        return None
+    return text if text.strip() else None
+
+
+def _looks_like_code(text: str) -> bool:
+    head = text[:20000]
+    return sum(1 for marker in _CODE_MARKERS if marker in head) >= 2
+
+
+def _header_of(text: str) -> list[str] | None:
+    first = next((line for line in text.splitlines() if line.strip()), None)
+    if first is None:
+        return None
+    for delimiter in ("\t", ","):
+        if delimiter in first:
+            return first.split(delimiter)
+    return None
+
+
+def _looks_like_matrix(text: str) -> bool:
+    """Rows of numbers under a header of sample names: values per feature per sample.
+
+    Checked on the SECOND row, because a header of sample names is all strings in both shapes and
+    only the data tells a matrix from a metadata table.
+    """
+    lines = [line for line in text.splitlines() if line.strip()][:3]
+    if len(lines) < 2:
+        return False
+    delimiter = "\t" if "\t" in lines[0] else ","
+    cells = lines[1].split(delimiter)[1:]
+    if len(cells) < 2:
+        return False
+    numeric = 0
+    for cell in cells:
+        try:
+            float(cell.strip().strip('"'))
+            numeric += 1
+        except ValueError:
+            pass
+    return numeric >= len(cells) - 1
