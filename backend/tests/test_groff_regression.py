@@ -41,7 +41,9 @@ _EXTRACTION = (
     '"method": {"assay": "bulk RNA-seq"}, '
     '"claims": [{"metric_key": "", "claim_text": "digital karyotypes were concordant with PGT-A", '
     '"source_locator": "Results"}], '
-    '"data_availability": "restricted", "code_availability": [], "blockers": []}\n```'
+    '"data_availability": "restricted", '
+    '"code_availability": [{"kind": "supplementary", "identifier": "Supplemental File S2"}], '
+    '"blockers": []}\n```'
 )
 
 
@@ -200,3 +202,46 @@ class TestTheUnbindableClaimSurvives:
         study = await _run(session, admin_user)
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
         assert any("digital karyotype" in (t.claim_text or "") for t in plan.comparison_targets)
+
+
+class TestOneFileIsOneResource:
+    """Study 32 listed S1, S2 and S3 twice each: the JATS media element and the prose reference
+    resolve to the same bytes."""
+
+    @pytest.mark.asyncio
+    async def test_each_supplement_appears_once(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        filenames = [s["filename"] for s in study.evidence_json["supplements"] if s.get("filename")]
+        assert len(filenames) == len(set(filenames))
+
+    @pytest.mark.asyncio
+    async def test_the_prose_identifier_is_the_label_a_reader_sees(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        labels = {s["label"] for s in study.evidence_json["supplements"]}
+        assert "Supplemental File S3" in labels
+
+    @pytest.mark.asyncio
+    async def test_both_ways_of_naming_it_are_kept(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        s3 = next(s for s in study.evidence_json["supplements"] if s["label"] == "Supplemental File S3")
+        assert len(s3["references"]) >= 1
+
+
+class TestRetrievalReachesTheCodeRow:
+    @pytest.mark.asyncio
+    async def test_a_downloaded_code_supplement_is_not_reported_as_not_attempted(
+        self, session, admin_user, _groff_world
+    ):
+        """The contradiction in study 32: exists yes, accessible not_attempted, for a file the same
+        run had downloaded, read and classified as code."""
+        study = await _run(session, admin_user)
+        sources = study.evidence_json["capabilities"]["code_sources"]
+        s2 = next(s for s in sources if s.get("identifier") == "Supplemental File S2")
+        assert s2["accessible"] == "yes"
+
+    @pytest.mark.asyncio
+    async def test_extraction_is_reported_separately_from_retrieval(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        sources = study.evidence_json["capabilities"]["code_sources"]
+        s2 = next(s for s in sources if s.get("identifier") == "Supplemental File S2")
+        assert s2["code_extracted"] is True
