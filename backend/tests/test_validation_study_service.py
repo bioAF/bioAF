@@ -94,7 +94,10 @@ async def test_terminal_state_rejects_further_transitions(session, admin_user):
     with pytest.raises(HTTPException) as ei:
         await ValidationStudyService.transition(session, study.id, admin_user.organization_id, admin_user.id, "reading")
     assert ei.value.status_code == 400
-    assert "none (terminal state)" in ei.value.detail
+    # change_7.1 section 4 gave `classified` one edge back to the C1 gate, so access arriving later
+    # can resume a blocked study without erasing its assessment. A classified study still cannot be
+    # re-read, re-run, or moved anywhere else: the verdict stands until someone decides again.
+    assert "Next valid status: plan_ready" in ei.value.detail
 
 
 @pytest.mark.asyncio

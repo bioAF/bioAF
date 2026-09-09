@@ -106,35 +106,77 @@ _SELF_DRIVING_FRONT_HALF_STATES = ("requested", "plan_ready")
 # What each route needs the paper to actually have. plan_7 amendment 3: a route is refused only on
 # an ESTABLISHED absence ("no"), never on UNKNOWN, because treating a GEO timeout as an absence would
 # hide a workable route behind a transient failure.
-_ROUTE_REQUIREMENTS: dict[str, tuple[str, str]] = {
-    "deposit": (
-        "preprocessed_data",
-        "This paper's GEO deposit holds no pre-processed data, so there is nothing to reproduce the "
-        "finding from. Validating from the raw reads is the remaining route.",
-    ),
-    "pipeline": (
-        "raw_data",
-        "No raw sequencing reads are published for this paper, so there is nothing to fetch and "
-        "re-run. Validating from the deposited data is the remaining route.",
-    ),
+#
+# change_7.1 section 4: existence is no longer sufficient. Groff's raw reads exist (108 FASTQ files,
+# established from EGA's public listing) and bioAF cannot fetch a single one of them, so a route
+# offered on existence alone approves a run that cannot start. The requirement is now that some
+# deposit both HOLDS the data and can be ACQUIRED.
+_ROUTE_REQUIREMENTS: dict[str, str] = {
+    "deposit": "preprocessed_data",
+    "pipeline": "raw_data",
+}
+
+_ROUTE_NEEDS = {
+    "deposit": "pre-processed data to reproduce the finding from",
+    "pipeline": "raw sequencing reads to fetch and re-run",
 }
 
 
 def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
     """Why the chosen route cannot be taken, in the reader's language, or None when it can.
 
+    **The explanation is generated from what discovery actually found.** The messages this replaced
+    were fixed strings that named GEO on a paper with no GEO deposit, and each ended by recommending
+    "the remaining route" without establishing that the remaining route could run either. A blocked
+    study was therefore told to try something that was equally blocked.
+
     ``both`` is checked against BOTH requirements: it spawns a sibling, so a leg that cannot run
     would produce a study created only to fail.
     """
-    checks = ("deposit", "pipeline") if route == "both" else (route,)
-    for leg in checks:
-        requirement = _ROUTE_REQUIREMENTS.get(leg)
-        if requirement is None:
+    deposits = [d for d in (capabilities.get("deposits") or []) if isinstance(d, dict)]
+    for leg in ("deposit", "pipeline") if route == "both" else (route,):
+        key = _ROUTE_REQUIREMENTS.get(leg)
+        if key is None:
             continue
-        key, message = requirement
-        if ((capabilities.get(key) or {}).get("value")) == "no":
-            return message
+        answer = (capabilities.get(key) or {}).get("value")
+        if answer == "no":
+            return f"No {_ROUTE_NEEDS[leg]} is published for this paper."
+        if answer != "yes":
+            # UNKNOWN. A discovery failure is not an absence, and refusing here would hide a
+            # workable route behind a timeout.
+            continue
+        holders = [d for d in deposits if d.get(key) == "yes"]
+        acquirable = [d for d in holders if d.get("supported") == "yes"]
+        if holders and not acquirable:
+            return _unacquirable_reason(holders, _ROUTE_NEEDS[leg])
     return None
+
+
+def _unacquirable_reason(holders: list[dict], need: str) -> str:
+    """Why data that demonstrably exists still cannot be used.
+
+    Both halves are stated on purpose. The authors published the data, and the obstacle is ours: a
+    reader who sees only "cannot run" will read it as a fault of the paper.
+    """
+    described = ", ".join(
+        f"{d.get('accession')} ({str(d.get('archive') or 'archive').upper()}, {d.get('access')} access)"
+        for d in holders
+    )
+    return (
+        f"This paper published {need}, in {described}. bioAF cannot obtain it: the deposit is not "
+        "openly downloadable and bioAF holds no credentials for that archive."
+    )
+
+
+def independent_checks_outstanding(evidence: dict) -> bool:
+    """Whether anything can still be established without compute or credentials.
+
+    change_7.1 section 4: a blocked execution route does not end the assessment. Reading the sample
+    metadata, inspecting the code the authors supplied and checking their results table need no
+    cluster and no data access agreement, and the assessment is what merges, not the reproduction.
+    """
+    supplements = (evidence or {}).get("supplements") or []
+    return any(not s.get("resolved") for s in supplements if isinstance(s, dict))
 
 
 def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
@@ -153,7 +195,7 @@ def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
     requested = (study.source_accession or "").strip()
     if requested:
         named.append({"accession": requested, "provenance": "requested"})
-    for extracted in (getattr(plan, "accessions_json", None) or []):
+    for extracted in getattr(plan, "accessions_json", None) or []:
         accession = str(extracted or "").strip()
         if accession:
             named.append({"accession": accession, "provenance": "extracted"})
@@ -363,6 +405,7 @@ class ValidationDriverService:
         # body text does. A pasted body is not a document, so it carries none, and an empty manifest
         # there means "nobody looked" rather than "the paper published none".
         supplements: list[dict] = []
+        pmcid = ""
         if not full_text:
             result = await FullTextFetchService.fetch(doi=study.source_doi)
             if result is None:
@@ -372,6 +415,8 @@ class ValidationDriverService:
                 )
             full_text = result.text
             supplements = result.supplements
+            # Kept so the supplement bundle can be fetched later without resolving the DOI again.
+            pmcid = result.external_id or ""
 
         # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
         # stage is a pass-through.
@@ -382,6 +427,8 @@ class ValidationDriverService:
 
         evidence = dict(study.evidence_json or {})
         evidence["supplements"] = supplements
+        if pmcid:
+            evidence["pmcid"] = pmcid
         study.evidence_json = evidence
         await session.flush()
 
@@ -649,7 +696,57 @@ class ValidationDriverService:
         study.evidence_json = evidence
         await session.flush()
         logger.info("study %s: chosen route %r cannot be taken: %s", study.id, route, unavailable)
+
+        # change_7.1 section 4: a blocked route is not the end of the assessment, and it is not an
+        # indefinite hold either. Everything that needs no compute and no credentials still gets
+        # done, and then the study reaches a stated outcome. It used to return here, leaving the
+        # study at plan_ready for ever, indistinguishable from one waiting for someone to approve it.
+        await ValidationDriverService._finish_without_execution(session, study, unavailable)
         return True
+
+    @staticmethod
+    async def _finish_without_execution(session: AsyncSession, study: ValidationStudy, reason: str) -> None:
+        """Complete every independent check, then classify. Never raises.
+
+        The merge requirement is an accurate, completed assessment, not a successful reproduction.
+        Reading the authors' sample metadata, inspecting the code they published and checking their
+        results table are all public work, and none of it needs the data bioAF cannot obtain.
+        """
+        evidence = dict(study.evidence_json or {})
+        if independent_checks_outstanding(evidence):
+            evidence["supplements"] = await ValidationDriverService._resolve_supplements(session, study, evidence)
+            study.evidence_json = evidence
+            await session.flush()
+
+        study.failure_reason = reason
+        await ValidationStudyService.transition(
+            session,
+            study.id,
+            study.organization_id,
+            study.requested_by_user_id,
+            "classified",
+            classification="access_restricted",
+        )
+
+    @staticmethod
+    async def _resolve_supplements(session: AsyncSession, study: ValidationStudy, evidence: dict) -> list[dict]:
+        """Download the paper's attachments and establish what each one is. Never raises.
+
+        This is the point where the read-time manifest of NAMES becomes an inventory of FILES with
+        roles. An article with no PMC id has nothing to download, which is a limitation of the run
+        and leaves the references exactly as they were.
+        """
+        from app.services.supplement_inventory import resolve_supplements
+
+        references = evidence.get("supplements") or []
+        pmcid = (evidence.get("pmcid") or "").strip()
+        if not pmcid:
+            return references
+        try:
+            return await resolve_supplements(pmcid, references, fetcher=_deposit_bytes_fetcher)
+        except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
+            logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
+            return references
 
     @staticmethod
     async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy) -> bool:

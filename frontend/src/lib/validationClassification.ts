@@ -17,6 +17,13 @@ export const VALIDATION_CLASSIFICATIONS: ReadonlyArray<ValidationClassificationO
   },
   { value: "not_validated", label: "Not validated", description: "Computed metrics contradict the paper's claims." },
   { value: "missing_data", label: "Missing data", description: "No usable deposited data to reproduce from." },
+  {
+    // change_7.1 section 4. Distinct from "Missing data" on purpose: the authors deposited their
+    // data and bioAF cannot obtain it, so the limitation is ours and the label has to say so.
+    value: "access_restricted",
+    label: "Access restricted",
+    description: "The data exists but is under controlled access bioAF cannot obtain.",
+  },
   { value: "missing_methods", label: "Missing methods", description: "The methods are too thin to reproduce." },
   { value: "not_reproducible", label: "Not reproducible", description: "No equivalent pipeline could run the analysis." },
   { value: "inconclusive", label: "Inconclusive", description: "Ran, but divergence could not be attributed." },
@@ -29,6 +36,7 @@ const CLASSIFICATION_TONE: Record<string, ValidationTone> = {
   partially_reproduced: "caution",
   not_validated: "negative",
   missing_data: "neutral",
+  access_restricted: "neutral",
   missing_methods: "neutral",
   not_reproducible: "neutral",
   inconclusive: "caution",
