@@ -194,3 +194,44 @@ class TestResolvingAReferenceToAFile:
 
         resolved = await resolve_supplements("PMC6771404", [], fetcher=_fetch)
         assert {s["filename"] for s in resolved} >= {"1705f01.jpg"}
+
+
+class TestWhatResolutionMeasures:
+    @pytest.mark.asyncio
+    async def test_a_results_table_reports_its_rows_and_threshold_splits(self):
+        """194 rows, 88 of them above |log2FC| > 2, 146 sex-linked. These are the numbers the paper
+        states, and computing them here is what lets a claim be checked against the right one."""
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        s3 = next(s for s in resolved if s["label"] == "Supplemental File S3")
+        assert s3["row_count"] == 194
+        assert s3["threshold_splits"]["abs_log2fc>2"] == 88
+        assert "log2FoldChange" in s3["columns"]
+
+    @pytest.mark.asyncio
+    async def test_a_metadata_table_reports_its_rows_and_columns(self):
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        s1 = next(s for s in resolved if s["label"] == "Supplemental File S1")
+        assert s1["row_count"] == 54
+        assert "Sampletype" in s1["columns"]
+
+    @pytest.mark.asyncio
+    async def test_the_rows_themselves_are_never_kept(self):
+        """The digest goes into a prompt. Row counts are evidence; 194 rows of gene IDs are cost."""
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        assert all("rows" not in s for s in resolved)
+        assert all("ENSG" not in str(s) for s in resolved)

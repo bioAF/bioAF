@@ -55,7 +55,12 @@ _SCHEMA_HINT = (
     '"assay": "the assay this contrast was measured on", '
     '"thresholds": {"log2fc": null, "padj": null}}], '
     '"thresholds": {"log2fc": null, "padj": null}}, '
-    '"claims": [{"metric_key": "aligns to a QC metric", "value": 0, "unit": "", "tolerance": null, "source_locator": "section/figure"}], '
+    '"claims": [{"metric_key": "aligns to a QC metric, or \'\' when nothing measures it", '
+    '"claim_text": "the paper\'s own sentence, quoted", "value": 0, "unit": "", "tolerance": null, '
+    '"source_locator": "section/figure", "sample_subset": "which samples, e.g. whole embryo", '
+    '"qc_stage": "as collected | post-QC | as analysed", "direction": "up | down | null, relative to the '
+    'reference arm", "threshold": null, "threshold_kind": "padj | abs_log2fc | null", '
+    '"output_type": "count | percentage | gene_set_size | ratio"}], '
     '"data_availability": "deposited | none | restricted", '
     '"code_availability": [{"kind": "github|gitlab|zenodo|codeocean|supplementary|none", "url": "", '
     '"identifier": "e.g. a DOI", "stated_in": "methods | data availability | code availability", '
@@ -484,8 +489,17 @@ def parse_extraction(response_text: str) -> dict:
 # reports nothing bioAF computes must be able to say so without a wrong binding standing in for it.
 
 
-def build_binding_prompt(claims: list[dict], *, previous: list[dict] | None = None) -> tuple[str, str]:
-    """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline."""
+def build_binding_prompt(
+    claims: list[dict], *, previous: list[dict] | None = None, inventory: str | None = None
+) -> tuple[str, str]:
+    """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline.
+
+    change_7.1 section 3: the claim now travels with the sentence it came from and, where the
+    supplements have been inspected, with what they hold. Binding "transcripts detected = 10500"
+    from a metric name alone meant deciding without the sentence saying which samples it describes,
+    without the table saying 54 were collected and 51 analysed, and without the results table where
+    88 of 194 rows clear the fold-change cutoff. All three distinctions were then lost.
+    """
     system = (
         "You are binding a paper's quantitative claims to a controlled vocabulary of QC metrics. For "
         "each claim you are given, decide which ONE controlled metric it measures, or decline.\n\n"
@@ -509,13 +523,29 @@ def build_binding_prompt(claims: list[dict], *, previous: list[dict] | None = No
         "- confidence is your own certainty in THIS binding: 1.0 when the claim states the metric in so "
         "many words, lower when you are reading intent from context."
     )
+    if inventory:
+        system += (
+            "\n\nYou are also given what the paper's SUPPLEMENTS hold. Use them to decide what a claim "
+            "actually counts. A supplement can show that a number describes a different population "
+            "than the claim's wording suggests (samples collected versus samples analysed after QC), "
+            "or that two numbers in one sentence are two claims at different thresholds. Where the "
+            "supplement contradicts your reading of the prose, say so in the reason and bind to what "
+            "the data supports. A supplement bioAF has not retrieved proves nothing either way."
+        )
     lines = []
     for i, c in enumerate(claims):
-        lines.append(
+        line = (
             f"[{i}] key={c.get('metric_key')!r} value={c.get('value')!r} unit={c.get('unit')!r} "
             f"where={c.get('source_locator')!r}"
         )
+        # The paper's own sentence. A metric name is the extractor's paraphrase; this is evidence.
+        passage = (c.get("claim_text") or "").strip()
+        if passage:
+            line += f"\n     the paper says: {passage}"
+        lines.append(line)
     payload = "Claims to bind:\n\n" + "\n".join(lines)
+    if inventory:
+        payload += "\n\n" + inventory
     if previous:
         prior = "\n".join(
             f"[{d.get('claim_index')}] you answered {d.get('bound_key')!r} because: {d.get('reason')}" for d in previous
@@ -608,6 +638,7 @@ async def bind_claims(
     client,
     model: str,
     api_key: str | None,
+    inventory: str | None = None,
     previous: list[dict] | None = None,
     on_issue=None,
 ) -> list[dict]:
@@ -622,7 +653,7 @@ async def bind_claims(
     if not claims:
         return []
 
-    system, payload = build_binding_prompt(claims, previous=previous)
+    system, payload = build_binding_prompt(claims, previous=previous, inventory=inventory)
     # `allowed` is the controlled vocabulary. An invented key would persist as a binding and be
     # compared against a metric that does not exist, which is the one failure this call removes.
     decision = await decide(
@@ -850,15 +881,28 @@ class ValidationExtractionService:
         claims_to_bind = []
         for c in parsed["claims"]:
             metric_key = (c.get("metric_key") or "").strip()
-            if not metric_key:
+            # A claim with no measurable metric is STILL one of the paper's claims. It used to be
+            # dropped here, so Groff's digital-karyotype and TE-WE concordance findings never
+            # reached the plan and the report was silent about them.
+            if not metric_key and not (c.get("claim_text") or "").strip():
                 continue
             targets.append(
                 {
                     "metric_key": metric_key,
+                    # change_7.1 section 3: the paper's own sentence, and what was actually
+                    # measured. Without these a claim is a number with a paraphrased name, checked
+                    # against whichever metric an alias table happened to match.
+                    "claim_text": c.get("claim_text"),
                     "claimed_value": _to_float(c.get("value")),
                     "unit": c.get("unit"),
                     "tolerance": _to_float(c.get("tolerance")),
                     "source_locator": c.get("source_locator"),
+                    "sample_subset": c.get("sample_subset"),
+                    "qc_stage": c.get("qc_stage"),
+                    "direction": c.get("direction"),
+                    "threshold": _to_float(c.get("threshold")),
+                    "threshold_kind": c.get("threshold_kind"),
+                    "output_type": c.get("output_type"),
                     # Until the binding call answers, the alias table is what decides, exactly as before.
                     "bound_by": "alias_table",
                 }
@@ -866,6 +910,7 @@ class ValidationExtractionService:
             claims_to_bind.append(
                 {
                     "metric_key": metric_key,
+                    "claim_text": c.get("claim_text"),
                     "value": c.get("value"),
                     "unit": c.get("unit"),
                     "source_locator": c.get("source_locator"),
