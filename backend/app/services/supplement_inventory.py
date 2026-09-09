@@ -44,6 +44,9 @@ CODE = "code"
 SUPPORTING_INPUT = "supporting_input"
 UNKNOWN_ROLE = "unknown"
 
+# The tri-state the capability checklist uses, imported rather than re-spelled.
+YES_ANSWER = "yes"
+
 _DOCX_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 # "Supplemental File S2", "Supplementary Table S1", "Supplemental Data Set S3". Journals differ on
@@ -462,3 +465,95 @@ def _measurements(blob: bytes) -> dict:
             splits[f"abs_log2fc>{cutoff:g}"] = count
         measured["threshold_splits"] = splits
     return measured
+
+
+def merge_resource_identity(supplements: list[dict] | None) -> list[dict]:
+    """One file, one row, however many ways the paper referred to it.
+
+    change_7.1 section 7. The deployed rerun listed Supplemental Files S1, S2 and S3 twice each:
+    once as the JATS media element that carries the filename, once as the prose reference that
+    carries the identifier a reader recognises. Same bytes, two rows, and a reader counting the
+    paper's attachments gets the wrong number.
+
+    **Only RESOLVED rows merge.** Two references bioAF could not resolve are not known to be the
+    same file, and merging them would invent a fact rather than remove a duplicate.
+
+    The reader-facing identifier wins the label: "Supplemental File S1" is what the paper's prose
+    cites, and "Supplemental Material (s1.txt)" is the publisher's packaging. Every reference is
+    kept so a search for either one still finds the resource.
+    """
+    merged: dict[str, dict] = {}
+    unresolved: list[dict] = []
+
+    for row in supplements or []:
+        if not isinstance(row, dict):
+            continue
+        filename = row.get("filename")
+        if not row.get("resolved") or not filename:
+            unresolved.append({**row, "references": [row.get("label")] if row.get("label") else []})
+            continue
+
+        existing = merged.get(filename)
+        if existing is None:
+            merged[filename] = {**row, "references": [row["label"]] if row.get("label") else []}
+            continue
+
+        # Later rows fill gaps rather than overwrite: a measurement taken once is not re-taken, and
+        # an established role must never be reset to "unknown" by a duplicate that carried none.
+        for key, value in row.items():
+            if key in ("label", "references"):
+                continue
+            if value in (None, {}, []) or (key == "role" and value == UNKNOWN_ROLE):
+                continue
+            if existing.get(key) in (None, {}, [], UNKNOWN_ROLE):
+                existing[key] = value
+        if row.get("label") and row["label"] not in existing["references"]:
+            existing["references"].append(row["label"])
+        existing["label"] = _preferred_label(existing["references"])
+
+    return list(merged.values()) + unresolved
+
+
+def _preferred_label(references: list[str]) -> str:
+    """The name a reader would look for.
+
+    A prose citation ("Supplemental File S2") names the artifact the way the paper does. A manifest
+    label with the filename in parentheses is packaging. Prefer the first, shortest citation.
+    """
+    cited = [r for r in references if r and _NAMED_SUPPLEMENT_RE.search(r)]
+    if cited:
+        return min(cited, key=len)
+    return references[0] if references else "supplement"
+
+
+def apply_retrieval_to_code_sources(sources: list[dict] | None, supplements: list[dict] | None) -> list[dict]:
+    """Carry what retrieval established back onto the paper's code rows.
+
+    change_7.1 section 7. Study 32 recorded Supplemental File S2 as ``exists: yes, accessible:
+    not_attempted`` in the same evidence bundle that had downloaded it, read its R Markdown and
+    classified it as code. An artifact cannot be retrieved and not-attempted at once.
+
+    **Retrieval, extraction and execution are separate statuses.** A DOCX that downloaded but could
+    not be read is accessible and unextracted, and collapsing the two would claim we had the code.
+    """
+    by_reference: dict[str, dict] = {}
+    for row in supplements or []:
+        if not isinstance(row, dict):
+            continue
+        for reference in [row.get("label"), *(row.get("references") or [])]:
+            if reference:
+                by_reference[str(reference).strip().lower()] = row
+
+    updated: list[dict] = []
+    for source in sources or []:
+        row = dict(source)
+        key = str(row.get("identifier") or row.get("url") or "").strip().lower()
+        supplement = by_reference.get(key)
+        if supplement and supplement.get("resolved"):
+            row["accessible"] = YES_ANSWER
+            row["accessible_reason"] = f"retrieved as {supplement.get('filename')}"
+            row["code_extracted"] = supplement.get("role") == CODE
+        else:
+            row.setdefault("code_extracted", False)
+        updated.append(row)
+    return updated

@@ -168,6 +168,20 @@ def _unacquirable_reason(holders: list[dict], need: str) -> str:
     )
 
 
+def _propagate_retrieval(capabilities: dict, supplements: list[dict]) -> dict:
+    """Carry retrieval outcomes from the inventory onto the capability answers.
+
+    change_7.1 section 7: a resource cannot be recorded as retrieved and as accessibility-not-
+    attempted at the same time, and a consumer that never hears about the retrieval keeps
+    reporting the stale answer beside the new fact.
+    """
+    from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+    updated = dict(capabilities)
+    updated["code_sources"] = apply_retrieval_to_code_sources(capabilities.get("code_sources") or [], supplements)
+    return updated
+
+
 def independent_checks_outstanding(evidence: dict) -> bool:
     """Whether anything can still be established without compute or credentials.
 
@@ -715,6 +729,12 @@ class ValidationDriverService:
         evidence = dict(study.evidence_json or {})
         if independent_checks_outstanding(evidence):
             evidence["supplements"] = await ValidationDriverService._resolve_supplements(session, study, evidence)
+            # What retrieval established has to reach the rows that answer for it. Study 32 recorded
+            # Supplemental File S2 as "not attempted" in the same bundle that had downloaded and
+            # read it.
+            evidence["capabilities"] = _propagate_retrieval(
+                evidence.get("capabilities") or {}, evidence["supplements"]
+            )
             study.evidence_json = evidence
             await session.flush()
 
@@ -736,17 +756,20 @@ class ValidationDriverService:
         roles. An article with no PMC id has nothing to download, which is a limitation of the run
         and leaves the references exactly as they were.
         """
-        from app.services.supplement_inventory import resolve_supplements
+        from app.services.supplement_inventory import merge_resource_identity, resolve_supplements
 
         references = evidence.get("supplements") or []
         pmcid = (evidence.get("pmcid") or "").strip()
         if not pmcid:
             return references
         try:
-            return await resolve_supplements(pmcid, references, fetcher=_deposit_bytes_fetcher)
+            resolved = await resolve_supplements(pmcid, references, fetcher=_deposit_bytes_fetcher)
         except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
             logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
             return references
+        # One file is one resource. The prose reference and the manifest entry resolve to the same
+        # bytes, and study 32 listed each of S1, S2 and S3 twice as a result.
+        return merge_resource_identity(resolved)
 
     @staticmethod
     async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy) -> bool:
