@@ -75,14 +75,36 @@ def _groff_world(monkeypatch):
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _Client:
+        """The provider as it behaved on the day, plus the correction the evidence enables.
+
+        The first binding call sees prose only and returns prose: the unparseable response the
+        owner's run actually got. The reconciliation call is distinguishable because its payload
+        carries the supplement inventory, and THAT is the call that can answer, because it can see
+        that S3 holds 194 rows of which 88 clear the fold-change cutoff.
+        """
+
+        def __init__(self):
+            self.binding_payloads: list[str] = []
+
         async def submit(self, prompt, payload, model, api_key, attachments=None):
             if prompt.startswith("You are binding"):
-                # The failure the owner actually saw. It must stay visible, not become a verdict.
+                self.binding_payloads.append(payload)
+                if "The paper's supplements:" in payload:
+                    return (
+                        '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, '
+                        '"reason": "S3 holds 194 rows; the 88 is the fold-change subset", '
+                        '"confidence": 0.9, "threshold_kind": "padj", "sample_subset": "XX vs XY", '
+                        '"qc_stage": "post-QC"}]}\n```'
+                    )
                 return "the model wrote prose instead of JSON"
             return _EXTRACTION
 
+    client = _Client()
+
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", _cfg)
-    monkeypatch.setattr(ext, "get_client", lambda _p: _Client())
+    monkeypatch.setattr(ext, "get_client", lambda _p: client)
+    monkeypatch.setattr("app.services.validation_driver_service.get_client", lambda _p: client)
+    monkeypatch.setattr("app.services.validation_driver_service.llm_provider_config_service.get_active", _cfg)
 
     async def _fetch_text(url: str) -> str:
         if "ega-archive.org" in url:
@@ -106,6 +128,7 @@ def _groff_world(monkeypatch):
     monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", _fetch_text)
     monkeypatch.setattr("app.services.validation_driver_service.FullTextFetchService.fetch", staticmethod(_full_text))
     monkeypatch.setattr("app.services.validation_driver_service._deposit_bytes_fetcher", _fetch_bytes)
+    return client
 
 
 async def _run(session, admin_user):
@@ -245,3 +268,53 @@ class TestRetrievalReachesTheCodeRow:
         sources = study.evidence_json["capabilities"]["code_sources"]
         s2 = next(s for s in sources if s.get("identifier") == "Supplemental File S2")
         assert s2["code_extracted"] is True
+
+
+class TestTheEvidenceReachesTheInterpretation:
+    """change_7.1 section 6. Study 32 discovered everything and revised nothing: extraction ran
+    before the inventory existed and the production binding call never passed it."""
+
+    @pytest.mark.asyncio
+    async def test_the_reconciliation_call_receives_the_inventory(self, session, admin_user, _groff_world):
+        await _run(session, admin_user)
+        with_inventory = [p for p in _groff_world.binding_payloads if "The paper's supplements:" in p]
+        assert with_inventory, "no binding call was made with the inspected evidence"
+
+    @pytest.mark.asyncio
+    async def test_the_inventory_it_receives_carries_the_measured_counts(self, session, admin_user, _groff_world):
+        await _run(session, admin_user)
+        payload = next(p for p in _groff_world.binding_payloads if "The paper's supplements:" in p)
+        assert "194" in payload
+        assert "88" in payload
+
+    @pytest.mark.asyncio
+    async def test_its_decision_lands_on_the_persisted_target(self, session, admin_user, _groff_world):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        study = await _run(session, admin_user)
+        rows = (await session.execute(select(ComparisonTarget))).scalars().all()
+        assert any(t.threshold_kind == "padj" and t.sample_subset == "XX vs XY" for t in rows)
+        assert study.evidence_json["reconciliation"]["revisions"]
+
+
+class TestTheOutcomeDescribesTheRealObstacle:
+    @pytest.mark.asyncio
+    async def test_the_reason_is_not_a_claim_about_the_whole_paper(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        assert "for this paper" not in (study.failure_reason or "")
+
+    @pytest.mark.asyncio
+    async def test_processed_results_and_a_reproduction_input_are_separate(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        completion = study.evidence_json["completion"]
+        assert completion["processed_results_available"] is True
+        assert completion["reproduction_input_available"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_completed_checks_are_named(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user)
+        completed = " ".join(study.evidence_json["completion"]["checks_completed"])
+        assert "Supplemental File S2" in completed
+        assert "Supplemental File S3" in completed

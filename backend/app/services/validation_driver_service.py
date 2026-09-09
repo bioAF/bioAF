@@ -43,6 +43,7 @@ from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
 from app.services.literature.fulltext_service import FullTextFetchService
+from app.services.validation_completion import completion_for
 from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -749,21 +750,61 @@ class ValidationDriverService:
             # What retrieval established has to reach the rows that answer for it. Study 32 recorded
             # Supplemental File S2 as "not attempted" in the same bundle that had downloaded and
             # read it.
-            evidence["capabilities"] = _propagate_retrieval(
-                evidence.get("capabilities") or {}, evidence["supplements"]
-            )
+            evidence["capabilities"] = _propagate_retrieval(evidence.get("capabilities") or {}, evidence["supplements"])
             study.evidence_json = evidence
             await session.flush()
 
-        study.failure_reason = reason
+        # change_7.1 section 6: the evidence is in hand, so the provisional reading gets revised
+        # before anything is concluded from it. Retrieval on its own changed no decision.
+        await ValidationDriverService._reconcile(session, study, evidence.get("supplements") or [])
+
+        # change_7.1 section 7: the outcome comes from the evidence, not from one label standing in
+        # for every kind of blockage.
+        evidence = dict(study.evidence_json or {})
+        outcome = completion_for(
+            route=study.intended_route or "deposit",
+            capabilities=evidence.get("capabilities") or {},
+            supplements=evidence.get("supplements") or [],
+        )
+        evidence["completion"] = outcome
+        study.evidence_json = evidence
+        study.failure_reason = outcome["reason"] or reason
+        await session.flush()
+
         await ValidationStudyService.transition(
             session,
             study.id,
             study.organization_id,
             study.requested_by_user_id,
             "classified",
-            classification="access_restricted",
+            classification=outcome["classification"],
         )
+
+    @staticmethod
+    async def _reconcile(session: AsyncSession, study: ValidationStudy, supplements: list[dict]) -> None:
+        """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
+        from app.services.reproduction_plan_service import ReproductionPlanService
+        from app.services.validation_reconciliation import reconcile
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        if plan is None:
+            return
+        cfg = await llm_provider_config_service.get_active(session, study.organization_id)
+        if cfg is None:
+            logger.info("study %s: no active provider, so nothing can reconcile the plan", study.id)
+            return
+        try:
+            await reconcile(
+                session,
+                study,
+                plan,
+                supplements=supplements,
+                client=get_client(cfg.provider),
+                model=cfg.model,
+                api_key=cfg.api_key,
+            )
+        except Exception as exc:  # noqa: BLE001 - a reconciliation failure degrades the report only
+            logger.warning("reconciliation failed for study %s: %s", study.id, exc)
 
     @staticmethod
     async def _resolve_supplements(session: AsyncSession, study: ValidationStudy, evidence: dict) -> list[dict]:
