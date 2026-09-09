@@ -47,12 +47,19 @@ def test_invalid_transitions_are_rejected():
     assert not can_transition("setup", "classified")
 
 
-def test_a_closed_verdict_has_no_outbound_transitions():
-    """`classified` and `plan_declined` are judgments. Nothing follows them."""
+def test_a_closed_verdict_is_not_reopened_by_the_driver():
+    """`classified` and `plan_declined` are judgments. Nothing follows them on its own.
+
+    change_7.1 section 4 gave `classified` ONE edge, back to the C1 gate, so a study blocked on
+    access bioAF did not have can be resumed when that access arrives without erasing what was
+    already found. It is a decision a person makes, not a path the driver can take: both states
+    stay terminal, and `plan_declined` still has nowhere to go at all.
+    """
     for terminal in ("classified", "plan_declined"):
         assert terminal in VALIDATION_STUDY_TERMINAL_STATES
-        assert next_states(terminal) == []
         assert is_terminal(terminal)
+    assert next_states("plan_declined") == []
+    assert next_states("classified") == ["plan_ready"]
     assert not is_terminal("reading")
 
 
@@ -94,12 +101,16 @@ def test_error_is_reachable_from_every_active_state():
         assert can_transition(state, "error"), f"{state} should be able to fail into error"
 
 
-def test_classifications_are_the_seven_buckets():
+def test_classifications_are_the_eight_buckets():
+    """`access_restricted` joined them in change_7.1 section 4. It is deliberately NOT
+    `missing_data`: a paper that deposited 54 samples and 108 FASTQ files behind a data access
+    agreement did not omit its data, and the limitation is bioAF's."""
     assert VALIDATION_STUDY_CLASSIFICATIONS == [
         "validated",
         "partially_reproduced",
         "not_validated",
         "missing_data",
+        "access_restricted",
         "missing_methods",
         "not_reproducible",
         "inconclusive",

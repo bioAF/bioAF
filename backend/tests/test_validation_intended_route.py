@@ -123,6 +123,14 @@ class TestAWorkableChoiceProceedsWithoutAsking:
 
 
 class TestAChoiceThatCannotWorkStopsAndSaysWhy:
+    """change_7.1 section 4 changed where these studies STOP.
+
+    They used to be left at `plan_ready` for ever: re-examined every 30 seconds, never changing,
+    and to a reader indistinguishable from a study waiting for someone to click approve. The
+    refusal and its reason are unchanged and still recorded on `route_blocked`; what is new is that
+    the study then reaches a stated outcome instead of holding.
+    """
+
     @pytest.mark.asyncio
     async def test_deposit_chosen_on_a_paper_with_no_deposited_matrix_holds(self, session, admin_user, _no_llm):
         """The case the upfront modal cannot warn about, so it is caught here instead."""
@@ -135,7 +143,8 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
         )
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
-        assert study.state == "plan_ready"
+        assert study.state == "classified"
+        assert study.classification == "access_restricted"
         blocked = study.evidence_json["route_blocked"]
         assert blocked["chosen"] == "deposit"
         assert "deposit" in blocked["reason"].lower() or "processed" in blocked["reason"].lower()
@@ -147,7 +156,7 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
         )
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
-        assert study.state == "plan_ready"
+        assert study.state == "classified"
         assert study.evidence_json["route_blocked"]["chosen"] == "pipeline"
 
     @pytest.mark.asyncio
@@ -167,7 +176,8 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
 
     @pytest.mark.asyncio
     async def test_it_does_not_retry_the_blocked_route_every_tick(self, session, admin_user, _no_llm):
-        """A held study must stay held rather than re-deciding on a 30s loop forever."""
+        """A study that has answered must not be re-decided on a 30s loop forever. It settles on
+        one outcome and one recorded reason, and a second tick changes neither."""
         study = await _study(
             session,
             admin_user,
@@ -176,10 +186,13 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
             state="plan_ready",
         )
         await ValidationDriverService.advance_active_studies(session)
+        blocked_at = study.evidence_json["route_blocked"]["at"]
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
-        assert study.state == "plan_ready"
+        assert study.state == "classified"
         assert study.evidence_json["route_blocked"]["chosen"] == "deposit"
+        # The second tick re-decided nothing: same refusal, same timestamp.
+        assert study.evidence_json["route_blocked"]["at"] == blocked_at
 
     @pytest.mark.asyncio
     async def test_a_species_mismatch_still_blocks_the_auto_approval(self, session, admin_user, _no_llm):
@@ -195,8 +208,10 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
         study = await _study(session, admin_user, intended_route="deposit", evidence=evidence, state="plan_ready")
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
-        assert study.state == "plan_ready"
+        # Still refused, and still refused on the species FACT rather than on the route.
+        assert study.state != "acquiring_processed"
         assert study.evidence_json["route_blocked"]["chosen"] == "deposit"
+        assert "musculus" in study.evidence_json["route_blocked"]["reason"].lower()
 
 
 class TestTheStudyStillReachesAPersonWhenItHasTo:

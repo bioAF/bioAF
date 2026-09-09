@@ -1009,11 +1009,11 @@ class TestDiscoveryCouldNotEstablishACapability:
         await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=True)
 
         caps = study.evidence_json["capabilities"]
-        assert caps["geo_entry"]["value"] == "unknown"
+        assert caps["deposit_exists"]["value"] == "unknown"
         assert caps["preprocessed_data"]["value"] != "no"
 
         issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
-        assert any("GEO entry" in i["step"] for i in issues)
+        assert any("data deposit" in i["step"] for i in issues)
         assert route.geo.byte_calls == []
 
     @pytest.mark.asyncio
@@ -1035,7 +1035,7 @@ class TestDiscoveryCouldNotEstablishACapability:
 
         text = await _report_text(session, study, admin_user)
         assert "Unknown" in text
-        assert "GEO entry exists" in text
+        assert "Data deposit exists" in text
 
 
 class TestAnUnsupportedOutput:

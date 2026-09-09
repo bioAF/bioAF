@@ -24,6 +24,7 @@ from app.services.archive_discovery import (
     SRA,
     classify_archive,
     describe_ega_deposit,
+    is_sample_accession,
 )
 from app.services.validation_capabilities import NO, UNKNOWN, YES
 
@@ -89,6 +90,28 @@ class TestWhichArchiveAnAccessionNames:
 
     def test_case_and_whitespace_do_not_change_the_archive(self):
         assert classify_archive("  egas00001003667 ") == EGA
+
+
+class TestASampleIsNotADeposit:
+    """A GSM is one sample INSIDE a series, not a deposit of its own.
+
+    Describing each as a top-level deposit put rows like "Deposit (GEO) GSM1" on the checklist and
+    spent a full round of lookups per sample: a series matrix that does not exist at that
+    accession, an ENA query, and a supplementary listing. A 54-sample study would have paid for it
+    on every paper read.
+    """
+
+    def test_a_sample_accession_is_recognised(self):
+        assert is_sample_accession("GSM1234567")
+
+    def test_a_series_accession_is_not(self):
+        assert not is_sample_accession("GSE274331")
+
+    def test_an_ega_study_is_not(self):
+        assert not is_sample_accession("EGAS00001003667")
+
+    def test_case_does_not_change_the_answer(self):
+        assert is_sample_accession(" gsm1234567 ")
 
 
 class TestAnEgaStudy:
