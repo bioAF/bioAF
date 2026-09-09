@@ -202,15 +202,30 @@ class ReproductionPlanService:
         created: list[ComparisonTarget] = []
         for t in targets:
             metric_key = (t.get("metric_key") or "").strip()
-            if not metric_key:
+            claim_text = (t.get("claim_text") or "").strip()
+            # change_7.1 section 3: a claim nothing measures is STILL one of the paper's claims. It
+            # used to be dropped here, which is why Groff's digital-karyotype and TE-WE concordance
+            # findings never appeared in the assessment: not as unsupported, not at all. A row with
+            # neither a metric nor the paper's own wording carries no claim, and only that is skipped.
+            if not metric_key and not claim_text:
                 continue
             target = ComparisonTarget(
                 reproduction_plan_id=plan.id,
-                metric_key=_clamp(metric_key, 100),
+                metric_key=_clamp(metric_key, 100) or None,
+                claim_text=claim_text or None,
                 claimed_value=t.get("claimed_value"),
                 unit=_clamp(t.get("unit"), 255),
                 tolerance=t.get("tolerance"),
                 source_locator=_clamp(t.get("source_locator"), 255),
+                # What was actually measured. A metric name cannot say which samples, at which QC
+                # stage, above which threshold, or in which direction, and the comparison engine
+                # branches on the last two.
+                sample_subset=_clamp(t.get("sample_subset"), 255),
+                qc_stage=_clamp(t.get("qc_stage"), 100),
+                direction=_clamp(t.get("direction"), 20),
+                threshold=t.get("threshold"),
+                threshold_kind=_clamp(t.get("threshold_kind"), 50),
+                output_type=_clamp(t.get("output_type"), 50),
                 # plan_6 step 3: the binding decision, when one was made. Absent keys leave NULLs,
                 # which is what every caller that predates the binding call writes.
                 bound_key=_clamp(t.get("bound_key"), 100),

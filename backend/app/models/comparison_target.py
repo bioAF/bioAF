@@ -21,7 +21,11 @@ class ComparisonTarget(Base):
         Integer, ForeignKey("reproduction_plans.id"), nullable=False, index=True
     )
 
-    metric_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    # Nullable since 134: a claim no controlled metric measures is still one of the paper's claims,
+    # and dropping it made the report silent about findings it had never read. `claim_text` is what
+    # the paper said, kept whether or not anything can measure it.
+    metric_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    claim_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     claimed_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 255, matching `source_locator`: these are a model's reading of a methods section, not a
     # controlled vocabulary, and a real paper wrote "genes (NOTCH4, JAG1, LIFR, CCNA2, CCND2, RB1,
@@ -47,6 +51,24 @@ class ComparisonTarget(Base):
     # "model" | "human" | "alias_table". NULL means the row predates the column, which is honestly
     # different from a binding the alias table made.
     bound_by: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # change_7.1 section 3: what was actually measured, as structure rather than prose.
+    #
+    # A metric name and a unit cannot say that 54 samples were collected and 51 analysed, that 194
+    # genes reached significance and 88 of them cleared a fold-change cutoff, or that a set of genes
+    # is up RELATIVE TO the reference arm. Groff et al. states all three, the extractor kept none of
+    # them, and the comparison then ran against the wrong population, the wrong threshold and, on one
+    # contrast, the opposite sign.
+    #
+    # `sample_subset` also gives two claims about the same quantity distinct identities: the paper's
+    # whole-embryo and trophectoderm transcript counts share a metric name and are different numbers.
+    sample_subset: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    qc_stage: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # "up" or "down", and always relative to the contrast's REFERENCE arm.
+    direction: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
+    threshold_kind: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    output_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
