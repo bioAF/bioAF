@@ -274,3 +274,104 @@ def _looks_like_matrix(text: str) -> bool:
         except ValueError:
             pass
     return numeric >= len(cells) - 1
+
+
+# Europe PMC serves an article's attachments as one zip. There is no listing endpoint, which is why
+# the manifest at read time comes from the JATS and only the resolution step pays for bytes.
+_SUPPLEMENTARY_BUNDLE = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/supplementaryFiles"
+
+# Groff's bundle is 9.4 MB, most of it figure images. A cap keeps one pathological article from
+# spending a session's memory on TIFFs.
+_MAX_BUNDLE_BYTES = 200 * 1024 * 1024
+
+_IDENTIFIER_RE = re.compile(r"\bS?(\d+)\b")
+
+
+async def resolve_supplements(pmcid: str, references: list[dict], *, fetcher) -> list[dict]:
+    """Resolve named references to real files and classify each by its content. Never raises.
+
+    The prose says "Supplemental File S2" and the publisher deposits
+    ``supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx``. Nothing connected the two, so
+    the authors' entire analysis sat in a public bundle and the paper was reported as publishing no
+    accessible code.
+
+    A download failure leaves every reference UNRESOLVED with a reason. "We could not fetch it" and
+    "the authors did not publish it" are different statements and only one is a finding.
+    """
+    rows = [dict(r) for r in references or []]
+
+    try:
+        blob = await fetcher(_SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid))
+    except Exception as exc:  # noqa: BLE001 - a fetch failure is a limitation of the run
+        logger.info("supplementary bundle fetch failed for %s: %s", pmcid, exc)
+        for row in rows:
+            row.setdefault("failure_reason", f"bioAF could not download this paper's supplementary bundle ({exc})")
+        return rows
+
+    if len(blob) > _MAX_BUNDLE_BYTES:
+        for row in rows:
+            row.setdefault("failure_reason", "this paper's supplementary bundle is larger than bioAF will download")
+        return rows
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            contents = {info.filename: zf.read(info.filename) for info in zf.infolist() if not info.is_dir()}
+    except (zipfile.BadZipFile, OSError) as exc:
+        logger.info("supplementary bundle for %s could not be read: %s", pmcid, exc)
+        for row in rows:
+            row.setdefault("failure_reason", "this paper's supplementary bundle could not be read")
+        return rows
+
+    claimed: set[str] = set()
+    for row in rows:
+        filename = row.get("filename") if row.get("filename") in contents else _match_filename(row, contents)
+        if filename is None:
+            row["failure_reason"] = "bioAF could not find a file in the bundle matching this reference"
+            continue
+        claimed.add(filename)
+        row.update(
+            filename=filename,
+            size_bytes=len(contents[filename]),
+            role=classify_supplement(filename, contents[filename]),
+            resolved=True,
+            failure_reason=None,
+        )
+
+    # A file nobody cited is still part of what the paper published. The prose names three files;
+    # the bundle holds seventeen, and the ones that are not figures can carry real inputs.
+    for filename, blob_bytes in contents.items():
+        if filename in claimed:
+            continue
+        rows.append(
+            {
+                "label": filename,
+                "filename": filename,
+                "mimetype": None,
+                "source": ATTACHED,
+                "role": classify_supplement(filename, blob_bytes),
+                "size_bytes": len(blob_bytes),
+                "resolved": True,
+                "failure_reason": None,
+            }
+        )
+    return rows
+
+
+def _match_filename(row: dict, contents: dict[str, bytes]) -> str | None:
+    """The bundle file a named reference points at, by its identifier.
+
+    Publishers mangle names in every direction, but the identifier survives: "Supplemental File S2"
+    becomes ``..._Supplemental_File_2_...``. Matching on the number inside a supplement-ish filename
+    is what connects them; matching on the label as a whole never would.
+    """
+    match = _IDENTIFIER_RE.search(row.get("label") or "")
+    if match is None:
+        return None
+    wanted = match.group(1)
+    for filename in contents:
+        normalized = re.sub(r"[^a-z0-9]+", "_", filename.lower())
+        if "supplement" not in normalized:
+            continue
+        if re.search(rf"(?:file|table|data|dataset|material)s?_{wanted}(?:_|\b)", normalized):
+            return filename
+    return None

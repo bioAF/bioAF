@@ -55,7 +55,10 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # The C1 gate is where the route is chosen, so an approved plan has two forward edges that spend
     # something: the pipeline route (raw reads, hours) and the deposit route (processed data,
     # minutes). The pipeline edge is unchanged.
-    "plan_ready": ["acquiring_data", "acquiring_processed", "plan_declined", "error"],
+    # `classified` is reachable from the gate since change_7.1 section 4: a study whose only routes
+    # need data bioAF cannot obtain has an ANSWER, and holding it at plan_ready for ever made it
+    # look like a study waiting for someone to click approve.
+    "plan_ready": ["acquiring_data", "acquiring_processed", "plan_declined", "classified", "error"],
     # The deposit route. `acquiring_data` is the ESCALATION edge on both: a deposit that turns out
     # unusable is not a verdict on the paper, it is a reason to spend the compute after all, and it
     # is never automatic. `classified` is the genuine early exit (the deposit is a PDF, or the
@@ -73,7 +76,11 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     "extracting": ["reproducing", "comparing", "error"],
     "reproducing": ["comparing", "error"],
     "comparing": ["classified", "error"],
-    "classified": [],
+    # change_7.1 section 4: credentials, a data access agreement or a newly public deposit can make
+    # a blocked study runnable later. Resuming returns it to the C1 gate, where the route is chosen,
+    # rather than to a run: new access is a reason to decide again, not to spend automatically. The
+    # previous assessment is not erased by the transition.
+    "classified": ["plan_ready"],
     "plan_declined": [],
     # `error` is an INFRA failure, not a judgment on the paper, and it stays in
     # VALIDATION_STUDY_TERMINAL_STATES so the background driver never touches it: a study that
@@ -99,6 +106,10 @@ VALIDATION_STUDY_CLASSIFICATIONS = [
     "partially_reproduced",
     "not_validated",
     "missing_data",
+    # change_7.1 section 4. The authors deposited their data and bioAF cannot obtain it. That is a
+    # restriction on us, not an omission by them, and `missing_data` would state the opposite about
+    # a paper that published 54 samples and 108 FASTQ files.
+    "access_restricted",
     "missing_methods",
     "not_reproducible",
     "inconclusive",
@@ -118,6 +129,9 @@ _CLASSIFICATION_CONFIDENCE: dict[str, float | None] = {
     # for confidence-only consumers (e.g. the provenance report).
     "partially_reproduced": 60.0,  # -> Possibly Validated (caution, needs human review)
     "not_validated": 0.0,  # human-confirmed contradiction -> Very Unlikely
+    # Could-not-test, not tested-and-unlikely. None renders as "Could Not Reproduce", which is the
+    # honest reading of a paper whose data exists behind an access agreement.
+    "access_restricted": None,
     "missing_data": None,  # no data to run -> Could Not Reproduce
     "missing_methods": None,  # no reproducible method -> Could Not Reproduce
     "not_reproducible": None,  # pipeline could not run -> Could Not Reproduce

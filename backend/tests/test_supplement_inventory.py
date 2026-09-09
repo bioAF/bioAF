@@ -129,3 +129,68 @@ class TestItNeverRaises:
             "expression_matrix",
             "supporting_input",
         }
+
+
+def _bundle() -> bytes:
+    """The Europe PMC supplementary bundle's real shape: one zip, publisher-mangled filenames."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt", _S1)
+        zf.writestr("supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx", _S2)
+        zf.writestr("supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt", _S3)
+        zf.writestr("1705f01.jpg", b"\xff\xd8\xff\xe0JFIF")
+    return buffer.getvalue()
+
+
+class TestResolvingAReferenceToAFile:
+    @pytest.mark.asyncio
+    async def test_the_prose_identifier_finds_the_publisher_mangled_filename(self):
+        """'Supplemental File S2' and 'supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx'
+        are the same artifact. Nothing connected them, so the code was never found."""
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        s2 = next(s for s in resolved if s["label"] == "Supplemental File S2")
+        assert s2["filename"].endswith("AllRCode_Review.docx")
+        assert s2["resolved"] is True
+
+    @pytest.mark.asyncio
+    async def test_each_file_gets_the_role_its_content_shows(self):
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        by_label = {s["label"]: s["role"] for s in resolved}
+        assert by_label["Supplemental File S1"] == SAMPLE_METADATA
+        assert by_label["Supplemental File S2"] == CODE
+        assert by_label["Supplemental File S3"] == RESULTS_TABLE
+
+    @pytest.mark.asyncio
+    async def test_a_download_failure_leaves_references_unresolved_not_absent(self):
+        """'We could not fetch it' is not 'the authors did not publish it'."""
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            raise RuntimeError("504 gateway timeout")
+
+        resolved = await resolve_supplements("PMC6771404", parse_jats_supplements(_JATS), fetcher=_fetch)
+        assert all(s["resolved"] is False for s in resolved)
+        assert any(s.get("failure_reason") for s in resolved)
+
+    @pytest.mark.asyncio
+    async def test_a_file_nobody_referenced_is_still_inventoried(self):
+        from app.services.supplement_inventory import resolve_supplements
+
+        async def _fetch(_url):
+            return _bundle()
+
+        resolved = await resolve_supplements("PMC6771404", [], fetcher=_fetch)
+        assert {s["filename"] for s in resolved} >= {"1705f01.jpg"}
