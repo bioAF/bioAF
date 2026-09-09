@@ -33,6 +33,7 @@ import {
   type ValidationIssue,
 } from "@/components/validation/ValidationIssuesSection";
 import { CapabilityChecklist, type Capabilities } from "@/components/validation/CapabilityChecklist";
+import { CompletionSummary, type Completion } from "@/components/validation/CompletionSummary";
 import { SupplementInventory, type Supplement } from "@/components/validation/SupplementInventory";
 import {
   PrecomputeChecksPanel,
@@ -112,6 +113,9 @@ type Plan7Evidence = DepositEvidence &
     // change_7.1 section 2: the article's own attachments, named at read time and resolved to real
     // files once something goes and gets them.
     supplements?: Supplement[] | null;
+    // change_7.1 section 7: why the assessment ended where it did, with every limitation that
+    // applied rather than one label standing in for all of them.
+    completion?: Completion | null;
   };
 
 /**
@@ -268,6 +272,15 @@ export default function ValidationStudyPage() {
               What this paper has
             </h2>
             <CapabilityChecklist capabilities={plan7.capabilities} />
+          </section>
+        )}
+
+        {plan7.completion && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              What could and could not be established
+            </h2>
+            <CompletionSummary completion={plan7.completion} />
           </section>
         )}
 
