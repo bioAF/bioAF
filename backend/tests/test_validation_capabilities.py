@@ -284,6 +284,30 @@ class TestItIsCheap:
         assert geo.urls, "discovery made no requests at all"
 
     @pytest.mark.asyncio
+    async def test_one_geo_deposit_costs_five_calls(self):
+        """change_7.1 kept the read-time budget. Discovery runs on EVERY paper read, including the
+        ones nobody approves, so the count is a property worth pinning rather than a detail: the
+        series matrix (which answers two rows), ENA, and `list_deposit`'s own filelist-then-listing
+        pair. Describing deposits per archive did not add to it."""
+        geo = _Geo()
+        await _discover(fetcher=geo)
+        assert len(geo.urls) == 5, geo.urls
+
+    @pytest.mark.asyncio
+    async def test_a_requested_accession_the_paper_also_names_is_described_once(self):
+        """The common case: the requester scoped GSE274331 and the paper names the same study. It
+        is ONE deposit, and describing it twice would double every read."""
+        geo = _Geo()
+        await _discover(
+            accessions=[
+                {"accession": _GSE, "provenance": "requested"},
+                {"accession": _GSE.lower(), "provenance": "extracted"},
+            ],
+            fetcher=geo,
+        )
+        assert len(geo.urls) == 5, geo.urls
+
+    @pytest.mark.asyncio
     async def test_it_never_raises_however_badly_the_network_behaves(self):
         async def _explode(url):
             raise RuntimeError("everything is on fire")
@@ -409,9 +433,11 @@ _EGA_DATASETS = (
     '[{"accession_id":"EGAD00001005044","num_samples":54,"access_type":"controlled",'
     '"is_released":true,"is_deprecated":false}]'
 )
-_EGA_FILES = "[" + ",".join(
-    f'{{"accession_id":"EGAF{i:08d}","filesize":442207842,"extension":"fastq.gz"}}' for i in range(108)
-) + "]"
+_EGA_FILES = (
+    "["
+    + ",".join(f'{{"accession_id":"EGAF{i:08d}","filesize":442207842,"extension":"fastq.gz"}}' for i in range(108))
+    + "]"
+)
 
 
 class _Archives(_Geo):
@@ -437,26 +463,20 @@ class TestADoiOnlyPaperWithAnExtractedDeposit:
 
     @pytest.mark.asyncio
     async def test_the_extracted_deposit_is_described(self):
-        caps = await _discover(
-            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
-        )
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
         assert caps["deposit_exists"]["value"] == YES
         assert [d["accession"] for d in caps["deposits"]] == [_EGAS]
 
     @pytest.mark.asyncio
     async def test_it_never_claims_the_paper_named_no_accession(self):
-        caps = await _discover(
-            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
-        )
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
         assert "names no deposited accession" not in (caps["deposit_exists"]["evidence"] or "")
 
     @pytest.mark.asyncio
     async def test_controlled_reads_exist_and_are_not_acquirable(self):
         """The two facts that have to survive together: the authors deposited their reads, and
         bioAF cannot fetch them."""
-        caps = await _discover(
-            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
-        )
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
         assert caps["raw_data"]["value"] == YES
         deposit = caps["deposits"][0]
         assert deposit["access"] == "controlled"
@@ -466,9 +486,7 @@ class TestADoiOnlyPaperWithAnExtractedDeposit:
     async def test_an_ega_paper_is_not_reported_as_having_no_geo_entry(self):
         """The row is about deposits now, not about GEO. A paper that deposited to EGA has a
         deposit, and saying otherwise is the false-absence finding this change exists to remove."""
-        caps = await _discover(
-            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
-        )
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
         assert "geo_entry" not in caps
         assert caps["deposit_exists"]["value"] == YES
 
@@ -501,9 +519,7 @@ class TestTheScopedAccessionStillDecides:
 
     @pytest.mark.asyncio
     async def test_provenance_survives_into_the_answer(self):
-        caps = await _discover(
-            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
-        )
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
         assert caps["deposits"][0]["provenance"] == "extracted"
 
 
@@ -550,9 +566,7 @@ class TestTheSupplementManifestLandsAtReadTime(TestItLandsAtReadTime):
     not taken at all, and the study then reports that the authors published nothing."""
 
     @pytest.mark.asyncio
-    async def test_a_fetched_paper_leaves_its_supplements_on_the_study(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_a_fetched_paper_leaves_its_supplements_on_the_study(self, session, admin_user, monkeypatch):
         from app.services.literature.fulltext_service import FullTextResult
         from app.services.validation_driver_service import ValidationDriverService
         from app.services.validation_study_service import ValidationStudyService
@@ -580,25 +594,19 @@ class TestTheSupplementManifestLandsAtReadTime(TestItLandsAtReadTime):
                 ],
             )
 
-        monkeypatch.setattr(
-            "app.services.validation_driver_service.FullTextFetchService.fetch", staticmethod(_fetch)
-        )
+        monkeypatch.setattr("app.services.validation_driver_service.FullTextFetchService.fetch", staticmethod(_fetch))
 
         study = await ValidationStudyService.create_study(
             session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
         )
-        await ValidationDriverService.read_and_plan(
-            session, study, None, admin_user.organization_id, admin_user.id
-        )
+        await ValidationDriverService.read_and_plan(session, study, None, admin_user.organization_id, admin_user.id)
 
         supplements = study.evidence_json["supplements"]
         assert [s["label"] for s in supplements] == ["Supplemental File S2"]
         assert supplements[0]["resolved"] is False
 
     @pytest.mark.asyncio
-    async def test_a_pasted_body_carries_no_manifest_and_that_is_not_an_error(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_a_pasted_body_carries_no_manifest_and_that_is_not_an_error(self, session, admin_user, monkeypatch):
         """Pasted text is not a document; there is nothing to parse. An empty manifest here means
         'nobody looked', which the report must not render as 'the paper has none'."""
         from app.services.validation_driver_service import ValidationDriverService
