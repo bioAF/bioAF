@@ -82,10 +82,10 @@ def _accessibility_update(answer: dict | None) -> dict:
 _TRANSCRIPT_FILENAME = "transcript.txt"
 
 _CAPABILITY_STEPS = {
-    "geo_entry": "checking whether this paper has a GEO entry",
+    "deposit_exists": "checking whether this paper has a data deposit",
     "raw_data": "checking whether raw sequencing data is available",
     "preprocessed_data": "checking whether pre-processed data is available",
-    "sample_metadata": "checking whether the GEO entry carries sample metadata",
+    "sample_metadata": "checking whether the deposit carries sample metadata",
     "code_artifact": "checking whether the paper published a code artifact",
     "code_repository": "checking whether the paper links a code repository",
 }
@@ -135,6 +135,29 @@ def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
         if ((capabilities.get(key) or {}).get("value")) == "no":
             return message
     return None
+
+
+def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
+    """Every deposit this paper names, with where each one came from.
+
+    change_7.1 section 1: discovery was handed ``study.source_accession`` alone, so a study
+    requested by DOI arrived with an empty string and every question was answered NO. The
+    accessions the reading extracted live on the plan, and a paper that deposited to EGA has a
+    deposit whether or not anyone typed its accession into the request.
+
+    The requested accession stays first and stays authoritative for what a run fetches. The
+    extracted ones are reported beside it, because "the paper also deposited this" is evidence
+    about the paper rather than an instruction to go and fetch it.
+    """
+    named: list[dict] = []
+    requested = (study.source_accession or "").strip()
+    if requested:
+        named.append({"accession": requested, "provenance": "requested"})
+    for extracted in (getattr(plan, "accessions_json", None) or []):
+        accession = str(extracted or "").strip()
+        if accession:
+            named.append({"accession": accession, "provenance": "extracted"})
+    return named
 
 
 def _driver_owns(study: "ValidationStudy") -> bool:
@@ -389,7 +412,7 @@ class ValidationDriverService:
 
         try:
             capabilities = await discover_capabilities(
-                accession=study.source_accession,
+                accessions=_named_accessions(study, plan),
                 has_full_text=has_full_text,
                 code_availability=(plan.code_availability_json if plan else None),
                 fetcher=fetcher,

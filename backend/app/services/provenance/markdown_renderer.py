@@ -778,7 +778,7 @@ def _append_issues(parts: list[str], issues: list[dict[str, Any]]) -> None:
 
 _CHECKLIST_ROWS = [
     ("paper_readable", "Paper text available"),
-    ("geo_entry", "GEO entry exists"),
+    ("deposit_exists", "Data deposit exists"),
     ("raw_data", "Raw sample data available"),
     ("preprocessed_data", "Pre-processed data available"),
     ("sample_metadata", "Sample metadata available"),

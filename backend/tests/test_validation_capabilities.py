@@ -86,8 +86,12 @@ class _Geo:
 
 
 async def _discover(**kw):
+    accession = kw.pop("accession", _GSE)
+    accessions = kw.pop("accessions", None)
+    if accessions is None:
+        accessions = [{"accession": accession, "provenance": "requested"}] if accession else []
     return await discover_capabilities(
-        accession=kw.pop("accession", _GSE),
+        accessions=accessions,
         has_full_text=kw.pop("has_full_text", True),
         code_availability=kw.pop("code_availability", []),
         fetcher=kw.pop("fetcher", _Geo()),
@@ -109,11 +113,11 @@ class TestThePaperItself:
         assert caps["paper_readable"]["value"] == NO
 
 
-class TestTheGeoEntry:
+class TestTheDepositRecord:
     @pytest.mark.asyncio
     async def test_a_parsed_series_record_proves_the_entry_exists(self):
         caps = await _discover()
-        assert caps["geo_entry"]["value"] == YES
+        assert caps["deposit_exists"]["value"] == YES
 
     @pytest.mark.asyncio
     async def test_an_unlistable_supplementary_directory_does_not_deny_the_entry(self):
@@ -121,20 +125,20 @@ class TestTheGeoEntry:
         the GEO record exists, and deriving existence from it read "GEO entry: NO" for a study that
         is plainly there."""
         caps = await _discover(fetcher=_Geo(suppl=RuntimeError("connection reset")))
-        assert caps["geo_entry"]["value"] == YES
+        assert caps["deposit_exists"]["value"] == YES
         assert caps["preprocessed_data"]["value"] == UNKNOWN
 
     @pytest.mark.asyncio
     async def test_a_series_matrix_failure_is_unknown_not_absent(self):
         caps = await _discover(fetcher=_Geo(matrix=RuntimeError("502 Bad Gateway")))
-        assert caps["geo_entry"]["value"] == UNKNOWN
-        assert caps["geo_entry"]["failure_reason"]
+        assert caps["deposit_exists"]["value"] == UNKNOWN
+        assert caps["deposit_exists"]["failure_reason"]
 
     @pytest.mark.asyncio
     async def test_a_study_with_no_accession_is_a_no(self):
         """Not UNKNOWN: there is nothing to look up, which is an established absence."""
         caps = await _discover(accession="")
-        assert caps["geo_entry"]["value"] == NO
+        assert caps["deposit_exists"]["value"] == NO
 
 
 class TestRawSampleData:
@@ -254,7 +258,7 @@ class TestOneFailureDoesNotAbandonTheRest:
             fetcher=_Geo(matrix=RuntimeError("down"), suppl=RuntimeError("down"), ena=RuntimeError("down")),
             code_availability=[{"kind": "github", "url": "https://github.com/lab/p"}],
         )
-        assert caps["geo_entry"]["value"] == UNKNOWN
+        assert caps["deposit_exists"]["value"] == UNKNOWN
         assert caps["raw_data"]["value"] == UNKNOWN
         assert caps["preprocessed_data"]["value"] == UNKNOWN
         assert caps["code_repository"]["value"] == YES
@@ -265,7 +269,7 @@ class TestOneFailureDoesNotAbandonTheRest:
         """A discovery failure has to be visible as a limitation of the run rather than as a fact
         about the paper."""
         caps = await _discover(fetcher=_Geo(matrix=RuntimeError("502 Bad Gateway")))
-        for key in ("geo_entry", "sample_metadata"):
+        for key in ("deposit_exists", "sample_metadata"):
             assert caps[key]["value"] == UNKNOWN
             assert caps[key]["failure_reason"]
 
@@ -287,7 +291,7 @@ class TestItIsCheap:
         caps = await _discover(fetcher=_explode)
         assert set(caps) >= {
             "paper_readable",
-            "geo_entry",
+            "deposit_exists",
             "raw_data",
             "preprocessed_data",
             "sample_metadata",
@@ -341,7 +345,7 @@ class TestItLandsAtReadTime:
         )
 
         caps = study.evidence_json["capabilities"]
-        assert caps["geo_entry"]["value"] == YES
+        assert caps["deposit_exists"]["value"] == YES
         assert caps["preprocessed_data"]["value"] == YES
         assert caps["code_repository"]["value"] == YES
         assert study.state == "plan_ready"
@@ -368,7 +372,7 @@ class TestItLandsAtReadTime:
         )
 
         assert study.state == "plan_ready"
-        assert study.evidence_json["capabilities"]["geo_entry"]["value"] == UNKNOWN
+        assert study.evidence_json["capabilities"]["deposit_exists"]["value"] == UNKNOWN
 
     @pytest.mark.asyncio
     async def test_each_unknown_reaches_the_issues_section_with_its_reason(self, session, admin_user, monkeypatch):
@@ -395,5 +399,147 @@ class TestItLandsAtReadTime:
 
         issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
         steps = [i["step"] for i in issues]
-        assert "checking whether this paper has a GEO entry" in steps
+        assert "checking whether this paper has a data deposit" in steps
         assert all(i["impact"] == "degraded" for i in issues)
+
+
+_EGAS = "EGAS00001003667"
+
+_EGA_DATASETS = (
+    '[{"accession_id":"EGAD00001005044","num_samples":54,"access_type":"controlled",'
+    '"is_released":true,"is_deprecated":false}]'
+)
+_EGA_FILES = "[" + ",".join(
+    f'{{"accession_id":"EGAF{i:08d}","filesize":442207842,"extension":"fastq.gz"}}' for i in range(108)
+) + "]"
+
+
+class _Archives(_Geo):
+    """GEO exactly as before, plus EGA's two public metadata endpoints."""
+
+    def __init__(self, *, datasets=_EGA_DATASETS, files=_EGA_FILES, **kw):
+        super().__init__(**kw)
+        self.datasets, self.files = datasets, files
+
+    async def __call__(self, url: str) -> str:
+        if "ega-archive.org" in url:
+            self.urls.append(url)
+            if url.endswith("/files"):
+                return self._or_raise(self.files, url)
+            return self._or_raise(self.datasets, url)
+        return await super().__call__(url)
+
+
+class TestADoiOnlyPaperWithAnExtractedDeposit:
+    """Groff et al. `10.1101/gr.252981.119`. The study was requested by DOI, so
+    `source_accession` is null and the EGA accession exists only in the extracted plan. Discovery
+    was handed the empty one and answered NO to everything."""
+
+    @pytest.mark.asyncio
+    async def test_the_extracted_deposit_is_described(self):
+        caps = await _discover(
+            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert caps["deposit_exists"]["value"] == YES
+        assert [d["accession"] for d in caps["deposits"]] == [_EGAS]
+
+    @pytest.mark.asyncio
+    async def test_it_never_claims_the_paper_named_no_accession(self):
+        caps = await _discover(
+            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert "names no deposited accession" not in (caps["deposit_exists"]["evidence"] or "")
+
+    @pytest.mark.asyncio
+    async def test_controlled_reads_exist_and_are_not_acquirable(self):
+        """The two facts that have to survive together: the authors deposited their reads, and
+        bioAF cannot fetch them."""
+        caps = await _discover(
+            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert caps["raw_data"]["value"] == YES
+        deposit = caps["deposits"][0]
+        assert deposit["access"] == "controlled"
+        assert deposit["supported"] == NO
+
+    @pytest.mark.asyncio
+    async def test_an_ega_paper_is_not_reported_as_having_no_geo_entry(self):
+        """The row is about deposits now, not about GEO. A paper that deposited to EGA has a
+        deposit, and saying otherwise is the false-absence finding this change exists to remove."""
+        caps = await _discover(
+            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert "geo_entry" not in caps
+        assert caps["deposit_exists"]["value"] == YES
+
+
+class TestTheScopedAccessionStillDecides:
+    @pytest.mark.asyncio
+    async def test_the_requested_accession_is_the_scoped_one(self):
+        caps = await _discover(
+            accessions=[
+                {"accession": _GSE, "provenance": "requested"},
+                {"accession": _EGAS, "provenance": "extracted"},
+            ],
+            fetcher=_Archives(),
+        )
+        scoped = [d for d in caps["deposits"] if d["scoped"]]
+        assert [d["accession"] for d in scoped] == [_GSE]
+
+    @pytest.mark.asyncio
+    async def test_the_other_deposits_are_still_reported(self):
+        """Scoping decides what runs. It does not license a report that the other deposits are not
+        there."""
+        caps = await _discover(
+            accessions=[
+                {"accession": _GSE, "provenance": "requested"},
+                {"accession": _EGAS, "provenance": "extracted"},
+            ],
+            fetcher=_Archives(),
+        )
+        assert {d["accession"] for d in caps["deposits"]} == {_GSE, _EGAS}
+
+    @pytest.mark.asyncio
+    async def test_provenance_survives_into_the_answer(self):
+        caps = await _discover(
+            accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert caps["deposits"][0]["provenance"] == "extracted"
+
+
+class TestAnArchiveBioafCannotLookUp:
+    @pytest.mark.asyncio
+    async def test_it_is_unknown_not_absent(self):
+        """An unsupported archive is a limit of ours. Answering NO would report it as a fact about
+        the paper."""
+        caps = await _discover(
+            accessions=[{"accession": "E-MTAB-1234", "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert caps["deposit_exists"]["value"] == UNKNOWN
+        assert caps["deposits"][0]["failure_reason"]
+
+    @pytest.mark.asyncio
+    async def test_the_reason_names_the_archive(self):
+        caps = await _discover(
+            accessions=[{"accession": "E-MTAB-1234", "provenance": "extracted"}], fetcher=_Archives()
+        )
+        assert "arrayexpress" in caps["deposits"][0]["failure_reason"].lower()
+
+
+class TestAggregatingAcrossDeposits:
+    @pytest.mark.asyncio
+    async def test_one_deposit_holding_reads_answers_yes_for_the_paper(self):
+        caps = await _discover(
+            accessions=[
+                {"accession": "E-MTAB-1234", "provenance": "extracted"},
+                {"accession": _EGAS, "provenance": "extracted"},
+            ],
+            fetcher=_Archives(),
+        )
+        assert caps["raw_data"]["value"] == YES
+
+    @pytest.mark.asyncio
+    async def test_a_paper_with_no_accession_at_all_is_still_a_no(self):
+        caps = await _discover(accessions=[])
+        assert caps["deposit_exists"]["value"] == NO
+        assert caps["deposits"] == []

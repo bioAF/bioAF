@@ -33,20 +33,45 @@ export interface CodeSource {
   accessible_reason: string | null;
 }
 
+/**
+ * One deposit, described by the archive it lives in (change_7.1 section 1).
+ *
+ * Existence, access and support are three answers, not one. EGAD00001005044 exists, is controlled,
+ * and cannot be acquired by bioAF: a single chip would drop the half that tells the reader the
+ * authors published their reads and the block is ours.
+ */
+export interface Deposit {
+  archive: string;
+  accession: string;
+  provenance: string | null;
+  scoped: boolean;
+  exists: "yes" | "no" | "unknown";
+  access: "public" | "controlled" | "unavailable" | "unknown" | "not_attempted";
+  supported: "yes" | "no";
+  raw_data: "yes" | "no" | "unknown";
+  preprocessed_data: "yes" | "no" | "unknown";
+  sample_metadata: "yes" | "no" | "unknown";
+  evidence: string | null;
+  failure_reason: string | null;
+}
+
 export interface Capabilities {
   paper_readable: Capability;
-  geo_entry: Capability;
+  deposit_exists: Capability;
   raw_data: Capability;
   preprocessed_data: Capability;
   sample_metadata: Capability;
   code_artifact: Capability;
   code_repository: Capability;
   code_sources: CodeSource[];
+  deposits: Deposit[];
 }
 
 const ROWS: { key: keyof Capabilities; label: string }[] = [
   { key: "paper_readable", label: "Paper text available" },
-  { key: "geo_entry", label: "GEO entry exists" },
+  // Archive-neutral: EGA, SRA and ArrayExpress deposits all land in this row now, and the
+  // per-deposit rows underneath name the archive each one actually lives in.
+  { key: "deposit_exists", label: "Data deposit exists" },
   { key: "raw_data", label: "Raw sample data available" },
   { key: "preprocessed_data", label: "Pre-processed data available" },
   { key: "sample_metadata", label: "Sample metadata available" },
@@ -57,6 +82,9 @@ const VALUE_LABEL: Record<string, string> = {
   no: "No",
   unknown: "Unknown",
   not_attempted: "Not attempted",
+  public: "Public",
+  controlled: "Controlled",
+  unavailable: "Unavailable",
 };
 
 const VALUE_CLASS: Record<string, string> = {
@@ -64,6 +92,19 @@ const VALUE_CLASS: Record<string, string> = {
   no: "bg-gray-100 text-gray-600",
   unknown: "bg-amber-50 text-amber-700",
   not_attempted: "bg-gray-100 text-gray-600",
+  public: "bg-emerald-50 text-emerald-700",
+  // Controlled is not a failure and not a fault of the paper. It is a restriction, and it reads as
+  // one rather than as a red mark against the authors.
+  controlled: "bg-amber-50 text-amber-700",
+  unavailable: "bg-gray-100 text-gray-600",
+};
+
+const ARCHIVE_LABEL: Record<string, string> = {
+  geo: "GEO",
+  ega: "EGA",
+  sra: "SRA",
+  arrayexpress: "ArrayExpress",
+  other: "Archive",
 };
 
 // The checklist's code row takes the SOURCE KIND rather than a bare yes, because "GitHub" and
@@ -108,6 +149,36 @@ export function CapabilityChecklist({ capabilities }: { capabilities: Capabiliti
               </tr>
             );
           })}
+
+          {(capabilities.deposits ?? []).map((deposit) => (
+            <tr key={deposit.accession} data-testid={`deposit-${deposit.accession}`}>
+              <td className="py-1.5 pr-4 text-gray-700">
+                Deposit <span className="text-xs text-gray-500">({ARCHIVE_LABEL[deposit.archive] ?? deposit.archive})</span>
+                {deposit.provenance === "extracted" && (
+                  <span className="ml-1 text-xs text-gray-500">from the paper</span>
+                )}
+              </td>
+              <td className="py-1.5 pr-4 whitespace-nowrap">
+                <Chip value={deposit.exists} />
+                {/* Access is a separate fact from existence: a deposit can be known, released and
+                    still closed to everyone without a data access agreement. */}
+                <span className="ml-1">
+                  <Chip value={deposit.access} />
+                </span>
+                {deposit.supported === "no" && deposit.exists !== "no" && (
+                  <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                    bioAF cannot acquire
+                  </span>
+                )}
+              </td>
+              <td className="py-1.5 text-xs text-gray-500">
+                {deposit.accession}
+                {(deposit.failure_reason || deposit.evidence) && (
+                  <span className="ml-2">{deposit.failure_reason || deposit.evidence}</span>
+                )}
+              </td>
+            </tr>
+          ))}
 
           {sources.length === 0 ? (
             <tr>

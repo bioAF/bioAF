@@ -35,23 +35,22 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from app.services.deposit_selection import selectable
-from app.services.literature.accession_manifest_service import (
-    AccessionManifestService,
-    ManifestResult,
-)
-from app.services.literature.deposit_inventory_service import list_deposit
+from app.services.archive_discovery import NO, UNKNOWN, YES, describe_deposit
 
 logger = logging.getLogger("bioaf.validation_capabilities")
 
 Fetcher = Callable[[str], Awaitable[str]]
 
-YES = "yes"
-NO = "no"
-UNKNOWN = "unknown"
+# Re-exported: the tri-state is answered per deposit now, and every existing caller imports it from
+# here.
+__all__ = ["NO", "NOT_ATTEMPTED", "UNKNOWN", "YES", "discover_capabilities"]
 
-# Existence is settled here. Accessibility waits for something to actually fetch the thing.
+# Existence is settled at read time. Accessibility waits for something to actually fetch the thing.
 NOT_ATTEMPTED = "not_attempted"
+
+# A paper naming a dozen deposits must not turn one read into two dozen HTTP calls. Three covers
+# every real paper seen so far; the rest are carried unnamed rather than described.
+_MAX_DEPOSITS = 3
 
 # A code source that lives in a repository rather than as a downloadable artifact. The split matters
 # because the checklist's `Code artifact exists` row takes NO / GitHub / Download / UNKNOWN, and
@@ -61,28 +60,6 @@ _REPO_KINDS = ("github", "gitlab")
 
 def _answer(value: str, *, evidence: str | None = None, failure_reason: str | None = None) -> dict:
     return {"value": value, "evidence": evidence, "failure_reason": failure_reason}
-
-
-def _raw_data_answer(rows: list[dict]) -> dict:
-    """Whether there are raw reads something could actually fetch.
-
-    **Registered is not the same as available**, measured live on GSE96583 (2026-09-07): ENA returns
-    run rows and a read count with ZERO ``fastq_bytes``, because the study deposits 10x BAMs rather
-    than FASTQ. Answering YES off the run rows alone would put a route on the checklist that nothing
-    can run.
-    """
-    if not rows:
-        return _answer(NO, evidence="ENA lists no sequencing runs for this study")
-    with_fastq = [r for r in rows if (r.get("fastq_bytes") or "").strip()]
-    if not with_fastq:
-        return _answer(
-            NO,
-            evidence=(
-                f"ENA lists {len(rows)} run(s) for this study, none of which publishes FASTQ files "
-                "(a study can register its runs and deposit aligned reads instead)"
-            ),
-        )
-    return _answer(YES, evidence=f"ENA publishes FASTQ files for {len(with_fastq)} of {len(rows)} run(s)")
 
 
 def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dict, dict]:
@@ -125,47 +102,26 @@ def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dic
     )
 
 
-async def _ena_rows(accession: str, fetch: Fetcher, manifest: ManifestResult) -> tuple[list[dict] | None, str | None]:
-    """The ENA run rows for this study, or a reason we could not get them.
-
-    Reuses ``accession_manifest_service``'s ENA client rather than adding a second one. The study's
-    SRA accession comes from the series matrix the manifest already parsed, so a GEO failure and an
-    ENA failure stay distinguishable.
-    """
-    from app.services.literature.accession_manifest_service import (
-        _ena_filereport_url,
-        parse_ena_filereport,
-    )
-
-    target = accession
-    if manifest.samples:
-        # A GEO series is not itself queryable at ENA; its SRA study is. The manifest resolved that
-        # link already, so re-deriving it here would be a second network round trip for an answer we
-        # are holding.
-        exp = next((s.get("experiment_accession") for s in manifest.samples if s.get("experiment_accession")), None)
-        target = exp or accession
-    try:
-        tsv = await fetch(_ena_filereport_url(target))
-    except Exception as exc:  # noqa: BLE001 - a discovery failure is UNKNOWN, never an absence
-        logger.info("ENA availability check failed for %s: %s", target, exc)
-        return None, "bioAF could not reach ENA to check whether raw reads are published"
-    return parse_ena_filereport(tsv), None
 
 
 async def discover_capabilities(
     *,
-    accession: str | None,
+    accessions: list[dict],
     has_full_text: bool,
     code_availability: list[dict] | None,
     fetcher: Fetcher | None = None,
 ) -> dict:
-    """Answer all seven phase-1 questions for one paper. Never raises.
+    """Answer the phase-1 questions for one paper, across every deposit it names. Never raises.
 
-    Returns the ``evidence["capabilities"]`` bundle: one tri-state answer per question, plus the
-    per-source code list carrying existence and accessibility separately.
+    Returns the ``evidence["capabilities"]`` bundle: the per-deposit answers, the paper-level rows
+    aggregated over them, and the per-source code list carrying existence and accessibility
+    separately.
+
+    ``accessions`` carries provenance, because a requested accession and one extracted from the
+    paper are different claims. change_7.1 section 1: a study requested by DOI has no
+    ``source_accession`` at all, and passing that empty string into GEO's implementation answered NO
+    to every question for a paper that deposited 54 samples and 108 FASTQ files.
     """
-    acc = (accession or "").strip()
-
     caps: dict = {
         "paper_readable": _answer(
             YES if has_full_text else NO,
@@ -180,52 +136,77 @@ async def discover_capabilities(
     caps["code_artifact"] = artifact_answer
     caps["code_repository"] = repo_answer
 
-    if not acc:
+    deposits = await _describe_deposits(accessions, fetcher or _default_fetch)
+    caps["deposits"] = deposits
+
+    if not deposits:
         # Nothing to look up. An established absence, not a failed lookup: reporting it as UNKNOWN
         # would suggest a retry might find something.
-        absent = _answer(NO, evidence="this study names no deposited accession")
-        for key in ("geo_entry", "raw_data", "preprocessed_data", "sample_metadata"):
+        absent = _answer(NO, evidence="this paper names no deposited accession")
+        for key in ("deposit_exists", "raw_data", "preprocessed_data", "sample_metadata"):
             caps[key] = dict(absent)
         return caps
 
-    # The series matrix answers TWO rows: the GEO record exists (it parsed), and the entry carries
-    # per-sample metadata (it listed samples). One fetch, and the manifest service already caches
-    # the multi-platform fallback that a combined-matrix 404 needs.
-    try:
-        manifest = await AccessionManifestService.fetch_manifest(acc, fetcher=fetcher)
-    except Exception as exc:  # noqa: BLE001 - the service does not raise, but discovery must not either
-        logger.info("series matrix discovery failed for %s: %s", acc, exc)
-        manifest = ManifestResult(unavailable_reason="bioAF could not reach GEO to read this study's record")
-
-    if manifest.samples:
-        caps["geo_entry"] = _answer(YES, evidence=f"GEO published a series record for {acc}")
-        caps["sample_metadata"] = _answer(
-            YES, evidence=f"the series record describes {len(manifest.samples)} sample(s)"
-        )
-    else:
-        reason = manifest.unavailable_reason or f"GEO returned no series record for {acc}"
-        caps["geo_entry"] = _answer(UNKNOWN, failure_reason=reason)
-        caps["sample_metadata"] = _answer(UNKNOWN, failure_reason=reason)
-
-    rows, ena_failure = await _ena_rows(acc, fetcher or _default_fetch, manifest)
-    caps["raw_data"] = _answer(UNKNOWN, failure_reason=ena_failure) if rows is None else _raw_data_answer(rows)
-
-    inventory = await list_deposit(acc, fetcher=fetcher)
-    if inventory.unavailable_reason:
-        # An unlistable directory is a discovery failure. It says nothing about whether the record
-        # exists, which is why that row was answered above from the series matrix instead.
-        caps["preprocessed_data"] = _answer(UNKNOWN, failure_reason=inventory.unavailable_reason)
-    else:
-        usable = selectable(inventory.entries)
-        caps["preprocessed_data"] = _answer(
-            YES if usable else NO,
-            evidence=(
-                f"{len(usable)} of {len(inventory.entries)} deposited file(s) could serve as a reproduction input"
-                if usable
-                else f"GEO lists {len(inventory.entries)} supplementary file(s), none holding per-feature values"
-            ),
-        )
+    caps["deposit_exists"] = _aggregate(deposits, "exists")
+    for key in ("raw_data", "preprocessed_data", "sample_metadata"):
+        caps[key] = _aggregate(deposits, key)
     return caps
+
+
+async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[dict]:
+    """Every named deposit, deduplicated, described in provenance order and bounded in number.
+
+    The requested accession is described first and marked scoped, because it is the one a run would
+    use. The rest are described because the paper named them: an accession the requester did not
+    scope is still evidence about what the authors deposited.
+    """
+    seen: set[str] = set()
+    wanted: list[dict] = []
+    for entry in accessions or []:
+        acc = str((entry or {}).get("accession") or "").strip()
+        if not acc or acc.upper() in seen:
+            continue
+        seen.add(acc.upper())
+        wanted.append({"accession": acc, "provenance": (entry or {}).get("provenance") or "extracted"})
+
+    requested = [e for e in wanted if e["provenance"] == "requested"]
+    ordered = requested + [e for e in wanted if e["provenance"] != "requested"]
+    # The scoped deposit is the requested one, or the only one when nothing was scoped. A paper
+    # naming three deposits and no request has no scope until someone picks one.
+    scoped_accession = requested[0]["accession"] if requested else (ordered[0]["accession"] if len(ordered) == 1 else None)
+
+    described: list[dict] = []
+    for entry in ordered[:_MAX_DEPOSITS]:
+        described.append(
+            await describe_deposit(
+                entry["accession"],
+                provenance=entry["provenance"],
+                scoped=entry["accession"] == scoped_accession,
+                fetcher=fetcher,
+            )
+        )
+    return described
+
+
+def _aggregate(deposits: list[dict], key: str) -> dict:
+    """One paper-level answer over every deposit.
+
+    **YES beats NO beats UNKNOWN.** One deposit holding reads means the paper published reads, and a
+    single unreadable listing must not erase a positive answer from its sibling. The evidence names
+    which deposit answered, so an aggregate is never a claim without a source.
+    """
+    answers = [(d.get("accession"), d.get(key), d.get("evidence"), d.get("failure_reason")) for d in deposits]
+    for wanted in (YES, NO):
+        matching = [a for a in answers if a[1] == wanted]
+        if matching:
+            return _answer(
+                wanted,
+                evidence="; ".join(f"{acc}: {ev}" for acc, _, ev, _ in matching if ev) or None,
+            )
+    return _answer(
+        UNKNOWN,
+        failure_reason="; ".join(reason for _, _, _, reason in answers if reason) or None,
+    )
 
 
 async def _default_fetch(url: str) -> str:
