@@ -168,6 +168,16 @@ def _unacquirable_reason(holders: list[dict], need: str) -> str:
     )
 
 
+def _has_organism_source(evidence: dict) -> bool:
+    """Whether any described deposit could have declared an organism.
+
+    Only GEO is read for one, via its series matrix. Saying "the deposit declares no organism" for
+    an EGA study reported a lookup that never happened.
+    """
+    deposits = (evidence.get("capabilities") or {}).get("deposits") or []
+    return any(d.get("archive") == "geo" for d in deposits if isinstance(d, dict))
+
+
 def _propagate_retrieval(capabilities: dict, supplements: list[dict]) -> dict:
     """Carry retrieval outcomes from the inventory onto the capability answers.
 
@@ -549,6 +559,13 @@ class ValidationDriverService:
                 deposit_organisms=await ValidationDriverService._deposit_organisms(study, fetcher=fetcher),
                 paper_sample_count=sample_sheet.get("sample_count"),
                 entries=await ValidationDriverService._deposit_entries(study, fetcher=fetcher),
+                # Whatever the inventory holds so far. At read time these are named references with
+                # no measurements; reconciliation re-runs the checks once they are resolved.
+                supplements=(study.evidence_json or {}).get("supplements") or [],
+                # A series matrix is the only organism declaration bioAF reads. An EGA deposit has
+                # none, and reporting that as "the deposit declares no organism" claimed we had
+                # looked at something we never queried.
+                organism_source=_has_organism_source(study.evidence_json or {}),
                 client=get_client(cfg.provider) if cfg else None,
                 model=cfg.model if cfg else "",
                 api_key=cfg.api_key if cfg else None,
