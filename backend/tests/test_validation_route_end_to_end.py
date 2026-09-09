@@ -69,6 +69,12 @@ def _counts_matrix(n_flat=400) -> str:
 
 _COUNTS = _counts_matrix()
 
+# Compressed ONCE, with a fixed mtime. `gzip.compress` stamps the current time into the header, so
+# compressing the same bytes at the fixture and again at the assertion produced two different
+# streams whenever the two calls straddled a second boundary, and the md5 comparison failed on
+# timing alone. The deposit's checksum is the thing under test; the clock is not.
+_COUNTS_GZ = gzip.compress(_COUNTS.encode(), mtime=0)
+
 _METADATA = "sample\tcondition\nCTRL_1\tControl\nCTRL_2\tControl\nCTRL_3\tControl\nKD_1\tKD\nKD_2\tKD\nKD_3\tKD\n"
 
 _DESIGN = {
@@ -367,7 +373,7 @@ class _Route:
         self.geo = _FakeGeo(
             _LISTING,
             {
-                _SUPPL + f"{_GSE}_counts.tsv.gz": gzip.compress(_COUNTS.encode()),
+                _SUPPL + f"{_GSE}_counts.tsv.gz": _COUNTS_GZ,
                 _SUPPL + f"{_GSE}_sample_metadata.tsv": _METADATA.encode(),
             },
         )
@@ -616,7 +622,7 @@ class TestTheDepositRouteReachesAVerdict:
         await _tick_to_rest(session, study)
 
         matrix = next(f for f in study.evidence_json["deposit"]["files"] if f["filename"].endswith("counts.tsv.gz"))
-        assert matrix["md5"] == hashlib.md5(gzip.compress(_COUNTS.encode())).hexdigest()
+        assert matrix["md5"] == hashlib.md5(_COUNTS_GZ).hexdigest()
         assert matrix["url"].startswith(_SUPPL)
         assert route.geo.byte_calls  # it really went to GEO
 
