@@ -713,6 +713,7 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     _append_capability_checklist(parts, evidence.get("capabilities") or {})
     _append_supplement_inventory(parts, evidence.get("supplements") or [])
+    _append_completion(parts, evidence.get("completion") or {})
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
     _append_issues(parts, entity.get("issues") or [])
@@ -895,6 +896,72 @@ _SUPPLEMENT_ROLE_LABEL = {
     "supporting_input": "Supporting input",
     "unknown": "Not established",
 }
+
+
+# What each kind of blockage is, in the reader's words.
+_LIMITATION_LABEL = {
+    "controlled_access": "Controlled access",
+    "unsupported_acquisition": "Acquisition not supported",
+    "missing_input": "Required input not published",
+    "failed_discovery": "Could not be established",
+}
+
+
+def _append_completion(parts: list[str], completion: dict[str, Any]) -> None:
+    """Why the assessment ended where it did, and what it managed to check on the way.
+
+    change_7.1 section 7. Study 32's report carried one sentence, a claim about the paper rather
+    than the deposit, and said nothing about the checks that DID run against the paper's own
+    attachments. Every limitation names the resource and the operation it affects, more than one
+    can be true at once, and consistency against a published results table is never worded as
+    reproduction.
+    """
+    if not completion:
+        return
+
+    parts.append("## What Could And Could Not Be Established")
+    parts.append("")
+    parts.append(
+        _table(
+            ["Statement", "Answer"],
+            [
+                ["Processed results published", _yes_no(completion.get("processed_results_available"))],
+                ["Reproduction input available", _yes_no(completion.get("reproduction_input_available"))],
+            ],
+        )
+    )
+    parts.append("")
+
+    limitations = completion.get("limitations") or []
+    if limitations:
+        parts.append(
+            _table(
+                ["Limitation", "Resource", "Route", "Detail"],
+                [
+                    [
+                        _LIMITATION_LABEL.get(row.get("kind"), row.get("kind")),
+                        row.get("resource") or "--",
+                        row.get("operation") or "--",
+                        row.get("detail") or "--",
+                    ]
+                    for row in limitations
+                ],
+            )
+        )
+        parts.append("")
+
+    for heading, key in (("Checks completed", "checks_completed"), ("Checks not completed", "checks_not_completed")):
+        rows = completion.get(key) or []
+        if not rows:
+            continue
+        parts.append(f"**{heading}**")
+        parts.append("")
+        parts.extend(f"- {row}" for row in rows)
+        parts.append("")
+
+
+def _yes_no(value: Any) -> str:
+    return "Yes" if value else "No"
 
 
 def _append_supplement_inventory(parts: list[str], supplements: list[dict[str, Any]]) -> None:
