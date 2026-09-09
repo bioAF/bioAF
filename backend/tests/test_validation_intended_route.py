@@ -144,7 +144,10 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
         await ValidationDriverService.advance_active_studies(session)
         await session.refresh(study)
         assert study.state == "classified"
-        assert study.classification == "access_restricted"
+        # change_7.1 section 7: a deposit that publishes no matrix is a MISSING INPUT, not restricted
+        # access. This assertion expected `access_restricted` from before `completion_for` existed,
+        # when one label stood in for every kind of blockage.
+        assert study.classification == "missing_data"
         blocked = study.evidence_json["route_blocked"]
         assert blocked["chosen"] == "deposit"
         assert "deposit" in blocked["reason"].lower() or "processed" in blocked["reason"].lower()

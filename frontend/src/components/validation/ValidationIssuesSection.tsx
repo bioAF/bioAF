@@ -29,6 +29,9 @@ const OUTCOME_LABEL: Record<string, string> = {
   unreachable: "bioAF could not reach the language model",
   internal: "bioAF hit an internal error",
   unparseable: "the model's answer was not in the format bioAF asked for",
+  // change_7.2 section 7: an answer cut off at the token limit is its own event. Reporting it as
+  // badly formatted is a true statement about the text and a false one about what happened.
+  truncated: "the model's answer was cut off at its token limit",
 };
 
 const IMPACT_LABEL: Record<string, string> = {

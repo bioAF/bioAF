@@ -106,8 +106,18 @@ async def submit(
     # ordinary text block. Nothing read the field, so the caller saw prose with no fenced JSON in it
     # and reported an unparseable answer, which is a true statement about the text and a false one
     # about what happened.
-    if str(data.get("stop_reason") or "").lower() == "refusal":
+    stop_reason = str(data.get("stop_reason") or "").lower()
+    if stop_reason == "refusal":
         raise refusal(text or "the model declined to answer")
+    # change_7.2 section 7: a capped answer is not an unparseable one. `max_tokens` returns a
+    # well-formed prefix that stops mid-JSON, and reporting it as "the model's answer was not in the
+    # format bioAF asked for" is a true statement about the text and a false one about what happened.
+    # That is the same misreading the refusal handling above was written to eliminate.
+    if stop_reason == "max_tokens":
+        raise ProviderError(
+            "the model's answer was cut off at the token limit before it finished",
+            error_class="truncated",
+        )
     # No text at all is the same event by a different route. An empty string would be reported as
     # unparseable for the same wrong reason.
     if not text:

@@ -361,6 +361,60 @@ class ValidationStudyService:
         return sibling
 
     @staticmethod
+    async def _refuse_route(
+        session: AsyncSession, study: ValidationStudy, user_id: int, route: str, decision
+    ) -> ValidationStudy:
+        """A route the policy will not authorize: assess what can still be assessed, then state it.
+
+        The approver is stamped, because a person did decide, and the decision they made is on the
+        record beside what it produced.
+        """
+        from app.services.validation_assessment import conclude_without_execution, record_refusal
+
+        study.approved_by_user_id = user_id
+        study.approved_at = datetime.now(timezone.utc)
+        evidence = record_refusal(study, route, decision)
+        evidence.pop("awaiting_refetch_approval", None)
+        evidence["route"] = "pipeline" if route == "pipeline" else "deposit"
+        study.evidence_json = dict(evidence)
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study.id,
+            action="route_refused",
+            details={"route": route, "action": decision.action, "reason": decision.reason},
+        )
+        await conclude_without_execution(session, study, decision.reason)
+        await session.refresh(study)
+        return study
+
+    @staticmethod
+    async def route_decision_for(session: AsyncSession, study: ValidationStudy, route: str):
+        """The shared route policy's answer for this study, for either approval entrance.
+
+        change_7.2 section 1. The two contested judgments are read from what the extraction and the
+        pre-compute checks already recorded, rather than re-derived: re-deriving them would put a
+        network fetch in the way of every approval and let an outage decide the answer.
+        """
+        from app.services.validation_route_policy import decide_route
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        evidence = study.evidence_json or {}
+        return decide_route(
+            route=route,
+            capabilities=evidence.get("capabilities") or {},
+            conflict=deposit_conflict(
+                plan.blockers_json if plan else None, plan.library_strategy if plan else None
+            ),
+            species_hold=species_hold(evidence.get("precompute_checks")),
+            deposit_override=bool(evidence.get("deposit_override")),
+            species_override=bool(evidence.get("species_override")),
+        )
+
+    @staticmethod
     async def approve_plan(
         session: AsyncSession, study_id: int, org_id: int, user_id: int, *, route: str = "deposit"
     ) -> ValidationStudy:
@@ -386,26 +440,25 @@ class ValidationStudyService:
                 f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
             )
 
-        # The one blocker that refuses rather than advises. Every other blocker a plan carries is
-        # information for the scientist ratifying it; this one says the plan names a pipeline that
-        # cannot read the data the study is scoped to, and approving is what spends the money.
-        # Recorded by the extractor, which is where the deposit was read; re-deriving it here would
-        # put a network fetch in the way of every approval and let an outage decide the answer.
-        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
-        conflict = deposit_conflict(plan.blockers_json if plan else None, plan.library_strategy if plan else None)
-        # Two ways past it, both deliberate: re-point the plan at the pipeline the deposit names
-        # (which clears the blocker), or record why the deposit itself is wrong. Neither is implicit.
-        if conflict and not (study.evidence_json or {}).get("deposit_override"):
-            raise HTTPException(400, conflict["message"])
+        # change_7.2 section 1: ONE policy, shared with the driver's entrance, answering four
+        # independent questions. Study 33 was approved by hand onto a route that could never be
+        # taken because this gate validated a deposit conflict and a species mismatch and had no
+        # route-feasibility equivalent.
+        decision = await ValidationStudyService.route_decision_for(session, study, route)
 
-        # plan_7 step 14: the OTHER blocker that refuses rather than advises, and the only one of the
-        # four pre-compute checks that does. A species mismatch is a string comparison, not an
-        # opinion, and it invalidates every number downstream: aligning mouse data to a human genome
-        # produces a confident wrong answer and costs hours before anyone can see it. The three
-        # sufficiency judgments are advisory and never stop a run.
-        hold = species_hold((study.evidence_json or {}).get("precompute_checks"))
-        if hold and not (study.evidence_json or {}).get("species_override"):
-            raise HTTPException(400, hold)
+        # A contested scientific judgment still refuses and still has its two deliberate ways past:
+        # re-point the plan at the pipeline the deposit names, or record why the deposit is wrong.
+        # Neither is implicit, and neither is what a missing adapter, a missing input or a missing
+        # authorization needs.
+        if decision.overridable:
+            raise HTTPException(400, decision.reason)
+
+        if not decision.authorizes_execution:
+            # A refusal is not a hold. Moving the guard here without this would leave the study at
+            # `plan_ready` with an HTTP 400, and a study approved with no `intended_route` is not
+            # claimed by the driver either, so it would sit there for ever: the same failure with a
+            # different cause. Both entrances authorize the public assessment and state an outcome.
+            return await ValidationStudyService._refuse_route(session, study, user_id, route, decision)
 
         study.approved_by_user_id = user_id
         study.approved_at = datetime.now(timezone.utc)
@@ -636,6 +689,112 @@ class ValidationStudyService:
             previous_value={"state": old_state},
         )
         return study
+
+    # change_7.2 section 3: the states a running acquisition can actually be stopped from. `/decline`
+    # needs `plan_ready` and `/classify` needs `comparing`, so a study looping in `acquiring_processed`
+    # could be stopped by NOTHING in the product. Studies 29 and 33 were parked in `error` by a direct
+    # database write, which should never be the answer.
+    # `samples_mismatch` is absent on purpose: it already has a product action (decline), and it is
+    # a held decision rather than a running acquisition.
+    CANCELLABLE_STATES = ("acquiring_data", "acquiring_processed", "inspecting_deposit")
+    # Where a stopped or failed study can be picked up again. Both land at the C1 gate, because new
+    # access or a corrected accession is a reason to DECIDE again, not to spend automatically.
+    RESUMABLE_STATES = ("classified", "error")
+
+    @staticmethod
+    async def cancel_acquisition(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str | None = None
+    ) -> ValidationStudy:
+        """Stop a running acquisition and state an outcome, without touching the database by hand.
+
+        The claim is invalidated first. A cancellation that leaves the running claim valid can be
+        overwritten by a late worker finishing its own step, which would silently undo it.
+        """
+        from app.services.validation_assessment import conclude_without_execution
+        from app.services.validation_ownership import invalidate
+
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if study.state not in ValidationStudyService.CANCELLABLE_STATES:
+            raise HTTPException(
+                400,
+                f"Cannot cancel acquisition from '{study.state}'; the study is not acquiring anything.",
+            )
+
+        await invalidate(session, study.id)
+        stated = (reason or "").strip() or "stopped by a person"
+        evidence = dict(study.evidence_json or {})
+        evidence["cancelled"] = {
+            "reason": stated,
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by_user_id": user_id,
+            "from_state": study.state,
+        }
+        evidence.pop("acquisition_retry_at", None)
+        evidence.pop("awaiting_choice", None)
+        study.evidence_json = evidence
+        old_state = study.state
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="validation_study",
+            entity_id=study.id,
+            action="acquisition_cancelled",
+            details={"reason": stated},
+            previous_value={"state": old_state},
+        )
+        # Everything already established still counts. A cancellation ends the ATTEMPT, and it says
+        # nothing about the paper, so the outcome carries the evidence and names the stop.
+        await conclude_without_execution(
+            session,
+            study,
+            stated,
+            limitation={
+                "kind": "failed_discovery",
+                "resource": study.source_accession or "this paper's deposits",
+                "operation": study.intended_route or "deposit",
+                "detail": f"the acquisition was stopped before it completed ({stated})",
+            },
+        )
+        await session.refresh(study)
+        return study
+
+    @staticmethod
+    async def resume_study(
+        session: AsyncSession, study_id: int, org_id: int, user_id: int, reason: str | None = None
+    ) -> ValidationStudy:
+        """Pick a stopped or failed study back up at the C1 gate.
+
+        New credentials, a corrected accession or a newly public deposit are reasons to decide again,
+        not to spend automatically, which is why this lands at `plan_ready` rather than back on a
+        route. The previous assessment is not erased by the transition.
+        """
+        from app.services.validation_ownership import invalidate
+
+        study = await ValidationStudyService._load(session, study_id, org_id)
+        if study.state not in ValidationStudyService.RESUMABLE_STATES:
+            raise HTTPException(
+                400,
+                f"Cannot resume from '{study.state}'; only a stopped or failed study can be resumed.",
+            )
+
+        await invalidate(session, study.id)
+        evidence = dict(study.evidence_json or {})
+        # The counters that would otherwise refuse the very attempt this resumption authorises.
+        for key in ("acquisition_attempts", "acquisition_retry_at", "route_blocked", "discovery_unresolved"):
+            evidence.pop(key, None)
+        evidence["resumed"] = {
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by_user_id": user_id,
+            "reason": (reason or "").strip() or "resumed by a person",
+            "from_state": study.state,
+        }
+        study.evidence_json = evidence
+        await session.flush()
+
+        resumed = await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
+        return resumed
 
     @staticmethod
     async def decline_plan(

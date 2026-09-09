@@ -217,6 +217,16 @@ class ValidationStudy(Base):
     # turns out to be impossible. Null keeps the manual C1 gate, so other entry points are unchanged.
     intended_route: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # change_7.2 section 2: who is working on this study right now, and until when.
+    #
+    # `claim_token` is a fencing token, not a boolean. Every write performed under a claim carries it
+    # and is rejected if it no longer matches, so an expired worker that finishes late cannot land its
+    # result over the worker that replaced it. Two writers ran `read_and_plan` on study 33 and both
+    # committed a plan; a `state != "requested"` guard could not see the other's uncommitted state.
+    claim_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claim_holder: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
