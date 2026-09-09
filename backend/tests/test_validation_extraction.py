@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.models.comparison_target import ComparisonTarget
 from app.services import validation_extraction_service as ext
 from app.services.pipeline_mapper import is_library_strategy_conflict, map_method
-from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS
+from app.services.validation_classifier_service import BINDING_FAILED, CONTROLLED_METRIC_KEYS
 from app.services.validation_extraction_service import (
     ValidationExtractionService,
     build_extraction_prompt,
@@ -1052,15 +1052,16 @@ async def test_a_target_records_who_bound_it_and_why(session, admin_user, monkey
 
 
 @pytest.mark.asyncio
-async def test_a_binding_call_that_fails_leaves_the_alias_table_in_charge(session, admin_user, monkeypatch):
+async def test_a_binding_call_that_fails_keeps_the_plan_and_marks_the_claims(session, admin_user, monkeypatch):
     """The binding call is an improvement on the alias table, not a dependency of the extraction. A
     provider error there must not lose the plan: the claims are still the paper's claims.
 
-    The failure is now simulated at the PROVIDER, which is where it comes from. It used to be
-    simulated by making `bind_claims` itself raise, which plan_7 step 14a made impossible: a provider
-    failure comes back as an empty decision list and an issue row rather than as an exception, and
-    the blanket `except Exception` that used to catch it here is gone. Every assertion below is
-    unchanged.
+    The failure is simulated at the PROVIDER, which is where it comes from.
+
+    change_7.1 section 3 changed what the failure LEAVES BEHIND. It used to leave every target on
+    `alias_table`, and the comparison then resolved the claim through that table and printed a
+    verdict, so an outage read as agreement. The targets are now marked `binding_failed`: the plan
+    survives exactly as before, and the comparison refuses to invent a mapping nobody made.
     """
     from app.services.llm_provider_clients import ProviderError
 
@@ -1091,7 +1092,7 @@ async def test_a_binding_call_that_fails_leaves_the_alias_table_in_charge(sessio
     )
     assert {t.metric_key for t in targets} == {"alignment_rate", "de_genes"}
     assert all(t.bound_key is None for t in targets)
-    assert all(t.bound_by == "alias_table" for t in targets)
+    assert all(t.bound_by == BINDING_FAILED for t in targets)
 
 
 # ---- plan_6 step 4: a binding failure is not a silent paper ----

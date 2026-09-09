@@ -36,7 +36,11 @@ from app.services.validation_issue_service import ValidationIssueService
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
-from app.services.validation_classifier_service import CONTROLLED_METRIC_KEYS, CONTROLLED_METRIC_SPECS
+from app.services.validation_classifier_service import (
+    BINDING_FAILED,
+    CONTROLLED_METRIC_KEYS,
+    CONTROLLED_METRIC_SPECS,
+)
 
 logger = logging.getLogger("bioaf.validation_extraction")
 
@@ -631,12 +635,27 @@ async def bind_claims(
         allowed=CONTROLLED_METRIC_KEYS,
     )
     if not decision.ok:
-        # Degraded, not blocked: the claims are still the paper's claims and the alias table still
-        # resolves what it always did. What changes is that the fall-back is now on the record
-        # instead of only in a log line.
+        # change_7.1 section 3. This used to return [], which left every target on `alias_table`
+        # with a NULL bound_key, and the comparison then resolved the claim through the alias table
+        # and printed a verdict. Groff's binding failed exactly this way and the study still showed
+        # comparisons as though a model had approved them.
+        #
+        # A FAILURE is not a DECLINE. Declining is an answer the model gives on purpose, and the
+        # alias table is the right fallback for it. An unreadable response is not an answer, and
+        # letting it fall back manufactures agreement out of an outage.
         if on_issue:
             on_issue(decision.as_issue(impact="degraded"))
-        return []
+        return [
+            {
+                "claim_index": i,
+                "bound_key": None,
+                "reason": "the binding call did not return a readable decision for this claim",
+                "confidence": 0.0,
+                "declined": False,
+                "bound_by": BINDING_FAILED,
+            }
+            for i in range(len(claims))
+        ]
 
     by_index = {}
     for row in parse_binding(decision.text):
@@ -884,7 +903,9 @@ class ValidationExtractionService:
                 binding_reason=decision["reason"],
                 binding_confidence=decision["confidence"],
                 bound_by_model=cfg.model,
-                bound_by="model",
+                # A decision the model made is `model`; one it could not make at all is
+                # `binding_failed`, and the comparison treats the two differently.
+                bound_by=decision.get("bound_by") or "model",
             )
 
         binding_blocker = binding_failure_blocker(decisions)
