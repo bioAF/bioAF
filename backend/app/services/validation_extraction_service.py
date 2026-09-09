@@ -593,16 +593,34 @@ def parse_binding(response_text: str) -> list[dict]:
                 f"left unbound{': ' + reason if reason else ''}"
             )
             key, confidence = None, 0.0
-        rows.append(
-            {
-                "claim_index": item.get("claim_index"),
-                "bound_key": key or None,
-                "reason": reason,
-                "confidence": confidence,
-                "declined": declined,
-            }
-        )
+        row = {
+            "claim_index": item.get("claim_index"),
+            "bound_key": key or None,
+            "reason": reason,
+            "confidence": confidence,
+            "declined": declined,
+        }
+        # change_7.1 section 6: a reconciliation call can correct the claim's CONTEXT even when it
+        # declines the metric, and those corrections are the point of showing it the supplements.
+        # Dropping them here meant the reconciliation ran, answered, and changed nothing.
+        for field in _CONTEXT_DECISION_FIELDS:
+            value = item.get(field)
+            if value is not None:
+                row[field] = value
+        rows.append(row)
     return rows
+
+
+# The claim-context fields a binding decision may revise, alongside the metric it binds to.
+_CONTEXT_DECISION_FIELDS = (
+    "sample_subset",
+    "qc_stage",
+    "direction",
+    "threshold",
+    "threshold_kind",
+    "output_type",
+    "measurement_basis",
+)
 
 
 BINDING_FAILURE_BLOCKER = "The model could not map any of this paper's claims to a measurable metric."
