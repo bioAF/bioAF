@@ -712,6 +712,7 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append("")
 
     _append_capability_checklist(parts, evidence.get("capabilities") or {})
+    _append_supplement_inventory(parts, evidence.get("supplements") or [])
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
     _append_issues(parts, entity.get("issues") or [])
@@ -855,6 +856,22 @@ def _append_capability_checklist(parts: list[str], capabilities: dict[str, Any])
                 answer.get("failure_reason") or answer.get("evidence") or "--",
             ]
         )
+    # change_7.1 section 1: one row per deposit, naming the archive it lives in. Existence and
+    # access are stated together on purpose. A reader who sees only "could not run" reads it as a
+    # fault of the paper, and for a controlled deposit the fault is entirely ours.
+    for deposit in capabilities.get("deposits") or []:
+        archive = str(deposit.get("archive") or "archive").upper()
+        answer = f"exists: {_TRISTATE_LABEL.get(deposit.get('exists'), deposit.get('exists'))}"
+        answer += f", access: {deposit.get('access')}"
+        if deposit.get("supported") == "no" and deposit.get("exists") != "no":
+            answer += ", bioAF cannot acquire it"
+        rows.append(
+            [
+                f"Deposit ({archive}) {deposit.get('accession')}",
+                answer,
+                deposit.get("failure_reason") or deposit.get("evidence") or "--",
+            ]
+        )
     for source in capabilities.get("code_sources") or []:
         rows.append(
             [
@@ -866,6 +883,58 @@ def _append_capability_checklist(parts: list[str], capabilities: dict[str, Any])
         )
     if rows:
         parts.append(_table(["Item", "Answer", "Detail"], rows))
+        parts.append("")
+
+
+# What a supplement IS, in the reader's words rather than the classifier's token.
+_SUPPLEMENT_ROLE_LABEL = {
+    "sample_metadata": "Sample metadata",
+    "expression_matrix": "Expression matrix",
+    "results_table": "Differential results",
+    "code": "Analysis code",
+    "supporting_input": "Supporting input",
+    "unknown": "Not established",
+}
+
+
+def _append_supplement_inventory(parts: list[str], supplements: list[dict[str, Any]]) -> None:
+    """The paper's own attachments, and what each one turned out to hold.
+
+    change_7.1 section 2. These were never discovered, so a paper that published its metadata
+    table, its complete analysis and its results table was reported as publishing none of them.
+
+    **An unresolved reference is rendered as unresolved**, with the reason. "bioAF could not fetch
+    it" and "the authors did not publish it" are different statements, and only the second would be
+    a finding about the paper.
+    """
+    if not supplements:
+        return
+    parts.append("## What The Paper Attached")
+    parts.append("")
+    rows: list[list[Any]] = []
+    for supplement in supplements:
+        if not isinstance(supplement, dict):
+            continue
+        if supplement.get("resolved"):
+            role = _SUPPLEMENT_ROLE_LABEL.get(supplement.get("role"), supplement.get("role") or "--")
+        else:
+            role = "Not retrieved"
+        detail: list[str] = []
+        if supplement.get("row_count") is not None:
+            detail.append(f"{supplement['row_count']} rows")
+        for name, count in (supplement.get("threshold_splits") or {}).items():
+            detail.append(f"{count} with {name}")
+        if supplement.get("failure_reason"):
+            detail.append(str(supplement["failure_reason"]))
+        rows.append(
+            [
+                supplement.get("label") or supplement.get("filename") or "--",
+                role,
+                "; ".join(detail) or (supplement.get("filename") or "--"),
+            ]
+        )
+    if rows:
+        parts.append(_table(["Attachment", "What it holds", "Detail"], rows))
         parts.append("")
 
 

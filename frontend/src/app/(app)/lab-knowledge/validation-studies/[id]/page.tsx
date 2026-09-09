@@ -33,6 +33,7 @@ import {
   type ValidationIssue,
 } from "@/components/validation/ValidationIssuesSection";
 import { CapabilityChecklist, type Capabilities } from "@/components/validation/CapabilityChecklist";
+import { SupplementInventory, type Supplement } from "@/components/validation/SupplementInventory";
 import {
   PrecomputeChecksPanel,
   type PrecomputeChecks,
@@ -108,6 +109,9 @@ type Plan7Evidence = DepositEvidence &
     species_override?: SpeciesOverride | null;
     // Set when the route chosen at the button turned out to be impossible once the paper was read.
     route_blocked?: { chosen?: string | null; reason?: string | null } | null;
+    // change_7.1 section 2: the article's own attachments, named at read time and resolved to real
+    // files once something goes and gets them.
+    supplements?: Supplement[] | null;
   };
 
 /**
@@ -264,6 +268,15 @@ export default function ValidationStudyPage() {
               What this paper has
             </h2>
             <CapabilityChecklist capabilities={plan7.capabilities} />
+          </section>
+        )}
+
+        {plan7.supplements && plan7.supplements.length > 0 && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              What the paper attached
+            </h2>
+            <SupplementInventory supplements={plan7.supplements} />
           </section>
         )}
 
