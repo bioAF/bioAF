@@ -219,13 +219,21 @@ def classify_supplement(filename: str, blob: bytes) -> str:
         return UNKNOWN_ROLE
 
     columns = [c.strip().strip('"').lower() for c in header]
-    if sum(1 for c in columns if c in _RESULT_COLUMNS) >= 2:
+    statistics = [c for c in columns if c in _RESULT_COLUMNS]
+    if len(statistics) >= 2:
         # A results table, and specifically NOT an expression matrix: these are one row per gene of
         # an analysis that already ran, not the per-sample values needed to run it again.
         return RESULTS_TABLE
 
     if any(any(m in c for m in _METADATA_COLUMNS) for c in columns):
         return SAMPLE_METADATA
+
+    # A single statistic column (edgeR's `logFC` with an `FDR` we did not recognise, say) still
+    # means this is per-gene OUTPUT, not per-sample input. Falling through to the matrix branch is
+    # how a results table gets offered as something to reproduce from, which is the one
+    # misclassification that would let a study read its own answer back.
+    if statistics:
+        return RESULTS_TABLE
 
     if _looks_like_matrix(text):
         return EXPRESSION_MATRIX

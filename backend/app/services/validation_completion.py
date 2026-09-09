@@ -85,7 +85,10 @@ def completion_for(*, route: str, capabilities: dict, supplements: list[dict] | 
                             f"{deposit.get('accession')} publishes {description} under "
                             f"{deposit.get('access')} access, which bioAF cannot obtain"
                             if controlled
-                            else f"bioAF cannot acquire data from {str(deposit.get('archive') or '').upper()}"
+                            else (
+                                f"{deposit.get('accession')} publishes {description}, and bioAF "
+                                f"cannot acquire data from {str(deposit.get('archive') or '').upper()}"
+                            )
                         ),
                     }
                 )
