@@ -19,10 +19,20 @@ class TestOneFileIsOneResource:
     def test_a_named_reference_and_a_manifest_entry_merge(self):
         rows = merge_resource_identity(
             [
-                {"label": "Supplemental Material (s1.txt)", "filename": "s1.txt", "role": SAMPLE_METADATA,
-                 "resolved": True, "row_count": 54},
-                {"label": "Supplemental File S1", "filename": "s1.txt", "role": SAMPLE_METADATA,
-                 "resolved": True, "row_count": 54},
+                {
+                    "label": "Supplemental Material (s1.txt)",
+                    "filename": "s1.txt",
+                    "role": SAMPLE_METADATA,
+                    "resolved": True,
+                    "row_count": 54,
+                },
+                {
+                    "label": "Supplemental File S1",
+                    "filename": "s1.txt",
+                    "role": SAMPLE_METADATA,
+                    "resolved": True,
+                    "row_count": 54,
+                },
             ]
         )
         assert len(rows) == 1
@@ -51,8 +61,13 @@ class TestOneFileIsOneResource:
         rows = merge_resource_identity(
             [
                 {"label": "Supplemental Material (s3.txt)", "filename": "s3.txt", "resolved": True},
-                {"label": "Supplemental File S3", "filename": "s3.txt", "resolved": True,
-                 "row_count": 194, "threshold_splits": {"abs_log2fc>2": 88}},
+                {
+                    "label": "Supplemental File S3",
+                    "filename": "s3.txt",
+                    "resolved": True,
+                    "row_count": 194,
+                    "threshold_splits": {"abs_log2fc>2": 88},
+                },
             ]
         )
         assert rows[0]["row_count"] == 194
@@ -61,7 +76,12 @@ class TestOneFileIsOneResource:
     def test_an_established_role_beats_an_unknown_one(self):
         rows = merge_resource_identity(
             [
-                {"label": "Supplemental Material (s2.docx)", "filename": "s2.docx", "resolved": True, "role": "unknown"},
+                {
+                    "label": "Supplemental Material (s2.docx)",
+                    "filename": "s2.docx",
+                    "resolved": True,
+                    "role": "unknown",
+                },
                 {"label": "Supplemental File S2", "filename": "s2.docx", "resolved": True, "role": CODE},
             ]
         )
@@ -95,8 +115,14 @@ class TestRetrievalPropagatesToTheCodeRows:
         from app.services.supplement_inventory import apply_retrieval_to_code_sources
 
         sources = [
-            {"kind": "supplementary", "url": None, "identifier": "Supplemental File S2",
-             "exists": "yes", "accessible": "not_attempted", "accessible_reason": None}
+            {
+                "kind": "supplementary",
+                "url": None,
+                "identifier": "Supplemental File S2",
+                "exists": "yes",
+                "accessible": "not_attempted",
+                "accessible_reason": None,
+            }
         ]
         updated = apply_retrieval_to_code_sources(
             sources, [{"label": "Supplemental File S2", "filename": "s2.docx", "role": CODE, "resolved": True}]
@@ -106,8 +132,16 @@ class TestRetrievalPropagatesToTheCodeRows:
     def test_the_reason_names_what_was_retrieved(self):
         from app.services.supplement_inventory import apply_retrieval_to_code_sources
 
-        sources = [{"kind": "supplementary", "url": None, "identifier": "Supplemental File S2",
-                    "exists": "yes", "accessible": "not_attempted", "accessible_reason": None}]
+        sources = [
+            {
+                "kind": "supplementary",
+                "url": None,
+                "identifier": "Supplemental File S2",
+                "exists": "yes",
+                "accessible": "not_attempted",
+                "accessible_reason": None,
+            }
+        ]
         updated = apply_retrieval_to_code_sources(
             sources, [{"label": "Supplemental File S2", "filename": "s2.docx", "role": CODE, "resolved": True}]
         )
@@ -116,8 +150,16 @@ class TestRetrievalPropagatesToTheCodeRows:
     def test_a_reference_that_was_not_retrieved_stays_not_attempted(self):
         from app.services.supplement_inventory import apply_retrieval_to_code_sources
 
-        sources = [{"kind": "supplementary", "url": None, "identifier": "Supplemental File S9",
-                    "exists": "yes", "accessible": "not_attempted", "accessible_reason": None}]
+        sources = [
+            {
+                "kind": "supplementary",
+                "url": None,
+                "identifier": "Supplemental File S9",
+                "exists": "yes",
+                "accessible": "not_attempted",
+                "accessible_reason": None,
+            }
+        ]
         updated = apply_retrieval_to_code_sources(
             sources, [{"label": "Supplemental File S9", "filename": None, "resolved": False}]
         )
@@ -128,8 +170,16 @@ class TestRetrievalPropagatesToTheCodeRows:
         downloaded but could not read is accessible and unextracted."""
         from app.services.supplement_inventory import apply_retrieval_to_code_sources
 
-        sources = [{"kind": "supplementary", "url": None, "identifier": "Supplemental File S2",
-                    "exists": "yes", "accessible": "not_attempted", "accessible_reason": None}]
+        sources = [
+            {
+                "kind": "supplementary",
+                "url": None,
+                "identifier": "Supplemental File S2",
+                "exists": "yes",
+                "accessible": "not_attempted",
+                "accessible_reason": None,
+            }
+        ]
         updated = apply_retrieval_to_code_sources(
             sources,
             [{"label": "Supplemental File S2", "filename": "s2.docx", "role": "unknown", "resolved": True}],
