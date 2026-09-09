@@ -139,3 +139,40 @@ async def test_fetch_returns_none_without_any_identifier():
     # No network should be touched when there is nothing to resolve.
     result = await FullTextFetchService.fetch()
     assert result is None
+
+
+# change_7.1 section 2: the JATS is fetched for its body text and then discarded, taking the
+# article's supplement manifest with it. The manifest is free here and nowhere else.
+_JATS_WITH_SUPPLEMENTS = (
+    '<?xml version="1.0"?>'
+    '<article xmlns="http://jats.nlm.nih.gov"><body><sec><title>Results</title>'
+    "<p>Sample characteristics are given in Supplemental File S1, and all analysis code in "
+    "Supplemental File S2.</p>"
+    "</sec></body></article>"
+)
+
+
+@pytest.mark.asyncio
+async def test_fetch_carries_the_supplement_manifest():
+    """A study requested by DOI reads its paper once. If the supplements are not taken from that
+    document they are not taken at all, and the paper reads as having published none."""
+    with respx.mock:
+        respx.get(f"{_BASE}/search").respond(json=_OPEN_ACCESS_SEARCH)
+        respx.get(f"{_BASE}/PMC3258391/fullTextXML").respond(text=_JATS_WITH_SUPPLEMENTS)
+
+        result = await FullTextFetchService.fetch(doi="10.1/abc")
+
+    assert result is not None
+    assert {s["label"] for s in result.supplements} == {"Supplemental File S1", "Supplemental File S2"}
+
+
+@pytest.mark.asyncio
+async def test_a_paper_with_no_supplements_carries_an_empty_manifest():
+    with respx.mock:
+        respx.get(f"{_BASE}/search").respond(json=_OPEN_ACCESS_SEARCH)
+        respx.get(f"{_BASE}/PMC3258391/fullTextXML").respond(text=_JATS)
+
+        result = await FullTextFetchService.fetch(doi="10.1/abc")
+
+    assert result is not None
+    assert result.supplements == []

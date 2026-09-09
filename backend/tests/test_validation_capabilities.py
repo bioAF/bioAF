@@ -543,3 +543,78 @@ class TestAggregatingAcrossDeposits:
         caps = await _discover(accessions=[])
         assert caps["deposit_exists"]["value"] == NO
         assert caps["deposits"] == []
+
+
+class TestTheSupplementManifestLandsAtReadTime(TestItLandsAtReadTime):
+    """change_7.1 section 2. The paper is read once. A supplement not taken from that document is
+    not taken at all, and the study then reports that the authors published nothing."""
+
+    @pytest.mark.asyncio
+    async def test_a_fetched_paper_leaves_its_supplements_on_the_study(
+        self, session, admin_user, monkeypatch
+    ):
+        from app.services.literature.fulltext_service import FullTextResult
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_study_service import ValidationStudyService
+
+        self._patch_llm(monkeypatch, self._EXTRACTION)
+        geo = _Geo()
+        monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", geo)
+        monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", geo)
+
+        async def _fetch(**_kw):
+            return FullTextResult(
+                text="the paper body",
+                source="europepmc",
+                external_id="PMC6771404",
+                supplements=[
+                    {
+                        "label": "Supplemental File S2",
+                        "filename": None,
+                        "mimetype": None,
+                        "source": "named_in_text",
+                        "role": "unknown",
+                        "size_bytes": None,
+                        "resolved": False,
+                    }
+                ],
+            )
+
+        monkeypatch.setattr(
+            "app.services.validation_driver_service.FullTextFetchService.fetch", staticmethod(_fetch)
+        )
+
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
+        )
+        await ValidationDriverService.read_and_plan(
+            session, study, None, admin_user.organization_id, admin_user.id
+        )
+
+        supplements = study.evidence_json["supplements"]
+        assert [s["label"] for s in supplements] == ["Supplemental File S2"]
+        assert supplements[0]["resolved"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_pasted_body_carries_no_manifest_and_that_is_not_an_error(
+        self, session, admin_user, monkeypatch
+    ):
+        """Pasted text is not a document; there is nothing to parse. An empty manifest here means
+        'nobody looked', which the report must not render as 'the paper has none'."""
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_study_service import ValidationStudyService
+
+        self._patch_llm(monkeypatch, self._EXTRACTION)
+        geo = _Geo()
+        monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", geo)
+        monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", geo)
+
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_accession=_GSE
+        )
+        await ValidationDriverService.read_and_plan(
+            session, study, "the paper body", admin_user.organization_id, admin_user.id
+        )
+
+        assert study.evidence_json.get("supplements") == []
+        assert study.state == "plan_ready"

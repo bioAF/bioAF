@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from xml.etree import ElementTree as ET
 
 import httpx
+
+from app.services.supplement_inventory import parse_jats_supplements
 
 logger = logging.getLogger("bioaf.literature.fulltext")
 
@@ -36,6 +38,11 @@ class FullTextResult:
     text: str
     source: str  # the fetch route, e.g. "europepmc"
     external_id: str  # the resolved id the text was pulled from, e.g. "PMC3258391"
+    # change_7.1 section 2: the article's supplement manifest, taken from the SAME document the
+    # body text came from. The JATS names S1, S2 and S3 in its prose and attaches its media
+    # elements; flattening to text and discarding the markup threw both away, and the supplements
+    # were then never looked for anywhere else.
+    supplements: list[dict] = field(default_factory=list)
 
 
 def _jats_to_text(xml_text: str) -> str:
@@ -116,4 +123,9 @@ class FullTextFetchService:
         text = _jats_to_text(xml_text)
         if not text:
             return None
-        return FullTextResult(text=text, source="europepmc", external_id=ext_id)
+        return FullTextResult(
+            text=text,
+            source="europepmc",
+            external_id=ext_id,
+            supplements=parse_jats_supplements(xml_text),
+        )
