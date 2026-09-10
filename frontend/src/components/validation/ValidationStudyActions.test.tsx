@@ -305,3 +305,89 @@ test("the modal is unchanged when discovery never ran", async () => {
   expect(screen.queryByText(/no pre-processed data was found/i)).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: /approve and run/i })).toBeInTheDocument();
 });
+
+// change_7.2 section 3: a running acquisition can be stopped, and a stopped study can be picked back
+// up, from the product. `/decline` needs `plan_ready` and `/classify` needs `comparing`, so a study
+// looping in `acquiring_processed` could be stopped by nothing at all: studies 29 and 33 were parked
+// in `error` by a direct database write.
+
+test("a study acquiring a deposit offers a way to stop it", () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "acquiring_processed" }} onChanged={jest.fn()} />);
+  expect(screen.getByRole("button", { name: /stop acquisition/i })).toBeInTheDocument();
+});
+
+test("a study inspecting a deposit offers it too", () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "inspecting_deposit" }} onChanged={jest.fn()} />);
+  expect(screen.getByRole("button", { name: /stop acquisition/i })).toBeInTheDocument();
+});
+
+test("stopping sends the reason so the record says why", async () => {
+  mockPost.mockResolvedValue({ id: 7, state: "classified" });
+  render(<ValidationStudyActions study={{ id: 7, state: "acquiring_data" }} onChanged={jest.fn()} />);
+
+  await userEvent.type(screen.getByLabelText(/why are you stopping/i), "wrong accession");
+  await userEvent.click(screen.getByRole("button", { name: /stop acquisition/i }));
+
+  await waitFor(() =>
+    expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/cancel-acquisition", {
+      reason: "wrong accession",
+    }),
+  );
+});
+
+test("a study waiting for a person to choose says what would resolve it", () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "acquiring_processed",
+        evidence: {
+          awaiting_choice: {
+            reason: "a person must select a file at the gate",
+            action: "choose a deposited file at the gate, or cancel the acquisition",
+          },
+        },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.getByText(/choose a deposited file at the gate/i)).toBeInTheDocument();
+});
+
+test("a study whose earlier run may still be going asks before starting another", () => {
+  render(
+    <ValidationStudyActions
+      study={{
+        id: 7,
+        state: "acquiring_data",
+        evidence: {
+          awaiting_adoption: {
+            operation: "data_acquisition",
+            action: "resume the run that is already going, or cancel it and start a new one",
+          },
+        },
+      }}
+      onChanged={jest.fn()}
+    />,
+  );
+  expect(screen.getByText(/resume the run that is already going/i)).toBeInTheDocument();
+});
+
+test("a study that reached an outcome can be resumed at the gate", async () => {
+  mockPost.mockResolvedValue({ id: 7, state: "plan_ready" });
+  render(<ValidationStudyActions study={{ id: 7, state: "classified" }} onChanged={jest.fn()} />);
+
+  await userEvent.click(screen.getByRole("button", { name: /resume at the gate/i }));
+
+  await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/resume", {}));
+});
+
+test("a study parked in error can be resumed the same way", () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "error" }} onChanged={jest.fn()} />);
+  expect(screen.getByRole("button", { name: /resume at the gate/i })).toBeInTheDocument();
+});
+
+test("resuming says it returns to the gate rather than restarting a run", () => {
+  render(<ValidationStudyActions study={{ id: 7, state: "classified" }} onChanged={jest.fn()} />);
+  expect(screen.getByText(/decide again/i)).toBeInTheDocument();
+});
