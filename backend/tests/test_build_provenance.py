@@ -83,6 +83,52 @@ class TestTheReportStatesTheBuild:
         _append_build_provenance(parts, {"stages": [], "stages_before_recording": True})
         assert any("unknown" in line.lower() for line in parts)
 
+    def test_the_section_reaches_the_validation_study_report(self):
+        """The renderer has six entity reports and the call landed in the wrong one, so the section
+        rendered on a SAMPLE report and never on the study it describes. Asserting on the helper
+        alone could not see that."""
+        from app.services.provenance.markdown_renderer import MarkdownRenderer
+
+        rendered = MarkdownRenderer.render(
+            "validation_study",
+            {
+                "generated_at": "now",
+                "generated_by": "test",
+                "report_type": "validation_study",
+                "schema_version": "1",
+                "organization": {"name": "demo"},
+                "entity": {
+                    "id": 1,
+                    "state": "classified",
+                    "build_provenance": {
+                        "stages": [{"stage": "assessment", "at": "now", "commit": "abc123", "image_digest": "sha256:x"}],
+                        "spans_more_than_one_build": False,
+                    },
+                },
+                "audit_trail": [],
+            },
+        )
+        assert "## Build Provenance" in rendered
+        assert "abc123" in rendered
+
+    def test_a_study_with_no_stages_still_gets_the_section(self):
+        from app.services.provenance.markdown_renderer import MarkdownRenderer
+
+        rendered = MarkdownRenderer.render(
+            "validation_study",
+            {
+                "generated_at": "now",
+                "generated_by": "test",
+                "report_type": "validation_study",
+                "schema_version": "1",
+                "organization": {"name": "demo"},
+                "entity": {"id": 1, "state": "classified", "build_provenance": {"stages": []}},
+                "audit_trail": [],
+            },
+        )
+        assert "## Build Provenance" in rendered
+        assert "unknown" in rendered.lower()
+
     def test_a_stamped_study_shows_its_commit_and_digest(self):
         from app.services.provenance.markdown_renderer import _append_build_provenance
 
