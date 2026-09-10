@@ -41,10 +41,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.validation_study import ValidationStudy
+from app.models.validation_study_claim import ValidationStudyClaim
 
 logger = logging.getLogger("bioaf.validation_ownership")
 
@@ -92,21 +93,26 @@ async def acquire(
 ) -> Claim | None:
     """Take the claim, or return None because somebody else holds it.
 
-    One statement. The conditional UPDATE is what makes this atomic: a second caller's identical
-    statement blocks on the row until the first commits and then matches nothing.
+    One statement. The conditional upsert is what makes this atomic: a second caller's identical
+    statement blocks on the claim row until the first commits, and then its WHERE matches nothing.
+
+    The claim lives on its own row, never on the study, so taking or renewing it can never queue
+    behind the transaction that is doing the owned work.
     """
     token = str(uuid.uuid4())
     now = _now()
-    result = await session.execute(
-        update(ValidationStudy)
-        .where(
-            ValidationStudy.id == study_id,
-            (ValidationStudy.claim_token.is_(None)) | (ValidationStudy.claim_expires_at < now),
+    expires = now + timedelta(seconds=lease_seconds)
+    statement = (
+        insert(ValidationStudyClaim)
+        .values(validation_study_id=study_id, token=token, holder=holder, claimed_at=now, expires_at=expires)
+        .on_conflict_do_update(
+            index_elements=[ValidationStudyClaim.validation_study_id],
+            set_={"token": token, "holder": holder, "claimed_at": now, "expires_at": expires},
+            where=ValidationStudyClaim.expires_at < now,
         )
-        .values(claim_token=token, claim_holder=holder, claim_expires_at=now + timedelta(seconds=lease_seconds))
-        .returning(ValidationStudy.id)
+        .returning(ValidationStudyClaim.validation_study_id)
     )
-    won = result.scalar_one_or_none() is not None
+    won = (await session.execute(statement)).scalar_one_or_none() is not None
     if commit:
         # The claim has to be visible to the other writer before the long work starts, and the long
         # work must not run inside the transaction that took it.
@@ -119,17 +125,22 @@ async def acquire(
 async def renew(session: AsyncSession, claim: Claim, *, lease_seconds: int = DEFAULT_LEASE_SECONDS) -> bool:
     """Extend a claim that is still ours. False means it was lost while the work ran."""
     result = await session.execute(
-        update(ValidationStudy)
-        .where(ValidationStudy.id == claim.study_id, ValidationStudy.claim_token == claim.token)
-        .values(claim_expires_at=_now() + timedelta(seconds=lease_seconds))
-        .returning(ValidationStudy.id)
+        update(ValidationStudyClaim)
+        .where(
+            ValidationStudyClaim.validation_study_id == claim.study_id,
+            ValidationStudyClaim.token == claim.token,
+        )
+        .values(expires_at=_now() + timedelta(seconds=lease_seconds))
+        .returning(ValidationStudyClaim.validation_study_id)
     )
     return result.scalar_one_or_none() is not None
 
 
 async def held(session: AsyncSession, claim: Claim) -> bool:
     token = (
-        await session.execute(select(ValidationStudy.claim_token).where(ValidationStudy.id == claim.study_id))
+        await session.execute(
+            select(ValidationStudyClaim.token).where(ValidationStudyClaim.validation_study_id == claim.study_id)
+        )
     ).scalar_one_or_none()
     return token == claim.token
 
@@ -152,9 +163,10 @@ async def release(session: AsyncSession, claim: Claim | None, *, commit: bool = 
     if claim is None:
         return
     await session.execute(
-        update(ValidationStudy)
-        .where(ValidationStudy.id == claim.study_id, ValidationStudy.claim_token == claim.token)
-        .values(claim_token=None, claim_holder=None, claim_expires_at=None)
+        delete(ValidationStudyClaim).where(
+            ValidationStudyClaim.validation_study_id == claim.study_id,
+            ValidationStudyClaim.token == claim.token,
+        )
     )
     if commit:
         await session.commit()
@@ -167,9 +179,7 @@ async def invalidate(session: AsyncSession, study_id: int) -> None:
     by a late extraction, which would silently undo it.
     """
     await session.execute(
-        update(ValidationStudy)
-        .where(ValidationStudy.id == study_id)
-        .values(claim_token=None, claim_holder=None, claim_expires_at=None)
+        delete(ValidationStudyClaim).where(ValidationStudyClaim.validation_study_id == study_id)
     )
 
 
@@ -180,7 +190,7 @@ async def owned(
     *,
     holder: str,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
-    renew_every: int = _RENEW_EVERY,
+    renew_every: float = _RENEW_EVERY,
 ):
     """Hold a study for the duration of a block, renewing the claim while the work runs.
 
@@ -200,9 +210,10 @@ async def owned(
         heartbeat.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await heartbeat
-        # Released on its own connection. The caller's transaction may be mid-rollback after a
-        # failure, and a release that gets rolled back with it leaves the study locked until the
-        # lease expires, which is the hold this protocol exists to remove.
+        # Released on its own connection, which is safe precisely because the claim is its own row:
+        # it cannot queue behind the caller's transaction. The caller's may be mid-rollback after a
+        # failure, and a release that got rolled back with it would leave the study locked until the
+        # lease expired, which is the hold this protocol exists to remove.
         with contextlib.suppress(Exception):
             from app.database import async_session_factory
 
@@ -210,7 +221,7 @@ async def owned(
                 await release(release_session, claim, commit=True)
 
 
-async def _heartbeat(claim: Claim, *, lease_seconds: int, every: int) -> None:
+async def _heartbeat(claim: Claim, *, lease_seconds: int, every: float) -> None:
     """Renew a claim on its own connection until cancelled."""
     from app.database import async_session_factory
 
@@ -230,14 +241,14 @@ async def _heartbeat(claim: Claim, *, lease_seconds: int, every: int) -> None:
 # ---- External operation identity (the half a database fence cannot cover) ----
 
 
-def operation_of(study: ValidationStudy, key: str) -> dict | None:
+def operation_of(study, key: str) -> dict | None:
     """The recorded identity of a logical external operation, or None if none was ever started."""
     return ((study.evidence_json or {}).get("operations") or {}).get(key)
 
 
 async def begin_operation(
     session: AsyncSession,
-    study: ValidationStudy,
+    study,
     key: str,
     *,
     claim: Claim | None = None,
@@ -269,7 +280,7 @@ async def begin_operation(
 
 async def record_dispatch(
     session: AsyncSession,
-    study: ValidationStudy,
+    study,
     key: str,
     *,
     external_id,
@@ -284,7 +295,7 @@ async def record_dispatch(
     return record
 
 
-async def finish_operation(session: AsyncSession, study: ValidationStudy, key: str, *, status: str = OP_DONE) -> None:
+async def finish_operation(session: AsyncSession, study, key: str, *, status: str = OP_DONE) -> None:
     record = dict(operation_of(study, key) or {})
     if not record:
         return
@@ -293,7 +304,7 @@ async def finish_operation(session: AsyncSession, study: ValidationStudy, key: s
     await session.flush()
 
 
-def adoptable(study: ValidationStudy, key: str) -> dict | None:
+def adoptable(study, key: str) -> dict | None:
     """An operation a previous worker started that this one must adopt rather than replace."""
     record = operation_of(study, key)
     if not record:
@@ -303,7 +314,7 @@ def adoptable(study: ValidationStudy, key: str) -> dict | None:
     return record
 
 
-async def adopt(session: AsyncSession, study: ValidationStudy, key: str, *, by: str) -> dict:
+async def adopt(session: AsyncSession, study, key: str, *, by: str) -> dict:
     """Take over a running operation and record the adoption, rather than launching a second one."""
     record = dict(operation_of(study, key) or {})
     record["adopted_at"] = _now().isoformat()
@@ -314,7 +325,7 @@ async def adopt(session: AsyncSession, study: ValidationStudy, key: str, *, by: 
     return record
 
 
-def _write_operation(study: ValidationStudy, key: str, record: dict) -> None:
+def _write_operation(study, key: str, record: dict) -> None:
     evidence = dict(study.evidence_json or {})
     operations = dict(evidence.get("operations") or {})
     operations[key] = record

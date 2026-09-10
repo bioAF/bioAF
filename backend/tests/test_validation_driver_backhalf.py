@@ -98,6 +98,11 @@ async def _study(session, user, *, state, accessions=("SRR390728",), pipeline_ke
     )
     study.state = state
     study.experiment_id = experiment_id
+    # change_7.2 section 4: the public assessment runs on the first tick after approval, on both
+    # routes. These tests are about what the back half does AFTER that, so the study arrives with the
+    # assessment already recorded, exactly as it would one tick later in the application. That the
+    # stage runs at all, and runs before any acquisition, is proved in test_assessment_stage.py.
+    study.evidence_json = {**(study.evidence_json or {}), "assessment": {"at": "already run"}}
     await session.flush()
     return study
 
@@ -468,6 +473,7 @@ async def test_retry_relaunches_after_backoff_elapses(session, admin_user, monke
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
     study.data_run_id = None
     study.evidence_json = {
+        **(study.evidence_json or {}),
         "acquire_retries": 1,
         "acquire_retry_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
     }
@@ -487,7 +493,7 @@ async def test_transient_retries_exhaust_to_error(session, admin_user, monkeypat
     monkeypatch.setattr(PipelineRunService, "launch_run", spy)
     exp_id = await _experiment_id(session, admin_user)
     study = await _study(session, admin_user, state="acquiring_data", experiment_id=exp_id)
-    study.evidence_json = {"acquire_retries": 3}  # budget already spent
+    study.evidence_json = {**(study.evidence_json or {}), "acquire_retries": 3}  # budget already spent
     fetch = await _run(
         session,
         admin_user,
