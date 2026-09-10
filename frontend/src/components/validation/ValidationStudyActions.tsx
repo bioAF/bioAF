@@ -67,6 +67,11 @@ function intendedMethod(caps: RouteCapabilities | null | undefined): string | nu
 // manual classification gate (Phase 1 keeps comparison manual). The automated stages in between are
 // advanced by the background driver, so they surface no action here. Each action returns the updated
 // study, handed back via onChanged so the page can re-render without a full refetch.
+// Where a run is actually in flight, and where a stopped or failed study can be picked back up.
+// Both lists mirror the server's, which is what refuses the action if these ever drift.
+const ACQUIRING_STATES = ["acquiring_data", "acquiring_processed", "inspecting_deposit"];
+const RESUMABLE_STATES = ["classified", "error"];
+
 export function ValidationStudyActions({
   study,
   onChanged,
@@ -86,7 +91,14 @@ export function ValidationStudyActions({
       capabilities?: RouteCapabilities | null;
       // The route chosen at the button, discovered to be impossible once the paper was read. The
       // study is held at `plan_ready` and this is what says so; without it the hold is invisible.
-      route_blocked?: { chosen?: string | null; reason?: string | null } | null;
+      route_blocked?: { chosen?: string | null; reason?: string | null; action?: string | null } | null;
+      // change_7.2 section 3: a hold that a person resolves. Recorded once rather than on every
+      // tick, and carrying the action that ends it, because a wait with no stated way out is the
+      // indefinite hold this change exists to remove.
+      awaiting_choice?: { reason?: string | null; action?: string | null } | null;
+      // change_7.2 section 2: an external operation an earlier worker may have started. An assisted
+      // organization is asked before a second one is launched.
+      awaiting_adoption?: { operation?: string | null; action?: string | null } | null;
     } | null;
     // The plan's one fatal blocker, when it has it. Approval is refused server-side while it
     // stands, so the control is not offered: DepositConflictNotice carries the two ways out.
@@ -105,6 +117,9 @@ export function ValidationStudyActions({
   const [error, setError] = useState<string | null>(null);
   const [fullText, setFullText] = useState("");
   const [declineReason, setDeclineReason] = useState("");
+  // Kept apart from the decline reason: they answer different questions and end up on different
+  // records, and one shared box would carry a stale sentence into the wrong one.
+  const [stopReason, setStopReason] = useState("");
   // The route the approver chooses, asked in the confirm modal. `deposit` is the default on the
   // owner's instruction (2026-09-07): start from what the authors deposited, and spend on raw reads
   // only when a person asks for it.
@@ -247,6 +262,69 @@ export function ValidationStudyActions({
           }}
           onCancel={() => setShowApprove(false)}
         />
+      </div>
+    );
+  } else if (ACQUIRING_STATES.includes(study.state) && canApprove) {
+    // change_7.2 section 3: no product action could stop a study in this state. `/decline` needs
+    // `plan_ready` and `/classify` needs `comparing`, so studies 29 and 33 were parked in `error` by
+    // a direct database write. Stopping a run must never require database access.
+    controls = (
+      <div className="space-y-2">
+        {study.evidence?.awaiting_choice && (
+          <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {study.evidence.awaiting_choice.reason}. {study.evidence.awaiting_choice.action}
+          </p>
+        )}
+        {study.evidence?.awaiting_adoption && (
+          <p className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            An earlier attempt on this study may still be running. bioAF will not start a second one:{" "}
+            {study.evidence.awaiting_adoption.action}.
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            aria-label="Why are you stopping this?"
+            value={stopReason}
+            onChange={(e) => setStopReason(e.target.value)}
+            placeholder="Why are you stopping this? (optional)"
+            className="rounded border border-gray-300 px-3 py-2 text-sm"
+          />
+          <button
+            className={`${btn} border border-red-300 text-red-700 hover:bg-red-50`}
+            disabled={busy}
+            onClick={() =>
+              run(() =>
+                api.post(
+                  `${base}/cancel-acquisition`,
+                  stopReason.trim() ? { reason: stopReason } : {},
+                ),
+              )
+            }
+          >
+            {busy ? "Working..." : "Stop acquisition"}
+          </button>
+        </div>
+        <p className="text-xs text-gray-500">
+          Stopping ends this attempt and records what was established so far. It says nothing about
+          the paper, and the study can be resumed.
+        </p>
+      </div>
+    );
+  } else if (RESUMABLE_STATES.includes(study.state) && canApprove) {
+    controls = (
+      <div className="space-y-2">
+        <button
+          className={`${btn} border border-gray-300 text-gray-800 hover:bg-gray-50`}
+          disabled={busy}
+          onClick={() => run(() => api.post(`${base}/resume`, {}))}
+        >
+          {busy ? "Working..." : "Resume at the gate"}
+        </button>
+        <p className="text-xs text-gray-500">
+          Credentials, a corrected accession or a newly public deposit can make a blocked study
+          runnable. Resuming returns it to the approval gate so you decide again, rather than
+          starting a run. What was already established is kept.
+        </p>
       </div>
     );
   } else if (study.state === "comparing" && canApprove) {

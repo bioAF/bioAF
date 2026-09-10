@@ -109,7 +109,13 @@ type Plan7Evidence = DepositEvidence &
     precompute_checks?: PrecomputeChecks | null;
     species_override?: SpeciesOverride | null;
     // Set when the route chosen at the button turned out to be impossible once the paper was read.
-    route_blocked?: { chosen?: string | null; reason?: string | null } | null;
+    // change_7.2 section 1: `action` is which of the six typed policy answers refused it, so the
+    // notice can tell a missing adapter from a missing input from a missing authorization.
+    route_blocked?: { chosen?: string | null; reason?: string | null; action?: string | null } | null;
+    // change_7.2 sections 2 and 3: the two holds a person resolves. Without a surface they are
+    // exactly the indefinite hold this change exists to remove.
+    awaiting_choice?: { reason?: string | null; action?: string | null } | null;
+    awaiting_adoption?: { operation?: string | null; action?: string | null } | null;
     // change_7.1 section 2: the article's own attachments, named at read time and resolved to real
     // files once something goes and gets them.
     supplements?: Supplement[] | null;
@@ -445,6 +451,8 @@ export default function ValidationStudyPage() {
                     }
                   : null,
                 route_blocked: plan7.route_blocked ?? null,
+                awaiting_choice: plan7.awaiting_choice ?? null,
+                awaiting_adoption: plan7.awaiting_adoption ?? null,
               },
               plan: { deposit_conflict: plan?.deposit_conflict ?? null },
             }}
