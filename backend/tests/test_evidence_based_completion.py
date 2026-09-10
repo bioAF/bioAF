@@ -95,7 +95,13 @@ class TestEveryLimitationNamesWhatItAffects:
 
     def test_more_than_one_limitation_survives(self):
         """Section 7: preserve multiple simultaneous limitations rather than forcing every
-        observation into one explanation."""
+        observation into one explanation.
+
+        change_7.2 section 1 changed which limitation the EGA leg produces. Both the adapter gap and
+        the authorization gap are true of a controlled EGA dataset, and the adapter is asked first
+        because it is the axis bioAF owns: telling a lab to negotiate data access for a capability
+        gap sends it to the wrong remedy.
+        """
         outcome = completion_for(
             route="both",
             capabilities={
@@ -106,7 +112,29 @@ class TestEveryLimitationNamesWhatItAffects:
             supplements=[_RESULTS_TABLE],
         )
         kinds = {limitation["kind"] for limitation in outcome["limitations"]}
-        assert {"controlled_access", "missing_input"} <= kinds
+        assert {"unsupported_acquisition", "missing_input"} <= kinds
+
+    def test_controlled_access_is_still_reached_where_the_adapter_exists(self):
+        """The authorization axis is only reachable once bioAF can read the archive at all. Section 9
+        turns the EGA deposit above into exactly this shape."""
+        outcome = completion_for(
+            route="pipeline",
+            capabilities={
+                "deposits": [
+                    {
+                        "archive": "geo",
+                        "accession": "GSE000001",
+                        "access": "controlled",
+                        "supported": "yes",
+                        "raw_data": "yes",
+                    }
+                ],
+                "raw_data": {"value": "yes"},
+            },
+            supplements=[],
+        )
+        assert {limitation["kind"] for limitation in outcome["limitations"]} == {"controlled_access"}
+        assert "not authorised" in outcome["reason"]
 
     def test_each_limitation_names_its_resource(self):
         outcome = completion_for(

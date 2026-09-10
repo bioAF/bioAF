@@ -1062,6 +1062,13 @@ cmd_build() {
     # next `start`/`restart` runs that build instead of whatever was there
     # before.
     pin_image_tag "v$(get_current_version)"
+    # change_7.2 section 7: stamp the commit into the image. The version tag is
+    # mutable, so two runs can report the same version and be different code;
+    # that is exactly what made studies 32 and 33 incomparable. Unset (not a git
+    # worktree) leaves it empty, which the application records as an explicit
+    # unknown rather than a guess.
+    BIOAF_BUILD_COMMIT="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || true)"
+    export BIOAF_BUILD_COMMIT
     local service="${1:-}"
     if [ -n "$service" ]; then
         bold "=== Building $service ==="

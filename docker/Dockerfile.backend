@@ -19,6 +19,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 ENV PYTHONPATH=/app
 
+# change_7.2 section 7: which build this image IS, baked in at build time.
+#
+# Studies 32 and 33 both reported version 2026.9.1 and ran on different code: the version tag is
+# mutable and the container had been rebuilt between them, so the exports established that observed
+# behaviour differed and could not attribute the difference to anything. These are read by the
+# application and recorded per execution stage.
+#
+# Empty is the honest default. The feature records an unstamped build as an explicit UNKNOWN rather
+# than guessing, and these must NOT be set in docker-compose's `environment:`, which would override
+# the baked value with an empty string at runtime.
+ARG BIOAF_BUILD_COMMIT=""
+ARG BIOAF_BUILD_IMAGE_DIGEST=""
+ENV BIOAF_BUILD_COMMIT=$BIOAF_BUILD_COMMIT
+ENV BIOAF_BUILD_IMAGE_DIGEST=$BIOAF_BUILD_IMAGE_DIGEST
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

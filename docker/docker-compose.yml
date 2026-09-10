@@ -23,6 +23,11 @@ services:
     build:
       context: ../backend
       dockerfile: ../docker/Dockerfile.backend
+      args:
+        # change_7.2 section 7: stamped into the image, never into `environment:`. Setting these at
+        # runtime would override the baked value with an empty string on every restart.
+        BIOAF_BUILD_COMMIT: ${BIOAF_BUILD_COMMIT:-}
+        BIOAF_BUILD_IMAGE_DIGEST: ${BIOAF_BUILD_IMAGE_DIGEST:-}
     environment:
       PYTHONPATH: /app
       RUN_MIGRATIONS: "false"

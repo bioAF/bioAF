@@ -91,21 +91,30 @@ def completion_for(
             continue
 
         holders = [d for d in deposits if d.get(key) == "yes"]
-        if answer == "yes" and holders and not [d for d in holders if d.get("supported") == "yes"]:
+        acquirable = [d for d in holders if d.get("supported") == "yes" and d.get("access") != "controlled"]
+        if answer == "yes" and holders and not acquirable:
             for deposit in holders:
-                controlled = deposit.get("access") == "controlled"
+                # change_7.2 section 1: the adapter question is asked FIRST, exactly as the route
+                # policy asks it, so the outcome and the refusal cannot name different axes for the
+                # same fact. Both can be true of one deposit, and the adapter is the axis bioAF owns:
+                # telling a lab to negotiate data access for a capability gap sends it to the wrong
+                # remedy, and the reverse files a feature request for a permission problem.
+                unsupported = deposit.get("supported") != "yes"
                 limitations.append(
                     {
-                        "kind": CONTROLLED_ACCESS if controlled else UNSUPPORTED_ACQUISITION,
+                        "kind": UNSUPPORTED_ACQUISITION if unsupported else CONTROLLED_ACCESS,
                         "resource": deposit.get("accession"),
                         "operation": leg,
                         "detail": (
                             f"{deposit.get('accession')} publishes {description} under "
-                            f"{deposit.get('access')} access, which bioAF cannot obtain"
-                            if controlled
+                            f"{deposit.get('access')} access, and bioAF has no adapter for "
+                            f"{str(deposit.get('archive') or '').upper()}. The data is published; "
+                            "the limitation is bioAF's"
+                            if unsupported
                             else (
-                                f"{deposit.get('accession')} publishes {description}, and bioAF "
-                                f"cannot acquire data from {str(deposit.get('archive') or '').upper()}"
+                                f"{deposit.get('accession')} publishes {description} under "
+                                f"{deposit.get('access')} access, and this organisation is not "
+                                "authorised to reach it"
                             )
                         ),
                     }
