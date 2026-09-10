@@ -119,6 +119,7 @@ from app.models.sdr import (
     SdrStatusTransition,
 )
 from app.models.validation_study import ValidationStudy
+from app.models.validation_study_claim import ValidationStudyClaim
 from app.models.validation_study_issue import ValidationStudyIssue
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.comparison_target import ComparisonTarget
@@ -245,6 +246,7 @@ __all__ = [
     "ValidationStudy",
     "ReproductionPlan",
     "ComparisonTarget",
+    "ValidationStudyClaim",
     "ValidationStudyIssue",
     "SamplesheetMapping",
 ]

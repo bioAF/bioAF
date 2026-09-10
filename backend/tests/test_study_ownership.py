@@ -122,9 +122,10 @@ class TestRenewal:
     @pytest.mark.asyncio
     async def test_owned_renews_while_the_work_runs(self, session, other_session, admin_user):
         study = await _study(session, admin_user)
-        async with own.owned(session, study.id, holder="worker-1", lease_seconds=1, renew_every=0) as claim:
+        async with own.owned(session, study.id, holder="worker-1", lease_seconds=1, renew_every=0.2) as claim:
             assert claim is not None
-            await asyncio.sleep(0.05)
+            # Longer than the base lease: without renewal the claim would be free by now.
+            await asyncio.sleep(1.3)
             assert await own.acquire(other_session, study.id, holder="worker-2") is None
 
     @pytest.mark.asyncio
