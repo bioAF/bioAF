@@ -306,8 +306,25 @@ class ValidationStudyService:
         Its plan is copied, not re-extracted: the paper has already been read and a second LLM call
         would cost money to produce the same answer. Each study names the other, so neither reads as
         an orphan duplicate in the list.
+
+        change_7.2 section 8: ONE sibling per authorization. Nothing checked, so a retried approval
+        would create a second study over the same paper on the same route, with its own copied plan
+        and its own compute bill, and the first would be orphaned by the forward pointer moving.
         """
         from app.models.reproduction_plan import ReproductionPlan
+
+        existing_id = (study.evidence_json or {}).get("sibling_study_id")
+        if existing_id:
+            existing = (
+                await session.execute(
+                    select(ValidationStudy).where(
+                        ValidationStudy.id == int(existing_id),
+                        ValidationStudy.organization_id == study.organization_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return existing
 
         sibling = ValidationStudy(
             organization_id=study.organization_id,

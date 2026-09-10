@@ -59,7 +59,16 @@ from app.services.validation_acquisition_outcome import (
 )
 from app.services.validation_completion import KIND_FOR_ACTION
 from app.services.validation_route_policy import UNDETERMINED, decide_route
-from app.services.validation_ownership import ClaimLost, assert_held, owned
+from app.services.validation_ownership import (
+    ClaimLost,
+    adopt,
+    adoptable,
+    assert_held,
+    begin_operation,
+    finish_operation,
+    owned,
+    record_dispatch,
+)
 from app.services.validation_provenance import record_stage
 from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.qc_dashboard_service import QCDashboardService
@@ -193,6 +202,11 @@ _ACTIVE_BACK_HALF_STATES = (
     "reproducing",
     "comparing",
 )
+
+# change_7.2 section 2: the logical external operations a study can have in flight. One identity
+# per logical attempt, persisted before dispatch, so a restart adopts rather than relaunches.
+_OP_DATA_ACQUISITION = "data_acquisition"
+_OP_ANALYSIS = "analysis"
 
 _FETCHNGS_KEY = "nf-core/fetchngs"
 # fetchngs's catalog default download_method is aspera, unproven on our GKE nodes; ftp is proven
@@ -670,10 +684,10 @@ class ValidationDriverService:
         handler = handlers.get(study.state)
         if handler is None:
             return False
-        if study.state == "requested":
-            # The read is the step that races, so it is the one that must run under this tick's own
-            # claim rather than taking a second one and finding itself already held.
-            return await ValidationDriverService._handle_requested(session, study, claim=claim)
+        # The steps that take this tick's claim: the read races two writers, and the two launches
+        # dispatch external work that a database fence cannot recall.
+        if study.state in ("requested", "acquiring_data", "setup"):
+            return await handler(session, study, claim=claim)
         return await handler(session, study)
 
     @staticmethod
@@ -743,7 +757,7 @@ class ValidationDriverService:
         await conclude_without_execution(session, study, reason)
 
     @staticmethod
-    async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         """Launch fetchngs (first visit), or on its completion run D2 and advance to setup (or, if the
         fetched data is not usable, early-exit to missing_data per spec-02/spec-03)."""
         if study.data_run_id is None:
@@ -751,13 +765,17 @@ class ValidationDriverService:
             retry_at = (study.evidence_json or {}).get("acquire_retry_at")
             if retry_at and _now() < _parse_iso(retry_at):
                 return False
-            return await ValidationDriverService._launch_fetchngs(session, study)
+            return await ValidationDriverService._launch_fetchngs(session, study, claim=claim)
 
         run = await ValidationDriverService._load_run(session, study.data_run_id)
         if run is None or run.status in _RUN_FAILED:
             return await ValidationDriverService._handle_acquisition_failure(session, study, run)
         if run.status != _RUN_DONE:
             return False  # still fetching
+
+        # The operation reached its end, so nothing may adopt it any more: a completed run is not a
+        # running one, and treating it as adoptable would stop the study relaunching when it should.
+        await finish_operation(session, study, _OP_DATA_ACQUISITION)
 
         # D2: turn the fetched data into first-class samples with their FASTQ attached. Both are
         # best-effort + idempotent, so re-running (or overlapping with the monitor's ingest) is safe.
@@ -1335,7 +1353,7 @@ class ValidationDriverService:
         return True
 
     @staticmethod
-    async def _handle_setup(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _handle_setup(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         """Launch the analysis pipeline (D3) against the set-up experiment and advance to running."""
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         if plan is None or not plan.pipeline_key:
@@ -1370,8 +1388,17 @@ class ValidationDriverService:
             # Some fetched samples may lack usable FASTQ; drop them rather than fail the whole run.
             drop_samples_without_files=True,
         )
+        # The same guarantee the data acquisition has: one identity per logical attempt, written
+        # before dispatch, and a run a previous worker started adopted rather than duplicated.
+        adopted = await ValidationDriverService._adopt_running_operation(session, study, _OP_ANALYSIS)
+        if adopted is not None:
+            return adopted
+
+        await begin_operation(session, study, _OP_ANALYSIS, claim=claim, kind=plan.pipeline_key)
+        await assert_held(session, claim)
         run = await ValidationDriverService._launch(session, study, launch)
         study.analysis_run_id = run.id
+        await record_dispatch(session, study, _OP_ANALYSIS, external_id=run.id, claim=claim)
         if run.status in _RUN_FAILED:
             return await ValidationDriverService._fail(session, study, "analysis run failed to launch")
 
@@ -2483,7 +2510,7 @@ class ValidationDriverService:
         return True
 
     @staticmethod
-    async def _launch_fetchngs(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _launch_fetchngs(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         accessions = list(plan.accessions_json or []) if plan else []
         if not accessions:
@@ -2508,16 +2535,68 @@ class ValidationDriverService:
             )
             study.experiment_id = experiment.id
 
+        # change_7.2 section 2: fencing a database write does not recall a pipeline run that has
+        # already launched. The operation's identity is persisted BEFORE the dispatch, reused across
+        # retries, and a run a previous worker started is adopted rather than replaced.
+        adopted = await ValidationDriverService._adopt_running_operation(session, study, _OP_DATA_ACQUISITION)
+        if adopted is not None:
+            return adopted
+
         launch = PipelineRunLaunchRequest(
             pipeline_key=_FETCHNGS_KEY,
             experiment_id=study.experiment_id,
             parameters={"accessions": accessions, "download_method": _FETCHNGS_DOWNLOAD_METHOD},
         )
+        await begin_operation(session, study, _OP_DATA_ACQUISITION, claim=claim, kind="nf-core/fetchngs")
+        await assert_held(session, claim)
         run = await ValidationDriverService._launch(session, study, launch)
         study.data_run_id = run.id
+        await record_dispatch(session, study, _OP_DATA_ACQUISITION, external_id=run.id, claim=claim)
         if run.status in _RUN_FAILED:
             return await ValidationDriverService._fail(session, study, "data acquisition run failed to launch")
         return True  # stays in acquiring_data until the fetch completes
+
+    @staticmethod
+    async def _adopt_running_operation(session: AsyncSession, study: ValidationStudy, key: str) -> bool | None:
+        """Take over an external operation a previous worker started, or ask before doing so.
+
+        Returns True when this tick's work is done (adopted, or waiting for an answer), None when
+        there is nothing to adopt and the caller should dispatch.
+
+        A worker can launch a run and crash before recording its identifier, and its replacement must
+        never launch a second one. An autonomous organization adopts and records the adoption; an
+        assisted one is asked whether to resume it or start a new one.
+        """
+        record = adoptable(study, key)
+        if record is None:
+            return None
+
+        org = await session.get(Organization, study.organization_id)
+        autonomy = (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
+        if autonomy != AUTONOMY_AUTONOMOUS:
+            evidence = dict(study.evidence_json or {})
+            if not evidence.get("awaiting_adoption"):
+                logger.info("validation study %d: an earlier %s may still be running; asking", study.id, key)
+            evidence["awaiting_adoption"] = {
+                "operation": key,
+                "operation_id": record.get("operation_id"),
+                "external_id": record.get("external_id"),
+                "at": _now().isoformat(),
+                "action": "resume the run that is already going, or cancel it and start a new one",
+            }
+            study.evidence_json = evidence
+            await session.flush()
+            return True
+
+        await adopt(session, study, key, by="driver")
+        if record.get("external_id"):
+            if key == _OP_DATA_ACQUISITION and study.data_run_id is None:
+                study.data_run_id = record["external_id"]
+            elif key == _OP_ANALYSIS and study.analysis_run_id is None:
+                study.analysis_run_id = record["external_id"]
+        logger.info("validation study %d: adopted the running %s rather than launching a second", study.id, key)
+        await session.flush()
+        return True
 
     @staticmethod
     async def _launch(session: AsyncSession, study: ValidationStudy, launch: PipelineRunLaunchRequest):
