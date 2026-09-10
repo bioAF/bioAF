@@ -346,7 +346,6 @@ def _render_sample_md(report: dict[str, Any]) -> str:
         )
     parts.append("")
 
-    _append_build_provenance(parts, entity.get("build_provenance") or {})
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
 
@@ -731,6 +730,7 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
     _append_issues(parts, entity.get("issues") or [])
+    _append_build_provenance(parts, entity.get("build_provenance") or {})
 
     _append_audit_trail(parts, report.get("audit_trail", []))
     return "\n".join(parts)
