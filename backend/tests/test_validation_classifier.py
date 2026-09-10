@@ -14,6 +14,16 @@ from app.services.validation_classifier_service import (
 )
 
 
+# change_7.2 section 6: a depth claim is scored only when the paper settles the three axes
+# `total_sequences` fixes: whether the figure is per sample or a total, whether it is before or after
+# trimming, and whether it counts reads or read pairs. A paired-end protocol puts a factor of two
+# inside a relative tolerance of 0.25, so an unqualified claim is reported beside bioAF's number
+# rather than scored against an assumption about what the authors meant. The depth claims below that
+# are meant to SCORE therefore state their units; the ones testing the older name-level rules are
+# unchanged.
+_QUALIFIED_DEPTH = "raw read pairs per sample"
+
+
 def _target(metric_key, claimed_value=None, unit=None, tolerance=None):
     return {
         "metric_key": metric_key,
@@ -101,7 +111,7 @@ class TestClassify:
         # validating a finding -> inconclusive, with the scope stated in the reasoning.
         result = classify_study(
             [
-                _target("total_reads", 7_000_000),
+                _target("total_reads", 7_000_000, unit=_QUALIFIED_DEPTH),
                 _target("alignment_rate", 83.4, unit="%"),
                 _target("differentially_expressed_genes", 1_200),
             ],
@@ -170,7 +180,10 @@ class TestClassify:
         # The old GSE309060 bulk smoke shape: read depth agrees, the other claim has no counterpart. Under
         # the spec-06 gate a lone QC-floor agreement no longer earns validated - it is inconclusive.
         result = classify_study(
-            [_target("mean_raw_reads_per_sample", 7e6), _target("mean_reads_after_trimming_per_sample", 5e6)],
+            [
+                _target("mean_raw_reads_per_sample", 7e6, unit=_QUALIFIED_DEPTH),
+                _target("mean_reads_after_trimming_per_sample", 5e6),
+            ],
             {"total_sequences": 6_600_000},
             mapping_confidence="partial",
         )
@@ -382,7 +395,7 @@ class TestPeakCountQualifierAliasing:
         # cannot strike the paper: only a SCORED divergence can reach not_validated. Here the only scored
         # metric is a QC floor, so the verdict is inconclusive - crucially, never not_validated.
         result = classify_study(
-            [_target("total_reads", 7_000_000), _target("peak_count_activated", 90_000)],
+            [_target("total_reads", 7_000_000, unit=_QUALIFIED_DEPTH), _target("peak_count_activated", 90_000)],
             {"total_sequences": 6_600_000, "peak_count": 40_000},
             mapping_confidence="exact",
             reference_genome="GRCh38",
@@ -641,11 +654,25 @@ class TestBasisMismatchIsAdvisory:
         """ "before trimming" states the basis we compute on. It must not be caught by the same rule
         that catches "after trimming", which a bare "trim" substring would do."""
         rows = compare_targets(
-            [_target("total_sequences", 7_000_000, unit="reads per sample (average, before trimming)")],
+            [_target("total_sequences", 7_000_000, unit="read pairs per sample (average, before trimming)")],
             {"total_sequences": 7_100_000},
         )
         assert rows[0]["advisory"] is False
         assert rows[0]["verdict"] == "agree"
+
+    def test_an_otherwise_complete_claim_that_omits_the_read_unit_is_not_scored(self):
+        """change_7.2 section 6: the same claim without "pairs". A paired-end protocol makes a factor
+        of two available inside a plausible-looking binding, and the tolerance is 0.25."""
+        rows = compare_targets(
+            [_target("total_sequences", 7_000_000, unit="reads per sample (average, before trimming)")],
+            {"total_sequences": 7_100_000},
+        )
+        assert rows[0]["advisory"] is True
+        assert "reads or read pairs" in rows[0]["advisory_reason"]
+        # The paper's number is still reported beside ours: an unstated convention is a gap in what
+        # the paper said, not evidence that the paper is wrong.
+        assert rows[0]["claimed_value"] == 7_000_000
+        assert rows[0]["computed_value"] == 7_100_000
 
     def test_the_basis_conflict_can_be_stated_in_the_key_instead_of_the_unit(self):
         """A model that keys the basis rather than unitting it must land in the same place."""
