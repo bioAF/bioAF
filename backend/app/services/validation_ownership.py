@@ -145,6 +145,19 @@ async def held(session: AsyncSession, claim: Claim) -> bool:
     return token == claim.token
 
 
+async def live_claim(session: AsyncSession, study_id: int) -> ValidationStudyClaim | None:
+    """The claim a worker holds on this study right now, or None. An expired claim is a crashed
+    worker's, which the next caller takes over, so it is not work under way."""
+    return (
+        await session.execute(
+            select(ValidationStudyClaim).where(
+                ValidationStudyClaim.validation_study_id == study_id,
+                ValidationStudyClaim.expires_at > _now(),
+            )
+        )
+    ).scalar_one_or_none()
+
+
 async def assert_held(session: AsyncSession, claim: Claim | None) -> None:
     """The fence. Called immediately before a write, and immediately before a dispatch.
 
@@ -178,9 +191,7 @@ async def invalidate(session: AsyncSession, study_id: int) -> None:
     This is what cancel uses: a cancellation that leaves the running claim valid can be overwritten
     by a late extraction, which would silently undo it.
     """
-    await session.execute(
-        delete(ValidationStudyClaim).where(ValidationStudyClaim.validation_study_id == study_id)
-    )
+    await session.execute(delete(ValidationStudyClaim).where(ValidationStudyClaim.validation_study_id == study_id))
 
 
 @asynccontextmanager

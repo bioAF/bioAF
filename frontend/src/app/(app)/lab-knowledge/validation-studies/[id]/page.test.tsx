@@ -4,14 +4,17 @@
  * The study is Groff on the current build with the attachment bundle failing: nothing executed, the
  * raw reads sit under controlled access in an archive bioAF cannot read, and no claim was compared.
  */
-import { render, screen, waitFor } from "@/testing/renderWithProviders";
+import { act, render, screen, waitFor } from "@/testing/renderWithProviders";
 
 import contract from "@/components/validation/__fixtures__/reportContract.json";
 import ValidationStudyPage from "./page";
 
+// One router for the whole test: the page's load effect depends on it, and a new object on every
+// render re-runs that effect and fetches again, which would read as polling.
+const mockRouter = { push: jest.fn(), back: jest.fn() };
 jest.mock("next/navigation", () => ({
   useParams: () => ({ id: "34" }),
-  useRouter: () => ({ push: jest.fn(), back: jest.fn() }),
+  useRouter: () => mockRouter,
   usePathname: () => "/lab-knowledge/validation-studies/34",
 }));
 jest.mock("@/hooks/usePermissions", () => ({
@@ -89,6 +92,56 @@ test("the checklist separates deposited from available to bioAF (item 11)", asyn
 test("the attachments show one failure notice, not one per row (item 4)", async () => {
   render(<ValidationStudyPage />);
   await waitFor(() => expect(screen.getAllByTestId("retrieval-failure")).toHaveLength(1));
+});
+
+// Study 37: the page loaded once in `requested` and never refreshed, so it still offered "Read paper"
+// while the driver was already reading. The server says whether bioAF moves the study on by itself,
+// and the page keeps itself current for exactly that long.
+function readingItself() {
+  return {
+    id: 37,
+    state: "requested",
+    title: "A paper bioAF is reading",
+    intended_route: "deposit",
+    evidence: null,
+    issues: [],
+    report_summary: null,
+    activity: { advancing: true, working: true, since: "2026-09-11T15:45:04+00:00" },
+  };
+}
+
+test("a study bioAF is reading shows the read under way and offers no Read paper", async () => {
+  mockGet.mockResolvedValue(readingItself());
+  render(<ValidationStudyPage />);
+  await waitFor(() => expect(screen.getByText(/reading the paper/i)).toBeInTheDocument());
+  expect(screen.queryByRole("button", { name: /read paper/i })).not.toBeInTheDocument();
+});
+
+describe("keeping the page current", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  async function fetchesOver(ms: number) {
+    const before = mockGet.mock.calls.length;
+    await act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+    return mockGet.mock.calls.length - before;
+  }
+
+  test("polls while bioAF moves the study on, in a state the old list left out", async () => {
+    mockGet.mockResolvedValue({ ...readingItself(), state: "inspecting_deposit" });
+    render(<ValidationStudyPage />);
+    await waitFor(() => expect(screen.getByRole("heading", { name: "A paper bioAF is reading" })).toBeInTheDocument());
+    expect(await fetchesOver(10000)).toBe(2);
+  });
+
+  test("does not poll a study that waits for a person", async () => {
+    mockGet.mockResolvedValue({ ...study(), activity: { advancing: false, working: false, since: null } });
+    render(<ValidationStudyPage />);
+    await waitFor(() => expect(screen.getByText("Reproduction not attempted")).toBeInTheDocument());
+    expect(await fetchesOver(15000)).toBe(0);
+  });
 });
 
 test("blockers read from the prose are marked provisional (section 6)", async () => {

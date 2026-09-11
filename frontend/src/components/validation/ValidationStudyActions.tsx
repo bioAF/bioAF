@@ -70,6 +70,14 @@ function intendedMethod(caps: RouteCapabilities | null | undefined): string | nu
 // Where a run is actually in flight, and where a stopped or failed study can be picked back up.
 // Both lists mirror the server's, which is what refuses the action if these ever drift.
 const ACQUIRING_STATES = ["acquiring_data", "acquiring_processed", "inspecting_deposit"];
+
+/** What bioAF is doing on a study right now: whether it moves the study on by itself, and whether a
+ * worker holds it at this moment and since when. */
+export interface StudyActivity {
+  advancing: boolean;
+  working: boolean;
+  since: string | null;
+}
 const RESUMABLE_STATES = ["classified", "error"];
 
 export function ValidationStudyActions({
@@ -107,6 +115,11 @@ export function ValidationStudyActions({
     } | null;
     // change_7.3 section 10 item 10: what would unblock this study, from the report projection.
     resume?: { label: string; requirements: string[] } | null;
+    // The route chosen at the button. A study carrying one is read by bioAF on its own, so it offers
+    // no "Read paper" click: study 37's click raced the driver's read and lost.
+    intended_route?: string | null;
+    // What bioAF is doing on the study right now, from the server.
+    activity?: StudyActivity | null;
   };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
@@ -163,7 +176,22 @@ export function ValidationStudyActions({
 
   let controls: React.ReactNode = null;
 
-  if (study.state === "requested" && canRequest) {
+  if (study.state === "requested" && study.intended_route) {
+    // The driver reads this study within one tick of it being created. The page shows that work
+    // instead of a click, and keeps itself current while it runs.
+    const working = !!study.activity?.working;
+    const since = study.activity?.since ? new Date(study.activity.since).toLocaleTimeString() : null;
+    controls = (
+      <div data-testid="study-activity" className="rounded border border-bioaf-200 bg-bioaf-50 p-3 text-sm text-gray-800">
+        <p>
+          {working
+            ? `bioAF is reading the paper and extracting the reproduction plan.${since ? ` Started ${since}.` : ""}`
+            : "Queued: bioAF starts reading the paper on its own within about 30 seconds."}
+        </p>
+        <p className="mt-1 text-xs text-gray-500">This page updates as the study moves on.</p>
+      </div>
+    );
+  } else if (study.state === "requested" && canRequest) {
     controls = (
       <div className="space-y-2">
         <div className="flex items-center gap-3">

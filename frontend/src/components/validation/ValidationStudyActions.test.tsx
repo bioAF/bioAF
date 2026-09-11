@@ -422,3 +422,48 @@ describe("change_7.3 section 10 item 10: resuming says what would unblock this s
     expect(screen.queryByText(/Credentials, a corrected accession/)).not.toBeInTheDocument();
   });
 });
+
+// Study 37: a study whose route was chosen at the button is read by bioAF on its own. "Read paper"
+// raced that read, lost, and came back as an error about a worker nobody could see.
+describe("a study that reads itself", () => {
+  const since = "2026-09-11T15:45:04+00:00";
+
+  test("offers no Read paper click", () => {
+    render(
+      <ValidationStudyActions
+        study={{ id: 37, state: "requested", intended_route: "deposit", activity: { advancing: true, working: false, since: null } }}
+        onChanged={jest.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /read paper/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
+  test("says it is queued before a worker takes it", () => {
+    render(
+      <ValidationStudyActions
+        study={{ id: 37, state: "requested", intended_route: "deposit", activity: { advancing: true, working: false, since: null } }}
+        onChanged={jest.fn()}
+      />,
+    );
+    expect(screen.getByTestId("study-activity")).toHaveTextContent(/starts reading the paper on its own/i);
+  });
+
+  test("says the read is under way, and since when", () => {
+    render(
+      <ValidationStudyActions
+        study={{ id: 37, state: "requested", intended_route: "deposit", activity: { advancing: true, working: true, since } }}
+        onChanged={jest.fn()}
+      />,
+    );
+    const status = screen.getByTestId("study-activity");
+    expect(status).toHaveTextContent(/reading the paper/i);
+    expect(status).toHaveTextContent(new RegExp(`Started ${new Date(since).toLocaleTimeString()}`));
+  });
+
+  test("a study with no route still waits for Read paper, since nothing else will read it", () => {
+    render(<ValidationStudyActions study={{ id: 7, state: "requested" }} onChanged={jest.fn()} />);
+    expect(screen.getByRole("button", { name: /read paper/i })).toBeInTheDocument();
+    expect(screen.queryByTestId("study-activity")).not.toBeInTheDocument();
+  });
+});

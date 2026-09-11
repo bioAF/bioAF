@@ -66,6 +66,7 @@ from app.services.validation_ownership import (
     assert_held,
     begin_operation,
     finish_operation,
+    live_claim,
     owned,
     record_dispatch,
 )
@@ -185,6 +186,39 @@ def _driver_owns(study: "ValidationStudy") -> bool:
     if study.state in _ACTIVE_BACK_HALF_STATES:
         return True
     return study.state in _SELF_DRIVING_FRONT_HALF_STATES and study.intended_route is not None
+
+
+# The holds a person resolves. The driver owns these states but will not move the study on until
+# somebody acts, so the page must not read them as bioAF working.
+_PERSON_HOLDS = ("route_blocked", "awaiting_choice", "awaiting_adoption")
+
+
+def is_advancing(study: "ValidationStudy") -> bool:
+    """Whether bioAF moves this study on without a person.
+
+    Study 37: the page offered "Read paper" on a study the driver had already claimed, and the click
+    came back as "Another worker is already reading this paper", naming a job nobody could see. The
+    page polls while this holds and offers no click that races the driver.
+    """
+    if not _driver_owns(study):
+        return False
+    evidence = study.evidence_json or {}
+    if any(evidence.get(hold) for hold in _PERSON_HOLDS):
+        return False
+    # The classifier runs once; after that the study waits at `comparing` for a person to ratify.
+    return not (study.state == "comparing" and "classification_result" in evidence)
+
+
+async def study_activity(session: AsyncSession, study: "ValidationStudy") -> dict:
+    """``{"advancing", "working", "since"}``: whether bioAF moves the study on by itself, and whether
+    a worker holds it right now (a live claim) and since when. An expired claim is a crashed worker,
+    not work under way."""
+    claim = await live_claim(session, study.id)
+    return {
+        "advancing": is_advancing(study),
+        "working": claim is not None,
+        "since": claim.claimed_at.isoformat() if claim is not None else None,
+    }
 
 
 # change_7.2 section 4: where the public assessment runs. Both routes' first post-approval state, so
