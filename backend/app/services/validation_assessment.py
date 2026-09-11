@@ -355,6 +355,9 @@ async def conclude_without_execution(
         capabilities=evidence.get("capabilities") or {},
         supplements=evidence.get("supplements") or [],
         extra_limitations=[limitation] if limitation else None,
+        # A paper read from a pasted body carries no manifest, so an empty inventory there means
+        # nobody listed its attachments, not that it has none.
+        manifest_known=bool(evidence.get("pmcid") or evidence.get("supplements")),
     )
     # The assessment reason is a dependent too: an unresolved contradiction has to reach the reader
     # of the outcome, not only the reader of the evidence bundle.

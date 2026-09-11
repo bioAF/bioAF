@@ -153,7 +153,8 @@ class TestTheOutcomeIsChosenPerPaper:
             capabilities={"preprocessed_data": {"value": "no"}, "deposits": []},
             supplements=[{"label": "Supplementary Table S7", "role": "results_table", "resolved": True}],
         )
-        assert outcome["processed_results_available"] is True
+        # change_7.3 section 4 (flagged test change): the fact is tri-state now.
+        assert outcome["processed_results_available"] == "yes"
         assert "Supplementary Table S7" in outcome["reason"]
 
 

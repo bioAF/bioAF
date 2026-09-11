@@ -50,6 +50,28 @@ _EXTRACTION = (
 )
 
 
+def _docx(text: str) -> bytes:
+    """A minimal real .docx holding ``text``: the stand-in for the 8.7 MB supplementary document."""
+    import io
+    import zipfile
+
+    body = "".join(f"<w:p><w:r><w:t>{line}</w:t></w:r></w:p>" for line in text.splitlines())
+    document = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", document)
+    return buffer.getvalue()
+
+
+# change_7.3 section 12: the bundle as Europe PMC actually serves it, all seventeen members. The
+# fixture used to hold three, so the index page, the fourth attachment and the twelve figure images
+# the real bundle carries were never exercised.
+_FIGURES = [f"1705f0{n}.{ext}" for n in range(1, 7) for ext in ("jpg", "gif")]
+
+
 def _bundle() -> bytes:
     import io
     import zipfile
@@ -62,6 +84,13 @@ def _bundle() -> bytes:
             ("supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt", "supplemental_file_3_siggenes.txt"),
         ]:
             zf.writestr(name, (_FIXTURES / source).read_bytes())
+        zf.writestr("supp_29_10_1705__index.html", "<html><body><a href='x'>Supplemental Material</a></body></html>")
+        zf.writestr(
+            "supp_gr.252981.119_Supplemental_Materials_.docx",
+            _docx("Supplemental Figure S1 legend.\nSupplemental Methods, sequencing and alignment."),
+        )
+        for figure in _FIGURES:
+            zf.writestr(figure, b"\xff\xd8\xff\xe0JFIF")
     return buffer.getvalue()
 
 
@@ -330,8 +359,9 @@ class TestTheOutcomeDescribesTheRealObstacle:
     async def test_processed_results_and_a_reproduction_input_are_separate(self, session, admin_user, _groff_world):
         study = await _run(session, admin_user)
         completion = study.evidence_json["completion"]
-        assert completion["processed_results_available"] is True
-        assert completion["reproduction_input_available"] is False
+        # change_7.3 section 4 (flagged test change): both facts are tri-state now.
+        assert completion["processed_results_available"] == "yes"
+        assert completion["reproduction_input_available"] == "no"
 
     @pytest.mark.asyncio
     async def test_the_completed_checks_are_named(self, session, admin_user, _groff_world):

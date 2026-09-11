@@ -121,6 +121,12 @@ def _deposit(accession: str, archive: str, **overrides) -> dict:
         "preprocessed_data": UNKNOWN,
         "sample_metadata": UNKNOWN,
         "evidence": None,
+        # change_7.3 section 4: the evidence that answers each question, so the raw, processed and
+        # metadata rows stop repeating one shared sentence ("108 fastq.gz" under all three).
+        "evidence_by_key": {},
+        # How many samples the archive registers, as a number rather than only inside prose. A count
+        # claim can then be checked against the collected inventory it may be describing.
+        "registered_samples": None,
         "failure_reason": None,
     }
     base.update(overrides)
@@ -145,16 +151,17 @@ async def _json(url: str, fetcher: Fetcher):
         return None
 
 
-def _file_answers(files: list[dict] | None) -> tuple[str, str, str | None]:
-    """(raw_data, preprocessed_data, evidence) from a dataset's public file listing.
+def _file_answers(files: list[dict] | None) -> tuple[str, str, str | None, str | None]:
+    """(raw_data, preprocessed_data, raw evidence, processed evidence) from a dataset's public
+    file listing.
 
     The listing is public even where the bytes are not, which is what makes "the reads exist and we
     cannot fetch them" an evidenced statement rather than an inference.
     """
     if files is None:
-        return UNKNOWN, UNKNOWN, None
+        return UNKNOWN, UNKNOWN, None, None
     if not files:
-        return NO, NO, "the EGA dataset lists no files"
+        return NO, NO, "the EGA dataset lists no files", "the EGA dataset lists no files"
 
     # "fastq.gz" is a compression wrapper around "fastq"; the part that says what the file IS comes
     # first, and matching on the whole string would miss every gzipped deposit.
@@ -168,10 +175,16 @@ def _file_answers(files: list[dict] | None) -> tuple[str, str, str | None]:
         evidence = f"EGA lists {len(raw)} {kind} file(s) for this dataset"
     else:
         evidence = f"EGA lists {len(extensions)} file(s), none of them sequencing reads"
+    processed_evidence = (
+        f"EGA lists {len(processed)} processed table(s) for this dataset"
+        if processed
+        else f"EGA lists {len(extensions)} file(s), none of them processed tables"
+    )
     return (
         YES if raw else NO,
         YES if processed else NO,
         evidence,
+        processed_evidence,
     )
 
 
@@ -218,16 +231,19 @@ async def describe_ega_deposit(accession: str, *, fetcher: Fetcher) -> dict:
     raw_answers: list[str] = []
     processed_answers: list[str] = []
     file_evidence: list[str] = []
+    processed_evidence: list[str] = []
     for dataset in described:
         dataset_id = str(dataset.get("accession_id") or "").strip()
         if not dataset_id:
             continue
         files = await _json(f"{_EGA_METADATA}/datasets/{dataset_id}/files", fetcher)
-        raw, processed, evidence = _file_answers(files if isinstance(files, list) else None)
+        raw, processed, evidence, processed_note = _file_answers(files if isinstance(files, list) else None)
         raw_answers.append(raw)
         processed_answers.append(processed)
         if evidence:
             file_evidence.append(evidence)
+        if processed_note:
+            processed_evidence.append(processed_note)
 
     def _aggregate(answers: list[str]) -> str:
         """YES beats NO beats UNKNOWN: one dataset holding reads means the study holds reads, and a
@@ -239,7 +255,8 @@ async def describe_ega_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         return UNKNOWN
 
     ids = ", ".join(str(d.get("accession_id") or "?") for d in described)
-    evidence = f"EGA dataset {ids} is {access} access"
+    existence = f"EGA dataset {ids} is {access} access"
+    evidence = existence
     if samples:
         evidence += f" and registers {samples} sample(s)"
     if file_evidence:
@@ -255,6 +272,13 @@ async def describe_ega_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         preprocessed_data=_aggregate(processed_answers),
         sample_metadata=YES if samples else UNKNOWN,
         evidence=evidence,
+        evidence_by_key={
+            "exists": existence,
+            "raw_data": "; ".join(file_evidence) or None,
+            "preprocessed_data": "; ".join(processed_evidence) or None,
+            "sample_metadata": f"EGA registers {samples} sample(s) for {ids}" if samples else None,
+        },
+        registered_samples=samples or None,
     )
 
 
@@ -281,10 +305,13 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         manifest = ManifestResult(unavailable_reason="bioAF could not reach GEO to read this study's record")
 
     evidence: list[str] = []
+    by_key: dict[str, str | None] = {}
     if manifest.samples:
         exists = YES
         sample_metadata = YES
-        evidence.append(f"GEO published a series record for {acc} describing {len(manifest.samples)} sample(s)")
+        record = f"GEO published a series record for {acc} describing {len(manifest.samples)} sample(s)"
+        evidence.append(record)
+        by_key["exists"] = by_key["sample_metadata"] = record
         failure_reason = None
     else:
         exists = UNKNOWN
@@ -298,6 +325,7 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
     else:
         raw_data, raw_evidence = _raw_read_answer(rows)
         evidence.append(raw_evidence)
+        by_key["raw_data"] = raw_evidence
 
     inventory = await list_deposit(acc, fetcher=fetcher)
     if inventory.unavailable_reason:
@@ -308,11 +336,13 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
     else:
         usable = selectable(inventory.entries)
         preprocessed = YES if usable else NO
-        evidence.append(
+        listing = (
             f"{len(usable)} of {len(inventory.entries)} deposited file(s) could serve as a reproduction input"
             if usable
             else f"GEO lists {len(inventory.entries)} supplementary file(s), none holding per-feature values"
         )
+        evidence.append(listing)
+        by_key["preprocessed_data"] = listing
 
     return _deposit(
         acc,
@@ -324,6 +354,8 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         preprocessed_data=preprocessed,
         sample_metadata=sample_metadata,
         evidence="; ".join(evidence) or None,
+        evidence_by_key=by_key,
+        registered_samples=len(manifest.samples) or None,
         failure_reason=failure_reason,
     )
 
@@ -335,6 +367,7 @@ async def describe_sra_deposit(accession: str, *, fetcher: Fetcher) -> dict:
     if rows is None:
         return _deposit(acc, SRA, supported=YES, failure_reason=failure)
     raw, evidence = _raw_read_answer(rows)
+    samples = {str(r.get("sample_accession") or "").strip() for r in rows} - {""}
     return _deposit(
         acc,
         SRA,
@@ -346,6 +379,11 @@ async def describe_sra_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         preprocessed_data=NO,
         sample_metadata=YES if any((r.get("sample_title") or "").strip() for r in rows) else UNKNOWN,
         evidence=evidence,
+        evidence_by_key={
+            "raw_data": evidence,
+            "preprocessed_data": "ENA holds sequencing reads, not processed tables",
+        },
+        registered_samples=len(samples) or None,
     )
 
 

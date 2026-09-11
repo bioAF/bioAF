@@ -144,14 +144,55 @@ async def discover_capabilities(
         # Nothing to look up. An established absence, not a failed lookup: reporting it as UNKNOWN
         # would suggest a retry might find something.
         absent = _answer(NO, evidence="this paper names no deposited accession")
-        for key in ("deposit_exists", "raw_data", "preprocessed_data", "sample_metadata"):
-            caps[key] = dict(absent)
+        caps["deposit_exists"] = dict(absent)
+        for key in DATA_KEYS:
+            caps[key] = {**absent, "available_to_bioaf": NO, "available_reason": "nothing is deposited"}
         return caps
 
     caps["deposit_exists"] = _aggregate(deposits, "exists")
-    for key in ("raw_data", "preprocessed_data", "sample_metadata"):
-        caps[key] = _aggregate(deposits, key)
+    for key in DATA_KEYS:
+        caps[key] = {**_aggregate(deposits, key), **_availability(deposits, key)}
     return caps
+
+
+# change_7.3 section 4: the rows that describe DATA, and so carry two facts each. Whether the authors
+# deposited it is about the paper; whether bioAF can acquire it is about bioAF and this organisation.
+DATA_KEYS = ("raw_data", "preprocessed_data", "sample_metadata")
+
+
+def _availability(deposits: list[dict], key: str) -> dict:
+    """Whether bioAF can acquire what the paper deposited, and why not when it cannot.
+
+    `_aggregate` answers "was it deposited" and never looked at ``access`` or ``supported``, so the
+    checklist said "Raw sample data available: Yes" for reads under controlled access in an archive
+    bioAF has no adapter for. Existence stays the paper's fact; this is bioAF's.
+    """
+    holders = [d for d in deposits if d.get(key) == YES]
+    reachable = [
+        d for d in holders if d.get("supported") == YES and d.get("access") not in ("controlled", "unavailable")
+    ]
+    if reachable:
+        names = ", ".join(f"{d.get('accession')} ({str(d.get('archive') or '').upper()})" for d in reachable)
+        return {"available_to_bioaf": YES, "available_reason": f"bioAF can acquire it from {names}"}
+    if holders:
+        return {"available_to_bioaf": NO, "available_reason": "; ".join(_why_unreachable(d) for d in holders)}
+    if any(d.get(key) == NO for d in deposits) and not any(d.get(key) == UNKNOWN for d in deposits):
+        return {"available_to_bioaf": NO, "available_reason": "nothing of this kind is deposited"}
+    return {
+        "available_to_bioaf": UNKNOWN,
+        "available_reason": "bioAF could not establish what the deposit holds, so whether it can acquire it is unknown",
+    }
+
+
+def _why_unreachable(deposit: dict) -> str:
+    """The adapter question first, as the route policy asks it: the missing adapter is bioAF's to
+    fix, and naming only the access class would send a lab to negotiate for data bioAF cannot read."""
+    accession = deposit.get("accession")
+    archive = str(deposit.get("archive") or "that archive").upper()
+    access = deposit.get("access")
+    if deposit.get("supported") != YES:
+        return f"{accession} is {access} access and bioAF has no adapter for {archive}"
+    return f"{accession} is {access} access and this organisation is not authorised to reach it"
 
 
 async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[dict]:
@@ -203,7 +244,17 @@ def _aggregate(deposits: list[dict], key: str) -> dict:
     single unreadable listing must not erase a positive answer from its sibling. The evidence names
     which deposit answered, so an aggregate is never a claim without a source.
     """
-    answers = [(d.get("accession"), d.get(key), d.get("evidence"), d.get("failure_reason")) for d in deposits]
+    # change_7.3 section 4: each row takes the evidence that answers IT, where the deposit recorded
+    # one. A deposit recorded before that falls back to its one shared sentence.
+    answers = [
+        (
+            d.get("accession"),
+            d.get(key),
+            (d.get("evidence_by_key") or {}).get(key) or d.get("evidence"),
+            d.get("failure_reason"),
+        )
+        for d in deposits
+    ]
     for wanted in (YES, NO):
         matching = [a for a in answers if a[1] == wanted]
         if matching:

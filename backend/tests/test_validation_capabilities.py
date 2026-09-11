@@ -626,3 +626,78 @@ class TestTheSupplementManifestLandsAtReadTime(TestItLandsAtReadTime):
 
         assert study.evidence_json.get("supplements") == []
         assert study.state == "plan_ready"
+
+
+# ---- change_7.3 section 4: "deposited" and "available to bioAF" are two facts ---------------------
+#
+# `_aggregate` took "yes beats no beats unknown" from the per-deposit answers and never looked at
+# `access` or `supported`, so the paper-level row said "Raw sample data available: Yes" for reads bioAF
+# cannot reach, although this module's own docstring says the checklist carries both facts.
+
+
+class TestEachDataRowCarriesAvailabilityToBioaf:
+    @pytest.mark.asyncio
+    async def test_controlled_reads_bioaf_cannot_acquire_are_deposited_and_not_available(self):
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
+        assert caps["raw_data"]["value"] == YES
+        assert caps["raw_data"]["available_to_bioaf"] == NO
+        reason = caps["raw_data"]["available_reason"] or ""
+        assert "controlled" in reason
+        assert "EGA" in reason
+
+    @pytest.mark.asyncio
+    async def test_public_reads_bioaf_can_fetch_are_available(self):
+        caps = await _discover()
+        assert caps["raw_data"]["value"] == YES
+        assert caps["raw_data"]["available_to_bioaf"] == YES
+
+    @pytest.mark.asyncio
+    async def test_an_undeposited_input_is_not_available_either(self):
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
+        assert caps["preprocessed_data"]["value"] == NO
+        assert caps["preprocessed_data"]["available_to_bioaf"] == NO
+
+    @pytest.mark.asyncio
+    async def test_an_unknown_deposit_is_unknown_availability(self):
+        caps = await _discover(fetcher=_Geo(ena=RuntimeError("timeout")))
+        assert caps["raw_data"]["value"] == UNKNOWN
+        assert caps["raw_data"]["available_to_bioaf"] == UNKNOWN
+
+    @pytest.mark.asyncio
+    async def test_a_paper_with_no_deposit_has_nothing_available(self):
+        caps = await _discover(accession=None)
+        assert caps["raw_data"]["available_to_bioaf"] == NO
+
+
+class TestEachRowHasItsOwnEvidence:
+    """A deposit had one shared evidence string, so the raw, processed and metadata rows all repeated
+    "108 fastq.gz"."""
+
+    @pytest.mark.asyncio
+    async def test_the_processed_row_says_what_answers_it(self):
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
+        processed = caps["preprocessed_data"]["evidence"] or ""
+        raw = caps["raw_data"]["evidence"] or ""
+        assert "108" in raw and "fastq" in raw
+        assert processed != raw
+        assert "processed" in processed
+
+    @pytest.mark.asyncio
+    async def test_the_metadata_row_says_what_answers_it(self):
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
+        metadata = caps["sample_metadata"]["evidence"] or ""
+        assert "54" in metadata
+        assert "fastq" not in metadata
+
+
+class TestTheRegisteredSampleCountIsAField:
+    @pytest.mark.asyncio
+    async def test_an_ega_deposit_carries_its_registered_samples(self):
+        caps = await _discover(accessions=[{"accession": _EGAS, "provenance": "extracted"}], fetcher=_Archives())
+        assert caps["deposits"][0]["registered_samples"] == 54
+
+    @pytest.mark.asyncio
+    async def test_a_geo_deposit_carries_the_samples_its_series_describes(self):
+        caps = await _discover()
+        assert isinstance(caps["deposits"][0]["registered_samples"], int)
+        assert caps["deposits"][0]["registered_samples"] > 0

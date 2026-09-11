@@ -79,7 +79,11 @@ class TestTheSixActions:
         assert decision.authorizes_execution is True
 
     def test_an_established_absence_is_no_input(self):
-        decision = decide_route(route="deposit", capabilities=_caps([_EGA_DEPOSIT], preprocessed_data="no"))
+        # change_7.3 section 5 (flagged test change, named by the plan): this asserted NO_INPUT for the
+        # EGA deposit, which is the axis-order defect. `no_input` means the adapter exists and the
+        # resource holds nothing that could serve, so it is held on a deposit bioAF can read.
+        no_matrix = {**_OPEN_GEO, "preprocessed_data": "no"}
+        decision = decide_route(route="deposit", capabilities=_caps([no_matrix], preprocessed_data="no"))
         assert decision.action == NO_INPUT
         assert decision.authorizes_execution is False
 
@@ -164,9 +168,7 @@ class TestTheReasonsStayApart:
         wordings = {
             decide_route(route="pipeline", capabilities=_caps([_EGA_DEPOSIT], raw_data="yes")).reason,
             decide_route(route="deposit", capabilities=_caps([_EGA_DEPOSIT], preprocessed_data="no")).reason,
-            decide_route(
-                route="pipeline", capabilities=_caps([_CONTROLLED_BUT_SUPPORTED], raw_data="yes")
-            ).reason,
+            decide_route(route="pipeline", capabilities=_caps([_CONTROLLED_BUT_SUPPORTED], raw_data="yes")).reason,
         }
         assert len(wordings) == 3
 
@@ -196,12 +198,12 @@ class TestBothLegs:
             route="both", capabilities=_caps([_EGA_DEPOSIT], raw_data="yes", preprocessed_data="no")
         )
         assert {f.leg for f in decision.findings} == {"deposit", "pipeline"}
-        assert {f.action for f in decision.findings} == {NO_ADAPTER, NO_INPUT}
+        # change_7.3 section 5 (flagged test change): the deposit leg of an EGA deposit is the adapter
+        # gap too, with its listing carried as an observation, not a missing input.
+        assert {f.action for f in decision.findings} == {NO_ADAPTER}
 
     def test_both_proceeds_only_when_both_legs_can(self):
-        decision = decide_route(
-            route="both", capabilities=_caps([_OPEN_GEO], raw_data="yes", preprocessed_data="yes")
-        )
+        decision = decide_route(route="both", capabilities=_caps([_OPEN_GEO], raw_data="yes", preprocessed_data="yes"))
         assert decision.action == PROCEED
 
 
@@ -229,3 +231,34 @@ class TestTheAxesStayIndependent:
             capabilities={"deposits": [], "preprocessed_data": {"value": "unknown", "failure_reason": "GEO timed out"}},
         )
         assert "GEO timed out" in decision.reason
+
+
+class TestTheAdapterQuestionComesBeforeTheInputQuestion:
+    """change_7.3 section 5. `_decide_leg` returned NO_INPUT as soon as the requirement row said "no",
+    before it asked about the adapter, so Groff's deposit route was refused as "the deposit holds
+    nothing" when the true refusal is that bioAF cannot read EGA at all."""
+
+    def test_an_unsupported_archive_whose_listing_lacks_the_input_is_no_adapter(self):
+        decision = decide_route(route="deposit", capabilities=_caps([_EGA_DEPOSIT], preprocessed_data="no"))
+        assert decision.action == NO_ADAPTER
+        assert decision.authorizes_execution is False
+
+    def test_the_listing_fact_is_carried_as_an_observation(self):
+        deposit = {
+            **_EGA_DEPOSIT,
+            "evidence_by_key": {"preprocessed_data": "EGA lists 108 file(s), none of them processed tables"},
+        }
+        decision = decide_route(route="deposit", capabilities=_caps([deposit], preprocessed_data="no"))
+        finding = decision.findings[0]
+        assert finding.observation == "EGA lists 108 file(s), none of them processed tables"
+        assert decision.as_record()["findings"][0]["observation"] == finding.observation
+
+    def test_the_reason_names_the_adapter_not_an_absence(self):
+        decision = decide_route(route="deposit", capabilities=_caps([_EGA_DEPOSIT], preprocessed_data="no"))
+        assert "no adapter" in decision.reason
+        assert decision.findings[0].archive == "ega"
+
+    def test_an_unsupported_archive_listing_processed_files_is_no_adapter_too(self):
+        holds = {**_EGA_DEPOSIT, "preprocessed_data": "yes"}
+        decision = decide_route(route="deposit", capabilities=_caps([holds], preprocessed_data="yes"))
+        assert decision.action == NO_ADAPTER
