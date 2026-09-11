@@ -105,9 +105,7 @@ class TestReconciliationSettlesItsDependents:
     }
 
     def test_the_contradiction_is_detected(self):
-        findings = reconcile_contradictions(
-            precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[]
-        )
+        findings = reconcile_contradictions(precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[])
         assert findings
 
     def test_evidence_settles_it_when_the_sample_table_was_read(self):
@@ -121,21 +119,15 @@ class TestReconciliationSettlesItsDependents:
         findings = reconcile_contradictions(
             precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[self._SAMPLE_TABLE]
         )
-        _, remaining = apply_resolutions(
-            precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], findings=findings
-        )
+        _, remaining = apply_resolutions(precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], findings=findings)
         assert remaining == []
 
     def test_an_unsettleable_contradiction_is_reported_as_unresolved(self):
-        findings = reconcile_contradictions(
-            precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[]
-        )
+        findings = reconcile_contradictions(precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[])
         assert findings[0]["status"] == UNRESOLVED
 
     def test_an_unresolved_contradiction_leaves_both_statements_standing_but_downgrades_the_claim(self):
-        findings = reconcile_contradictions(
-            precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[]
-        )
+        findings = reconcile_contradictions(precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], supplements=[])
         checks, remaining = apply_resolutions(
             precompute_checks=self._CHECK_OK, blockers=[self._BLOCKER], findings=findings
         )
@@ -171,3 +163,99 @@ class TestReconciliationSettlesItsDependents:
         assert record["contradictions"]
         assert record["contradictions"][0]["status"] == RESOLVED
         assert plan.blockers_json == []
+
+
+# ---- change_7.3 sections 1 and 9: the assessment keeps a ledger and reports a failure once --------
+
+import pathlib  # noqa: E402
+
+from app.services.supplement_inventory import parse_jats_supplements  # noqa: E402
+from app.services.validation_issue_service import ValidationIssueService  # noqa: E402
+
+_GROFF_JATS = (pathlib.Path(__file__).parent / "fixtures" / "groff" / "fulltext_jats.xml").read_text()
+
+
+class _NotFound(Exception):
+    def __init__(self):
+        super().__init__("Client error '404 Not Found' for url")
+        self.response = type("R", (), {"status_code": 404})()
+
+
+async def _with_attachments(session, admin_user, monkeypatch, fetch):
+    monkeypatch.setattr("app.services.validation_assessment.deposit_bytes_fetcher", fetch)
+    study = await _approved(session, admin_user, state="acquiring_processed")
+    study.evidence_json = {
+        **(study.evidence_json or {}),
+        "pmcid": "PMC6771404",
+        "supplements": parse_jats_supplements(_GROFF_JATS),
+    }
+    await session.flush()
+    return study
+
+
+class TestTheAssessmentRecordsRetrievalOnce:
+    @pytest.mark.asyncio
+    async def test_every_attempt_lands_in_the_ledger(self, session, admin_user, monkeypatch):
+        async def _fail(_url):
+            raise _NotFound()
+
+        study = await _with_attachments(session, admin_user, monkeypatch, _fail)
+        await run_assessment(session, study)
+        ledger = study.evidence_json["retrieval_ledger"]
+        assert [e["outcome"] for e in ledger] == ["not_found"] * len(ledger)
+        assert len(ledger) >= 2
+
+    @pytest.mark.asyncio
+    async def test_a_failed_source_is_one_issue_naming_the_attachments(self, session, admin_user, monkeypatch):
+        async def _fail(_url):
+            raise _NotFound()
+
+        study = await _with_attachments(session, admin_user, monkeypatch, _fail)
+        await run_assessment(session, study)
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        failed = [i for i in issues if i["outcome"] == "retrieval_failed"]
+        assert len(failed) == 1
+        assert "Supplemental File S2" in failed[0]["message"]
+        assert "404" not in failed[0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_the_issue_carries_the_technical_detail(self, session, admin_user, monkeypatch):
+        async def _fail(_url):
+            raise _NotFound()
+
+        study = await _with_attachments(session, admin_user, monkeypatch, _fail)
+        await run_assessment(session, study)
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        detail = next(i for i in issues if i["outcome"] == "retrieval_failed")["technical_detail"]
+        assert detail["http_status"] == 404
+        assert detail["url"].endswith("/PMC6771404/supplementaryFiles")
+        assert detail["attempts"] == len(study.evidence_json["retrieval_ledger"])
+        assert detail["first_at"] and detail["last_at"]
+
+    @pytest.mark.asyncio
+    async def test_a_successful_retrieval_records_no_issue(self, session, admin_user, monkeypatch):
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt", "sample\tsex\nE1\tXX\n")
+
+        async def _ok(_url):
+            return buffer.getvalue()
+
+        study = await _with_attachments(session, admin_user, monkeypatch, _ok)
+        await run_assessment(session, study)
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert not [i for i in issues if i["outcome"] == "retrieval_failed"]
+
+    @pytest.mark.asyncio
+    async def test_a_resumed_assessment_keeps_the_earlier_attempts(self, session, admin_user, monkeypatch):
+        async def _fail(_url):
+            raise _NotFound()
+
+        study = await _with_attachments(session, admin_user, monkeypatch, _fail)
+        await run_assessment(session, study)
+        before = len(study.evidence_json["retrieval_ledger"])
+        await run_assessment(session, study)
+        assert len(study.evidence_json["retrieval_ledger"]) > before

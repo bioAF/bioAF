@@ -52,8 +52,11 @@ async def _fetch(_url):
 
 class TestAPaperWithNoDepositButPublicAttachments:
     def test_its_supplements_are_named_from_its_own_wording(self):
+        # change_7.3 section 2 (flagged test change): this accepted "Supplemental File S7" for the
+        # paper's "Supplementary Table S7", which is the every-kind-becomes-File collapse the section
+        # removes, and "Additional File 2" was never recognised at all. The noun is kept now.
         labels = {s["label"] for s in parse_jats_supplements(_JATS)}
-        assert "Supplemental File S2" in labels or "Supplemental File S7" in labels
+        assert labels == {"Additional File 2", "Supplemental Table S7"}
 
     @pytest.mark.asyncio
     async def test_a_different_naming_convention_still_resolves(self):
