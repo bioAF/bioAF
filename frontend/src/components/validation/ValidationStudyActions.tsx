@@ -105,6 +105,8 @@ export function ValidationStudyActions({
     plan?: {
       deposit_conflict?: { message?: string; override?: unknown | null } | null;
     } | null;
+    // change_7.3 section 10 item 10: what would unblock this study, from the report projection.
+    resume?: { label: string; requirements: string[] } | null;
   };
   onChanged: (updated: unknown) => void;
   // The classifier's (E2/E3/E4) suggested verdict at comparing; pre-selects the Classify control so the
@@ -311,6 +313,10 @@ export function ValidationStudyActions({
       </div>
     );
   } else if (RESUMABLE_STATES.includes(study.state) && canApprove) {
+    // change_7.3 section 10 item 10: the helper text is generated from THIS study's limitations and
+    // says what would unblock each one. The fixed text said credentials might suffice, which is
+    // false for an archive bioAF has no adapter for.
+    const requirements = study.resume?.requirements ?? [];
     controls = (
       <div className="space-y-2">
         <button
@@ -318,12 +324,20 @@ export function ValidationStudyActions({
           disabled={busy}
           onClick={() => run(() => api.post(`${base}/resume`, {}))}
         >
-          {busy ? "Working..." : "Resume at the gate"}
+          {busy ? "Working..." : (study.resume?.label ?? "Review and resume")}
         </button>
+        {requirements.length > 0 && (
+          <ul className="list-disc pl-5 text-xs text-gray-600">
+            {requirements.map((requirement) => (
+              <li key={requirement}>{requirement}</li>
+            ))}
+          </ul>
+        )}
         <p className="text-xs text-gray-500">
-          Credentials, a corrected accession or a newly public deposit can make a blocked study
-          runnable. Resuming returns it to the approval gate so you decide again, rather than
-          starting a run. What was already established is kept.
+          {requirements.length === 0 &&
+            "Credentials, a corrected accession or a newly public deposit can make a blocked study runnable. "}
+          Resuming returns it to the approval gate so you decide again, rather than starting a run. What
+          was already established is kept.
         </p>
       </div>
     );

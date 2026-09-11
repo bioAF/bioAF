@@ -23,3 +23,19 @@ test("the partially_reproduced classification renders a precise 'Partially Repro
 test("a non-partial classification falls through to the confidence band", () => {
   expect(getValidationStatus(100, "validated").key).toBe("fully_validated");
 });
+
+describe("change_7.3 section 10 item 1: the attempt decides the headline", () => {
+  it("reads Reproduction not attempted when nothing executed", () => {
+    const status = getValidationStatus(null, "access_restricted", "not_attempted");
+    expect(status.key).toBe("reproduction_not_attempted");
+    expect(status.label).toBe("Reproduction not attempted");
+  });
+
+  it("keeps Could Not Reproduce for an attempt that reached no verdict", () => {
+    expect(getValidationStatus(null, "inconclusive", "attempted").label).toBe("Could Not Reproduce");
+  });
+
+  it("does not change a verdict", () => {
+    expect(getValidationStatus(100, "validated", "attempted").label).toBe("Fully Validated");
+  });
+});

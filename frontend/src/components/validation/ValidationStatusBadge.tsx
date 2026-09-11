@@ -12,13 +12,17 @@ import { statusBadgeClass } from "@/lib/statusStyles";
 export function ValidationStatusBadge({
   confidence,
   classification,
+  attempt,
   showReview = true,
 }: {
   confidence: number | null | undefined;
   classification?: string | null;
+  // change_7.3: whether reproduction was attempted, so a study that ran nothing does not read as
+  // one that failed.
+  attempt?: "attempted" | "not_attempted" | null;
   showReview?: boolean;
 }) {
-  const status = getValidationStatus(confidence, classification);
+  const status = getValidationStatus(confidence, classification, attempt);
   return (
     <span className="inline-flex items-center gap-1.5">
       <span

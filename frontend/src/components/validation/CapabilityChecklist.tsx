@@ -1,5 +1,7 @@
 "use client";
 
+import type { CapabilityRow } from "@/lib/validationReport";
+
 /**
  * plan_7 steps 13 and 19: what this paper actually has.
  *
@@ -128,16 +130,38 @@ function Chip({ value }: { value: string }) {
   );
 }
 
-export function CapabilityChecklist({ capabilities }: { capabilities: Capabilities | null | undefined }) {
-  if (!capabilities) return null;
-  const sources = capabilities.code_sources ?? [];
+export function CapabilityChecklist({
+  capabilities,
+  rows,
+}: {
+  capabilities: Capabilities | null | undefined;
+  // change_7.3 section 10 item 11: the checklist rows from the report projection, where each data row
+  // is two facts: "deposited" is about the paper, "available to bioAF" is about bioAF. "Raw sample
+  // data available: Yes" was shown for reads under controlled access in an archive bioAF cannot read.
+  rows?: CapabilityRow[] | null;
+}) {
+  if (!capabilities && !rows) return null;
+  const caps = capabilities ?? ({} as Capabilities);
+  const sources = caps.code_sources ?? [];
 
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
         <tbody className="divide-y divide-gray-100">
-          {ROWS.map(({ key, label }) => {
-            const cap = capabilities[key] as Capability | undefined;
+          {rows && rows.length > 0 &&
+            rows
+              .filter((row) => !["code_artifact", "code_repository"].includes(row.key))
+              .map((row) => (
+                <tr key={row.key} data-testid={`capability-${row.key}`}>
+                  <td className="py-1.5 pr-4 text-gray-700">{row.label}</td>
+                  <td className="py-1.5 pr-4">
+                    <Chip value={row.value ?? "unknown"} />
+                  </td>
+                  <td className="py-1.5 text-xs text-gray-500">{row.detail || ""}</td>
+                </tr>
+              ))}
+          {!(rows && rows.length > 0) && ROWS.map(({ key, label }) => {
+            const cap = caps[key] as Capability | undefined;
             if (!cap) return null;
             return (
               <tr key={key}>
@@ -150,7 +174,7 @@ export function CapabilityChecklist({ capabilities }: { capabilities: Capabiliti
             );
           })}
 
-          {(capabilities.deposits ?? []).map((deposit) => (
+          {(caps.deposits ?? []).map((deposit) => (
             <tr key={deposit.accession} data-testid={`deposit-${deposit.accession}`}>
               <td className="py-1.5 pr-4 text-gray-700">
                 Deposit <span className="text-xs text-gray-500">({ARCHIVE_LABEL[deposit.archive] ?? deposit.archive})</span>
@@ -184,11 +208,11 @@ export function CapabilityChecklist({ capabilities }: { capabilities: Capabiliti
             <tr>
               <td className="py-1.5 pr-4 text-gray-700">Code published</td>
               <td className="py-1.5 pr-4">
-                <Chip value={capabilities.code_repository?.value ?? "unknown"} />
+                <Chip value={caps.code_repository?.value ?? "unknown"} />
               </td>
               <td className="py-1.5 text-xs text-gray-500">
-                {capabilities.code_repository?.value === "unknown"
-                  ? capabilities.code_repository?.failure_reason || ""
+                {caps.code_repository?.value === "unknown"
+                  ? caps.code_repository?.failure_reason || ""
                   : "no code source was named in the paper"}
               </td>
             </tr>

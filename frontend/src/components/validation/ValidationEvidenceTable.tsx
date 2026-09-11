@@ -92,7 +92,16 @@ function VerdictChip({ verdict }: { verdict: string }) {
   );
 }
 
-export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | null | undefined }) {
+export function ValidationEvidenceTable({
+  evidence,
+  attemptStatus,
+}: {
+  evidence: Evidence | null | undefined;
+  // change_7.3 section 10 item 8: whether reproduction was attempted, from the report projection.
+  // An empty table on a study that never ran is not waiting for anything, and saying "appear once the
+  // analysis run completes" promised a run that was never going to happen.
+  attemptStatus?: "attempted" | "not_attempted" | null;
+}) {
   const comparisons = evidence?.classification_result?.comparisons ?? null;
   const computed = evidence?.computed_metrics ?? {};
   const computedEntries = Object.entries(computed);
@@ -170,6 +179,9 @@ export function ValidationEvidenceTable({ evidence }: { evidence: Evidence | nul
   // Fallback (no classifier result yet): heuristic exact-key join of raw targets vs computed.
   const targets = evidence?.comparison_targets ?? [];
   if (targets.length === 0 && computedEntries.length === 0) {
+    if (attemptStatus === "not_attempted") {
+      return <p className="text-sm text-gray-500">No execution results: reproduction was not attempted.</p>;
+    }
     return (
       <p className="text-sm text-gray-500">
         No evidence has been collected yet. Metrics appear once the analysis run completes.
