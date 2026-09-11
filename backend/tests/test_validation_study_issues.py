@@ -115,6 +115,79 @@ class TestRecording:
         assert await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id) == []
 
 
+class TestOneVocabularyBeyondModelFailures:
+    """change_7.3 section 9. The issue vocabulary was a hand-copied subset of `llm_decision`'s, and
+    `truncated` was missing from it, so a truncated answer's issue was discarded on write. Tests
+    covered `as_issue` and never the write. These go through `record`, the entry point."""
+
+    @pytest.mark.asyncio
+    async def test_every_model_failure_outcome_survives_the_write(self, session, admin_user):
+        from app.services.llm_decision import OUTCOME_OK, OUTCOMES
+
+        study = await _study(session, admin_user)
+        failures = [o for o in OUTCOMES if o != OUTCOME_OK]
+        stored = await ValidationIssueService.record(session, study, [_row(outcome=o) for o in failures])
+        assert stored == len(failures)
+        listed = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert "truncated" in {r["outcome"] for r in listed}
+
+    @pytest.mark.asyncio
+    async def test_a_failed_retrieval_is_an_issue(self, session, admin_user):
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(
+            session,
+            study,
+            [
+                _row(
+                    step="retrieving the paper's supplementary files",
+                    outcome="retrieval_failed",
+                    model=None,
+                    message="bioAF could not download the paper's supplementary files in this attempt.",
+                )
+            ],
+        )
+        listed = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert [r["outcome"] for r in listed] == ["retrieval_failed"]
+
+    @pytest.mark.asyncio
+    async def test_a_stage_that_could_not_run_is_an_issue(self, session, admin_user):
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(
+            session,
+            study,
+            [_row(step="reconciling the plan against the inspected evidence", outcome="not_performed", model=None)],
+        )
+        listed = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert [r["outcome"] for r in listed] == ["not_performed"]
+
+    @pytest.mark.asyncio
+    async def test_technical_detail_round_trips_beside_the_plain_message(self, session, admin_user):
+        """The message stays one plain sentence; the URL, status, error class, attempts and times
+        travel separately so they can sit under a collapsed element."""
+        study = await _study(session, admin_user)
+        detail = {
+            "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1/supplementaryFiles",
+            "http_status": 404,
+            "error_class": "HTTPStatusError",
+            "attempts": 3,
+            "first_at": "2026-09-10T13:09:18+00:00",
+            "last_at": "2026-09-10T13:09:26+00:00",
+        }
+        await ValidationIssueService.record(
+            session, study, [_row(outcome="retrieval_failed", model=None, technical_detail=detail)]
+        )
+        listed = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert listed[0]["technical_detail"] == detail
+        assert "404" not in listed[0]["message"]
+
+    @pytest.mark.asyncio
+    async def test_a_row_without_technical_detail_lists_it_as_none(self, session, admin_user):
+        study = await _study(session, admin_user)
+        await ValidationIssueService.record(session, study, [_row()])
+        listed = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert listed[0]["technical_detail"] is None
+
+
 class TestScoping:
     @pytest.mark.asyncio
     async def test_another_org_lists_nothing(self, session, admin_user):

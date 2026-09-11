@@ -54,6 +54,11 @@ class ValidationIssueService:
                     impact=impact,
                     message=str(row.get("message") or "").strip(),
                     model=(str(row["model"])[:120] if row.get("model") else None),
+                    # change_7.3 section 9: the detail a collapsed element shows. Only a mapping is
+                    # kept, so a stray string cannot become a second message on screen.
+                    technical_detail=(
+                        dict(row["technical_detail"]) if isinstance(row.get("technical_detail"), dict) else None
+                    ),
                 )
             )
             stored += 1
@@ -91,6 +96,7 @@ class ValidationIssueService:
                 "impact": r.impact,
                 "message": r.message,
                 "model": r.model,
+                "technical_detail": r.technical_detail,
                 "at": r.occurred_at.isoformat() if r.occurred_at else None,
             }
             for r in rows

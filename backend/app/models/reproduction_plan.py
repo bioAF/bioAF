@@ -97,6 +97,11 @@ class ReproductionPlan(Base):
 
     # Reasons the paper cannot be reproduced (no accession, no nf-core equivalent, ...).
     blockers_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # change_7.3 section 7: a kind for each blocker, as ``[{"text": ..., "kind": ...}]``. The
+    # consistency pass matched blockers with two regexes, so "Sample IDs ... are not explicitly
+    # enumerated in the text" read as no contradiction. Beside ``blockers_json`` rather than inside
+    # it, because every consumer of that list reads strings.
+    blocker_kinds_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Provenance of the AI extraction that produced this plan.
     extractor_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
