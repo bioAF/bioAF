@@ -20,6 +20,7 @@ from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.validation_autonomy import decision_list
 from app.services.validation_report_summary import report_summary_for, target_dict
+from app.services.validation_reproduction_attempt import reproduction_attempt
 from app.schemas.validation_study import (
     ApproveRequest,
     DepositOverrideRequest,
@@ -253,6 +254,10 @@ async def list_studies(
             title=_study_title(s, titles.get(s.paper_id)),
             classification=s.classification,
             confidence=classification_confidence(s.classification),
+            # change_7.3: derived from execution evidence only, the same way the report's headline is.
+            attempt=reproduction_attempt(s.evidence_json, analysis_run_id=s.analysis_run_id, data_run_id=s.data_run_id)[
+                "status"
+            ],
             paper_id=s.paper_id,
             source_doi=s.source_doi,
             source_accession=s.source_accession,

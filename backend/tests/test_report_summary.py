@@ -398,3 +398,30 @@ class TestBlockersAndContrastsCarryTheirBasis:
         summary = self._summary("inspected_evidence")
         assert summary["blockers"][0]["provisional"] is False
         assert summary["contrasts"][0]["provisional"] is False
+
+
+class TestTheStudiesListFollowsTheAttemptToo:
+    """change_7.3 section 10 item 1 on the list page: a classified study that executed nothing read
+    "Could Not Reproduce" there, because the list carried only the bucket."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _enable(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_a_study_that_ran_nothing_is_listed_as_not_attempted(self, client, session, admin_user, admin_token):
+        from app.services.validation_study_service import ValidationStudyService
+
+        idle = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        idle.state, idle.classification = "classified", "access_restricted"
+        ran = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        ran.state, ran.classification, ran.analysis_run_id = "classified", "inconclusive", 12
+        await session.commit()
+
+        rows = (await client.get("/api/validation-studies", headers={"Authorization": f"Bearer {admin_token}"})).json()
+        by_id = {r["id"]: r for r in rows}
+        assert by_id[idle.id]["attempt"] == "not_attempted"
+        assert by_id[ran.id]["attempt"] == "attempted"

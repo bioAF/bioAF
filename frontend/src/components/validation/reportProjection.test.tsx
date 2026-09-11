@@ -284,3 +284,18 @@ describe("every vocabulary in the contract has a label (section 11)", () => {
     }
   });
 });
+
+describe("the studies list follows the attempt too (item 1)", () => {
+  it("reads Reproduction not attempted from the attempt alone", () => {
+    render(
+      <ValidationStudyOutcome state="classified" confidence={null} classification="access_restricted" attempt="not_attempted" />,
+    );
+    expect(screen.getByText("Reproduction not attempted")).toBeInTheDocument();
+    expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
+  });
+
+  it("keeps Could Not Reproduce for an attempt with no verdict", () => {
+    render(<ValidationStudyOutcome state="classified" confidence={null} classification="inconclusive" attempt="attempted" />);
+    expect(screen.getByText("Could Not Reproduce")).toBeInTheDocument();
+  });
+});
