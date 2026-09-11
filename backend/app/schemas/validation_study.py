@@ -148,6 +148,11 @@ class ComparisonTargetResponse(BaseModel):
     threshold: float | None = None
     threshold_kind: str | None = None
     output_type: str | None = None
+    # change_7.3 section 7: the claim's own cutoffs, the contrast it reports on, and why its context
+    # is unresolved where it is.
+    contrast_index: int | None = None
+    cutoffs: list[dict] | None = None
+    unresolved_reason: str | None = None
 
 
 class ReproductionPlanResponse(BaseModel):
@@ -246,3 +251,6 @@ class ValidationStudyResponse(BaseModel):
     # Informational, one row per occurrence, each with its impact (`degraded` or `blocked`). Empty is
     # the normal case and means every step got the answer it asked for.
     issues: list[dict] = []
+    # change_7.3 section 11: the report as one projection of the evidence, the plan and the issues.
+    # The page, the JSON export and the markdown export all render from this, so they cannot drift.
+    report_summary: dict | None = None

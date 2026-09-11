@@ -126,16 +126,28 @@ def check_species(
     )
 
 
-def check_sample_data(*, paper_sample_count: int | None, entries: list, supplements: list | None = None) -> dict:
+def check_sample_data(
+    *,
+    paper_sample_count: int | None,
+    entries: list,
+    supplements: list | None = None,
+    deposits: list | None = None,
+) -> dict:
     """The deposit's per-sample files against the number of samples the paper describes.
 
     Advisory. A deposit holding ONE series-level matrix with every sample as a column is the
     commonest usable shape, and counting it as one sample would flag every well-formed deposit, so
     a series-level matrix satisfies the check on its own.
+
+    change_7.3 section 8: ``entries`` is GEO's listing and nothing else, and a DOI-requested study
+    passed it an empty accession, so the check said "no deposited files were listed" beside an EGA
+    inventory of 108 files. ``deposits`` carries every archive's answer. Where bioAF cannot open the
+    files it compares the registered sample count, and says the contents were not inspected.
     """
     if not paper_sample_count:
         return _result(CHECK_SAMPLE_DATA, UNKNOWN, detail="the paper does not state how many samples it used")
     if not entries:
+        registered = _registered_counts(deposits)
         # change_7.1 section 7: the paper's own sample table answers this when the deposit cannot.
         # Study 32 said "no deposited files were listed" in the same bundle that held Supplemental
         # File S1, resolved, 54 rows, one per sample. A known listing cannot produce a
@@ -155,6 +167,30 @@ def check_sample_data(*, paper_sample_count: int | None, entries: list, suppleme
                 detail=(
                     f"the paper states {paper_sample_count} sample(s) and {label} describes {rows}. "
                     "One of the two is not describing the set that was analysed."
+                ),
+            )
+        if registered:
+            accession, archive, count = registered[0]
+            contents = (
+                "its files were not inspected, because bioAF cannot open them"
+                if archive != "GEO"
+                else ("its files were not listed in this check")
+            )
+            if count == paper_sample_count:
+                return _result(
+                    CHECK_SAMPLE_DATA,
+                    OK,
+                    detail=(
+                        f"{accession} registers {count} sample(s) in {archive}, matching the {paper_sample_count} "
+                        f"the paper states; {contents}"
+                    ),
+                )
+            return _result(
+                CHECK_SAMPLE_DATA,
+                MISMATCH,
+                detail=(
+                    f"the paper states {paper_sample_count} sample(s) and {accession} registers {count} in "
+                    f"{archive}. One of the two is not describing the set that was analysed; {contents}."
                 ),
             )
         # Nothing listed anywhere is a discovery problem, and step 13's own row already says so.
@@ -266,6 +302,7 @@ async def run_precompute_checks(
     paper_sample_count: int | None,
     entries: list,
     supplements: list | None = None,
+    deposits: list | None = None,
     organism_source: bool = True,
     client=None,
     model: str,
@@ -282,7 +319,7 @@ async def run_precompute_checks(
         # change_7.1 section 7: the paper's own attachments are evidence for these checks, not just
         # for the report. A check that contradicts the inventory beside it is worse than no check.
         CHECK_SAMPLE_DATA: check_sample_data(
-            paper_sample_count=paper_sample_count, entries=entries, supplements=supplements
+            paper_sample_count=paper_sample_count, entries=entries, supplements=supplements, deposits=deposits
         ),
     }
     checks[CHECK_METHODS] = await _judge(
@@ -305,7 +342,37 @@ async def run_precompute_checks(
         api_key=api_key,
         on_issue=on_issue,
     )
+    # change_7.3 section 6: at read time nothing has been retrieved, so every judgment here is made
+    # from the paper's text and is provisional until the assessment re-settles it.
+    for check in checks.values():
+        check["basis"] = basis_of(check)
     return checks
+
+
+# change_7.3 section 6: what a check's verdict rests on. A judgment made from the prose is provisional
+# until something inspected settles it, and it must never render as a settled "Yes".
+BASIS_PAPER_TEXT = "paper_text"
+BASIS_INSPECTED = "inspected_evidence"
+
+
+def basis_of(check: dict) -> str:
+    """A measurement against a listing or an inspected file rests on evidence; a model reading the
+    prose, or a measurement that had nothing to compare, rests on the paper's text."""
+    if check.get("decided_by") == "measurement" and check.get("verdict") in (OK, MISMATCH):
+        return BASIS_INSPECTED
+    return BASIS_PAPER_TEXT
+
+
+def _registered_counts(deposits: list | None) -> list[tuple[str, str, int]]:
+    """(accession, ARCHIVE, registered samples) for every deposit that registered a count."""
+    found = []
+    for deposit in deposits or []:
+        if not isinstance(deposit, dict):
+            continue
+        count = deposit.get("registered_samples")
+        if isinstance(count, int) and count > 0:
+            found.append((str(deposit.get("accession")), str(deposit.get("archive") or "archive").upper(), count))
+    return found
 
 
 def species_hold(precompute_checks: dict | None) -> str | None:

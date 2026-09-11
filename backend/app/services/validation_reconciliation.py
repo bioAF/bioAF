@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.comparison_target import ComparisonTarget
 
 from app.services.supplement_inventory import build_inventory_digest
+from app.services.validation_classifier_service import BINDING_FAILED
 from app.services.validation_extraction_service import bind_claims
 
 logger = logging.getLogger("bioaf.validation_reconciliation")
@@ -52,11 +53,27 @@ _CONTEXT_FIELDS = (
 )
 
 
-def inventory_fingerprint(supplements: list[dict] | None) -> str:
+PERFORMED = "performed"
+NOT_PERFORMED = "not_performed"
+BASIS_INSPECTED = "inspected_evidence"
+BASIS_PAPER_TEXT = "paper_text"
+
+
+def not_performed(reason: str, **extra) -> dict:
+    """change_7.3 section 6: the record of a reconciliation that did not run, and why.
+
+    ``reconciled: false`` used to stand for five causes (nothing inspected, no plan, no provider, an
+    exception, a model that could not answer), and none of them reached the report.
+    """
+    return {"status": NOT_PERFORMED, "reason": reason, "basis": None, "revisions": [], "fingerprint": None, **extra}
+
+
+def inventory_fingerprint(supplements: list[dict] | None, passages: dict | None = None) -> str:
     """A stable identity for the evidence a reconciliation used.
 
     Section 6 asks that derived decisions be associated with the resource versions they used, and
-    that a retry not redo work. Both need the same thing: a fingerprint of what was inspected.
+    that a retry not redo work. Both need the same thing: a fingerprint of what was inspected, and
+    since change_7.3 of the paper passages kept at read time.
     """
     material = [
         {
@@ -70,7 +87,22 @@ def inventory_fingerprint(supplements: list[dict] | None) -> str:
             key=lambda s: str(s.get("filename") or s.get("label") or ""),
         )
     ]
-    return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:16]
+    return hashlib.sha256(json.dumps([material, passages or {}], sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _has_passages(passages: dict | None) -> bool:
+    return bool((passages or {}).get("claims") or (passages or {}).get("statements"))
+
+
+def passage_for(claim_text: str | None, passages: dict | None) -> str | None:
+    """The kept passage around a claim, matched on the claim's own sentence."""
+    wanted = " ".join(str(claim_text or "").split()).lower()
+    if not wanted:
+        return None
+    for row in (passages or {}).get("claims") or []:
+        if " ".join(str(row.get("claim_text") or "").split()).lower() == wanted:
+            return row.get("passage")
+    return None
 
 
 async def reconcile(
@@ -86,8 +118,14 @@ async def reconcile(
 ) -> dict:
     """Re-interpret this plan's claims against the inspected evidence. Never raises.
 
-    Returns ``{"revisions": [...], "fingerprint": ...}``. A revision names the target, what it said
-    before, what it says now, and why.
+    Returns the reconciliation record: ``status`` (``performed`` or ``not_performed``), ``reason``,
+    ``basis`` (``inspected_evidence`` or ``paper_text``), ``revisions`` and ``fingerprint``. A
+    revision names the target, what it said before, what it says now, and why.
+
+    change_7.3 section 7: **it runs on the paper's own passages even when every attachment failed.**
+    No paper text reached reconciliation at all, so the paper's own exclusion statement could never
+    correct a count. With nothing inspected it records ``basis: paper_text``, and what stays is the
+    rule against re-asking the same question of the same inputs.
     """
     # Loaded explicitly: the relationship is lazy, and touching it here would attempt IO outside
     # the async context.
@@ -102,17 +140,32 @@ async def reconcile(
         .scalars()
         .all()
     )
-    resolved = [s for s in (supplements or []) if isinstance(s, dict) and s.get("resolved")]
-    if not targets or not resolved:
-        # Nothing inspected means no better answer is available, and re-asking the same question of
-        # the same inputs would spend a model call to learn nothing.
-        return {"revisions": [], "fingerprint": None}
-
-    fingerprint = inventory_fingerprint(supplements)
     evidence = dict(study.evidence_json or {})
-    if (evidence.get("reconciliation") or {}).get("fingerprint") == fingerprint:
+    passages = evidence.get("paper_passages") or {}
+    resolved = [
+        s
+        for s in (supplements or [])
+        if isinstance(s, dict) and s.get("resolved") and s.get("kind") not in ("figure", "index")
+    ]
+    if not targets:
+        return not_performed("the plan has no claims to reconcile")
+    if not resolved and not _has_passages(passages):
+        # Nothing inspected and nothing of the paper kept means no better answer is available, and
+        # re-asking the same question of the same inputs would spend a model call to learn nothing.
+        return not_performed("no attachments were inspected and no passage of the paper was kept to reconcile against")
+
+    basis = BASIS_INSPECTED if resolved else BASIS_PAPER_TEXT
+    fingerprint = inventory_fingerprint(supplements, passages)
+    prior = evidence.get("reconciliation") or {}
+    if prior.get("fingerprint") == fingerprint:
         logger.info("study %s: evidence unchanged since the last reconciliation, skipping", study.id)
-        return {"revisions": [], "fingerprint": fingerprint}
+        return {
+            **prior,
+            "status": prior.get("status") or PERFORMED,
+            "basis": prior.get("basis") or basis,
+            "reason": "the evidence is unchanged since the last reconciliation, so it was not asked again",
+            "revisions": [],
+        }
 
     digest = build_inventory_digest(resolved)
     claims = [
@@ -122,6 +175,7 @@ async def reconcile(
             "value": t.claimed_value,
             "unit": t.unit,
             "source_locator": t.source_locator,
+            "passage": passage_for(t.claim_text, passages),
         }
         for t in targets
     ]
@@ -134,20 +188,35 @@ async def reconcile(
             api_key=api_key,
             inventory=digest,
             on_issue=on_issue,
+            **({"statements": list(passages["statements"])} if passages.get("statements") else {}),
         )
     except Exception as exc:  # noqa: BLE001 - reconciliation degrades the report, it cannot fail the study
         logger.warning("reconciliation failed for study %s: %s", study.id, exc)
-        return {"revisions": [], "fingerprint": None}
+        return not_performed("bioAF hit an internal error while reconciling the plan", error_class=type(exc).__name__)
 
     revisions = _apply(targets, decisions)
-    evidence["reconciliation"] = {
+    if decisions and all(d.get("bound_by") == BINDING_FAILED for d in decisions):
+        # The model could not answer. Each claim is marked unresolved by `_apply`; the provisional
+        # reading is not confirmed by our failure to check it, and a later attempt may ask again.
+        await session.flush()
+        return not_performed("the model's answer could not be read, so no claim was revised", revisions=revisions)
+
+    record = {
+        "status": PERFORMED,
+        "reason": (
+            "reconciled against the inspected attachments"
+            if basis == BASIS_INSPECTED
+            else "reconciled against the paper's own passages; no attachment was inspected"
+        ),
+        "basis": basis,
         "fingerprint": fingerprint,
         "revisions": revisions,
         "model": model,
     }
+    evidence["reconciliation"] = record
     study.evidence_json = evidence
     await session.flush()
-    return {"revisions": revisions, "fingerprint": fingerprint}
+    return record
 
 
 def _apply(targets: list, decisions: list[dict]) -> list[dict]:

@@ -130,6 +130,7 @@ _LEVEL3_NEVER_CONFIGURED = {"no_plan", "no_finding_claim"}
 # entry point behaves exactly as it did.
 _SELF_DRIVING_FRONT_HALF_STATES = ("requested", "plan_ready")
 
+
 def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
     """Why the chosen route cannot be taken, in the reader's language, or None when it can.
 
@@ -438,6 +439,10 @@ class ValidationDriverService:
         evidence["supplements"] = supplements
         if pmcid:
             evidence["pmcid"] = pmcid
+        # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
+        # of the paper reached reconciliation before, so its own exclusion statement could never
+        # correct a count, and a failed download left nothing at all to reconcile against.
+        evidence["paper_passages"] = await ValidationDriverService._paper_passages(session, plan, full_text)
         study.evidence_json = evidence
         await session.flush()
 
@@ -470,6 +475,29 @@ class ValidationDriverService:
             )
 
         return await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
+
+    @staticmethod
+    async def _paper_passages(session: AsyncSession, plan, full_text: str | None) -> dict:
+        """The passage around each claim, and the paper's exclusion statements. Bounded; never the
+        full text. Targets are queried explicitly: the relationship is lazy and raises outside IO."""
+        from app.models.comparison_target import ComparisonTarget
+        from app.services.validation_passages import paper_passages
+
+        claim_texts: list[str | None] = []
+        if plan is not None:
+            rows = (
+                (
+                    await session.execute(
+                        select(ComparisonTarget)
+                        .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                        .order_by(ComparisonTarget.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            claim_texts = [t.claim_text for t in rows if t.claim_text]
+        return paper_passages(full_text or "", claim_texts)
 
     @staticmethod
     async def _discover_capabilities(
@@ -553,8 +581,12 @@ class ValidationDriverService:
                 paper_sample_count=sample_sheet.get("sample_count"),
                 entries=await ValidationDriverService._deposit_entries(study, fetcher=fetcher),
                 # Whatever the inventory holds so far. At read time these are named references with
-                # no measurements; reconciliation re-runs the checks once they are resolved.
+                # no measurements; the assessment stage re-settles the checks once they are resolved.
                 supplements=(study.evidence_json or {}).get("supplements") or [],
+                # change_7.3 section 8: every archive's listing, not only GEO's. A DOI-requested study
+                # handed `list_deposit` an empty accession and the check said "no deposited files were
+                # listed" beside an EGA inventory of 108 files.
+                deposits=((study.evidence_json or {}).get("capabilities") or {}).get("deposits") or [],
                 # A series matrix is the only organism declaration bioAF reads. An EGA deposit has
                 # none, and reporting that as "the deposit declares no organism" claimed we had
                 # looked at something we never queried.
@@ -1118,7 +1150,9 @@ class ValidationDriverService:
         if design.get("contrasts"):
             rewritten, status, reason = rewrite_design_to_columns(design, associations)
             if status == "mismatch":
-                return await ValidationDriverService._hold_deposit(session, study, evidence, reason or "design mismatch")
+                return await ValidationDriverService._hold_deposit(
+                    session, study, evidence, reason or "design mismatch"
+                )
             plan.differential_design_json = rewritten
             await session.flush()
 

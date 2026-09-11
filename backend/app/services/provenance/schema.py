@@ -106,6 +106,9 @@ class ValidationStudyProvenanceData:
     # An exported report missing these would be worse than the page missing them, because the export
     # is what leaves the building.
     issues: list[dict[str, Any]] = field(default_factory=list)
+    # change_7.3 section 11: the report projection the API response also carries, so the page and
+    # both exports render the same statements from the same evidence.
+    report_summary: dict[str, Any] | None = None
     audit_trail: list[dict[str, Any]] = field(default_factory=list)
 
 

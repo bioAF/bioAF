@@ -25,7 +25,7 @@ VALID_AUTONOMY: tuple[str, ...] = (AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS)
 LOW_CONFIDENCE = 0.7
 
 
-def decision_list(targets: list[dict]) -> list[dict]:
+def decision_list(targets: list[dict], *, contrasts: list[dict] | None = None) -> list[dict]:
     """The AI decisions behind a plan, one row per claim, for the C1 gate to render.
 
     Rendered in BOTH modes. An AI decision that cannot be attributed is a defect rather than a
@@ -34,9 +34,22 @@ def decision_list(targets: list[dict]) -> list[dict]:
 
     A row the alias table resolved is shown as the alias table's, not the model's. Presenting a
     lookup as a judgment would be the same defect in the other direction.
+
+    change_7.3 section 10 item 7: each row carries the claim itself (its sentence, value and unit,
+    population, contrast and cutoff) so the gate leads with the science, and the mapping's status in
+    the report's own words. The wording comes from the report projection, the one place it lives.
     """
+    from app.services.validation_report_summary import summarize
+
+    projected = summarize(
+        study={},
+        evidence={},
+        plan={"differential_design": {"contrasts": contrasts or []}},
+        targets=list(targets or []),
+        issues=[],
+    )["claims"]
     rows = []
-    for t in targets or []:
+    for t, claim in zip(targets or [], projected):
         decided_by = t.get("bound_by") or "alias_table"
         by_model = decided_by == "model"
         confidence = t.get("binding_confidence") if by_model else None
@@ -50,6 +63,16 @@ def decision_list(targets: list[dict]) -> list[dict]:
                 "model": t.get("bound_by_model") if by_model else None,
                 "decided_by": decided_by,
                 "low_confidence": bool(by_model and confidence is not None and confidence < LOW_CONFIDENCE),
+                "claim_text": t.get("claim_text"),
+                "claimed_value": t.get("claimed_value"),
+                "unit": t.get("unit"),
+                "population": claim["population"],
+                "contrast": claim["contrast"],
+                "cutoff": claim["cutoff"],
+                "unresolved_reason": claim["unresolved_reason"],
+                "mapping_status": claim["mapping"]["status"],
+                "mapping_label": claim["mapping"]["label"],
+                "mapping_explanation": claim["mapping"]["explanation"],
             }
         )
     return rows

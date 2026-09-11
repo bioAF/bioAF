@@ -53,6 +53,7 @@ _SCHEMA_HINT = (
     '"reference_condition": "", "test_samples": ["sample ids in the test group"], '
     '"reference_samples": ["sample ids in the reference group"], '
     '"assay": "the assay this contrast was measured on", '
+    '"finding_claim_index": "index into claims of the claim stating this contrast\'s headline finding, or null", '
     '"thresholds": {"log2fc": null, "padj": null}}], '
     '"thresholds": {"log2fc": null, "padj": null}}, '
     '"claims": [{"metric_key": "aligns to a QC metric, or \'\' when nothing measures it", '
@@ -60,12 +61,15 @@ _SCHEMA_HINT = (
     '"source_locator": "section/figure", "sample_subset": "which samples, e.g. whole embryo", '
     '"qc_stage": "as collected | post-QC | as analysed", "direction": "up | down | null, relative to the '
     'reference arm", "threshold": null, "threshold_kind": "padj | abs_log2fc | null", '
+    '"contrast": "the name of the contrast this claim reports on, or null", '
+    '"cutoffs": [{"kind": "padj | pvalue | abs_log2fc", "operator": "< | <= | > | >=", "value": 0}], '
     '"output_type": "count | percentage | gene_set_size | ratio"}], '
     '"data_availability": "deposited | none | restricted", '
     '"code_availability": [{"kind": "github|gitlab|zenodo|codeocean|supplementary|none", "url": "", '
     '"identifier": "e.g. a DOI", "stated_in": "methods | data availability | code availability", '
     '"language": "R|Python|shell|unknown", "confidence": 0.0}], '
-    '"blockers": ["reasons the paper cannot be reproduced"]}'
+    '"blockers": [{"text": "a reason the paper cannot be reproduced", '
+    '"kind": "sample_assignment | data_access | missing_detail | no_accession | method_mismatch | other"}]}'
 )
 
 
@@ -223,7 +227,19 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "than copying another contrast's number. If the paper truly states one pair for everything, "
         "repeat it on each contrast. If the paper reports no differential "
         "comparison (a descriptive/QC-only paper), set contrasts to [] and leave thresholds null. Never "
-        "fabricate a contrast or a threshold."
+        "fabricate a contrast or a threshold.\n\n"
+        # change_7.3 section 7: cutoffs belong to claims, and a set and its subset are two claims.
+        'Give every claim its own cutoffs, one entry per cutoff: "padj < 0.05 and |log2FC| > 2" is two '
+        "cutoffs. Name the contrast a claim reports on, and for each contrast give finding_claim_index, "
+        "the claim that states its headline finding. A sentence that states a set and a subset of it "
+        '("194 genes were significant, 88 of which changed more than two-fold") makes TWO claims, each '
+        "with its own value and cutoffs; never merge them. Likewise, when the paper says samples were "
+        'excluded, the count before the exclusions is one claim with qc_stage "as collected" and the '
+        'number analysed after them is another with qc_stage "as analysed".\n\n'
+        "Give each blocker a kind: sample_assignment when which sample belongs to which group is not "
+        "stated, data_access when the data sits behind an access agreement, missing_detail for an "
+        "unstated methods detail, no_accession when no data deposit is named, method_mismatch when the "
+        "paper's method is not one a standard pipeline runs, other for anything else."
     )
     payload = f"Paper full text:\n\n{full_text}"
     return system, payload
@@ -427,6 +443,12 @@ def _normalize_differential_design(value) -> dict:
                 "thresholds": _contrast_thresholds(c.get("thresholds"), thresholds),
             }
         )
+        # change_7.3 section 7: which of the claims is this contrast's finding, so its threshold can
+        # be taken from that claim rather than from whichever pair the extractor attached. Only kept
+        # when the model named one, so the stored design is unchanged for every other contrast.
+        finding = c.get("finding_claim_index")
+        if isinstance(finding, int) and not isinstance(finding, bool):
+            contrasts[-1]["finding_claim_index"] = finding
     return {
         "contrasts": contrasts,
         # Kept: stored plans and the Level-3 wiring read it, and a single-contrast paper has exactly
@@ -456,12 +478,14 @@ def parse_extraction(response_text: str) -> dict:
         # shipped empty. Found by step 13, which needs the answer to fill the checklist's code rows.
         "code_availability": [],
         "blockers": [],
+        "blocker_kinds": [],
         "parse_failure": True,
     }
     data = fenced_json(response_text)
     if data is None:
         return empty
 
+    blockers, blocker_kinds = _typed_blockers(data.get("blockers"))
     return {
         "accessions": [str(a).strip() for a in _as_list(data.get("accessions")) if str(a).strip()],
         "sample_structure": _as_dict(data.get("sample_structure")),
@@ -473,9 +497,36 @@ def parse_extraction(response_text: str) -> dict:
         # that named nothing reads as `[]` ("we looked and it named none") rather than as a missing
         # key, which step 13 renders as UNKNOWN ("we never asked").
         "code_availability": [c for c in _as_list(data.get("code_availability")) if isinstance(c, dict)],
-        "blockers": [str(b) for b in _as_list(data.get("blockers")) if str(b).strip()],
+        "blockers": blockers,
+        "blocker_kinds": blocker_kinds,
         "parse_failure": False,
     }
+
+
+def _typed_blockers(raw) -> tuple[list[str], list[dict]]:
+    """Blocker sentences, and the kind the extraction gave each one.
+
+    change_7.3 section 7: the consistency pass read blockers with two regexes, and a paraphrase read
+    as no contradiction. The model now states a kind beside each sentence; a bare string (an older
+    answer, or a model ignoring the schema) is kept as a sentence with no kind, and only then does
+    the regex fallback apply.
+    """
+    from app.services.validation_consistency import BLOCKER_KINDS
+
+    sentences: list[str] = []
+    kinds: list[dict] = []
+    for item in _as_list(raw):
+        if isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            kind = str(item.get("kind") or "").strip().lower()
+            if not text:
+                continue
+            sentences.append(text)
+            if kind in BLOCKER_KINDS:
+                kinds.append({"text": text, "kind": kind})
+        elif str(item).strip():
+            sentences.append(str(item).strip())
+    return sentences, kinds
 
 
 # ---- plan_6 step 2: the binding call ----------------------------------------------------------
@@ -490,7 +541,11 @@ def parse_extraction(response_text: str) -> dict:
 
 
 def build_binding_prompt(
-    claims: list[dict], *, previous: list[dict] | None = None, inventory: str | None = None
+    claims: list[dict],
+    *,
+    previous: list[dict] | None = None,
+    inventory: str | None = None,
+    statements: list[str] | None = None,
 ) -> tuple[str, str]:
     """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline.
 
@@ -506,7 +561,16 @@ def build_binding_prompt(
         f"{_metric_vocabulary_block()}\n\n"
         "Respond with a SINGLE fenced JSON block (```json ... ```) and nothing else:\n"
         '{"bindings": [{"claim_index": 0, "bound_key": "peak_count" or null, "reason": "one sentence", '
-        '"confidence": 0.0 to 1.0}]}\n\n'
+        '"confidence": 0.0 to 1.0, "sample_subset": "which samples the number describes, or null", '
+        '"qc_stage": "as collected | post-QC | as analysed | null", '
+        '"direction": "up | down | null, relative to the reference arm", '
+        '"threshold": null, "threshold_kind": "padj | abs_log2fc | null", '
+        '"output_type": "count | percentage | gene_set_size | ratio | null", '
+        '"measurement_basis": "cell | sample | library | subject | cohort | null"}]}\n\n'
+        # change_7.3 section 7: the context fields were only ever volunteered. A reconciliation call
+        # that can correct "54 samples, post-QC" to "as collected" has to be ASKED for qc_stage.
+        "The context fields say what the number actually is. Fill each one the evidence settles and "
+        "leave it null otherwise; null keeps the earlier reading rather than blanking it.\n\n"
         "Rules:\n"
         "- Bind only when the claim measures the SAME quantity the metric describes. A per-condition or "
         "differential subset is not a total: peaks gained in one condition is not peak_count, and "
@@ -523,6 +587,13 @@ def build_binding_prompt(
         "- confidence is your own certainty in THIS binding: 1.0 when the claim states the metric in so "
         "many words, lower when you are reading intent from context."
     )
+    if statements:
+        system += (
+            "\n\nYou are also given the paper's own statements about its samples and quality control. "
+            "When the paper says samples were excluded, a count from before the exclusions is `as "
+            "collected` and the number analysed after them is a different population; set qc_stage to "
+            "say which one each claim describes."
+        )
     if inventory:
         system += (
             "\n\nYou are also given what the paper's SUPPLEMENTS hold. Use them to decide what a claim "
@@ -542,8 +613,17 @@ def build_binding_prompt(
         passage = (c.get("claim_text") or "").strip()
         if passage:
             line += f"\n     the paper says: {passage}"
+        # change_7.3 section 7: the passage around it, kept at read time, so the sentence arrives with
+        # the context that says which samples and which stage it counts.
+        context = (c.get("passage") or "").strip()
+        if context and context != passage:
+            line += f"\n     in context: {context}"
         lines.append(line)
     payload = "Claims to bind:\n\n" + "\n".join(lines)
+    if statements:
+        payload += "\n\nThe paper's statements about its samples and quality control:\n" + "\n".join(
+            f"- {statement}" for statement in statements
+        )
     if inventory:
         payload += "\n\n" + inventory
     if previous:
@@ -659,6 +739,7 @@ async def bind_claims(
     inventory: str | None = None,
     previous: list[dict] | None = None,
     on_issue=None,
+    statements: list[str] | None = None,
 ) -> list[dict]:
     """Ask the model which controlled metric each claim measures. One row per claim, in claim order.
 
@@ -671,7 +752,7 @@ async def bind_claims(
     if not claims:
         return []
 
-    system, payload = build_binding_prompt(claims, previous=previous, inventory=inventory)
+    system, payload = build_binding_prompt(claims, previous=previous, inventory=inventory, statements=statements)
     # `allowed` is the controlled vocabulary. An invented key would persist as a binding and be
     # compared against a metric that does not exist, which is the one failure this call removes.
     decision = await decide(
@@ -895,6 +976,13 @@ class ValidationExtractionService:
                 f"this dataset was aligned to before approving."
             )
 
+        from app.services.validation_claim_cutoffs import (
+            claim_cutoffs,
+            contrast_index_for,
+            derive_contrast_thresholds,
+        )
+
+        design_contrasts = parsed["differential_design"].get("contrasts") or []
         targets = []
         claims_to_bind = []
         for c in parsed["claims"]:
@@ -921,6 +1009,9 @@ class ValidationExtractionService:
                     "threshold": _to_float(c.get("threshold")),
                     "threshold_kind": c.get("threshold_kind"),
                     "output_type": c.get("output_type"),
+                    # change_7.3 section 7: the claim's own cutoffs and the contrast it reports on.
+                    "cutoffs": claim_cutoffs(c) or None,
+                    "contrast_index": contrast_index_for(c, design_contrasts),
                     # Until the binding call answers, the alias table is what decides, exactly as before.
                     "bound_by": "alias_table",
                 }
@@ -980,6 +1071,10 @@ class ValidationExtractionService:
         # so a paper listing its ChIP-seq contrast last handed a chipseq run an RNA-seq knockout.
         design = _differential_design_or_none(parsed["differential_design"])
         if design and design.get("contrasts"):
+            # change_7.3 section 7: a contrast's threshold comes from the claim that is its finding.
+            # The pair the extractor attached to the contrast drove the ground truth, and on a contrast
+            # with a set and a stricter subset it was the subset's.
+            design["contrasts"] = derive_contrast_thresholds(design["contrasts"], parsed["claims"])
             selection = await _select_contrast_for(
                 session,
                 study,
@@ -1030,6 +1125,10 @@ class ValidationExtractionService:
             library_strategy=library_strategy,
         )
 
+        # The kind of each blocker that survived into the plan, beside the sentences every other
+        # consumer reads.
+        kept = set(blockers)
+        plan.blocker_kinds_json = [k for k in parsed.get("blocker_kinds") or [] if k["text"] in kept] or None
         await ReproductionPlanService.add_comparison_targets(session, plan, targets)
         # Everything that could not get an answer from a model while reading this paper, on the
         # record. Study-scoped rather than plan-scoped: the extraction refusal above happens before

@@ -241,6 +241,10 @@ class ReproductionPlanService:
                 measurement_basis=_clamp(
                     t.get("measurement_basis") or basis_of(t.get("unit")) or basis_of(metric_key), 32
                 ),
+                # change_7.3 section 7: the claim's own cutoffs and the contrast it reports on.
+                contrast_index=t.get("contrast_index") if isinstance(t.get("contrast_index"), int) else None,
+                cutoffs=t.get("cutoffs") or None,
+                unresolved_reason=t.get("unresolved_reason"),
             )
             session.add(target)
             created.append(target)
@@ -528,9 +532,20 @@ class ReproductionPlanService:
             if header and await _autonomy_for(session, org_id) == AUTONOMY_AUTONOMOUS:
                 cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_VALIDATION)
                 if cfg is not None:
+                    # change_7.3 section 9: this caller dropped `on_issue`, so a model that could
+                    # not read the columns left nothing on the study's issues list.
+                    issues: list[dict] = []
                     resolved = await resolve_columns(
-                        header, kind=kind, client=get_client(cfg.provider), model=cfg.model, api_key=cfg.api_key
+                        header,
+                        kind=kind,
+                        client=get_client(cfg.provider),
+                        model=cfg.model,
+                        api_key=cfg.api_key,
+                        on_issue=issues.append,
                     )
+                    from app.services.validation_issue_service import ValidationIssueService
+
+                    await ValidationIssueService.record(session, study, issues)
             if resolved:
                 retried = _normalize(resolved["columns"])
                 if retried.entities:

@@ -44,7 +44,7 @@ def _patch_model(monkeypatch, columns, model="claude-opus-4-8"):
     async def fake_get_for_feature(sess, org_id, feature):
         return SimpleNamespace(provider="anthropic", model=model, api_key=None)
 
-    async def fake_resolve(header, *, kind, client, model, api_key):
+    async def fake_resolve(header, *, kind, client, model, api_key, on_issue=None):  # setup: section 9 passes on_issue
         return {"columns": columns, "reason": "csaw prefixes its columns", "confidence": 0.96, "model": model}
 
     monkeypatch.setattr(rps.llm_provider_config_service, "get_for_feature", fake_get_for_feature)
@@ -137,7 +137,7 @@ async def test_autonomous_that_gets_no_answer_falls_back_to_asking_a_person(sess
     """A provider outage must not look like an unusable deposit."""
     study = await _plan_ready_study(session, admin_user, autonomy="autonomous")
 
-    async def fake_resolve(header, *, kind, client, model, api_key):
+    async def fake_resolve(header, *, kind, client, model, api_key, on_issue=None):  # setup: section 9 passes on_issue
         return None
 
     from types import SimpleNamespace
@@ -203,3 +203,29 @@ async def test_a_plan_with_no_selection_still_uses_the_paper_level_pair(session,
     )
     assert claim["thresholds"] == {"log2fc": 1.0, "padj": 0.05}
     assert len(claim["finding_set"]["entities"]) == 1
+
+
+async def test_a_column_resolution_the_model_could_not_answer_is_an_issue(session, admin_user, monkeypatch):
+    """change_7.3 section 9: `set_finding_claim` dropped `on_issue`, so a model failing to resolve a
+    table's columns reached a log line and nothing else."""
+    from types import SimpleNamespace
+
+    from app.services.validation_issue_service import ValidationIssueService
+
+    study = await _plan_ready_study(session, admin_user, autonomy="autonomous")
+
+    async def fake_get_for_feature(sess, org_id, feature):
+        return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
+
+    class _Prose:
+        async def submit(self, prompt, payload, model, api_key, attachments=None):
+            return "I would guess the second column, but I am not sure."
+
+    monkeypatch.setattr(rps.llm_provider_config_service, "get_for_feature", fake_get_for_feature)
+    monkeypatch.setattr(rps, "get_client", lambda p: _Prose())
+
+    await ReproductionPlanService.set_finding_claim(
+        session, study.id, admin_user.organization_id, admin_user.id, kind="interval", table_text=_CSAW
+    )
+    issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+    assert [i["outcome"] for i in issues] == ["unparseable"]

@@ -233,3 +233,96 @@ class TestItDoesNotRedoWorkOnRetry:
         for _ in range(2):
             await rec.reconcile(session, study, plan, supplements=[_S1, _S3], client=object(), model="m", api_key=None)
         assert len(calls) == 1
+
+
+# ---- change_7.3 section 7 --------------------------------------------------------------------------
+
+
+class _Provider:
+    """The provider boundary, so the real `bind_claims` and its parser run."""
+
+    def __init__(self, answer: str):
+        self.answer = answer
+        self.calls: list[tuple[str, str]] = []
+
+    async def submit(self, prompt, payload, model, api_key, attachments=None):
+        self.calls.append((prompt, payload))
+        return self.answer
+
+
+class TestTheBindingSchemaAsksForTheContext:
+    """The binding response schema asked only for claim_index, bound_key, reason and confidence, so
+    `qc_stage` and `threshold` landed only when a model volunteered them."""
+
+    def test_every_context_field_is_requested(self):
+        from app.services.validation_extraction_service import build_binding_prompt
+
+        system, _ = build_binding_prompt([{"metric_key": "total_samples", "value": 54}])
+        for field in ("sample_subset", "qc_stage", "direction", "threshold_kind", "output_type", "measurement_basis"):
+            assert f'"{field}"' in system
+
+    @pytest.mark.asyncio
+    async def test_a_corrected_context_is_stored_through_the_real_binding_call(self, session, admin_user):
+        # change_7.3 section 7 (flagged test change): `test_a_corrected_context_is_stored` above stubs
+        # `bind_claims` and so never exercises the schema; this one goes through the provider.
+        from app.services import validation_reconciliation as rec
+
+        provider = _Provider(
+            '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "the 88 is a subset", '
+            '"confidence": 0.9, "threshold": 0.05, "threshold_kind": "padj", "sample_subset": "XX vs XY", '
+            '"qc_stage": "as analysed"}]}\n```'
+        )
+        study, plan = await _study_with_provisional_plan(session, admin_user)
+        await rec.reconcile(session, study, plan, supplements=[_S1, _S3], client=provider, model="m", api_key=None)
+        target = (await _targets(session, plan))[0]
+        assert target.threshold_kind == "padj"
+        assert target.sample_subset == "XX vs XY"
+        assert target.qc_stage == "as analysed"
+
+
+class TestItRunsOnThePaperText:
+    _PASSAGES = {
+        "claims": [
+            {
+                "claim_text": "194 genes were significant, 88 of them above a two-fold change",
+                "passage": "We identified 194 significantly differentially expressed genes. We further refined "
+                "this list by selecting those with a log2 fold change >2 ... these 88 genes",
+            }
+        ],
+        "statements": ["As a result, three TE biopsy samples were excluded for failing to pass quality control."],
+    }
+
+    @pytest.mark.asyncio
+    async def test_zero_attachments_with_kept_passages_still_reconciles(self, session, admin_user):
+        from app.services import validation_reconciliation as rec
+
+        provider = _Provider('```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "r"}]}\n```')
+        study, plan = await _study_with_provisional_plan(session, admin_user)
+        study.evidence_json = {"paper_passages": self._PASSAGES}
+        result = await rec.reconcile(session, study, plan, supplements=[], client=provider, model="m", api_key=None)
+        assert result["status"] == "performed"
+        assert result["basis"] == "paper_text"
+        assert provider.calls, "no model call was made on the paper's passages"
+
+    @pytest.mark.asyncio
+    async def test_the_call_receives_the_passage_and_the_exclusion_statement(self, session, admin_user):
+        from app.services import validation_reconciliation as rec
+
+        provider = _Provider('```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "r"}]}\n```')
+        study, plan = await _study_with_provisional_plan(session, admin_user)
+        study.evidence_json = {"paper_passages": self._PASSAGES}
+        await rec.reconcile(session, study, plan, supplements=[], client=provider, model="m", api_key=None)
+        _, payload = provider.calls[0]
+        assert "these 88 genes" in payload
+        assert "three TE biopsy samples were excluded" in payload
+
+    @pytest.mark.asyncio
+    async def test_unchanged_passages_are_not_asked_again(self, session, admin_user):
+        from app.services import validation_reconciliation as rec
+
+        provider = _Provider('```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "r"}]}\n```')
+        study, plan = await _study_with_provisional_plan(session, admin_user)
+        study.evidence_json = {"paper_passages": self._PASSAGES}
+        for _ in range(2):
+            await rec.reconcile(session, study, plan, supplements=[], client=provider, model="m", api_key=None)
+        assert len(provider.calls) == 1

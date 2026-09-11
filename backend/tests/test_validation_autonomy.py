@@ -171,3 +171,49 @@ class TestTheGateSeesTheDecisions:
         assert decisions[0]["confidence"] == 0.94
         assert decisions[0]["low_confidence"] is False
         assert decisions[0]["reason"] == "the paper's headline peak number"
+
+
+class TestTheDecisionLeadsWithTheScience:
+    """change_7.3 section 10 item 7: the gate showed internal keys first (`de_gene_count` ->
+    `total_sequences`). A reader needs the claim, its value and unit, its population or contrast and
+    cutoff; the binding is detail behind that."""
+
+    def _row(self):
+        from app.services.validation_autonomy import decision_list
+
+        return decision_list(
+            [
+                {
+                    "metric_key": "de_gene_count",
+                    "claim_text": "We identified 194 significantly differentially expressed genes",
+                    "claimed_value": 194.0,
+                    "unit": "genes",
+                    "sample_subset": "whole embryo XX vs XY",
+                    "contrast_index": 0,
+                    "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}],
+                    "bound_key": None,
+                    "binding_reason": "not a controlled metric",
+                    "binding_confidence": 0.97,
+                    "bound_by_model": "m",
+                    "bound_by": "model",
+                }
+            ],
+            contrasts=[{"name": "XX vs XY WE"}],
+        )[0]
+
+    def test_it_carries_the_claim(self):
+        row = self._row()
+        assert row["claim_text"].startswith("We identified 194")
+        assert row["claimed_value"] == 194.0
+        assert row["unit"] == "genes"
+        assert row["population"] == "whole embryo XX vs XY"
+
+    def test_it_carries_the_contrast_and_cutoff(self):
+        row = self._row()
+        assert row["contrast"] == "XX vs XY WE"
+        assert row["cutoff"] == "padj < 0.05"
+
+    def test_a_decline_by_the_model_says_no_supported_metric(self):
+        row = self._row()
+        assert row["mapping_status"] == "no_supported_metric"
+        assert "bioAF has no metric that measures this claim" in row["mapping_explanation"]

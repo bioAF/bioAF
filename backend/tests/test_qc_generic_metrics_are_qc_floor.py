@@ -75,8 +75,11 @@ def test_generic_metrics_still_surface_a_real_divergence():
     """Coverage that cannot earn `validated` must still be able to catch a
     problem: a read depth an order of magnitude off the paper is a real signal
     even though it is a floor metric."""
+    # Flagged test change, carried over from change_7.2 section 6 (2db794c2): a depth claim scores only
+    # when it settles reads versus pairs, per sample, before trimming. That commit qualified the unit
+    # in four sibling classifier tests and missed this one, because the full suite never ran to the end.
     result = classify_study(
-        [_target("total_reads", 60_000_000)],
+        [_target("total_reads", 60_000_000, unit="raw read pairs per sample")],
         {"total_sequences": 6_677_908},
         mapping_confidence="exact",
         reference_genome="GRCh38",
