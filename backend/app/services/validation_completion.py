@@ -23,21 +23,35 @@ CONTROLLED_ACCESS = "controlled_access"
 MISSING_INPUT = "missing_input"
 UNSUPPORTED_ACQUISITION = "unsupported_acquisition"
 FAILED_DISCOVERY = "failed_discovery"
+# change_7.3 section 5: bioAF tried to fetch something and failed. Distinct from a discovery that
+# never established anything and from an input that is established as missing: it is a limitation of
+# THIS attempt, and it forbids concluding that the thing is absent.
+RETRIEVAL_FAILED = "retrieval_failed"
 
-# What each blockage means for the terminal verdict. `inconclusive` is deliberate for a discovery
-# failure: nothing was established, so nothing about the paper may be concluded.
+LIMITATION_KINDS = (CONTROLLED_ACCESS, UNSUPPORTED_ACQUISITION, MISSING_INPUT, FAILED_DISCOVERY, RETRIEVAL_FAILED)
+
+# What each blockage means for the terminal verdict. `inconclusive` is deliberate for a discovery or
+# retrieval failure: nothing was established, so nothing about the paper may be concluded.
 _CLASSIFICATION_FOR = {
     CONTROLLED_ACCESS: "access_restricted",
     UNSUPPORTED_ACQUISITION: "access_restricted",
     MISSING_INPUT: "missing_data",
     FAILED_DISCOVERY: "inconclusive",
+    RETRIEVAL_FAILED: "inconclusive",
 }
+
+# The tri-state for the two completion facts. `not_established` is what a failed download yields;
+# a boolean could only say "No", which is an absence nobody established.
+YES = "yes"
+NO = "no"
+NOT_ESTABLISHED = "not_established"
 
 # What each route needs a deposit to hold.
 _ROUTE_NEEDS = {
     "deposit": ("preprocessed_data", "pre-processed data to reproduce the finding from"),
     "pipeline": ("raw_data", "raw sequencing reads to fetch and re-run"),
 }
+_LEGS = ("deposit", "pipeline")
 
 
 # change_7.2 section 1: one vocabulary for a refusal, wherever it arose. A limitation discovered at
@@ -57,81 +71,39 @@ def classification_for(limitations: list[dict]) -> str:
 
 
 def completion_for(
-    *, route: str, capabilities: dict, supplements: list[dict] | None, extra_limitations: list[dict] | None = None
+    *,
+    route: str,
+    capabilities: dict,
+    supplements: list[dict] | None,
+    extra_limitations: list[dict] | None = None,
+    manifest_known: bool = True,
 ) -> dict:
     """The terminal outcome for a study whose route(s) cannot run.
 
     Returns the classification, a reader-facing reason, every limitation with the resource it
     affects, and what was and was not checked.
+
+    change_7.3 section 5: **every leg is evaluated and only the chosen legs govern.** Assessing a leg
+    costs nothing and touches only public evidence, and a deposit-route study that never states what
+    the raw-read route faces cannot say the one thing a reader needs about a controlled deposit. The
+    legs that were not chosen are returned as ``other_legs``: context, never run, never classifying.
+
+    ``manifest_known`` is False when nothing listed the paper's attachments (a pasted body carries
+    no manifest), so an empty inventory cannot be read as "the paper attached nothing".
     """
     deposits = [d for d in (capabilities.get("deposits") or []) if isinstance(d, dict)]
-    resolved = [s for s in (supplements or []) if isinstance(s, dict) and s.get("resolved")]
-
+    rows = [s for s in (supplements or []) if isinstance(s, dict)]
+    resolved = [s for s in rows if s.get("resolved")]
     results_tables = [s for s in resolved if s.get("role") == "results_table"]
-    matrices = [s for s in resolved if s.get("role") == "expression_matrix"]
 
+    from app.services.validation_route_policy import legs_for
+
+    chosen = legs_for(route)
     limitations: list[dict] = []
-    for leg in ("deposit", "pipeline") if route == "both" else (route,):
-        need = _ROUTE_NEEDS.get(leg)
-        if need is None:
-            continue
-        key, description = need
-        answer = (capabilities.get(key) or {}).get("value")
-
-        if answer == "unknown":
-            limitations.append(
-                {
-                    "kind": FAILED_DISCOVERY,
-                    "resource": "this paper's deposits",
-                    "operation": leg,
-                    "detail": (capabilities.get(key) or {}).get("failure_reason")
-                    or f"bioAF could not establish whether {description} is published",
-                }
-            )
-            continue
-
-        holders = [d for d in deposits if d.get(key) == "yes"]
-        acquirable = [d for d in holders if d.get("supported") == "yes" and d.get("access") != "controlled"]
-        if answer == "yes" and holders and not acquirable:
-            for deposit in holders:
-                # change_7.2 section 1: the adapter question is asked FIRST, exactly as the route
-                # policy asks it, so the outcome and the refusal cannot name different axes for the
-                # same fact. Both can be true of one deposit, and the adapter is the axis bioAF owns:
-                # telling a lab to negotiate data access for a capability gap sends it to the wrong
-                # remedy, and the reverse files a feature request for a permission problem.
-                unsupported = deposit.get("supported") != "yes"
-                limitations.append(
-                    {
-                        "kind": UNSUPPORTED_ACQUISITION if unsupported else CONTROLLED_ACCESS,
-                        "resource": deposit.get("accession"),
-                        "operation": leg,
-                        "detail": (
-                            f"{deposit.get('accession')} publishes {description} under "
-                            f"{deposit.get('access')} access, and bioAF has no adapter for "
-                            f"{str(deposit.get('archive') or '').upper()}. The data is published; "
-                            "the limitation is bioAF's"
-                            if unsupported
-                            else (
-                                f"{deposit.get('accession')} publishes {description} under "
-                                f"{deposit.get('access')} access, and this organisation is not "
-                                "authorised to reach it"
-                            )
-                        ),
-                    }
-                )
-            continue
-
-        if answer == "no":
-            # Scoped to the deposit, never to the paper: the paper may well publish this elsewhere,
-            # and study 32 said it did not while holding the file that proved otherwise.
-            named = ", ".join(str(d.get("accession")) for d in deposits) or "the deposits bioAF found"
-            detail = f"{named} publishes no {description}"
-            if results_tables and leg == "deposit":
-                detail += (
-                    f". The paper does publish processed results ({results_tables[0].get('label')}), "
-                    "which can be checked for consistency but cannot be reproduced from"
-                )
-            limitations.append({"kind": MISSING_INPUT, "resource": named, "operation": leg, "detail": detail})
+    other_legs: list[dict] = []
+    for leg in _LEGS:
+        found = _leg_limitations(leg, capabilities, deposits, results_tables)
+        (limitations if leg in chosen else other_legs).extend(found)
 
     # A limitation the caller established for itself: an acquisition that ran out of attempts, or a
     # deposit that turned out to hold nothing usable. Discovery answered "yes" for both, so nothing
@@ -140,31 +112,261 @@ def completion_for(
         if isinstance(extra, dict) and extra.get("kind"):
             limitations.append(extra)
 
-    # change_7.3 section 3: a retrieved file the classifier could not place is still a retrieved file.
-    # Dropping it made a downloaded document vanish from the report. Figures and index pages are the
-    # article's own packaging, not attachments, and are not checks.
+    # change_7.3 section 5: what the paper attached and bioAF could not inspect. It is the reason an
+    # absence cannot be established, so it has to stand beside the limitation it qualifies.
+    limitations.extend(_attachment_limitations(rows, manifest_known=manifest_known))
+
+    # change_7.1 section 7 and change_7.3 section 3: a retrieved file the classifier could not place
+    # is still a retrieved file. Figures and index pages are the article's packaging, not checks.
     checks_completed = [
         f"{s.get('label')}: {_CHECK_DESCRIPTION.get(s.get('role'), 'retrieved; role not established')}"
         for s in resolved
         if s.get("kind") not in ("figure", "index")
     ]
-    checks_not_completed = [
-        f"{s.get('label')}: {s.get('failure_reason') or 'not retrieved'}"
-        for s in (supplements or [])
-        if isinstance(s, dict) and not s.get("resolved")
-    ]
+
+    processed, processed_reason = _processed_results(rows, results_tables, manifest_known=manifest_known)
+    acquired, acquired_reason = _reproduction_input(rows, deposits, manifest_known=manifest_known)
 
     return {
         "classification": _classification(limitations),
         "reason": " ".join(limitation["detail"] for limitation in limitations) or "no route could be taken",
         "limitations": limitations,
+        "other_legs": other_legs,
         # Two different facts, and collapsing them is what produced a no-processed-results
-        # conclusion about a paper that published a results table.
-        "processed_results_available": bool(results_tables),
-        "reproduction_input_available": bool(matrices),
+        # conclusion about a paper that published a results table. Each is yes, no or
+        # not_established, with the reason beside it.
+        "processed_results_available": processed,
+        "processed_results_reason": processed_reason,
+        "reproduction_input_available": acquired,
+        "reproduction_input_reason": acquired_reason,
         "checks_completed": checks_completed,
-        "checks_not_completed": checks_not_completed,
+        "checks_not_completed": _checks_not_completed(rows),
     }
+
+
+def _leg_limitations(leg: str, capabilities: dict, deposits: list[dict], results_tables: list[dict]) -> list[dict]:
+    """What stands in the way of one leg, asking the adapter question before the input question."""
+    key, description = _ROUTE_NEEDS[leg]
+    answer = (capabilities.get(key) or {}).get("value")
+
+    if answer not in ("yes", "no"):
+        return [
+            {
+                "kind": FAILED_DISCOVERY,
+                "resource": "this paper's deposits",
+                "operation": leg,
+                "detail": (capabilities.get(key) or {}).get("failure_reason")
+                or f"bioAF could not establish whether {description} is published",
+            }
+        ]
+
+    if answer == "yes":
+        holders = [d for d in deposits if d.get(key) == "yes"]
+        acquirable = [d for d in holders if d.get("supported") == "yes" and d.get("access") != "controlled"]
+        if not holders or acquirable:
+            return []
+        # change_7.2 section 1: the adapter question is asked FIRST, exactly as the route policy
+        # asks it, so the outcome and the refusal cannot name different axes for the same fact.
+        return [
+            _unsupported(deposit, leg, key, description, holds=True)
+            if deposit.get("supported") != "yes"
+            else {
+                "kind": CONTROLLED_ACCESS,
+                "resource": deposit.get("accession"),
+                "operation": leg,
+                "detail": (
+                    f"{deposit.get('accession')} publishes {description} under {deposit.get('access')} "
+                    "access, and this organisation is not authorised to reach it"
+                ),
+            }
+            for deposit in holders
+        ]
+
+    # answer == "no". change_7.3 section 5: the adapter question still comes first. `no_input` means
+    # the adapter exists and the resource holds nothing that could serve; for a deposit in an archive
+    # bioAF cannot read, the refusal is the missing adapter and the listing is an observation beside
+    # it. Commit b7cc32f3 reordered adapter against access and never touched this path.
+    note = (
+        f". The paper does publish processed results ({results_tables[0].get('label')}), which can be checked "
+        "for consistency but cannot be reproduced from"
+        if results_tables and leg == "deposit"
+        else ""
+    )
+    if not deposits:
+        return [
+            {
+                "kind": MISSING_INPUT,
+                "resource": "this paper's deposits",
+                "operation": leg,
+                "detail": f"this paper names no deposit holding {description}{note}",
+            }
+        ]
+    found: list[dict] = []
+    for deposit in deposits:
+        if deposit.get("supported") != "yes":
+            found.append(_unsupported(deposit, leg, key, description, holds=False))
+            continue
+        # Scoped to the deposit, never to the paper: the paper may well publish this elsewhere, and
+        # study 32 said it did not while holding the file that proved otherwise.
+        detail = f"{deposit.get('accession')} publishes no {description}{note}"
+        found.append({"kind": MISSING_INPUT, "resource": deposit.get("accession"), "operation": leg, "detail": detail})
+    if note and found and found[0]["kind"] == UNSUPPORTED_ACQUISITION:
+        found[0]["detail"] += note
+    return found
+
+
+def _unsupported(deposit: dict, leg: str, key: str, description: str, *, holds: bool) -> dict:
+    """A deposit in an archive bioAF has no adapter for. The limitation is bioAF's; what the public
+    listing shows is carried beside it as an observation, never as the refusal."""
+    accession = deposit.get("accession")
+    archive = str(deposit.get("archive") or "that archive").upper()
+    observation = (deposit.get("evidence_by_key") or {}).get(key) or deposit.get("evidence")
+    if holds:
+        detail = (
+            f"{accession} publishes {description} under {deposit.get('access')} access, and bioAF has no "
+            f"adapter for {archive}. The data is published; the limitation is bioAF's"
+        )
+    else:
+        detail = (
+            f"{accession} is in {archive} ({deposit.get('access')} access), and bioAF has no adapter for "
+            f"{archive}, so it cannot acquire anything from it. Its public listing holds no {description}"
+        )
+    return {
+        "kind": UNSUPPORTED_ACQUISITION,
+        "resource": accession,
+        "operation": leg,
+        "detail": detail,
+        "observation": observation,
+    }
+
+
+def _retrieval_status(row: dict) -> str:
+    """A row's retrieval status, reading a row recorded before the ledger as it was: failed if it
+    carries a copied reason, otherwise not attempted."""
+    status = (row.get("retrieval") or {}).get("status")
+    if status:
+        return status
+    if row.get("resolved"):
+        return "retrieved"
+    return "failed" if row.get("failure_reason") else "not_attempted"
+
+
+def _candidates(rows: list[dict]) -> list[dict]:
+    """The rows that could hold an input: attachments, and citations the manifest could not place.
+    Index pages and figure images are packaging."""
+    return [r for r in rows if r.get("kind", "attachment") not in ("index", "figure")]
+
+
+def _uninspected(rows: list[dict]) -> list[dict]:
+    """Candidates whose content nobody established: retrieval failed, was never attempted, or the
+    bundle did not carry them. A citation with no match anywhere is a discovery limitation and is
+    counted here too, because what it names is not established either."""
+    return [r for r in _candidates(rows) if not r.get("resolved")]
+
+
+def _attachment_limitations(rows: list[dict], *, manifest_known: bool) -> list[dict]:
+    failed = [r for r in _uninspected(rows) if _retrieval_status(r) == "failed"]
+    never = [r for r in _uninspected(rows) if _retrieval_status(r) == "not_attempted"]
+    found: list[dict] = []
+    if failed:
+        found.append(
+            {
+                "kind": RETRIEVAL_FAILED,
+                "resource": "the paper's supplementary files",
+                "operation": "retrieval",
+                "detail": (
+                    f"bioAF could not retrieve {len(failed)} of the paper's attachment(s) in this attempt, "
+                    "so what they hold is not established"
+                ),
+            }
+        )
+    if never:
+        found.append(
+            {
+                "kind": FAILED_DISCOVERY,
+                "resource": "the paper's supplementary files",
+                "operation": "retrieval",
+                "detail": (
+                    f"bioAF did not retrieve {len(never)} of the paper's attachment(s), so what they hold is not "
+                    "established"
+                ),
+            }
+        )
+    if not manifest_known and not rows:
+        found.append(
+            {
+                "kind": FAILED_DISCOVERY,
+                "resource": "the paper's supplementary files",
+                "operation": "retrieval",
+                "detail": "bioAF has no list of this paper's attachments, so what the paper attaches is not established",
+            }
+        )
+    return found
+
+
+def _processed_results(rows: list[dict], results_tables: list[dict], *, manifest_known: bool) -> tuple[str, str]:
+    if results_tables:
+        return YES, f"{results_tables[0].get('label')} is a published results table that bioAF inspected"
+    uninspected = _uninspected(rows)
+    if uninspected:
+        return NOT_ESTABLISHED, (
+            f"{len(uninspected)} of the paper's attachment(s) were not inspected, so whether the paper publishes "
+            "processed results is not established"
+        )
+    if not manifest_known and not rows:
+        return NOT_ESTABLISHED, "bioAF has no list of this paper's attachments"
+    return NO, "bioAF inspected every attachment it found and none is a results table"
+
+
+def _reproduction_input(rows: list[dict], deposits: list[dict], *, manifest_known: bool) -> tuple[str, str]:
+    """Whether bioAF acquired a sample-level input. Acquisition is what this fact describes."""
+    matrices = [r for r in rows if r.get("resolved") and r.get("role") == "expression_matrix"]
+    if matrices:
+        return YES, f"bioAF retrieved {matrices[0].get('label')}, a sample-level matrix"
+    uninspected = _uninspected(rows)
+    if uninspected:
+        return NOT_ESTABLISHED, (
+            f"{len(uninspected)} of the paper's attachment(s) were not inspected, so whether the paper attaches a "
+            "usable input is not established; bioAF acquired none in this attempt"
+        )
+    if not manifest_known and not rows:
+        return NOT_ESTABLISHED, "bioAF has no list of this paper's attachments; it acquired no input in this attempt"
+    unreachable = [
+        d
+        for d in deposits
+        if (d.get("raw_data") == "yes" or d.get("preprocessed_data") == "yes") and d.get("supported") != "yes"
+    ]
+    if unreachable:
+        names = ", ".join(str(d.get("accession")) for d in unreachable)
+        return NO, f"{names} holds a published input that bioAF cannot acquire, and no attachment holds one"
+    return NO, "no attachment bioAF inspected holds a sample-level input, and it acquired none"
+
+
+def _checks_not_completed(rows: list[dict]) -> list[str]:
+    """One line per failure, never one per artifact. Study 34 repeated one bundle failure eight times
+    in this list alone."""
+    groups: dict[str, list[str]] = {}
+    texts: dict[str, str] = {}
+    for row in _uninspected(rows):
+        status = _retrieval_status(row)
+        if status == "failed":
+            key = f"failed:{(row.get('retrieval') or {}).get('ledger') or row.get('failure_reason') or ''}"
+            texts[key] = "could not be retrieved in this attempt"
+        elif status == "not_in_bundle":
+            key = f"absent:{row.get('label')}"
+            texts[key] = (
+                "named in the text; no matching attachment in the article's manifest or its bundle"
+                if row.get("kind") == "reference"
+                else "not found in the paper's supplementary bundle"
+            )
+        elif row.get("kind") == "reference":
+            key = f"reference:{row.get('label')}"
+            texts[key] = "named in the text; no matching attachment in the article's manifest"
+        else:
+            key = f"never:{row.get('label')}"
+            texts[key] = "not retrieved"
+        groups.setdefault(key, []).append(str(row.get("label")))
+    return [f"{', '.join(labels)}: {texts[key]}" for key, labels in groups.items()]
 
 
 # What inspecting a resource of each role actually established. Consistency against a published
@@ -183,9 +385,17 @@ def _classification(limitations: list[dict]) -> str:
 
     Access beats a missing input when both are true: a reader deciding what to do next can request
     access, and cannot conjure a matrix the authors never deposited.
+
+    change_7.3 section 5: **`missing_data` needs an established absence.** A retrieval that failed or
+    an attachment nobody inspected means the absence is not established, and the study is
+    `inconclusive` rather than a finding that the paper lacks data.
     """
     kinds = {limitation["kind"] for limitation in limitations}
-    for kind in (CONTROLLED_ACCESS, UNSUPPORTED_ACQUISITION, MISSING_INPUT, FAILED_DISCOVERY):
+    for kind in (CONTROLLED_ACCESS, UNSUPPORTED_ACQUISITION):
         if kind in kinds:
             return _CLASSIFICATION_FOR[kind]
+    if kinds & {RETRIEVAL_FAILED, FAILED_DISCOVERY}:
+        return "inconclusive"
+    if MISSING_INPUT in kinds:
+        return "missing_data"
     return "inconclusive"

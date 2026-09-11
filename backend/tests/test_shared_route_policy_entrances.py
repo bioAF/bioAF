@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.validation_driver_service import ValidationDriverService
-from app.services.validation_route_policy import CONTESTED, NO_ADAPTER, NO_INPUT, decide_route
+from app.services.validation_route_policy import CONTESTED, NO_ADAPTER, decide_route
 from app.services.validation_study_service import ValidationStudyService
 
 _TO_PLAN_READY = ["acquiring_text", "reading", "plan_ready"]
@@ -174,13 +174,15 @@ class TestTheTwoEntrancesAgree:
         assert approved.state == "classified"
 
     @pytest.mark.asyncio
-    async def test_the_deposit_leg_refuses_on_a_missing_input_not_a_missing_adapter(self, session, admin_user):
-        """The same paper refuses each leg for a different reason, and the report must say which."""
+    async def test_the_deposit_leg_of_an_unreadable_archive_refuses_on_the_adapter(self, session, admin_user):
+        """change_7.3 section 5 (flagged test change): this asserted NO_INPUT for the EGA deposit leg,
+        the axis-order defect the plan names. `no_input` means the adapter exists and the resource
+        holds nothing; for EGA the adapter does not exist, and the listing is an observation."""
         study = await _study(session, admin_user, capabilities=_EGA_CAPS)
         approved = await ValidationStudyService.approve_plan(
             session, study.id, admin_user.organization_id, admin_user.id, route="deposit"
         )
-        assert (approved.evidence_json or {}).get("route_decision", {}).get("action") == NO_INPUT
+        assert (approved.evidence_json or {}).get("route_decision", {}).get("action") == NO_ADAPTER
 
 
 class TestTheGateStillRefusesWhatItAlwaysDid:

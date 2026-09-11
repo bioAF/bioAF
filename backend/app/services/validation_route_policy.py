@@ -72,6 +72,10 @@ class RouteFinding:
     reason: str
     resource: str | None = None
     archive: str | None = None
+    # change_7.3 section 5: an established fact reported beside the refusal, never as it. For a
+    # deposit bioAF has no adapter for, what its public listing holds ("108 fastq.gz, no processed
+    # tables") is true and worth saying, and it is not the reason the route was refused.
+    observation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,7 @@ class RouteDecision:
                     "reason": f.reason,
                     "resource": f.resource,
                     "archive": f.archive,
+                    "observation": f.observation,
                 }
                 for f in self.findings
             ],
@@ -179,6 +184,22 @@ def _decide_leg(leg: str, caps: dict, deposits: list[dict]) -> RouteFinding:
     holders = [d for d in deposits if d.get(key) == "yes"]
 
     if answer == "no":
+        # change_7.3 section 5: axis 1 before axis 2 here too. `no_input` means the adapter exists and
+        # the resource holds nothing that could serve. A deposit in an archive bioAF cannot read is a
+        # missing adapter, and what its public listing holds is an observation beside the refusal.
+        # Commit b7cc32f3 reordered adapter against access and never touched this path.
+        unreadable = [d for d in deposits if d.get("supported") != "yes"]
+        if unreadable:
+            first = unreadable[0]
+            observation = (first.get("evidence_by_key") or {}).get(key) or first.get("evidence")
+            return RouteFinding(
+                leg=leg,
+                action=NO_ADAPTER,
+                reason=_no_adapter_listing_reason(unreadable, need),
+                resource=str(first.get("accession") or "") or None,
+                archive=str(first.get("archive") or "") or None,
+                observation=observation,
+            )
         # Axis 2, scoped to the deposits that were actually read. "for this paper" states something
         # about the publication that a deposit listing cannot establish, and study 32 said exactly
         # that while holding the results table that disproved it.
@@ -235,6 +256,17 @@ def _no_adapter_reason(deposits: list[dict], need: str) -> str:
         f"This paper published {need}, in {_describe(deposits)}. bioAF has no adapter for "
         f"{' or '.join(archives)}, so it cannot acquire this data. The data is published; the "
         "limitation is bioAF's."
+    )
+
+
+def _no_adapter_listing_reason(deposits: list[dict], need: str) -> str:
+    """The adapter gap for a deposit whose public listing holds none of what this leg needs. Both
+    are stated, in that order: the refusal is bioAF's, and the listing is what was observed."""
+    archives = sorted({str(d.get("archive") or "that archive").upper() for d in deposits})
+    return (
+        f"{_describe(deposits)} is in {' or '.join(archives)}, and bioAF has no adapter for "
+        f"{' or '.join(archives)}, so it cannot acquire data from it. Its public listing holds no {need}. "
+        "The limitation is bioAF's."
     )
 
 
