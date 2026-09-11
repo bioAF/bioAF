@@ -72,9 +72,24 @@ _SAMPLE_RECOVERY_BLOCKER_REVERSED = re.compile(
 )
 
 
+# And the wording that says the assignments are not STATED, which is the same claim. Study 34's plan,
+# recorded before blockers had kinds, said "Sample IDs assigned to each differential group ... are not
+# explicitly enumerated in the text", and its resume on the deployed build found no contradiction.
+_SAMPLE_RECOVERY_UNSTATED = re.compile(
+    r"(sample ids?|sample identit|sample assignment|per[- ]sample|which sample|assigned to each)"
+    r".{0,160}?"
+    r"not (explicitly |fully |clearly )?(enumerated|listed|stated|specified|given|reported|provided)",
+    re.I | re.S,
+)
+
+
 def _asserts_samples_unrecoverable(blocker: str) -> bool:
     text = str(blocker or "")
-    return bool(_SAMPLE_RECOVERY_BLOCKER.search(text) or _SAMPLE_RECOVERY_BLOCKER_REVERSED.search(text))
+    return bool(
+        _SAMPLE_RECOVERY_BLOCKER.search(text)
+        or _SAMPLE_RECOVERY_BLOCKER_REVERSED.search(text)
+        or _SAMPLE_RECOVERY_UNSTATED.search(text)
+    )
 
 
 def _sample_metadata_evidence(supplements: list[dict] | None) -> dict | None:

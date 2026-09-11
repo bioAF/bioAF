@@ -190,13 +190,18 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     change_7.3 section 1: every attempt lands in ``evidence["retrieval_ledger"]``, which this
     updates in place, and one failed source becomes one issue.
     """
-    from app.services.supplement_inventory import merge_resource_identity, resolve_supplements
+    from app.services.supplement_inventory import merge_resource_identity, recorded_failures, resolve_supplements
 
     references = evidence.get("supplements") or []
     pmcid = (evidence.get("pmcid") or "").strip()
     if not pmcid:
         return references
     ledger = list(evidence.get("retrieval_ledger") or [])
+    if not ledger:
+        # A study recorded before the ledger carries its failure only as a copy on each row, and the
+        # attempt below clears those copies. The failure is written into the ledger first, so a
+        # resumed study shows the original failure beside the new attempt.
+        ledger.extend(recorded_failures(references, pmcid=pmcid, at=(evidence.get("assessment") or {}).get("at")))
     start = len(ledger)
     try:
         resolved = await resolve_supplements(
@@ -449,14 +454,18 @@ async def guard_population_counts(session: AsyncSession, study, plan) -> list[in
     marked: list[int] = []
     for target in targets:
         stage = (target.qc_stage or "").lower().replace("-", "").replace(" ", "")
-        if "postqc" not in stage or target.claimed_value is None or not _is_sample_count(target):
+        # "as analysed" says the same thing as post-QC once the paper states that samples were
+        # excluded: the deployed resume of study 34 had reconciliation relabel the 54 that way.
+        # Without a stated exclusion an analysed count equal to the inventory is plausible, and left.
+        analysed = "postqc" in stage or ("analys" in stage or "analyz" in stage) and excluded
+        if not analysed or target.claimed_value is None or not _is_sample_count(target):
             continue
         match = next((acc for acc, count in registered if float(count) == float(target.claimed_value)), None)
         if match is None:
             continue
         target.unresolved_reason = (
             f"This count equals the {int(target.claimed_value)} samples {match} registers, which is the collected "
-            "inventory, but the claim is tagged post-QC."
+            f"inventory, but the claim describes it as {target.qc_stage}."
             + (
                 " The paper states that samples were excluded after quality control, so fewer were analysed."
                 if excluded

@@ -685,6 +685,53 @@ async def resolve_supplements(
     return rows
 
 
+def recorded_failures(rows: list[dict] | None, *, pmcid: str, at: str | None) -> list[dict]:
+    """Ledger entries for failures recorded before the ledger existed. One per distinct reason.
+
+    A legacy row carries the bundle failure as a copied ``failure_reason``; the HTTP status and URL
+    are read out of that text where it holds them. ``recorded_before_ledger`` marks what these are:
+    what the study said at the time, not an attempt this build made.
+    """
+    groups: dict[str, list[str]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict) or row.get("resolved") or isinstance(row.get("retrieval"), dict):
+            continue
+        reason = str(row.get("failure_reason") or "").strip()
+        # A file the bundle lacked is about that artifact, not a failed request.
+        if not reason or "could not find a file in the bundle" in reason:
+            continue
+        groups.setdefault(reason, []).append(str(row.get("filename") or row.get("label") or ""))
+
+    entries: list[dict] = []
+    for index, (reason, artifacts) in enumerate(groups.items(), start=1):
+        status_match = re.search(r"\b([45]\d\d)\b", reason)
+        status = int(status_match.group(1)) if status_match else None
+        url_match = re.search(r"url '([^']+)'", reason)
+        if "larger than" in reason:
+            outcome = TOO_LARGE
+        elif "could not be read" in reason:
+            outcome = UNREADABLE
+        else:
+            outcome = _failure_outcome(status)
+        entries.append(
+            {
+                "id": f"R{index}",
+                "source": BUNDLE_SOURCE,
+                "source_label": BUNDLE_SOURCE_LABEL,
+                "url": url_match.group(1) if url_match else _SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid),
+                "at": at,
+                "attempt": 1,
+                "outcome": outcome,
+                "http_status": status,
+                "error_class": None,
+                "artifacts": artifacts,
+                "recorded_before_ledger": True,
+                "recorded_reason": reason,
+            }
+        )
+    return entries
+
+
 def _bundle_kind(filename: str) -> str:
     name = filename.lower()
     if name.endswith(_IMAGE_EXTENSIONS):

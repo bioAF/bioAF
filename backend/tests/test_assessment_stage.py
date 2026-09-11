@@ -507,11 +507,13 @@ class TestTypedBlockersReachTheConsistencyPass:
 
     _CHECK_OK = {CHECK_SAMPLES_DESCRIBED: {"check": CHECK_SAMPLES_DESCRIBED, "verdict": OK, "detail": "described"}}
 
-    def test_the_paraphrase_is_missed_without_a_kind(self):
-        assert (
-            reconcile_contradictions(precompute_checks=self._CHECK_OK, blockers=[_STUDY_34_BLOCKER], supplements=[])
-            == []
+    def test_a_legacy_blocker_saying_it_is_not_enumerated_is_caught_by_the_fallback(self):
+        """A plan recorded before blockers had kinds. Study 34's resume on the deployed build found no
+        contradiction because the fallback regexes did not know "not explicitly enumerated"."""
+        findings = reconcile_contradictions(
+            precompute_checks=self._CHECK_OK, blockers=[_STUDY_34_BLOCKER], supplements=[]
         )
+        assert findings and findings[0]["status"] == UNRESOLVED
 
     def test_a_typed_blocker_is_detected_whatever_its_wording(self):
         findings = reconcile_contradictions(
@@ -608,3 +610,70 @@ class TestAPostQcCountEqualToTheInventoryIsUnresolved:
             await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
         ).scalar_one()
         assert target.unresolved_reason is None
+
+
+class TestALegacyRecordedFailureSeedsTheLedger:
+    """change_7.3 deployed acceptance, step 4: a resumed study's ledger must show the original
+    failure and the new attempt. Study 34's 404 predates the ledger and lived only as a copy on each
+    row, so a successful retry cleared it and the ledger showed only the new attempt."""
+
+    @pytest.mark.asyncio
+    async def test_the_recorded_404_and_the_new_attempt_both_appear(self, session, admin_user, monkeypatch):
+        import io
+        import json as _json
+        import zipfile
+
+        persisted = _json.loads(
+            (pathlib.Path(__file__).parent / "fixtures" / "groff" / "study_34_persisted.json").read_text()
+        )
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            zf.writestr("supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt", "sample\tsex\nE1\tXX\n")
+
+        async def _ok(_url):
+            return buffer.getvalue()
+
+        monkeypatch.setattr("app.services.validation_assessment.deposit_bytes_fetcher", _ok)
+        study = await _approved(session, admin_user, state="acquiring_processed")
+        study.evidence_json = {
+            **(study.evidence_json or {}),
+            "pmcid": "PMC6771404",
+            "supplements": persisted["evidence"]["supplements"],
+            "assessment": persisted["evidence"]["assessment"],
+        }
+        await session.flush()
+        await run_assessment(session, study)
+        ledger = study.evidence_json["retrieval_ledger"]
+        assert [e["outcome"] for e in ledger] == ["not_found", "retrieved"]
+        assert ledger[0]["http_status"] == 404
+        assert ledger[0]["recorded_before_ledger"] is True
+        assert ledger[0]["at"] == persisted["evidence"]["assessment"]["at"]
+
+
+class TestAnAnalysedCountEqualToTheInventoryIsUnresolvedWhenThePaperExcludedSamples:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("statements, marked", [(["three TE biopsies were excluded after QC"], True), ([], False)])
+    async def test_it_is_marked_only_when_exclusions_are_stated(
+        self, session, admin_user, monkeypatch, statements, marked
+    ):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        _provider(monkeypatch, configured=False)
+        study, plan = await _with_plan(
+            session,
+            admin_user,
+            targets=({**_CLAIM, "qc_stage": "as analysed", "output_type": "count"},),
+            passages={"claims": [], "statements": statements},
+        )
+        study.evidence_json = {
+            **study.evidence_json,
+            "capabilities": {**_RUNNABLE, "deposits": [{"accession": "EGAS00001003667", "registered_samples": 54}]},
+        }
+        await session.flush()
+        await run_assessment(session, study)
+        target = (
+            await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
+        ).scalar_one()
+        assert (target.unresolved_reason is not None) is marked
