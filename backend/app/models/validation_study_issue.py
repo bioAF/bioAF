@@ -22,14 +22,22 @@ them apart is one users learn to ignore.
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.services.llm_decision import OUTCOME_OK, OUTCOMES
 
-# What went wrong, from `llm_decision`. `refusal` is the one that names a model an administrator can
-# request an account exception for; the others separate "we could not reach the LLM" from "bioAF hit
-# an internal error" from "the answer was not in the format we asked for".
-ISSUE_OUTCOMES = ("refusal", "unreachable", "internal", "unparseable")
+# change_7.3 section 9: failures that are not a model's. An external resource bioAF tried and failed
+# to fetch, and a stage that could not run (reconciliation with nothing to work from, a contradiction
+# pass that raised). Both were logged and never reached the report.
+OUTCOME_RETRIEVAL_FAILED = "retrieval_failed"
+OUTCOME_NOT_PERFORMED = "not_performed"
+
+# What went wrong. ONE vocabulary: every failure `llm_decision` can report, imported rather than
+# re-spelled, plus the two above. The hand-copied list this replaced lacked `truncated`, so a
+# truncated answer's issue was discarded on write while every test of `as_issue` passed.
+ISSUE_OUTCOMES = tuple(o for o in OUTCOMES if o != OUTCOME_OK) + (OUTCOME_RETRIEVAL_FAILED, OUTCOME_NOT_PERFORMED)
 
 # Whether the step still produced something usable. Without this distinction every fallback would
 # read as a failure.
@@ -53,5 +61,8 @@ class ValidationStudyIssue(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     # Which model, so a refusal can be acted on. Null where the step was not a model call.
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # change_7.3 section 9: URL, HTTP status, error class, attempts and times. Rendered under a
+    # collapsed "Technical details" element, never in the message, and still written to the logs.
+    technical_detail: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

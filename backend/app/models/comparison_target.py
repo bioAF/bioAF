@@ -8,6 +8,7 @@ paper the claim came from (for evidence). See ``local/lit_validation/spec-02-dat
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -73,6 +74,17 @@ class ComparisonTarget(Base):
     # per-library depth as `mean_reads_per_cell`, which compared against a run would be wrong by
     # the number of cells in an embryo and reported as the paper's divergence.
     measurement_basis: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # change_7.3 section 7: cutoffs belong to claims. "padj < 0.05 and |log2FC| > 2" is two cutoffs,
+    # which one scalar `threshold` cannot hold, and nothing linked a claim to its contrast, so the
+    # contrast took one threshold pair and Groff's 194-gene claim was scored against the 88-gene
+    # subset's cutoff. ``cutoffs`` is ``[{"kind": "padj", "operator": "<", "value": 0.05}, ...]``;
+    # ``contrast_index`` points into the plan's ``differential_design.contrasts``.
+    contrast_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cutoffs: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # Why this claim's context is marked unresolved rather than rewritten. A post-QC count equal to a
+    # deposit's registered inventory is evidence reaching a consumer; changing the number would not be.
+    unresolved_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
