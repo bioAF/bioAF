@@ -39,6 +39,7 @@ export function ValidationStudyOutcome({
   failureReason,
   route,
   summary,
+  attempt,
 }: {
   state: string;
   confidence: number | null | undefined;
@@ -48,7 +49,12 @@ export function ValidationStudyOutcome({
   // change_7.3 section 11: the report projection. When present, the headline follows whether
   // reproduction was attempted, and the summary sentences it generated from the evidence follow.
   summary?: ReportSummary | null;
+  // The attempt alone, for a surface that has no projection (the studies list).
+  attempt?: "attempted" | "not_attempted" | null;
 }) {
+  if (state === "classified" && !summary && attempt === "not_attempted") {
+    return <ValidationStatusBadge confidence={confidence} classification={classification} attempt="not_attempted" />;
+  }
   if (state === "classified" && summary?.headline?.key === "reproduction_not_attempted") {
     // change_7.3 section 10 item 1: "Reproduction not attempted", followed by the limitations that
     // actually stood in the way, rather than "Could Not Reproduce" beside a bucket name.

@@ -212,6 +212,10 @@ class ValidationStudySummary(BaseModel):
     title: str = ""
     classification: str | None = None
     confidence: float | None = None
+    # change_7.3 section 10 item 1: whether reproduction was attempted, so the list's outcome badge
+    # follows the attempt rather than the bucket. A study that executed nothing is "Reproduction not
+    # attempted", never "Could Not Reproduce".
+    attempt: Literal["attempted", "not_attempted"] | None = None
     paper_id: int | None = None
     source_doi: str | None = None
     source_accession: str | None = None

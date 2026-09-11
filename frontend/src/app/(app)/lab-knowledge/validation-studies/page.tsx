@@ -17,6 +17,9 @@ interface ValidationStudySummary {
   title?: string | null;
   classification?: string | null;
   confidence?: number | null;
+  // change_7.3: whether reproduction was attempted, so a study that ran nothing does not read as one
+  // that failed.
+  attempt?: "attempted" | "not_attempted" | null;
   paper_id?: number | null;
   source_doi?: string | null;
   source_accession?: string | null;
@@ -114,6 +117,7 @@ export default function ValidationStudiesListPage() {
                           state={s.state}
                           confidence={s.confidence}
                           classification={s.classification}
+                          attempt={s.attempt ?? null}
                         />
                       </td>
                     </tr>

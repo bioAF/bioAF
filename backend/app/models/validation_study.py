@@ -119,8 +119,11 @@ VALIDATION_STUDY_CLASSIFICATIONS = [
 # status badge (frontend lib/validationStatus). This is a stopgap until the E2 comparison engine
 # produces a real graded confidence; a manual human verdict is discrete, so it only ever yields the
 # extremes. The "couldn't test / couldn't conclude" buckets (and any not-yet-classified study) map to
-# None, which the UI renders as "Could Not Reproduce" -- deliberately distinct from a LOW confidence
-# (could-not-test is not the same as tested-and-unlikely).
+# None -- deliberately distinct from a LOW confidence (could-not-test is not the same as
+# tested-and-unlikely). change_7.3 section 10 item 1: a None is NOT on its own "Could Not Reproduce".
+# The headline follows whether reproduction was attempted (validation_reproduction_attempt): a study
+# that executed nothing reads "Reproduction not attempted", and only one that ran and reached no
+# verdict reads "Could Not Reproduce". The bucket alone cannot tell them apart.
 _CLASSIFICATION_CONFIDENCE: dict[str, float | None] = {
     "validated": 100.0,  # human-confirmed validation -> Fully Validated
     # partially_reproduced was tested AND concluded (the finding reproduced in part), so it is NOT a
