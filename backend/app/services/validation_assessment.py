@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services import llm_provider_config_service
 from app.services.llm_provider_clients import get_client
 from app.services.validation_completion import completion_for
+from app.services.validation_issue_service import ValidationIssueService
 
 logger = logging.getLogger("bioaf.validation_assessment")
 
@@ -60,9 +61,59 @@ def independent_checks_outstanding(evidence: dict) -> bool:
     change_7.1 section 4: a blocked execution route does not end the assessment. Reading the sample
     metadata, inspecting the code the authors supplied and checking their results table need no
     cluster and no data access agreement, and the assessment is what merges, not the reproduction.
+
+    change_7.3 section 1: an artifact the bundle turned out not to contain is settled for that
+    bundle; only one never attempted, or whose retrieval failed, is worth another fetch.
     """
-    supplements = (evidence or {}).get("supplements") or []
-    return any(not s.get("resolved") for s in supplements if isinstance(s, dict))
+    from app.services.supplement_inventory import RETRIEVAL_FAILED, RETRIEVAL_NOT_ATTEMPTED, establish_identity
+
+    supplements = [s for s in (evidence or {}).get("supplements") or [] if isinstance(s, dict)]
+    return any(
+        not s.get("resolved") and s["retrieval"]["status"] in (RETRIEVAL_NOT_ATTEMPTED, RETRIEVAL_FAILED)
+        for s in establish_identity(supplements)
+    )
+
+
+RETRIEVAL_STEP = "retrieving the paper's supplementary files"
+
+
+def retrieval_issue(entries: list[dict], supplements: list[dict]) -> dict | None:
+    """One issue for a retrieval source whose attempts all failed, naming what it affected.
+
+    change_7.3 section 9: one per failed SOURCE, never one per artifact. Study 34 showed one bundle
+    failure about sixteen times. The sentence is plain; the URL, status, error class, attempts and
+    times travel as technical detail.
+    """
+    if not entries or entries[-1].get("outcome") == "retrieved":
+        return None
+    last = entries[-1]
+    affected = [
+        str(s.get("label"))
+        for s in supplements
+        if isinstance(s, dict)
+        and (s.get("retrieval") or {}).get("ledger") == last.get("id")
+        and s.get("kind") in ("attachment", "reference")
+    ]
+    message = "bioAF could not download the paper's supplementary files in this attempt"
+    message += f", so these were not inspected: {', '.join(affected)}." if affected else "."
+    return {
+        "step": RETRIEVAL_STEP,
+        "outcome": "retrieval_failed",
+        "impact": "degraded",
+        "message": message,
+        "model": None,
+        "technical_detail": {
+            "source": last.get("source_label"),
+            "url": last.get("url"),
+            "http_status": last.get("http_status"),
+            "error_class": last.get("error_class"),
+            "outcome": last.get("outcome"),
+            "attempts": len(entries),
+            "first_at": entries[0].get("at"),
+            "last_at": last.get("at"),
+            "ledger": [e.get("id") for e in entries],
+        },
+    }
 
 
 async def active_plan(session: AsyncSession, study):
@@ -81,15 +132,19 @@ async def active_plan(session: AsyncSession, study):
         if plan is not None:
             return plan
     return (
-        await session.execute(
-            select(ReproductionPlan)
-            .where(
-                ReproductionPlan.validation_study_id == study.id,
-                ReproductionPlan.superseded_at.is_(None),
+        (
+            await session.execute(
+                select(ReproductionPlan)
+                .where(
+                    ReproductionPlan.validation_study_id == study.id,
+                    ReproductionPlan.superseded_at.is_(None),
+                )
+                .order_by(ReproductionPlan.id.desc())
             )
-            .order_by(ReproductionPlan.id.desc())
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
 
 
 async def claimed_thresholds(session: AsyncSession, study) -> list[float]:
@@ -107,11 +162,7 @@ async def claimed_thresholds(session: AsyncSession, study) -> list[float]:
     if plan is None:
         return []
     rows = (
-        (
-            await session.execute(
-                select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)
-            )
-        )
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
         .scalars()
         .all()
     )
@@ -129,6 +180,9 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     This is the point where the read-time manifest of NAMES becomes an inventory of FILES with
     roles. An article with no PMC id has nothing to download, which is a limitation of the run and
     leaves the references exactly as they were.
+
+    change_7.3 section 1: every attempt lands in ``evidence["retrieval_ledger"]``, which this
+    updates in place, and one failed source becomes one issue.
     """
     from app.services.supplement_inventory import merge_resource_identity, resolve_supplements
 
@@ -136,16 +190,21 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     pmcid = (evidence.get("pmcid") or "").strip()
     if not pmcid:
         return references
+    ledger = list(evidence.get("retrieval_ledger") or [])
+    start = len(ledger)
     try:
         resolved = await resolve_supplements(
             pmcid,
             references,
             fetcher=deposit_bytes_fetcher,
             thresholds=await claimed_thresholds(session, study),
+            ledger=ledger,
         )
     except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
         logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
         return references
+    evidence["retrieval_ledger"] = ledger
+    await ValidationIssueService.record(session, study, [retrieval_issue(ledger[start:], resolved)])
     # One file is one resource. The prose reference and the manifest entry resolve to the same
     # bytes, and study 32 listed each of S1, S2 and S3 twice as a result.
     return merge_resource_identity(resolved)

@@ -339,3 +339,18 @@ def _no_accession_manifest_network(monkeypatch):
         raise RuntimeError(f"tests do not fetch {url}")
 
     monkeypatch.setattr(accession_manifest_service, "_http_fetch_text", _offline)
+
+
+@pytest.fixture(autouse=True)
+def _no_retrieval_backoff(monkeypatch):
+    """Supplement retrieval retries with real backoff (change_7.3 section 1).
+
+    Tests assert the attempts the ledger records, not the waiting between them, so the wait is
+    removed here rather than paid seconds at a time by every test whose bundle fetch fails.
+    """
+    from app.services import supplement_inventory
+
+    async def _no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(supplement_inventory, "_sleep", _no_wait)

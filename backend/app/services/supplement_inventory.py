@@ -24,17 +24,40 @@ matrix needed to rerun the analysis that produced it, and accepting it as one wo
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
 import xml.etree.ElementTree as ET
 import zipfile
 
+from app.services.validation_acquisition_outcome import MAX_ATTEMPTS
+
 logger = logging.getLogger("bioaf.supplement_inventory")
 
 # Where a row came from, which is also how far discovery got with it.
 ATTACHED = "attached"  # a media element in the JATS, with a filename
 NAMED_IN_TEXT = "named_in_text"  # the prose cites it; nothing has resolved it to a file yet
+
+# change_7.3 section 2: what a row IS, decided from the manifest before any bytes arrive. An index
+# page is the publisher's wrapper around the attachments, not one of them, and a figure image in the
+# bundle is the article's own figure. Neither is counted as a supplement or retried as one.
+KIND_ATTACHMENT = "attachment"
+KIND_INDEX = "index"
+KIND_REFERENCE = "reference"  # named in the prose with no matching attachment in the manifest
+KIND_FIGURE = "figure"
+
+# Where an artifact was named. The four statuses of section 3 start here: identification.
+IDENTIFIED_IN_MANIFEST = "article_manifest"
+IDENTIFIED_IN_PROSE = "prose"
+IDENTIFIED_IN_BUNDLE = "bundle"
+
+# change_7.3 section 3: retrieval is its own status, kept separate from what inspection found.
+RETRIEVAL_NOT_ATTEMPTED = "not_attempted"
+RETRIEVAL_FAILED = "failed"
+RETRIEVAL_RETRIEVED = "retrieved"
+RETRIEVAL_NOT_IN_BUNDLE = "not_in_bundle"
+RETRIEVAL_STATUSES = (RETRIEVAL_NOT_ATTEMPTED, RETRIEVAL_FAILED, RETRIEVAL_RETRIEVED, RETRIEVAL_NOT_IN_BUNDLE)
 
 # What a resource IS, established by looking inside it.
 SAMPLE_METADATA = "sample_metadata"
@@ -49,11 +72,26 @@ YES_ANSWER = "yes"
 
 _DOCX_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
-# "Supplemental File S2", "Supplementary Table S1", "Supplemental Data Set S3". Journals differ on
-# every word except the pattern.
+# "Supplemental File S2", "Supplementary Table S1", "Supplemental Data Set S3", "Additional file 2".
+# Journals differ on every word except the pattern. The NOUN is kept: "Supplementary Table S1" and
+# "Supplemental File S1" are two different artifacts in the same paper, and collapsing both to "File
+# S1" merged them into one row. An enumeration ("Supplemental Files S2, S3") names every identifier.
+_IDENT = r"S?\d+[A-Za-z]?"
 _NAMED_SUPPLEMENT_RE = re.compile(
-    r"\bSupplement(?:al|ary)\s+(?:File|Table|Data\s*Set|Dataset|Material)s?\s+(S\d+[A-Za-z]?)", re.I
+    r"\b(?:Supplement(?:al|ary)\s+(?P<noun>File|Table|Data\s*Set|Dataset|Material)s?"
+    r"|Additional\s+(?P<additional>file|table)s?)"
+    rf"\s+(?P<ids>{_IDENT}(?:\s*(?:,|and|&)\s*{_IDENT})*)",
+    re.I,
 )
+_ONE_IDENT_RE = re.compile(rf"\b({_IDENT})\b")
+
+_CANONICAL_NOUN = {
+    "file": "File",
+    "table": "Table",
+    "dataset": "Data Set",
+    "data set": "Data Set",
+    "material": "Material",
+}
 
 # A differential-results table announces itself in its header. These are the DESeq2/edgeR/limma
 # column names, and two of them together are conclusive.
@@ -93,6 +131,12 @@ def parse_jats_supplements(xml_text: str) -> list[dict]:
     markup alone would find the wrapper and miss the analysis.
 
     Never raises: a malformed document is a discovery limitation, not a reason to fail a read.
+
+    change_7.3 section 2: **identity is established here, from the manifest, whether or not any
+    bytes ever arrive.** A prose citation that matches an attached filename becomes an alias of that
+    attachment rather than a second row, so a failed download can no longer turn four attachments
+    into eight "supplements". A citation with no match in the manifest stays its own entry: a
+    discovery limitation, never a missing file.
     """
     rows: dict[str, dict] = {}
 
@@ -116,38 +160,207 @@ def parse_jats_supplements(xml_text: str) -> list[dict]:
             # they are different attachments. The label is disambiguated only when it collides, so
             # the common single-file case keeps the caption the reader would recognise.
             taken = {row["label"] for row in rows.values()}
+            mimetype = _mimetype_of(media)
+            role = next((v for k, v in media.attrib.items() if k.endswith("role")), None)
             rows.setdefault(
                 href,
-                {
-                    "label": label if label not in taken else f"{label} ({href})",
-                    "filename": href,
-                    "mimetype": _mimetype_of(media),
-                    "source": ATTACHED,
-                    "role": UNKNOWN_ROLE,
-                    "size_bytes": None,
-                    "resolved": False,
-                },
+                _new_row(
+                    label=label if label not in taken else f"{label} ({href})",
+                    filename=href,
+                    mimetype=mimetype,
+                    source=ATTACHED,
+                    kind=_manifest_kind(href, mimetype, role),
+                    identified_in=IDENTIFIED_IN_MANIFEST,
+                ),
             )
 
     body_text = " ".join(t for t in root.itertext() if t)
-    for match in _NAMED_SUPPLEMENT_RE.finditer(body_text):
-        # Normalised so "Supplementary File S2" and "Supplemental file s2" are one row, not three.
-        identifier = match.group(1).upper()
-        label = f"Supplemental File {identifier}"
+    for citation in _citations(body_text):
+        identity = f"reference:{citation['key']}"
         rows.setdefault(
-            label,
-            {
-                "label": label,
-                "filename": None,
-                "mimetype": None,
-                "source": NAMED_IN_TEXT,
-                "role": UNKNOWN_ROLE,
-                "size_bytes": None,
-                "resolved": False,
-            },
+            identity,
+            _new_row(
+                label=citation["label"],
+                filename=None,
+                mimetype=None,
+                source=NAMED_IN_TEXT,
+                kind=KIND_REFERENCE,
+                identified_in=IDENTIFIED_IN_PROSE,
+                identity=identity,
+            ),
         )
 
-    return list(rows.values())
+    return establish_identity(list(rows.values()))
+
+
+def establish_identity(rows: list[dict] | None) -> list[dict]:
+    """One row per artifact: every prose citation that names an attached file becomes its alias.
+
+    Runs at read time on the manifest and again before retrieval, so a study recorded before this
+    existed (its citations and its attachments listed side by side, each "not retrieved") gets the
+    same identities when it is resumed. A citation that matches no attachment, or matches more than
+    one, stays its own row: ambiguity is not a match.
+    """
+    upgraded = [_upgraded(dict(row)) for row in rows or [] if isinstance(row, dict)]
+    attachments = [row for row in upgraded if row["kind"] == KIND_ATTACHMENT and row.get("filename")]
+    kept: list[dict] = []
+    for row in upgraded:
+        if row["kind"] == KIND_REFERENCE and not row.get("resolved"):
+            citations = [c for label in row["references"] for c in _citations(label)]
+            target = next((a for a in (_attachment_for(c, attachments) for c in citations) if a is not None), None)
+            if target is not None:
+                for label in row["references"]:
+                    _add_reference(target, label, IDENTIFIED_IN_PROSE)
+                continue
+        kept.append(row)
+    for row in kept:
+        row["label"] = _preferred_label(row["references"])
+    return kept
+
+
+_IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".gif", ".png", ".tif", ".tiff", ".bmp", ".svg", ".eps")
+
+
+def _upgraded(row: dict) -> dict:
+    """Fill the section 2 and 3 fields on a row recorded before they existed. Never overwrites.
+
+    A legacy row carries its failure as a copied ``failure_reason``; that is read as a failed
+    retrieval with no ledger entry, which is what it was.
+    """
+    filename = row.get("filename")
+    if not row.get("references"):
+        row["references"] = [row["label"]] if row.get("label") else []
+    if "kind" not in row:
+        if not filename:
+            row["kind"] = KIND_REFERENCE
+        elif str(filename).lower().endswith(_IMAGE_EXTENSIONS) and row.get("source") != NAMED_IN_TEXT:
+            row["kind"] = (
+                KIND_FIGURE if not row.get("mimetype") else _manifest_kind(filename, row.get("mimetype"), None)
+            )
+        else:
+            row["kind"] = _manifest_kind(filename, row.get("mimetype"), None)
+    if not row.get("identity"):
+        citation = next((c for label in row["references"] for c in _citations(label)), None)
+        row["identity"] = filename or (f"reference:{citation['key']}" if citation else f"reference:{row.get('label')}")
+    if not row.get("identified_in"):
+        row["identified_in"] = [IDENTIFIED_IN_PROSE if row.get("source") == NAMED_IN_TEXT else IDENTIFIED_IN_MANIFEST]
+    if not isinstance(row.get("retrieval"), dict):
+        if row.get("resolved"):
+            status = RETRIEVAL_RETRIEVED
+        elif row.get("failure_reason"):
+            status = RETRIEVAL_FAILED
+        else:
+            status = RETRIEVAL_NOT_ATTEMPTED
+        row["retrieval"] = {"status": status, "ledger": None}
+    return row
+
+
+def _new_row(
+    *,
+    label: str,
+    filename: str | None,
+    mimetype: str | None,
+    source: str,
+    kind: str,
+    identified_in: str,
+    identity: str | None = None,
+) -> dict:
+    return {
+        "label": label,
+        "filename": filename,
+        "mimetype": mimetype,
+        "source": source,
+        "role": UNKNOWN_ROLE,
+        "size_bytes": None,
+        "resolved": False,
+        "kind": kind,
+        # One identity per artifact, whatever happens to its bytes. The filename where the manifest
+        # gives one; a canonical citation otherwise.
+        "identity": identity or filename,
+        "references": [label],
+        "identified_in": [identified_in],
+        "retrieval": {"status": RETRIEVAL_NOT_ATTEMPTED, "ledger": None},
+    }
+
+
+def _add_reference(row: dict, label: str, identified_in: str) -> None:
+    if label not in row["references"]:
+        row["references"].append(label)
+    if identified_in not in row["identified_in"]:
+        row["identified_in"].append(identified_in)
+
+
+def _manifest_kind(href: str, mimetype: str | None, role: str | None) -> str:
+    """An attachment, or the publisher's index page around the attachments.
+
+    Europe PMC marks the real attachments ``xlink:role="associated-file"`` and leaves the HTML
+    wrapper unmarked. Most journals set no role at all, so its absence is not evidence of an index:
+    only an unmarked HTML page is one.
+    """
+    if (role or "").strip().lower() == "associated-file":
+        return KIND_ATTACHMENT
+    if (mimetype or "").lower() in ("text/html", "html") or href.lower().endswith((".html", ".htm")):
+        return KIND_INDEX
+    return KIND_ATTACHMENT
+
+
+def _citations(text: str) -> list[dict]:
+    """Every supplement the prose cites, one entry per identifier, in order of first mention.
+
+    ``key`` is what makes two spellings one citation ("Supplementary File S2", "Supplemental file
+    s2"); ``label`` is the canonical form a reader recognises.
+    """
+    found: dict[str, dict] = {}
+    for match in _NAMED_SUPPLEMENT_RE.finditer(text or ""):
+        if match.group("additional"):
+            word = match.group("additional").lower()
+            noun, prefix = f"additional_{word}", f"Additional {word.title()}"
+        else:
+            raw = " ".join(match.group("noun").split()).lower()
+            canonical = _CANONICAL_NOUN.get(raw, raw.title())
+            noun, prefix = canonical.lower().replace(" ", ""), f"Supplemental {canonical}"
+        for ident in _ONE_IDENT_RE.findall(match.group("ids")):
+            ident = ident.upper()
+            key = f"{noun}:{ident}"
+            found.setdefault(key, {"key": key, "label": f"{prefix} {ident}", "noun": noun, "ident": ident})
+    return list(found.values())
+
+
+_NOUN_TOKENS = {
+    "file": r"files?",
+    "table": r"(?:tables?|tab)",
+    "dataset": r"(?:data_?sets?|data)",
+    "material": r"materials?",
+    "additional_file": r"additional_files?",
+    "additional_table": r"additional_tables?",
+}
+
+
+def _normalized_name(filename: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (filename or "").lower())
+
+
+def _filename_pattern(citation: dict) -> re.Pattern[str]:
+    """The filename shape a citation's own noun and number produce.
+
+    Publishers mangle names in every direction, but the noun and the number survive: "Supplemental
+    File S2" becomes ``..._Supplemental_File_2_...``. The noun is part of the match, so "Table S1"
+    never takes "File 1". Springer's ``MOESM2_ESM`` numbering is what "Additional file 2" means.
+    """
+    number = re.escape(citation["ident"].lower().lstrip("s") or citation["ident"].lower())
+    tokens = _NOUN_TOKENS.get(citation["noun"], re.escape(citation["noun"]))
+    alternatives = [rf"(?:^|_){tokens}_?s?0*{number}(?:_|$)"]
+    if citation["noun"].startswith("additional_"):
+        alternatives.append(rf"(?:^|_)moesm0*{number}_esm(?:_|$)")
+    return re.compile("|".join(alternatives))
+
+
+def _attachment_for(citation: dict, candidates: list[dict]) -> dict | None:
+    """The one attachment a citation names, or None. Two candidates is ambiguity, not a match, and
+    picking one would invent the fact this exists to establish."""
+    pattern = _filename_pattern(citation)
+    matches = [row for row in candidates if pattern.search(_normalized_name(row.get("filename")))]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _text_of(element, tag: str) -> str | None:
@@ -295,11 +508,98 @@ _SUPPLEMENTARY_BUNDLE = "https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid
 # spending a session's memory on TIFFs.
 _MAX_BUNDLE_BYTES = 200 * 1024 * 1024
 
-_IDENTIFIER_RE = re.compile(r"\bS?(\d+)\b")
+# change_7.3 section 1: what one retrieval attempt came to. A 404 from the bundle endpoint is
+# `not_found` and still retryable: it was observed to be transient, and the article's own manifest
+# already establishes that the files exist, so it can never mean they are absent.
+RETRIEVED = "retrieved"
+NOT_FOUND = "not_found"
+FORBIDDEN = "forbidden"
+TRANSIENT = "transient"
+TOO_LARGE = "too_large"
+UNREADABLE = "unreadable"
+RETRIEVAL_OUTCOMES = (RETRIEVED, NOT_FOUND, FORBIDDEN, TRANSIENT, TOO_LARGE, UNREADABLE)
+_RETRYABLE = (NOT_FOUND, TRANSIENT)
+
+BUNDLE_SOURCE = "europepmc_supplementary_bundle"
+BUNDLE_SOURCE_LABEL = "the article's supplementary bundle from Europe PMC"
+
+# Bounded, with backoff, never a fixed-interval loop: the attempt cap is change_7.2 section 3's.
+# The waits are seconds rather than that policy's minutes because retrieval runs inside one driver
+# tick or one approval request, and a quarter-hour sleep there would stall every other study.
+# "Review and resume" is the product path to try again later.
+_RETRY_DELAYS = (2.0, 6.0)
+_sleep = asyncio.sleep
+
+
+def _status_of(exc: Exception) -> int | None:
+    """The HTTP status behind a fetch failure, when there was one."""
+    code = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(code, int):
+        return code
+    match = re.match(r"\s*([1-5]\d\d)\b", str(exc))
+    return int(match.group(1)) if match else None
+
+
+def _failure_outcome(status: int | None) -> str:
+    """Anything unrecognised is transient, as in the acquisition policy: calling an outage an
+    absence is a wrong and terminal statement about the paper."""
+    if status in (404, 410):
+        return NOT_FOUND
+    if status in (401, 403, 407):
+        return FORBIDDEN
+    return TRANSIENT
+
+
+async def _retrieve_bundle(url: str, fetcher, covered: list[str], ledger: list[dict]) -> tuple[dict | None, dict]:
+    """Fetch and open the bundle, recording every attempt. Returns (members or None, last entry)."""
+    entry: dict = {}
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        at = _now_iso()
+        outcome, status, error_class, contents = RETRIEVED, None, None, None
+        try:
+            blob = await fetcher(url)
+        except Exception as exc:  # noqa: BLE001 - a fetch failure is a limitation of the run
+            status = _status_of(exc)
+            outcome, error_class = _failure_outcome(status), type(exc).__name__
+            logger.info("supplementary bundle fetch failed for %s (attempt %d): %s", url, attempt, exc)
+        else:
+            if len(blob) > _MAX_BUNDLE_BYTES:
+                outcome = TOO_LARGE
+            else:
+                try:
+                    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                        contents = {i.filename: zf.read(i.filename) for i in zf.infolist() if not i.is_dir()}
+                except (zipfile.BadZipFile, OSError) as exc:
+                    outcome, error_class = UNREADABLE, type(exc).__name__
+                    logger.info("supplementary bundle at %s could not be read: %s", url, exc)
+        entry = {
+            "id": f"R{len(ledger) + 1}",
+            "source": BUNDLE_SOURCE,
+            "source_label": BUNDLE_SOURCE_LABEL,
+            "url": url,
+            "at": at,
+            "attempt": attempt,
+            "outcome": outcome,
+            "http_status": status,
+            "error_class": error_class,
+            "artifacts": list(covered),
+        }
+        ledger.append(entry)
+        if outcome == RETRIEVED:
+            return contents, entry
+        if outcome not in _RETRYABLE or attempt == MAX_ATTEMPTS:
+            break
+        await _sleep(_RETRY_DELAYS[min(attempt - 1, len(_RETRY_DELAYS) - 1)])
+    return None, entry
 
 
 async def resolve_supplements(
-    pmcid: str, references: list[dict], *, fetcher, thresholds: list[float] | None = None
+    pmcid: str,
+    references: list[dict],
+    *,
+    fetcher,
+    thresholds: list[float] | None = None,
+    ledger: list[dict] | None = None,
 ) -> list[dict]:
     """Resolve named references to real files and classify each by its content. Never raises.
 
@@ -308,88 +608,116 @@ async def resolve_supplements(
     the authors' entire analysis sat in a public bundle and the paper was reported as publishing no
     accessible code.
 
-    A download failure leaves every reference UNRESOLVED with a reason. "We could not fetch it" and
-    "the authors did not publish it" are different statements and only one is a finding.
+    change_7.3 section 1: **each attempt is recorded once, in ``ledger``, and every artifact points at
+    the entry that decided it.** A failure used to be copied onto every row with ``setdefault``, so a
+    later attempt could never replace the first reason and nothing recorded that an attempt had
+    happened. A failed download leaves every artifact UNRESOLVED and its existence untouched: "we
+    could not fetch it" is not "the authors did not publish it".
     """
-    rows = [dict(r) for r in references or []]
+    rows = establish_identity(references)
+    if ledger is None:
+        ledger = []
+    covered = [r["identity"] for r in rows if r["kind"] not in (KIND_FIGURE, KIND_INDEX)]
+    contents, entry = await _retrieve_bundle(_SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid), fetcher, covered, ledger)
 
-    try:
-        blob = await fetcher(_SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid))
-    except Exception as exc:  # noqa: BLE001 - a fetch failure is a limitation of the run
-        logger.info("supplementary bundle fetch failed for %s: %s", pmcid, exc)
+    if contents is None:
         for row in rows:
-            row.setdefault("failure_reason", f"bioAF could not download this paper's supplementary bundle ({exc})")
-        return rows
-
-    if len(blob) > _MAX_BUNDLE_BYTES:
-        for row in rows:
-            row.setdefault("failure_reason", "this paper's supplementary bundle is larger than bioAF will download")
-        return rows
-
-    try:
-        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
-            contents = {info.filename: zf.read(info.filename) for info in zf.infolist() if not info.is_dir()}
-    except (zipfile.BadZipFile, OSError) as exc:
-        logger.info("supplementary bundle for %s could not be read: %s", pmcid, exc)
-        for row in rows:
-            row.setdefault("failure_reason", "this paper's supplementary bundle could not be read")
+            if row.get("resolved"):
+                continue  # retrieved by an earlier attempt; this failure does not undo that
+            row["retrieval"] = {"status": RETRIEVAL_FAILED, "ledger": entry.get("id")}
+            row.pop("failure_reason", None)  # a legacy copy; the ledger holds the one account now
         return rows
 
     claimed: set[str] = set()
     for row in rows:
-        filename = row.get("filename") if row.get("filename") in contents else _match_filename(row, contents)
+        filename = _bundle_member_for(row, contents)
         if filename is None:
-            row["failure_reason"] = "bioAF could not find a file in the bundle matching this reference"
+            if not row.get("resolved"):
+                # The bundle arrived and this artifact is not in it. That alone is marked; the rest
+                # resolve. Still not an absence: the manifest named it.
+                row["retrieval"] = {"status": RETRIEVAL_NOT_IN_BUNDLE, "ledger": entry["id"]}
+                row.pop("failure_reason", None)
             continue
         claimed.add(filename)
+        row.pop("failure_reason", None)
         row.update(
             filename=filename,
             size_bytes=len(contents[filename]),
-            role=classify_supplement(filename, contents[filename]),
             resolved=True,
-            failure_reason=None,
-            **measure_table(contents[filename], thresholds=thresholds),
+            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": entry["id"]},
         )
+        if row["kind"] == KIND_REFERENCE:
+            # A citation the manifest could not place, which the bundle's listing did.
+            row["kind"] = KIND_ATTACHMENT
+            row["identity"] = filename
+            _add_reference(row, row["label"], IDENTIFIED_IN_BUNDLE)
+        if row["kind"] == KIND_ATTACHMENT:
+            row.update(
+                role=classify_supplement(filename, contents[filename]),
+                **measure_table(contents[filename], thresholds=thresholds),
+            )
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
-    # the bundle holds seventeen, and the ones that are not figures can carry real inputs.
+    # the bundle holds seventeen, and the ones that are not figures can carry real inputs. The
+    # figure images are the article's own figures and are kept apart from the attachments.
     for filename, blob_bytes in contents.items():
         if filename in claimed:
             continue
-        rows.append(
-            {
-                "label": filename,
-                "filename": filename,
-                "mimetype": None,
-                "source": ATTACHED,
-                "role": classify_supplement(filename, blob_bytes),
-                "size_bytes": len(blob_bytes),
-                "resolved": True,
-                "failure_reason": None,
-                **measure_table(blob_bytes, thresholds=thresholds),
-            }
+        kind = _bundle_kind(filename)
+        row = _new_row(
+            label=filename,
+            filename=filename,
+            mimetype=None,
+            source=ATTACHED,
+            kind=kind,
+            identified_in=IDENTIFIED_IN_BUNDLE,
         )
+        row.update(
+            size_bytes=len(blob_bytes),
+            resolved=True,
+            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": entry["id"]},
+        )
+        if kind == KIND_ATTACHMENT:
+            row.update(
+                role=classify_supplement(filename, blob_bytes), **measure_table(blob_bytes, thresholds=thresholds)
+            )
+        rows.append(row)
     return rows
 
 
-def _match_filename(row: dict, contents: dict[str, bytes]) -> str | None:
-    """The bundle file a named reference points at, by its identifier.
+def _bundle_kind(filename: str) -> str:
+    name = filename.lower()
+    if name.endswith(_IMAGE_EXTENSIONS):
+        return KIND_FIGURE
+    if name.endswith((".html", ".htm")):
+        return KIND_INDEX
+    return KIND_ATTACHMENT
 
-    Publishers mangle names in every direction, but the identifier survives: "Supplemental File S2"
-    becomes ``..._Supplemental_File_2_...``. Matching on the number inside a supplement-ish filename
-    is what connects them; matching on the label as a whole never would.
+
+def _bundle_member_for(row: dict, contents: dict[str, bytes]) -> str | None:
+    """The bundle member an artifact is, or None.
+
+    A manifest attachment is matched by its own filename and nothing else. Fuzzy-matching one that
+    is missing from the bundle is how the digits of a DOI in "Supplemental Material
+    (supp_gr.252981.119_...)" became an identifier. Only a citation the manifest could not place is
+    matched by its noun and number against the bundle's listing.
     """
-    match = _IDENTIFIER_RE.search(row.get("label") or "")
-    if match is None:
-        return None
-    wanted = match.group(1)
-    for filename in contents:
-        normalized = re.sub(r"[^a-z0-9]+", "_", filename.lower())
-        if "supplement" not in normalized:
-            continue
-        if re.search(rf"(?:file|table|data|dataset|material)s?_{wanted}(?:_|\b)", normalized):
-            return filename
+    filename = row.get("filename")
+    if filename:
+        return filename if filename in contents else None
+    candidates = [{"filename": name} for name in contents]
+    for label in row.get("references") or [row.get("label")]:
+        for citation in _citations(label or ""):
+            match = _attachment_for(citation, candidates)
+            if match is not None:
+                return match["filename"]
     return None
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
 
 
 # The digest is what a binding call sees of a supplement. Bounded ON PURPOSE: headers, counts and
