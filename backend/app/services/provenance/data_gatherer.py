@@ -1028,6 +1028,8 @@ class ProvenanceDataGatherer:
         source paper -> reproduction plan -> experiment -> data run (fetchngs) -> analysis run, plus
         the computed-vs-claimed evidence bundle and the classifier verdict. Org-scoped via the study.
         """
+        from app.services.validation_report_summary import report_summary_for
+
         study = (
             await session.execute(
                 select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
@@ -1130,6 +1132,11 @@ class ProvenanceDataGatherer:
                         "binding_confidence": t.binding_confidence,
                         "bound_by_model": t.bound_by_model,
                         "bound_by": t.bound_by,
+                        # change_7.3 section 7: the claim's own cutoffs, its contrast, and why its
+                        # context is unresolved where it is.
+                        "contrast_index": t.contrast_index,
+                        "cutoffs": t.cutoffs,
+                        "unresolved_reason": t.unresolved_reason,
                     }
                     for t in (plan.comparison_targets or [])
                 ]
@@ -1207,5 +1214,7 @@ class ProvenanceDataGatherer:
             pipeline_runs=pipeline_runs,
             evidence=study.evidence_json,
             issues=await ValidationIssueService.list_for_study(session, study_id, org_id),
+            # change_7.3 section 11: the same call the API response makes, so they cannot disagree.
+            report_summary=await report_summary_for(session, study, org_id),
             audit_trail=audit_trail,
         )

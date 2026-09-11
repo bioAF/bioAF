@@ -134,11 +134,15 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
     @pytest.mark.asyncio
     async def test_deposit_chosen_on_a_paper_with_no_deposited_matrix_holds(self, session, admin_user, _no_llm):
         """The case the upfront modal cannot warn about, so it is caught here instead."""
+        # change_7.3 section 5 (flagged test change): `missing_data` now needs an established absence,
+        # and a study with no list of the paper's attachments has not established one. This fixture
+        # read a paper with a PMC id whose manifest lists no attachments, which is the absence the
+        # assertion below always meant.
         study = await _study(
             session,
             admin_user,
             intended_route="deposit",
-            evidence=_caps(preprocessed="no"),
+            evidence={**_caps(preprocessed="no"), "pmcid": "PMC1", "supplements": []},
             state="plan_ready",
         )
         await ValidationDriverService.advance_active_studies(session)

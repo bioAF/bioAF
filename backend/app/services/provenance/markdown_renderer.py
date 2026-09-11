@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.services.validation_report_summary import ISSUE_OUTCOME_LABELS, LIMITATION_LABELS, ROLE_LABELS
+
 from app.exceptions import ValidationError
 
 
@@ -573,9 +575,14 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append("---")
     parts.append("")
 
+    summary = entity.get("report_summary") or {}
+
     # Verdict
     parts.append("## Verdict")
     parts.append("")
+    # change_7.3 section 10 items 1 and 2: the headline follows the reproduction attempt, and the
+    # summary sentences are generated from the evidence by the same projection the page renders.
+    _append_outcome(parts, summary)
     verdict = entity.get("classification") or result.get("classification")
     parts.append(
         _table(
@@ -671,6 +678,8 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
         if coverage:
             parts.append(_table(["Coverage", "Count"], [[k, v] for k, v in coverage.items()]))
             parts.append("")
+    elif summary.get("claims"):
+        _append_claims(parts, summary)
     else:
         # Pre-classifier study: show the raw claimed targets so the evidence is still visible.
         targets = plan.get("comparison_targets") or []
@@ -723,10 +732,10 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append(_table(["Step", "Entity"], chain_rows))
     parts.append("")
 
-    _append_capability_checklist(parts, evidence.get("capabilities") or {})
-    _append_supplement_inventory(parts, evidence.get("supplements") or [])
+    _append_capability_checklist(parts, evidence.get("capabilities") or {}, summary)
+    _append_supplement_inventory(parts, evidence.get("supplements") or [], summary)
     _append_what_was_not_attempted(parts, plan, evidence, result)
-    _append_completion(parts, evidence.get("completion") or {})
+    _append_completion(parts, evidence.get("completion") or {}, summary)
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
     _append_issues(parts, entity.get("issues") or [])
@@ -738,13 +747,8 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
 # What each outcome means to a reader, in plain language. The token itself says nothing to a
 # scientist, and a refusal is the one an administrator can actually do something about.
-_ISSUE_OUTCOME_LABEL = {
-    "refusal": "the model declined to answer",
-    "unreachable": "bioAF could not reach the language model",
-    "internal": "bioAF hit an internal error",
-    "unparseable": "the model's answer was not in the format bioAF asked for",
-    "truncated": "the model's answer was cut off at its token limit",
-}
+# change_7.3 section 11: one vocabulary, worded once in the report projection.
+_ISSUE_OUTCOME_LABEL = ISSUE_OUTCOME_LABELS
 
 _ISSUE_IMPACT_LABEL = {
     "degraded": "continued with a fallback",
@@ -827,6 +831,14 @@ def _append_issues(parts: list[str], issues: list[dict[str, Any]]) -> None:
         )
     )
     parts.append("")
+    # change_7.3 decision 8: the technical detail sits in a collapsed element under the plain rows.
+    detailed = [i for i in issues if i.get("technical_detail")]
+    if detailed:
+        lines = []
+        for i in detailed:
+            detail = "; ".join(f"{k}: {v}" for k, v in (i.get("technical_detail") or {}).items() if v is not None)
+            lines.append(f"- {i.get('step')}: {detail}")
+        _append_details(parts, lines)
 
 
 # ---- plan_7 step 19: the findings report, in the export -----------------------------------------
@@ -896,15 +908,23 @@ _CHECK_LABEL = {
 }
 
 
-def _append_capability_checklist(parts: list[str], capabilities: dict[str, Any]) -> None:
+def _append_capability_checklist(
+    parts: list[str], capabilities: dict[str, Any], summary: dict[str, Any] | None = None
+) -> None:
     """What this paper actually has. UNKNOWN is rendered AS UNKNOWN, with the reason beside it: a
-    checklist showing NO for a GEO timeout tells the reader something false about the paper."""
+    checklist showing NO for a GEO timeout tells the reader something false about the paper.
+
+    change_7.3 section 10 item 11: each data row is two rows, "deposited" and "available to bioAF",
+    worded once in the report projection."""
     if not capabilities:
         return
     parts.append("## What This Paper Has")
     parts.append("")
     rows: list[list[Any]] = []
-    for key, label in _CHECKLIST_ROWS:
+    projected = (summary or {}).get("capability_rows")
+    if projected:
+        rows.extend([row["label"], row["value_label"], row.get("detail") or "--"] for row in projected)
+    for key, label in _CHECKLIST_ROWS if not projected else ():
         answer = capabilities.get(key)
         if not isinstance(answer, dict):
             continue
@@ -945,27 +965,13 @@ def _append_capability_checklist(parts: list[str], capabilities: dict[str, Any])
         parts.append("")
 
 
-# What a supplement IS, in the reader's words rather than the classifier's token.
-_SUPPLEMENT_ROLE_LABEL = {
-    "sample_metadata": "Sample metadata",
-    "expression_matrix": "Expression matrix",
-    "results_table": "Differential results",
-    "code": "Analysis code",
-    "supporting_input": "Supporting input",
-    "unknown": "Not established",
-}
+# What a supplement IS, and what each kind of blockage is, in the reader's words. change_7.3
+# section 11: these were copies of the frontend's maps and drifted; the projection holds them now.
+_SUPPLEMENT_ROLE_LABEL = ROLE_LABELS
+_LIMITATION_LABEL = LIMITATION_LABELS
 
 
-# What each kind of blockage is, in the reader's words.
-_LIMITATION_LABEL = {
-    "controlled_access": "Controlled access",
-    "unsupported_acquisition": "Acquisition not supported",
-    "missing_input": "Required input not published",
-    "failed_discovery": "Could not be established",
-}
-
-
-def _append_completion(parts: list[str], completion: dict[str, Any]) -> None:
+def _append_completion(parts: list[str], completion: dict[str, Any], summary: dict[str, Any] | None = None) -> None:
     """Why the assessment ended where it did, and what it managed to check on the way.
 
     change_7.1 section 7. Study 32's report carried one sentence, a claim about the paper rather
@@ -979,19 +985,46 @@ def _append_completion(parts: list[str], completion: dict[str, Any]) -> None:
 
     parts.append("## What Could And Could Not Be Established")
     parts.append("")
-    parts.append(
-        _table(
-            ["Statement", "Answer"],
-            [
-                ["Processed results published", _yes_no(completion.get("processed_results_available"))],
-                ["Reproduction input available", _yes_no(completion.get("reproduction_input_available"))],
-            ],
+    facts = (summary or {}).get("completion_facts")
+    if facts:
+        # change_7.3 section 10 item 12: tri-state, with the reason, never a bare "No".
+        parts.append(
+            _table(
+                ["Statement", "Answer", "Why"],
+                [[f["label"], f["value_label"], f.get("reason") or "--"] for f in facts],
+            )
         )
-    )
+    else:
+        parts.append(
+            _table(
+                ["Statement", "Answer"],
+                [
+                    ["Processed results published", _yes_no(completion.get("processed_results_available"))],
+                    ["Reproduction input available", _yes_no(completion.get("reproduction_input_available"))],
+                ],
+            )
+        )
     parts.append("")
 
-    limitations = completion.get("limitations") or []
-    if limitations:
+    projected = (summary or {}).get("limitations")
+    if projected:
+        parts.append(
+            _table(
+                ["Limitation", "Resource", "Route", "Detail"],
+                [
+                    [
+                        row["label"] if row["governs"] else f"{row['label']} (route not chosen; reported as context)",
+                        row.get("resource") or "--",
+                        row.get("leg") or "--",
+                        (row.get("detail") or "--")
+                        + (f" Observed: {row['observation']}" if row.get("observation") else ""),
+                    ]
+                    for row in projected
+                ],
+            )
+        )
+        parts.append("")
+    elif completion.get("limitations"):
         parts.append(
             _table(
                 ["Limitation", "Resource", "Route", "Detail"],
@@ -1002,7 +1035,7 @@ def _append_completion(parts: list[str], completion: dict[str, Any]) -> None:
                         row.get("operation") or "--",
                         row.get("detail") or "--",
                     ]
-                    for row in limitations
+                    for row in completion.get("limitations") or []
                 ],
             )
         )
@@ -1070,7 +1103,9 @@ def _yes_no(value: Any) -> str:
     return "Yes" if value else "No"
 
 
-def _append_supplement_inventory(parts: list[str], supplements: list[dict[str, Any]]) -> None:
+def _append_supplement_inventory(
+    parts: list[str], supplements: list[dict[str, Any]], summary: dict[str, Any] | None = None
+) -> None:
     """The paper's own attachments, and what each one turned out to hold.
 
     change_7.1 section 2. These were never discovered, so a paper that published its metadata
@@ -1084,6 +1119,9 @@ def _append_supplement_inventory(parts: list[str], supplements: list[dict[str, A
         return
     parts.append("## What The Paper Attached")
     parts.append("")
+    if summary and summary.get("artifacts") is not None:
+        _append_projected_attachments(parts, summary)
+        return
     rows: list[list[Any]] = []
     for supplement in supplements:
         if not isinstance(supplement, dict):
@@ -1331,3 +1369,132 @@ _MD_RENDERERS: dict[str, Any] = {
     "artifact": _render_artifact_md,
     "validation_study": _render_validation_study_md,
 }
+
+
+# ---- change_7.3: the report projection, rendered ------------------------------------------------------
+
+
+def _append_details(parts: list[str], lines: list[str], summary: str = "Technical details") -> None:
+    """A collapsed element (GitHub-flavoured markdown) under the plain statement it qualifies.
+
+    change_7.3 decision 8: HTTP status, URL, exception class, attempts and times belong under a
+    collapsed "Technical details" element, never in the sentence a reader acts on.
+    """
+    parts.append("<details>")
+    parts.append(f"<summary>{summary}</summary>")
+    parts.append("")
+    parts.extend(lines)
+    parts.append("")
+    parts.append("</details>")
+    parts.append("")
+
+
+def _append_outcome(parts: list[str], summary: dict[str, Any]) -> None:
+    """The headline and the summary sentences, then the limitations that governed the outcome."""
+    headline = (summary.get("headline") or {}).get("label")
+    if headline:
+        parts.append(f"**Outcome:** {headline}")
+        parts.append("")
+    sentences = summary.get("summary") or []
+    if sentences:
+        parts.append(" ".join(sentences))
+        parts.append("")
+    governing = [row for row in summary.get("limitations") or [] if row.get("governs")]
+    if headline and governing:
+        parts.extend(f"- {row['label']}: {row.get('resource') or '--'}" for row in governing)
+        parts.append("")
+
+
+def _append_claims(parts: list[str], summary: dict[str, Any]) -> None:
+    """change_7.3 section 10 item 7: each claim leads with its science; the binding is detail."""
+    counts = summary.get("claim_counts") or {}
+    if counts.get("label"):
+        parts.append(counts["label"])
+        parts.append("")
+    parts.append(
+        _table(
+            ["Claim", "Claimed", "Unit", "Population", "Contrast", "Cutoff", "Mapping", "Basis"],
+            [
+                [
+                    c.get("description"),
+                    c.get("value"),
+                    c.get("unit") or "--",
+                    c.get("population") or "--",
+                    c.get("contrast") or "--",
+                    c.get("cutoff") or "--",
+                    (c.get("mapping") or {}).get("label"),
+                    "provisional (from the paper text only; not checked against the attachments)"
+                    if c.get("provisional")
+                    else "inspected evidence",
+                ]
+                for c in summary.get("claims") or []
+            ],
+        )
+    )
+    parts.append("")
+    unresolved = [c for c in summary.get("claims") or [] if c.get("unresolved_reason")]
+    for claim in unresolved:
+        parts.append(f"**Unresolved:** {claim['description']}. {claim['unresolved_reason']}")
+        parts.append("")
+    explained = [c for c in summary.get("claims") or [] if (c.get("mapping") or {}).get("explanation")]
+    if explained:
+        _append_details(
+            parts,
+            [
+                f"- {c['description']}: {c['mapping']['explanation']} "
+                f"(metric {c['mapping'].get('metric_key') or '--'}, bound to {c['mapping'].get('bound_key') or '--'}, "
+                f"decided by {c['mapping'].get('decided_by')}, model {c['mapping'].get('model') or '--'}, "
+                f"confidence {c['mapping'].get('confidence') if c['mapping'].get('confidence') is not None else '--'}: "
+                f"{c['mapping'].get('reason') or '--'})"
+                for c in explained
+            ],
+            summary="Binding details",
+        )
+    comparisons = summary.get("comparisons") or {}
+    if comparisons.get("label"):
+        parts.append(f"**{comparisons['label']}:** {comparisons.get('reason')}.")
+        parts.append("")
+    reconciliation = summary.get("reconciliation") or {}
+    if reconciliation.get("label"):
+        parts.append(f"**Reconciliation:** {reconciliation['label']}.")
+        parts.append("")
+    consistency = summary.get("consistency") or {}
+    if consistency.get("label"):
+        parts.append(f"**Consistency:** {consistency['label']}.")
+        parts.append("")
+        for row in consistency.get("unresolved") or []:
+            parts.append(f"- Unresolved: {row.get('outcome')}")
+        if consistency.get("unresolved"):
+            parts.append("")
+
+
+def _append_projected_attachments(parts: list[str], summary: dict[str, Any]) -> None:
+    """Every attachment once, with its retrieval and inspection status; one notice per failure."""
+    for failure in summary.get("retrieval_failures") or []:
+        parts.append(f"**{failure['message']}.** Affected: {', '.join(failure['artifacts'])}.")
+        parts.append("")
+        detail = failure.get("technical_detail") or {}
+        _append_details(parts, [f"- {k}: {v}" for k, v in detail.items() if v is not None])
+    rows = []
+    for artifact in summary.get("artifacts") or []:
+        inspection = artifact.get("inspection") or {}
+        rows.append(
+            [
+                artifact.get("label"),
+                (artifact.get("retrieval") or {}).get("label"),
+                inspection.get("role_label") or "--",
+                "; ".join(inspection.get("measurements") or []) or "--",
+                artifact.get("identification_label") or "--",
+            ]
+        )
+    if rows:
+        parts.append(_table(["Attachment", "Retrieval", "What it holds", "Measured", "Named in"], rows))
+        parts.append("")
+    extras = []
+    if summary.get("index_pages"):
+        extras.append(f"{summary['index_pages']} index page(s)")
+    if summary.get("figures"):
+        extras.append(f"{summary['figures']} figure image(s)")
+    if extras:
+        parts.append(f"The bundle's packaging, not counted as attachments: {', '.join(extras)}.")
+        parts.append("")

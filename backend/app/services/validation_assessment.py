@@ -171,6 +171,12 @@ async def claimed_thresholds(session: AsyncSession, study) -> list[float]:
         for t in rows
         if t.threshold is not None and (t.threshold_kind or "").lower() in ("abs_log2fc", "log2fc", "fold_change")
     }
+    # change_7.3 section 7: a claim's cutoffs are structure now, and a two-part cutoff carries its
+    # fold change there rather than in the one scalar.
+    for t in rows:
+        for cutoff in t.cutoffs or []:
+            if isinstance(cutoff, dict) and cutoff.get("kind") == "abs_log2fc" and cutoff.get("value") is not None:
+                wanted.add(float(cutoff["value"]))
     return sorted(wanted)
 
 
@@ -212,17 +218,22 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
 
 async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) -> None:
     """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
-    from app.services.validation_reconciliation import reconcile
+    from app.services.validation_reconciliation import not_performed, reconcile
 
     plan = await active_plan(session, study)
     if plan is None:
-        return
+        return not_performed("this study has no reproduction plan to reconcile")
     cfg = await llm_provider_config_service.get_active(session, study.organization_id)
     if cfg is None:
         logger.info("study %s: no active provider, so nothing can reconcile the plan", study.id)
-        return
+        return not_performed(
+            "no language model is configured for this organization, so nothing could reconcile the plan"
+        )
+    # change_7.3 section 9: this caller dropped `on_issue`, so a model failing inside reconciliation
+    # reached nothing but a log line.
+    issues: list[dict] = []
     try:
-        await reconcile(
+        result = await reconcile(
             session,
             study,
             plan,
@@ -230,9 +241,96 @@ async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) 
             client=get_client(cfg.provider),
             model=cfg.model,
             api_key=cfg.api_key,
+            on_issue=issues.append,
         )
     except Exception as exc:  # noqa: BLE001 - a reconciliation failure degrades the report only
         logger.warning("reconciliation failed for study %s: %s", study.id, exc)
+        result = not_performed("bioAF hit an internal error while reconciling the plan", error_class=type(exc).__name__)
+    await ValidationIssueService.record(session, study, issues)
+    result["model_issue"] = any(issues)
+    return result
+
+
+RECONCILIATION_STEP = "reconciling the plan against the paper's evidence"
+CONSISTENCY_STEP = "checking this assessment's statements for contradictions"
+
+
+def _not_performed_issue(step: str, reason: str, **detail) -> dict:
+    """change_7.3 section 9: a stage that could not run is an issue, stated plainly, with any
+    technical detail beside the sentence rather than in it."""
+    return {
+        "step": step,
+        "outcome": "not_performed",
+        "impact": "degraded",
+        "message": f"This step was not performed: {reason}.",
+        "model": None,
+        "technical_detail": {k: v for k, v in detail.items() if v is not None} or None,
+    }
+
+
+def refresh_checks(study, plan) -> None:
+    """Re-settle the read-time checks against what the assessment established. Never raises.
+
+    change_7.3 section 6: the driver said reconciliation re-ran the pre-compute checks once
+    supplements resolved, and nothing did. Study 34 kept a read-time "samples described: ok" whose
+    reasoning cited supplementary metadata nobody had inspected. A verdict that rests on the paper's
+    text stays marked as such until something inspected settles it.
+    """
+    from app.services.validation_precompute_checks import (
+        BASIS_INSPECTED,
+        CHECK_SAMPLE_DATA,
+        CHECK_SAMPLES_DESCRIBED,
+        OK,
+        UNKNOWN,
+        basis_of,
+        check_sample_data,
+    )
+
+    evidence = dict(study.evidence_json or {})
+    checks = {k: dict(v) if isinstance(v, dict) else v for k, v in (evidence.get("precompute_checks") or {}).items()}
+    supplements = [s for s in evidence.get("supplements") or [] if isinstance(s, dict)]
+    deposits = [d for d in ((evidence.get("capabilities") or {}).get("deposits") or []) if isinstance(d, dict)]
+
+    table = next(
+        (
+            s
+            for s in supplements
+            if s.get("resolved") and s.get("role") == "sample_metadata" and (s.get("row_count") or 0) > 0
+        ),
+        None,
+    )
+    described = checks.get(CHECK_SAMPLES_DESCRIBED)
+    if table is not None and isinstance(described, dict):
+        columns = ", ".join(str(c) for c in (table.get("columns") or [])[:6])
+        described.update(
+            verdict=OK,
+            detail=(
+                f"{table.get('label')} was retrieved and lists {table.get('row_count')} samples"
+                + (f" with {columns} for each" if columns else "")
+                + ", so which sample belongs to which condition is recoverable from it"
+            ),
+            decided_by="measurement",
+            basis=BASIS_INSPECTED,
+        )
+
+    sample_data = checks.get(CHECK_SAMPLE_DATA)
+    paper_count = ((plan.sample_sheet_json if plan else None) or {}).get("sample_count")
+    if isinstance(sample_data, dict) and sample_data.get("verdict") == UNKNOWN:
+        rerun = check_sample_data(
+            paper_sample_count=paper_count if isinstance(paper_count, int) else None,
+            entries=[],
+            supplements=supplements,
+            deposits=deposits,
+        )
+        if rerun.get("verdict") != UNKNOWN or "no deposited files were listed" in str(sample_data.get("detail")):
+            checks[CHECK_SAMPLE_DATA] = rerun
+
+    for check in checks.values():
+        if isinstance(check, dict) and not check.get("basis"):
+            check["basis"] = basis_of(check)
+    if checks:
+        evidence["precompute_checks"] = checks
+        study.evidence_json = evidence
 
 
 async def run_assessment(session: AsyncSession, study) -> dict:
@@ -241,6 +339,10 @@ async def run_assessment(session: AsyncSession, study) -> dict:
     Runs on every authorized study on both routes, after authorization and before the final
     execution-feasibility decision. It concludes nothing about the study's state: that is the
     caller's, and it differs between a route that can still run and one that cannot.
+
+    change_7.3 section 6: **the record says what reconciliation and the contradiction pass covered,
+    and whether they ran at all.** ``reconciled: false`` stood for five different causes, and an
+    empty contradiction list read as consistency established when the pass had not run.
     """
     from app.services.validation_provenance import record_stage
 
@@ -254,31 +356,123 @@ async def run_assessment(session: AsyncSession, study) -> dict:
         study.evidence_json = evidence
         await session.flush()
 
+    plan = await active_plan(session, study)
+    refresh_checks(study, plan)
+    await session.flush()
+
     # change_7.1 section 6: the evidence is in hand, so the provisional reading gets revised before
     # anything is concluded from it. Retrieval on its own changed no decision.
-    await reconcile_plan(session, study, evidence.get("supplements") or [])
+    reconciliation = await reconcile_plan(session, study, (study.evidence_json or {}).get("supplements") or [])
+    if reconciliation["status"] != "performed" and not reconciliation.get("model_issue"):
+        await ValidationIssueService.record(
+            session,
+            study,
+            [
+                _not_performed_issue(
+                    RECONCILIATION_STEP, reconciliation["reason"], error_class=reconciliation.get("error_class")
+                )
+            ],
+        )
+
+    # change_7.3 section 7: a count equal to the collected inventory and tagged post-QC is marked
+    # unresolved. The deposit's registered count is established evidence reaching a consumer.
+    await guard_population_counts(session, study, plan)
 
     # change_7.2 section 4: reconciliation settles its DEPENDENTS. Reaching this stage is not the
     # same as the report being consistent, and study 33 shipped a check asserting that per-sample
     # assignments are recoverable beside a blocker asserting they cannot be reconstructed.
-    contradictions = await settle_dependents(session, study)
+    contradiction_pass = await settle_dependents(session, study)
+    contradictions = contradiction_pass["findings"]
 
     evidence = dict(study.evidence_json or {})
-    supplements = evidence.get("supplements") or []
-    resolved = [s for s in supplements if isinstance(s, dict) and s.get("resolved")]
+    supplements = [
+        s for s in evidence.get("supplements") or [] if isinstance(s, dict) and s.get("kind") not in ("figure", "index")
+    ]
+    resolved = [s for s in supplements if s.get("resolved")]
+    performed = reconciliation["status"] == "performed"
     record = {
         "contradictions": contradictions,
         "unresolved_contradictions": [c for c in contradictions if c.get("status") == "unresolved"],
+        "contradiction_pass": {
+            "checked": contradiction_pass["checked"],
+            "pairs": contradiction_pass["pairs"],
+            "reason": contradiction_pass.get("reason"),
+        },
         "at": _now_iso(),
         "supplements_inspected": len(resolved),
         "supplements_unresolved": len(supplements) - len(resolved),
-        "reconciled": bool((evidence.get("reconciliation") or {}).get("fingerprint")),
-        "revisions": len((evidence.get("reconciliation") or {}).get("revisions") or []),
+        "reconciliation": {
+            "status": reconciliation["status"],
+            "reason": reconciliation.get("reason"),
+            "basis": reconciliation.get("basis"),
+        },
+        # What every finding in this assessment rests on until something inspected settles it.
+        "basis": reconciliation.get("basis") if performed else "paper_text",
+        "reconciled": performed,
+        "revisions": len(reconciliation.get("revisions") or []),
     }
     evidence["assessment"] = record
     study.evidence_json = evidence
     await session.flush()
     return record
+
+
+async def guard_population_counts(session: AsyncSession, study, plan) -> list[int]:
+    """Mark a post-QC count that equals a deposit's registered sample count as unresolved.
+
+    change_7.3 section 7. Study 34 recorded "54 samples, post-QC" beside a paper that excludes three
+    TE biopsies after quality control, leaving 51 analysed, and an EGA record that registers 54. The
+    count is the collected inventory; the analysed population is a different number. The claim is
+    never rewritten: the registered count is evidence, the paper's number is the paper's, and which
+    population the sentence meant is exactly what is unresolved.
+
+    Returns the ids of the targets it marked.
+    """
+    from app.models.comparison_target import ComparisonTarget
+
+    if plan is None:
+        return []
+    evidence = study.evidence_json or {}
+    registered = [
+        (str(d.get("accession")), d.get("registered_samples"))
+        for d in ((evidence.get("capabilities") or {}).get("deposits") or [])
+        if isinstance(d, dict) and isinstance(d.get("registered_samples"), int)
+    ]
+    if not registered:
+        return []
+    excluded = bool(((evidence.get("paper_passages") or {}).get("statements") or []))
+    targets = (
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+        .scalars()
+        .all()
+    )
+    marked: list[int] = []
+    for target in targets:
+        stage = (target.qc_stage or "").lower().replace("-", "").replace(" ", "")
+        if "postqc" not in stage or target.claimed_value is None or not _is_sample_count(target):
+            continue
+        match = next((acc for acc, count in registered if float(count) == float(target.claimed_value)), None)
+        if match is None:
+            continue
+        target.unresolved_reason = (
+            f"This count equals the {int(target.claimed_value)} samples {match} registers, which is the collected "
+            "inventory, but the claim is tagged post-QC."
+            + (
+                " The paper states that samples were excluded after quality control, so fewer were analysed."
+                if excluded
+                else ""
+            )
+            + " Which population it counts is unresolved; the number is not rewritten."
+        )
+        marked.append(target.id)
+    if marked:
+        await session.flush()
+    return marked
+
+
+def _is_sample_count(target) -> bool:
+    text = " ".join(str(v or "") for v in (target.metric_key, target.unit, target.claim_text)).lower()
+    return (target.output_type or "count") == "count" and ("sample" in text or "biops" in text or "embryo" in text)
 
 
 def record_refusal(study, route: str, decision, reason: str | None = None) -> dict:
@@ -299,33 +493,40 @@ def record_refusal(study, route: str, decision, reason: str | None = None) -> di
     return evidence
 
 
-async def settle_dependents(session: AsyncSession, study) -> list[dict]:
+async def settle_dependents(session: AsyncSession, study) -> dict:
     """Express the assessment's dependent statements against the reconciled evidence.
 
-    Returns every contradiction found, each either resolved by what was inspected or reported as
-    unresolved. Never raises: a consistency pass that fails must not fail the study, but its silence
-    is recorded rather than mistaken for agreement.
+    Returns ``{"checked", "pairs", "findings", "reason"}``: whether the pass ran, the pairs it
+    compared, and every contradiction found, each either resolved by what was inspected or reported
+    as unresolved. Never raises: a consistency pass that fails must not fail the study, and
+    change_7.3 section 6 records its failure rather than returning ``[]``, which read as agreement.
     """
-    from app.services.validation_consistency import apply_resolutions, reconcile_contradictions
+    from app.services import validation_consistency as consistency
 
     evidence = dict(study.evidence_json or {})
     plan = await active_plan(session, study)
     blockers = list((plan.blockers_json if plan else None) or [])
 
     try:
-        findings = reconcile_contradictions(
+        findings = consistency.reconcile_contradictions(
             precompute_checks=evidence.get("precompute_checks"),
             blockers=blockers,
             supplements=evidence.get("supplements") or [],
+            blocker_kinds=(plan.blocker_kinds_json if plan else None) or [],
         )
     except Exception as exc:  # noqa: BLE001 - a consistency failure degrades the report only
         logger.warning("consistency pass failed for study %s: %s", study.id, exc)
-        return []
+        reason = "bioAF hit an internal error while comparing this assessment's statements"
+        await ValidationIssueService.record(
+            session, study, [_not_performed_issue(CONSISTENCY_STEP, reason, error_class=type(exc).__name__)]
+        )
+        return {"checked": False, "pairs": [], "findings": [], "reason": reason}
 
+    result = {"checked": True, "pairs": list(consistency.CHECKED_PAIRS), "findings": findings, "reason": None}
     if not findings:
-        return []
+        return result
 
-    checks, remaining = apply_resolutions(
+    checks, remaining = consistency.apply_resolutions(
         precompute_checks=evidence.get("precompute_checks"), blockers=blockers, findings=findings
     )
     evidence["precompute_checks"] = checks
@@ -333,7 +534,7 @@ async def settle_dependents(session: AsyncSession, study) -> list[dict]:
     if plan is not None and remaining != blockers:
         plan.blockers_json = remaining
     await session.flush()
-    return findings
+    return result
 
 
 async def conclude_without_execution(

@@ -259,3 +259,352 @@ class TestTheAssessmentRecordsRetrievalOnce:
         before = len(study.evidence_json["retrieval_ledger"])
         await run_assessment(session, study)
         assert len(study.evidence_json["retrieval_ledger"]) > before
+
+
+# ---- change_7.3 section 6: say what reconciliation covered, and mark provisional findings ---------
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.services.reproduction_plan_service import ReproductionPlanService  # noqa: E402
+
+_CLAIM = {
+    "metric_key": "total_samples",
+    "claim_text": "The resulting data set includes 54 samples",
+    "claimed_value": 54,
+    "unit": "samples",
+}
+
+
+async def _with_plan(session, admin_user, *, supplements=None, targets=(_CLAIM,), passages=None):
+    study = await _approved(session, admin_user, state="acquiring_processed")
+    plan = await ReproductionPlanService.create_plan(session, study, admin_user.id, accessions=["GSE309060"])
+    if targets:
+        await ReproductionPlanService.add_comparison_targets(session, plan, [dict(t) for t in targets])
+    evidence = {**(study.evidence_json or {}), "supplements": supplements or []}
+    if passages is not None:
+        evidence["paper_passages"] = passages
+    study.evidence_json = evidence
+    await session.flush()
+    return study, plan
+
+
+def _provider(monkeypatch, *, configured=True):
+    async def _cfg(_session, _org):
+        return SimpleNamespace(provider="anthropic", model="m", api_key=None) if configured else None
+
+    monkeypatch.setattr("app.services.validation_assessment.llm_provider_config_service.get_active", _cfg)
+    monkeypatch.setattr("app.services.validation_assessment.get_client", lambda _p: object())
+
+
+def _binding(monkeypatch, rows=None, *, raises=None):
+    calls: list[dict] = []
+
+    async def _bind(claims, **kw):
+        calls.append({"claims": claims, **kw})
+        if raises:
+            raise raises
+        return rows if rows is not None else [{"claim_index": 0, "bound_key": None, "reason": "r", "confidence": 0.5}]
+
+    monkeypatch.setattr("app.services.validation_reconciliation.bind_claims", _bind)
+    return calls
+
+
+class TestReconciliationSaysWhetherItRan:
+    """`reconciled: false` stood for five different causes."""
+
+    @pytest.mark.asyncio
+    async def test_nothing_to_work_from_is_not_performed_with_that_reason(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        calls = _binding(monkeypatch)
+        study, _ = await _with_plan(session, admin_user)
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+        assert "no attachments were inspected" in record["reconciliation"]["reason"]
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_no_provider_is_not_performed_with_that_reason(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch, configured=False)
+        study, _ = await _with_plan(session, admin_user, supplements=[self._S1])
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+        assert "language model" in record["reconciliation"]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_no_claims_is_not_performed_with_that_reason(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        study, _ = await _with_plan(session, admin_user, supplements=[self._S1], targets=())
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+        assert "claims" in record["reconciliation"]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_no_plan_is_not_performed_with_that_reason(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        study = await _approved(session, admin_user, state="acquiring_processed")
+        study.evidence_json = {**(study.evidence_json or {}), "supplements": [self._S1]}
+        await session.flush()
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+        assert "plan" in record["reconciliation"]["reason"]
+
+    @pytest.mark.asyncio
+    async def test_a_failure_is_not_performed_and_an_issue(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        _binding(monkeypatch, raises=RuntimeError("boom"))
+        study, _ = await _with_plan(session, admin_user, supplements=[self._S1])
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert any(i["outcome"] == "not_performed" for i in issues)
+
+    @pytest.mark.asyncio
+    async def test_a_stage_with_nothing_to_work_from_is_an_issue_too(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        _binding(monkeypatch)
+        study, _ = await _with_plan(session, admin_user)
+        await run_assessment(session, study)
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert [i["outcome"] for i in issues if i["outcome"] == "not_performed"] == ["not_performed"]
+
+    @pytest.mark.asyncio
+    async def test_a_run_on_inspected_evidence_says_so(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch)
+        _binding(monkeypatch)
+        study, _ = await _with_plan(session, admin_user, supplements=[self._S1])
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "performed"
+        assert record["reconciliation"]["basis"] == "inspected_evidence"
+
+    @pytest.mark.asyncio
+    async def test_the_model_failing_inside_it_is_not_performed(self, session, admin_user, monkeypatch):
+        from app.services.validation_classifier_service import BINDING_FAILED
+
+        _provider(monkeypatch)
+        _binding(
+            monkeypatch,
+            rows=[{"claim_index": 0, "bound_key": None, "reason": "x", "confidence": 0.0, "bound_by": BINDING_FAILED}],
+        )
+        study, _ = await _with_plan(session, admin_user, supplements=[self._S1])
+        record = await run_assessment(session, study)
+        assert record["reconciliation"]["status"] == "not_performed"
+
+    _S1 = {
+        "label": "Supplemental File S1",
+        "filename": "s1.txt",
+        "kind": "attachment",
+        "resolved": True,
+        "role": "sample_metadata",
+        "row_count": 54,
+        "columns": ["Sample", "Sex", "Karyotype"],
+        "retrieval": {"status": "retrieved", "ledger": "R1"},
+    }
+
+
+class TestTheContradictionPassSaysWhetherItRan:
+    @pytest.mark.asyncio
+    async def test_a_pass_that_ran_records_checked_and_its_pairs(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch, configured=False)
+        study, _ = await _with_plan(session, admin_user)
+        record = await run_assessment(session, study)
+        assert record["contradiction_pass"]["checked"] is True
+        assert "samples_described_enough" in " ".join(record["contradiction_pass"]["pairs"])
+
+    @pytest.mark.asyncio
+    async def test_a_pass_that_raised_is_not_checked_and_is_an_issue(self, session, admin_user, monkeypatch):
+        def _raise(**_kw):
+            raise RuntimeError("consistency exploded")
+
+        _provider(monkeypatch, configured=False)
+        monkeypatch.setattr("app.services.validation_consistency.reconcile_contradictions", _raise)
+        study, _ = await _with_plan(session, admin_user)
+        record = await run_assessment(session, study)
+        assert record["contradiction_pass"]["checked"] is False
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert any(i["outcome"] == "not_performed" and "contradiction" in i["step"] for i in issues)
+
+
+class TestReadTimeChecksAreProvisionalUntilReRun:
+    _CHECK = {
+        CHECK_SAMPLES_DESCRIBED: {
+            "check": CHECK_SAMPLES_DESCRIBED,
+            "verdict": OK,
+            "detail": "supplemental files list per-sample metadata",
+            "decided_by": "model",
+        }
+    }
+
+    @pytest.mark.asyncio
+    async def test_a_read_time_verdict_keeps_the_paper_text_basis_while_nothing_was_inspected(
+        self, session, admin_user, monkeypatch
+    ):
+        _provider(monkeypatch, configured=False)
+        study, _ = await _with_plan(session, admin_user)
+        study.evidence_json = {**study.evidence_json, "precompute_checks": self._CHECK}
+        await session.flush()
+        await run_assessment(session, study)
+        assert study.evidence_json["precompute_checks"][CHECK_SAMPLES_DESCRIBED]["basis"] == "paper_text"
+
+    @pytest.mark.asyncio
+    async def test_an_inspected_sample_table_re_settles_it_on_inspected_evidence(
+        self, session, admin_user, monkeypatch
+    ):
+        _provider(monkeypatch, configured=False)
+        study, _ = await _with_plan(session, admin_user, supplements=[TestReconciliationSaysWhetherItRan._S1])
+        study.evidence_json = {**study.evidence_json, "precompute_checks": self._CHECK}
+        await session.flush()
+        await run_assessment(session, study)
+        check = study.evidence_json["precompute_checks"][CHECK_SAMPLES_DESCRIBED]
+        assert check["basis"] == "inspected_evidence"
+        assert "Supplemental File S1" in check["detail"]
+
+    @pytest.mark.asyncio
+    async def test_the_sample_data_check_is_re_run_against_the_deposits(self, session, admin_user, monkeypatch):
+        _provider(monkeypatch, configured=False)
+        study, plan = await _with_plan(session, admin_user)
+        plan.sample_sheet_json = {"sample_count": 54}
+        study.evidence_json = {
+            **study.evidence_json,
+            "capabilities": {
+                **_RUNNABLE,
+                "deposits": [
+                    {
+                        "archive": "ega",
+                        "accession": "EGAS00001003667",
+                        "exists": "yes",
+                        "access": "controlled",
+                        "supported": "no",
+                        "registered_samples": 54,
+                    }
+                ],
+            },
+            "precompute_checks": {
+                "sample_data_matches_paper": {
+                    "check": "sample_data_matches_paper",
+                    "verdict": UNKNOWN,
+                    "detail": "no deposited files were listed to compare against",
+                }
+            },
+        }
+        await session.flush()
+        await run_assessment(session, study)
+        check = study.evidence_json["precompute_checks"]["sample_data_matches_paper"]
+        assert "no deposited files were listed" not in check["detail"]
+        assert "EGAS00001003667" in check["detail"]
+
+
+# ---- change_7.3 section 7: typed blockers and the population guard --------------------------------
+
+_STUDY_34_BLOCKER = (
+    "Sample IDs assigned to each differential group (aneuploid/euploid, XX/XY, AA/CC, morphokinetic) are not "
+    "explicitly enumerated in the text"
+)
+
+
+class TestTypedBlockersReachTheConsistencyPass:
+    """The pass matched blockers with two regexes, and neither matched study 34's paraphrase, so the
+    pair went unseen and `[]` came back."""
+
+    _CHECK_OK = {CHECK_SAMPLES_DESCRIBED: {"check": CHECK_SAMPLES_DESCRIBED, "verdict": OK, "detail": "described"}}
+
+    def test_the_paraphrase_is_missed_without_a_kind(self):
+        assert (
+            reconcile_contradictions(precompute_checks=self._CHECK_OK, blockers=[_STUDY_34_BLOCKER], supplements=[])
+            == []
+        )
+
+    def test_a_typed_blocker_is_detected_whatever_its_wording(self):
+        findings = reconcile_contradictions(
+            precompute_checks=self._CHECK_OK,
+            blockers=[_STUDY_34_BLOCKER],
+            supplements=[],
+            blocker_kinds=[{"text": _STUDY_34_BLOCKER, "kind": "sample_assignment"}],
+        )
+        assert findings and findings[0]["status"] == UNRESOLVED
+
+    def test_an_unretrieved_metadata_attachment_is_named_as_where_the_answer_may_be(self):
+        s1 = {
+            "label": "Supplemental File S1",
+            "filename": "supp_Supplemental_File_1_embryo_metadata.txt",
+            "references": ["Supplemental File S1"],
+            "kind": "attachment",
+            "resolved": False,
+        }
+        findings = reconcile_contradictions(
+            precompute_checks=self._CHECK_OK,
+            blockers=[_STUDY_34_BLOCKER],
+            supplements=[s1],
+            blocker_kinds=[{"text": _STUDY_34_BLOCKER, "kind": "sample_assignment"}],
+        )
+        assert "Supplemental File S1 may carry them" in findings[0]["outcome"]
+        assert "not retrieved in this attempt" in findings[0]["outcome"]
+
+    def test_a_blocker_typed_as_something_else_is_not_matched_by_the_regex(self):
+        blocker = "per-sample assignments cannot be reconstructed from the deposit"
+        findings = reconcile_contradictions(
+            precompute_checks=self._CHECK_OK,
+            blockers=[blocker],
+            supplements=[],
+            blocker_kinds=[{"text": blocker, "kind": "data_access"}],
+        )
+        assert findings == []
+
+
+class TestAPostQcCountEqualToTheInventoryIsUnresolved:
+    @pytest.mark.asyncio
+    async def test_it_is_marked_and_never_rewritten(self, session, admin_user, monkeypatch):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        _provider(monkeypatch, configured=False)
+        study, plan = await _with_plan(
+            session,
+            admin_user,
+            targets=(
+                {
+                    "metric_key": "total_samples",
+                    "claim_text": "The resulting data set includes 35 WE samples, 19 TE biopsies",
+                    "claimed_value": 54,
+                    "unit": "RNA-seq samples",
+                    "qc_stage": "post-QC",
+                    "output_type": "count",
+                },
+            ),
+            passages={"claims": [], "statements": ["three TE biopsy samples were excluded after quality control"]},
+        )
+        study.evidence_json = {
+            **study.evidence_json,
+            "capabilities": {**_RUNNABLE, "deposits": [{"accession": "EGAS00001003667", "registered_samples": 54}]},
+        }
+        await session.flush()
+        await run_assessment(session, study)
+        target = (
+            await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
+        ).scalar_one()
+        assert target.claimed_value == 54
+        assert "EGAS00001003667" in target.unresolved_reason
+        assert "excluded" in target.unresolved_reason
+
+    @pytest.mark.asyncio
+    async def test_a_count_tagged_as_collected_is_left_alone(self, session, admin_user, monkeypatch):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        _provider(monkeypatch, configured=False)
+        study, plan = await _with_plan(
+            session,
+            admin_user,
+            targets=({**_CLAIM, "qc_stage": "as collected", "output_type": "count"},),
+        )
+        study.evidence_json = {
+            **study.evidence_json,
+            "capabilities": {**_RUNNABLE, "deposits": [{"accession": "EGAS00001003667", "registered_samples": 54}]},
+        }
+        await session.flush()
+        await run_assessment(session, study)
+        target = (
+            await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
+        ).scalar_one()
+        assert target.unresolved_reason is None

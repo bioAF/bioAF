@@ -19,6 +19,7 @@ from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.validation_autonomy import decision_list
+from app.services.validation_report_summary import report_summary_for, target_dict
 from app.schemas.validation_study import (
     ApproveRequest,
     DepositOverrideRequest,
@@ -102,21 +103,17 @@ async def _plan_response(
                 threshold=t.threshold,
                 threshold_kind=t.threshold_kind,
                 output_type=t.output_type,
+                contrast_index=t.contrast_index,
+                cutoffs=t.cutoffs,
+                unresolved_reason=t.unresolved_reason,
             )
             for t in (plan.comparison_targets or [])
         ],
+        # change_7.3 section 10 item 7: the gate leads with the claim's science, so the decisions
+        # carry the claim fields and the binding details sit behind them.
         ai_decisions=decision_list(
-            [
-                {
-                    "metric_key": t.metric_key,
-                    "bound_key": t.bound_key,
-                    "binding_reason": t.binding_reason,
-                    "binding_confidence": t.binding_confidence,
-                    "bound_by_model": t.bound_by_model,
-                    "bound_by": t.bound_by,
-                }
-                for t in (plan.comparison_targets or [])
-            ]
+            [target_dict(t) for t in (plan.comparison_targets or [])],
+            contrasts=((plan.differential_design_json or {}).get("contrasts") or []),
         ),
     )
 
@@ -201,6 +198,8 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         # plan_7 step 14c: what went wrong on the way to this verdict. Study-scoped, so it carries
         # failures that happened before there was a plan to hang them off.
         issues=await ValidationIssueService.list_for_study(session, study.id, org_id),
+        # change_7.3 section 11: the same projection the provenance export carries.
+        report_summary=await report_summary_for(session, study, org_id),
     )
 
 

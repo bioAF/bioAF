@@ -949,8 +949,10 @@ def apply_retrieval_to_code_sources(sources: list[dict] | None, supplements: lis
             row["inspection"] = {"status": "inspected", "role": supplement.get("role")}
         elif status in (RETRIEVAL_FAILED, RETRIEVAL_NOT_IN_BUNDLE):
             row["accessible"] = "unknown"
+            # Short and distinct from the retrieval notice, which states the failure once for every
+            # artifact it affected.
             row["accessible_reason"] = (
-                "retrieval was attempted and bioAF could not download the paper's supplementary files in this attempt"
+                "retrieval was attempted and the file could not be retrieved in this attempt"
                 if status == RETRIEVAL_FAILED
                 else "retrieval was attempted and the paper's supplementary bundle did not contain this file"
             )

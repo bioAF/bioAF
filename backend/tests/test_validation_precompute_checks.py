@@ -397,3 +397,96 @@ class TestTheSpeciesHoldBlocksApproval:
         override = study.evidence_json["species_override"]
         assert override["reason"] == "the deposit's annotation is wrong"
         assert override["by_user_id"] == admin_user.id
+
+
+# ---- change_7.3 sections 7 and 8: the read keeps its passages, and the sample check reads any archive
+
+
+class TestTheReadGivesEveryConsumerWhatItKnows:
+    """`sample_data_matches_paper` read its listing from `list_deposit(source_accession)`, which is
+    GEO-only and received an empty string on every DOI-requested study, so it said "no deposited
+    files were listed" beside an EGA inventory of 108 files."""
+
+    _EXTRACTION = (
+        '```json\n{"accessions": ["EGAS00001003667"], '
+        '"sample_structure": {"organism": "Homo sapiens", "sample_count": 54}, '
+        '"method": {"assay": "bulk RNA-seq"}, '
+        '"claims": [{"metric_key": "total_samples", "value": 54, "unit": "samples", '
+        '"claim_text": "The resulting data set includes 35 WE samples, 19 TE biopsies"}], '
+        '"data_availability": "restricted", "code_availability": [], "blockers": []}\n```'
+    )
+
+    @staticmethod
+    def _world(monkeypatch, extraction):
+        import pathlib
+        import xml.etree.ElementTree as ET
+        from types import SimpleNamespace
+
+        from app.services import validation_extraction_service as ext
+
+        async def _cfg(*_a, **_k):
+            return SimpleNamespace(provider="anthropic", model="m", api_key=None)
+
+        class _Client:
+            async def submit(self, prompt, payload, model, api_key, attachments=None):
+                return extraction
+
+        monkeypatch.setattr(ext.llm_provider_config_service, "get_for_feature", _cfg)
+        monkeypatch.setattr(ext, "get_client", lambda _p: _Client())
+        monkeypatch.setattr("app.services.validation_driver_service.llm_provider_config_service.get_for_feature", _cfg)
+        monkeypatch.setattr("app.services.validation_driver_service.get_client", lambda _p: _Client())
+
+        datasets = '[{"accession_id":"EGAD00001005044","num_samples":54,"access_type":"controlled","is_released":true}]'
+        files = "[" + ",".join('{"extension":"fastq.gz"}' for _ in range(108)) + "]"
+
+        async def _fetch(url):
+            if "ega-archive.org" in url:
+                return files if url.endswith("/files") else datasets
+            raise RuntimeError(f"404 {url}")
+
+        monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", _fetch)
+        monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", _fetch)
+        jats = pathlib.Path(__file__).parent / "fixtures" / "groff" / "fulltext_jats.xml"
+        return " ".join(ET.parse(jats).getroot().itertext())
+
+    @pytest.mark.asyncio
+    async def test_an_ega_listing_reaches_the_sample_data_check(self, session, admin_user, monkeypatch):
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_study_service import ValidationStudyService
+
+        text = self._world(monkeypatch, self._EXTRACTION)
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
+        )
+        await ValidationDriverService.read_and_plan(session, study, text, admin_user.organization_id, admin_user.id)
+        check = study.evidence_json["precompute_checks"]["sample_data_matches_paper"]
+        assert "no deposited files were listed" not in check["detail"]
+        assert "EGAS00001003667" in check["detail"]
+        assert "not inspected" in check["detail"]
+
+    @pytest.mark.asyncio
+    async def test_the_read_keeps_bounded_passages(self, session, admin_user, monkeypatch):
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_study_service import ValidationStudyService
+
+        text = self._world(monkeypatch, self._EXTRACTION)
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
+        )
+        await ValidationDriverService.read_and_plan(session, study, text, admin_user.organization_id, admin_user.id)
+        passages = study.evidence_json["paper_passages"]
+        assert "three TE biopsies were excluded" in passages["claims"][0]["passage"]
+        assert any("excluded for failing to pass quality control" in s for s in passages["statements"])
+        assert "paper_text" not in study.evidence_json
+
+    def test_a_non_geo_listing_never_reads_as_nothing_listed(self):
+        from app.services.validation_precompute_checks import check_sample_data
+
+        result = check_sample_data(
+            paper_sample_count=51,
+            entries=[],
+            deposits=[{"accession": "E-MTAB-9", "archive": "arrayexpress", "registered_samples": 54}],
+        )
+        assert result["verdict"] == "mismatch"
+        assert "no deposited files were listed" not in result["detail"]
+        assert "E-MTAB-9" in result["detail"]

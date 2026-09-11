@@ -1,0 +1,552 @@
+{
+ "evidence": {
+  "assessment": {
+   "at": "2026-09-10T13:09:18.370751+00:00",
+   "contradictions": [],
+   "reconciled": false,
+   "revisions": 0,
+   "supplements_inspected": 0,
+   "supplements_unresolved": 8,
+   "unresolved_contradictions": []
+  },
+  "capabilities": {
+   "code_artifact": {
+    "evidence": "Supplemental File S2",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "code_repository": {
+    "evidence": null,
+    "failure_reason": null,
+    "value": "no"
+   },
+   "code_sources": [
+    {
+     "accessible": "not_attempted",
+     "accessible_reason": null,
+     "code_extracted": false,
+     "exists": "yes",
+     "identifier": "Supplemental File S2",
+     "kind": "supplementary",
+     "url": null
+    }
+   ],
+   "deposit_exists": {
+    "evidence": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "deposits": [
+    {
+     "access": "controlled",
+     "accession": "EGAS00001003667",
+     "archive": "ega",
+     "evidence": "EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+     "exists": "yes",
+     "failure_reason": null,
+     "preprocessed_data": "no",
+     "provenance": "extracted",
+     "raw_data": "yes",
+     "sample_metadata": "yes",
+     "scoped": true,
+     "supported": "no"
+    }
+   ],
+   "paper_readable": {
+    "evidence": "bioAF holds the paper's full text",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "preprocessed_data": {
+    "evidence": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+    "failure_reason": null,
+    "value": "no"
+   },
+   "raw_data": {
+    "evidence": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "sample_metadata": {
+    "evidence": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+    "failure_reason": null,
+    "value": "yes"
+   }
+  },
+  "completion": {
+   "checks_completed": [],
+   "checks_not_completed": [
+    "Supplemental Material: bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx): bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt): bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx): bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt): bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental File S2: bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental File S3: bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "Supplemental File S1: bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)"
+   ],
+   "classification": "missing_data",
+   "limitations": [
+    {
+     "detail": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from",
+     "kind": "missing_input",
+     "operation": "deposit",
+     "resource": "EGAS00001003667"
+    }
+   ],
+   "processed_results_available": false,
+   "reason": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from",
+   "reproduction_input_available": false
+  },
+  "pmcid": "PMC6771404",
+  "precompute_checks": {
+   "methods_detailed_enough": {
+    "blocking": false,
+    "check": "methods_detailed_enough",
+    "confidence": 0.0,
+    "decided_by": "model",
+    "detail": "The methods specify aligner (RSEM v1.2.29), reference (hg19), QC tools (FastQC, fastx_toolkit), differential expression package (DESeq2 with versions), explicit thresholds (>1 TPM filtering, >5000 genes, Y-sum >25 TPM, Z-score \u00b12, bootstrapped P-values with 3000 permutations, BH-adjusted P<0.05), and grading/partition criteria, making an equivalent analysis reconstructable.",
+    "model": "claude-opus-4-8",
+    "reason": "The methods specify aligner (RSEM v1.2.29), reference (hg19), QC tools (FastQC, fastx_toolkit), differential expression package (DESeq2 with versions), explicit thresholds (>1 TPM filtering, >5000 genes, Y-sum >25 TPM, Z-score \u00b12, bootstrapped P-values with 3000 permutations, BH-adjusted P<0.05), and grading/partition criteria, making an equivalent analysis reconstructable.",
+    "verdict": "ok"
+   },
+   "sample_data_matches_paper": {
+    "blocking": false,
+    "check": "sample_data_matches_paper",
+    "confidence": 0.0,
+    "decided_by": "measurement",
+    "detail": "no deposited files were listed to compare against",
+    "model": null,
+    "reason": "",
+    "verdict": "unknown"
+   },
+   "samples_described_enough": {
+    "blocking": false,
+    "check": "samples_described_enough",
+    "confidence": 0.7,
+    "decided_by": "model",
+    "detail": "Figure 1C is described as a data overview table labeling each embryo (E1-39) with which data types it has, and the text repeatedly identifies specific embryos by their condition (e.g., karyotype outliers E5+13, morphokinetic calls, euploid/aneuploid, XX/XY), plus supplemental files list per-sample metadata, making per-sample condition assignments recoverable.",
+    "model": "claude-opus-4-8",
+    "reason": "Figure 1C is described as a data overview table labeling each embryo (E1-39) with which data types it has, and the text repeatedly identifies specific embryos by their condition (e.g., karyotype outliers E5+13, morphokinetic calls, euploid/aneuploid, XX/XY), plus supplemental files list per-sample metadata, making per-sample condition assignments recoverable.",
+    "verdict": "ok"
+   },
+   "species_matches": {
+    "blocking": false,
+    "check": "species_matches",
+    "confidence": 0.0,
+    "decided_by": "measurement",
+    "detail": "bioAF has no organism declaration for this deposit to compare against",
+    "model": null,
+    "reason": "",
+    "verdict": "unknown"
+   }
+  },
+  "route_blocked": {
+   "action": "no_input",
+   "at": "2026-09-10T13:09:17.717403+00:00",
+   "chosen": "deposit",
+   "reason": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from."
+  },
+  "route_decision": {
+   "action": "no_input",
+   "findings": [
+    {
+     "action": "no_input",
+     "archive": null,
+     "leg": "deposit",
+     "reason": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from.",
+     "resource": "EGAS00001003667"
+    }
+   ],
+   "reason": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from.",
+   "route": "deposit"
+  },
+  "stage_provenance": [
+   {
+    "at": "2026-09-10T13:08:14.224094+00:00",
+    "commit": "2db794c2f8887c0f060d077655fae8f6a811e5cc",
+    "image_digest": "unknown",
+    "stage": "reading",
+    "version": "2026.9.1"
+   },
+   {
+    "at": "2026-09-10T13:09:17.707695+00:00",
+    "commit": "2db794c2f8887c0f060d077655fae8f6a811e5cc",
+    "image_digest": "unknown",
+    "stage": "plan_ready",
+    "version": "2026.9.1"
+   },
+   {
+    "at": "2026-09-10T13:09:17.720282+00:00",
+    "commit": "2db794c2f8887c0f060d077655fae8f6a811e5cc",
+    "image_digest": "unknown",
+    "stage": "assessment",
+    "version": "2026.9.1"
+   }
+  ],
+  "supplements": [
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": "supp_29_10_1705__index.html",
+    "label": "Supplemental Material",
+    "mimetype": "text/html",
+    "references": [
+     "Supplemental Material"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "attached"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
+    "label": "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+    "mimetype": "application/msword",
+    "references": [
+     "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "attached"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+    "label": "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt)",
+    "mimetype": "text/plain",
+    "references": [
+     "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt)"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "attached"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+    "label": "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx)",
+    "mimetype": "application/msword",
+    "references": [
+     "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx)"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "attached"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+    "label": "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt)",
+    "mimetype": "text/plain",
+    "references": [
+     "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt)"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "attached"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": null,
+    "label": "Supplemental File S2",
+    "mimetype": null,
+    "references": [
+     "Supplemental File S2"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "named_in_text"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": null,
+    "label": "Supplemental File S3",
+    "mimetype": null,
+    "references": [
+     "Supplemental File S3"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "named_in_text"
+   },
+   {
+    "failure_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+    "filename": null,
+    "label": "Supplemental File S1",
+    "mimetype": null,
+    "references": [
+     "Supplemental File S1"
+    ],
+    "resolved": false,
+    "role": "unknown",
+    "size_bytes": null,
+    "source": "named_in_text"
+   }
+  ]
+ },
+ "note": "Study 34 as persisted on the demo by build 2db794c2 (2026-09-10): the evidence bundle and the plan with its comparison targets, user fields removed. change_7.3 reads this legacy shape.",
+ "reproduction_plan": {
+  "accessions": [
+   "EGAS00001003667"
+  ],
+  "blockers": [
+   "Raw data deposited in EGA (EGAS00001003667) under controlled access, requiring data access committee approval",
+   "Sample IDs assigned to each differential group (aneuploid/euploid, XX/XY, AA/CC, morphokinetic) are not explicitly enumerated in the text",
+   "Library layout (single vs paired-end) not stated"
+  ],
+  "comparison_targets": [
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "Directly reports the dataset sample count (35 WE + 19 TE = 54 samples).",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "total_samples",
+    "claim_text": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+    "claimed_value": 54.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "total_samples",
+    "output_type": "count",
+    "qc_stage": "post-QC",
+    "sample_subset": "whole embryo and TE biopsy",
+    "source_locator": "Results, Fig. 1C",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "RNA-seq samples (35 WE + 19 TE)"
+   },
+   {
+    "binding_confidence": 0.7,
+    "binding_reason": "Average raw sequencing depth per library is a per-sample read count, matching total_sequences; mean_reads_per_cell is a single-cell metric that does not apply to bulk RNA-seq libraries.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "total_sequences",
+    "claim_text": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+    "claimed_value": 44600000.0,
+    "direction": null,
+    "measurement_basis": "library",
+    "metric_key": "mean_reads_per_cell",
+    "output_type": "count",
+    "qc_stage": "as collected",
+    "sample_subset": "all RNA-seq libraries",
+    "source_locator": "Results",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "reads per library (average)"
+   },
+   {
+    "binding_confidence": 0.85,
+    "binding_reason": "Distinct expressed transcripts detected across WE samples matches total_genes_detected.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "total_genes_detected",
+    "claim_text": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+    "claimed_value": 13175.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "total_genes_detected",
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "whole embryo",
+    "source_locator": "Methods, Analysis",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)"
+   },
+   {
+    "binding_confidence": 0.85,
+    "binding_reason": "Distinct expressed transcripts detected across TE samples matches total_genes_detected.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "total_genes_detected",
+    "claim_text": "TE samples expressed 6086 transcripts",
+    "claimed_value": 6086.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "total_genes_detected",
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "TE biopsy",
+    "source_locator": "Methods, Analysis",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)"
+   },
+   {
+    "binding_confidence": 0.97,
+    "binding_reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+    "claimed_value": 194.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "de_gene_count",
+    "output_type": "gene_set_size",
+    "qc_stage": "as analysed",
+    "sample_subset": "whole embryo XX vs XY",
+    "source_locator": "Results (sex chromosome DE)",
+    "threshold": 0.05,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes"
+   },
+   {
+    "binding_confidence": 0.97,
+    "binding_reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+    "claimed_value": 53.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "de_gene_count",
+    "output_type": "gene_set_size",
+    "qc_stage": "as analysed",
+    "sample_subset": "whole embryo aneuploid vs euploid",
+    "source_locator": "Results, Fig. 4B",
+    "threshold": 0.05,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes"
+   },
+   {
+    "binding_confidence": 0.97,
+    "binding_reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+    "claimed_value": 10.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "de_gene_count",
+    "output_type": "gene_set_size",
+    "qc_stage": "as analysed",
+    "sample_subset": "whole embryo AA vs CC morphology",
+    "source_locator": "Results, Fig. 5B",
+    "threshold": 0.05,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes"
+   },
+   {
+    "binding_confidence": 0.97,
+    "binding_reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+    "claimed_value": 9.0,
+    "direction": null,
+    "measurement_basis": null,
+    "metric_key": "de_gene_count",
+    "output_type": "gene_set_size",
+    "qc_stage": "as analysed",
+    "sample_subset": "whole embryo high vs low morphokinetic quality",
+    "source_locator": "Results, Fig. 6C",
+    "threshold": 0.05,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes"
+   }
+  ],
+  "differential_design": {
+   "contrasts": [
+    {
+     "assay": "bulk RNA-seq (WE)",
+     "name": "aneuploid vs euploid WE (RNA karyotype)",
+     "reference_condition": "euploid WE (RNA-based karyotype)",
+     "reference_samples": [],
+     "subjects": {},
+     "test_condition": "aneuploid WE (RNA-based karyotype)",
+     "test_samples": [],
+     "thresholds": {
+      "log2fc": null,
+      "padj": 0.05
+     }
+    },
+    {
+     "assay": "bulk RNA-seq (WE)",
+     "name": "XX vs XY WE (sex chromosome)",
+     "reference_condition": "XY WE",
+     "reference_samples": [],
+     "subjects": {},
+     "test_condition": "XX WE",
+     "test_samples": [],
+     "thresholds": {
+      "log2fc": 2.0,
+      "padj": 0.05
+     }
+    },
+    {
+     "assay": "bulk RNA-seq (WE)",
+     "name": "good vs poor morphology (Gardner AA vs CC) WE",
+     "reference_condition": "CC morphology WE",
+     "reference_samples": [],
+     "subjects": {},
+     "test_condition": "AA morphology WE",
+     "test_samples": [],
+     "thresholds": {
+      "log2fc": null,
+      "padj": 0.05
+     }
+    },
+    {
+     "assay": "bulk RNA-seq (WE)",
+     "name": "high vs low morphokinetic quality WE",
+     "reference_condition": "morphokinetically aberrant WE",
+     "reference_samples": [],
+     "subjects": {},
+     "test_condition": "clinical-standard morphokinetics WE",
+     "test_samples": [],
+     "thresholds": {
+      "log2fc": null,
+      "padj": 0.05
+     }
+    }
+   ],
+   "selected_contrast": {
+    "confidence": 0.6,
+    "contrast_index": null,
+    "decided_by": "model",
+    "model": "claude-opus-4-8",
+    "reason": "No dataset accession or sample titles are provided, so the specific conditions sequenced cannot be determined among the four same-assay RNA-seq contrasts."
+   },
+   "thresholds": {
+    "log2fc": null,
+    "padj": 0.05
+   }
+  },
+  "extractor_model": "claude-opus-4-8",
+  "extractor_provider": "anthropic",
+  "finding_claim": null,
+  "id": 35,
+  "mapping_confidence": "partial",
+  "mapping_notes": "Mapped assay 'bulk RNA-seq (low-input Smart-seq2)' (tools: RSEM v1.2.29, FastQC, fastx_toolkit, DESeq2, R/Bioconductor) to nf-core/rnaseq 3.14.0. The original toolchain differs from nf-core, so exact metric reproduction is not guaranteed.",
+  "parameters": {},
+  "pipeline_key": "nf-core/rnaseq",
+  "pipeline_version": "3.14.0",
+  "reference_build": "hg19 / RSEM (International Human Genome Sequencing Consortium 2001)",
+  "reference_genome": "GRCh37"
+ },
+ "study": {
+  "classification": "missing_data",
+  "failure_reason": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from",
+  "id": 34,
+  "source_doi": "10.1101/gr.252981.119",
+  "state": "classified"
+ }
+}
