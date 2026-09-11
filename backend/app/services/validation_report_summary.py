@@ -169,6 +169,8 @@ def summarize(
         "capability_rows": _capability_rows(evidence),
         "claims": claims,
         "claim_counts": counts,
+        "blockers": _blockers(plan, evidence),
+        "contrasts": _contrasts(plan, evidence),
         "reconciliation": reconciliation,
         "consistency": _consistency(evidence),
         "checks": _checks(evidence, reconciliation),
@@ -181,6 +183,36 @@ def summarize(
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
     }
+
+
+def _basis(evidence: dict) -> str:
+    """What every reading from the paper rests on: the assessment's basis once reconciliation has run
+    on inspected evidence, the paper's text until then."""
+    return (evidence.get("assessment") or {}).get("basis") or "paper_text"
+
+
+def _blockers(plan: dict, evidence: dict) -> list[dict]:
+    """Section 6: a blocker is a reading of the prose, provisional until inspected evidence settles it."""
+    basis = _basis(evidence)
+    kinds = {str(k.get("text")): k.get("kind") for k in plan.get("blocker_kinds") or [] if isinstance(k, dict)}
+    return [
+        {"text": str(b), "kind": kinds.get(str(b)), "basis": basis, "provisional": basis != "inspected_evidence"}
+        for b in plan.get("blockers") or []
+    ]
+
+
+def _contrasts(plan: dict, evidence: dict) -> list[dict]:
+    basis = _basis(evidence)
+    return [
+        {
+            "name": c.get("name"),
+            "thresholds": c.get("thresholds"),
+            "basis": basis,
+            "provisional": basis != "inspected_evidence",
+        }
+        for c in ((plan.get("differential_design") or {}).get("contrasts") or [])
+        if isinstance(c, dict)
+    ]
 
 
 def _headline(study: dict, attempt: dict) -> dict:

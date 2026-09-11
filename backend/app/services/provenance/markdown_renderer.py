@@ -649,7 +649,12 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
         parts.append("")
     blockers = plan.get("blockers") or []
     if blockers:
-        parts.append("**Blockers:** " + "; ".join(str(b) for b in blockers))
+        provisional = any(b.get("provisional") for b in summary.get("blockers") or [])
+        parts.append(
+            "**Blockers:** "
+            + "; ".join(str(b) for b in blockers)
+            + (" (provisional: from the paper text only; not checked against the attachments)" if provisional else "")
+        )
         parts.append("")
 
     # Computed vs Claimed (E2 evidence)

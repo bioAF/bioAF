@@ -365,3 +365,36 @@ class TestEverySurfaceSaysTheSameThing:
         assert "Reproduction not attempted" in text
         assert "Could Not Reproduce" not in text
         assert "undefined rows" not in text
+
+
+class TestBlockersAndContrastsCarryTheirBasis:
+    """change_7.3 section 6: targets, contrasts, checks and blockers carry their basis, and each renders
+    as provisional while reconciliation has not run on inspected evidence."""
+
+    def _summary(self, basis):
+        return summarize(
+            study={"state": "classified", "classification": "access_restricted"},
+            evidence={"assessment": {"basis": basis}},
+            plan={
+                "blockers": ["Sample IDs are not enumerated in the text"],
+                "blocker_kinds": [{"text": "Sample IDs are not enumerated in the text", "kind": "sample_assignment"}],
+                "differential_design": {"contrasts": [{"name": "treated vs vehicle", "thresholds": {"padj": 0.05}}]},
+            },
+            targets=[],
+            issues=[],
+        )
+
+    def test_a_blocker_from_the_prose_is_provisional(self):
+        [blocker] = self._summary("paper_text")["blockers"]
+        assert blocker["kind"] == "sample_assignment"
+        assert blocker["provisional"] is True
+
+    def test_a_contrast_from_the_prose_is_provisional(self):
+        [contrast] = self._summary("paper_text")["contrasts"]
+        assert contrast["name"] == "treated vs vehicle"
+        assert contrast["provisional"] is True
+
+    def test_both_settle_once_reconciled_on_inspected_evidence(self):
+        summary = self._summary("inspected_evidence")
+        assert summary["blockers"][0]["provisional"] is False
+        assert summary["contrasts"][0]["provisional"] is False

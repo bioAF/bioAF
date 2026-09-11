@@ -8,6 +8,7 @@
       ],
       "status": "attempted"
     },
+    "blockers": [],
     "capability_rows": [],
     "checks": [],
     "checks_completed": [],
@@ -32,6 +33,7 @@
       "pairs": [],
       "unresolved": []
     },
+    "contrasts": [],
     "facts": {
       "attachments": {
         "failed": 0,
@@ -239,6 +241,26 @@
       "executed": [],
       "status": "not_attempted"
     },
+    "blockers": [
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Raw data deposited in EGA (EGAS00001003667) under controlled access, requiring data access committee approval"
+      },
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Sample IDs assigned to each differential group (aneuploid/euploid, XX/XY, AA/CC, morphokinetic) are not explicitly enumerated in the text"
+      },
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Library layout (single vs paired-end) not stated"
+      }
+    ],
     "capability_rows": [
       {
         "detail": "bioAF holds the paper's full text",
@@ -562,6 +584,44 @@
       ],
       "unresolved": []
     },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "name": "aneuploid vs euploid WE (RNA karyotype)",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "XX vs XY WE (sex chromosome)",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": 2.0,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "good vs poor morphology (Gardner AA vs CC) WE",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "high vs low morphokinetic quality WE",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      }
+    ],
     "facts": {
       "attachments": {
         "failed": 4,
@@ -772,6 +832,26 @@
       "executed": [],
       "status": "not_attempted"
     },
+    "blockers": [
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Raw data deposited in EGA (EGAS00001003667) under controlled access, requiring data access committee approval"
+      },
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Sample IDs assigned to each differential group (aneuploid/euploid, XX/XY, AA/CC, morphokinetic) are not explicitly enumerated in the text"
+      },
+      {
+        "basis": "paper_text",
+        "kind": null,
+        "provisional": true,
+        "text": "Library layout (single vs paired-end) not stated"
+      }
+    ],
     "capability_rows": [
       {
         "detail": "bioAF holds the paper's full text",
@@ -1123,6 +1203,44 @@
       "pairs": [],
       "unresolved": []
     },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "name": "aneuploid vs euploid WE (RNA karyotype)",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "XX vs XY WE (sex chromosome)",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": 2.0,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "good vs poor morphology (Gardner AA vs CC) WE",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      },
+      {
+        "basis": "paper_text",
+        "name": "high vs low morphokinetic quality WE",
+        "provisional": true,
+        "thresholds": {
+          "log2fc": null,
+          "padj": 0.05
+        }
+      }
+    ],
     "facts": {
       "attachments": {
         "failed": 4,

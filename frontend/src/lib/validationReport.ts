@@ -107,6 +107,8 @@ export interface ReportSummary {
   capability_rows: CapabilityRow[];
   claims: ReportClaim[];
   claim_counts: { total: number; mapped: number; tested: number; label: string };
+  blockers: { text: string; kind: string | null; basis: string; provisional: boolean }[];
+  contrasts: { name: string | null; thresholds: Record<string, number | null> | null; basis: string; provisional: boolean }[];
   reconciliation: { status: string | null; reason: string | null; basis: string | null; label: string | null };
   consistency: { checked: boolean; pairs: string[]; label: string; unresolved: { statement: string | null; outcome: string | null }[] };
   checks: { key: string; label: string; verdict: string | null; detail: string | null; basis: string; provisional: boolean }[];

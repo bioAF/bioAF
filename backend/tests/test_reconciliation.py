@@ -119,30 +119,24 @@ class TestTheReconciliationCallReceivesTheEvidence:
 
 class TestARevisionReachesThePersistedPlan:
     @pytest.mark.asyncio
-    async def test_a_corrected_context_is_stored(self, session, admin_user, monkeypatch):
+    async def test_a_corrected_context_is_stored(self, session, admin_user):
+        # change_7.3 section 7 (flagged test change, named by the plan): this stubbed `bind_claims`
+        # to return the context fields, which hid that the binding schema never asked for them. It now
+        # goes through the provider, so the real prompt, parser and application all run.
         from app.services import validation_reconciliation as rec
 
-        async def _bind(claims, *, client, model, api_key, inventory=None, previous=None, on_issue=None):
-            return [
-                {
-                    "claim_index": 0,
-                    "bound_key": "differentially_expressed_genes",
-                    "reason": "S3 holds 194 rows; the 88 is the fold-change subset, a separate claim",
-                    "confidence": 0.9,
-                    "declined": False,
-                    "threshold": 0.05,
-                    "threshold_kind": "padj",
-                    "sample_subset": "XX vs XY",
-                    "qc_stage": "post-QC",
-                }
-            ]
-
-        monkeypatch.setattr(rec, "bind_claims", _bind)
+        provider = _Provider(
+            '```json\n{"bindings": [{"claim_index": 0, "bound_key": "differentially_expressed_genes", '
+            '"reason": "S3 holds 194 rows; the 88 is the fold-change subset, a separate claim", '
+            '"confidence": 0.9, "threshold": 0.05, "threshold_kind": "padj", "sample_subset": "XX vs XY", '
+            '"qc_stage": "post-QC"}]}\n```'
+        )
         study, plan = await _study_with_provisional_plan(session, admin_user)
-        await rec.reconcile(session, study, plan, supplements=[_S1, _S3], client=object(), model="m", api_key=None)
+        await rec.reconcile(session, study, plan, supplements=[_S1, _S3], client=provider, model="m", api_key=None)
         target = (await _targets(session, plan))[0]
         assert target.threshold_kind == "padj"
         assert target.sample_subset == "XX vs XY"
+        assert target.qc_stage == "post-QC"
 
     @pytest.mark.asyncio
     async def test_the_original_reading_and_the_reason_are_kept(self, session, admin_user, monkeypatch):
@@ -260,24 +254,6 @@ class TestTheBindingSchemaAsksForTheContext:
         system, _ = build_binding_prompt([{"metric_key": "total_samples", "value": 54}])
         for field in ("sample_subset", "qc_stage", "direction", "threshold_kind", "output_type", "measurement_basis"):
             assert f'"{field}"' in system
-
-    @pytest.mark.asyncio
-    async def test_a_corrected_context_is_stored_through_the_real_binding_call(self, session, admin_user):
-        # change_7.3 section 7 (flagged test change): `test_a_corrected_context_is_stored` above stubs
-        # `bind_claims` and so never exercises the schema; this one goes through the provider.
-        from app.services import validation_reconciliation as rec
-
-        provider = _Provider(
-            '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "the 88 is a subset", '
-            '"confidence": 0.9, "threshold": 0.05, "threshold_kind": "padj", "sample_subset": "XX vs XY", '
-            '"qc_stage": "as analysed"}]}\n```'
-        )
-        study, plan = await _study_with_provisional_plan(session, admin_user)
-        await rec.reconcile(session, study, plan, supplements=[_S1, _S3], client=provider, model="m", api_key=None)
-        target = (await _targets(session, plan))[0]
-        assert target.threshold_kind == "padj"
-        assert target.sample_subset == "XX vs XY"
-        assert target.qc_stage == "as analysed"
 
 
 class TestItRunsOnThePaperText:
