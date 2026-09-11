@@ -6,7 +6,7 @@ import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import Link from "next/link";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
-import { ValidationStudyActions } from "@/components/validation/ValidationStudyActions";
+import { ValidationStudyActions, type StudyActivity } from "@/components/validation/ValidationStudyActions";
 import { ValidationVerdictPanel } from "@/components/validation/ValidationVerdictPanel";
 import { ValidationEvidenceTable, type Evidence } from "@/components/validation/ValidationEvidenceTable";
 import {
@@ -44,10 +44,6 @@ import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/com
 import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSection";
 import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
 import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
-
-// States the background driver advances on its own; while a study sits in one, poll so the page
-// reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
-const ADVANCING_STATES = new Set(["acquiring_data", "setup", "running", "extracting"]);
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -101,6 +97,9 @@ interface ValidationStudy {
   // change_7.3 section 11: the report as one projection of the evidence. The panels below render from
   // it, and the JSON and markdown exports carry the same statements.
   report_summary?: ReportSummary | null;
+  // The route chosen at the button, and what bioAF is doing on the study right now.
+  intended_route?: string | null;
+  activity?: StudyActivity | null;
 }
 
 // The evidence keys the plan_7 panels read. The bundle carries more than this; these are the ones
@@ -163,9 +162,11 @@ export default function ValidationStudyPage() {
     };
   }, [refresh, router]);
 
-  // While the driver is advancing the study on its own, poll so the stage/evidence stay current.
+  // While bioAF moves the study on by itself, poll so the stage and evidence stay current. The server
+  // decides: a fixed list of states here had drifted from the driver's, so study 37's page loaded once
+  // in `requested` and still offered "Read paper" after the driver had begun reading it.
   useEffect(() => {
-    if (!study || !ADVANCING_STATES.has(study.state)) return;
+    if (!study?.activity?.advancing) return;
     const t = setInterval(refresh, 5000);
     return () => clearInterval(t);
   }, [study, refresh]);
@@ -477,6 +478,8 @@ export default function ValidationStudyPage() {
               },
               plan: { deposit_conflict: plan?.deposit_conflict ?? null },
               resume: summary?.resume ?? null,
+              intended_route: study.intended_route ?? null,
+              activity: study.activity ?? null,
             }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
             suggestedClassification={study.evidence?.classification_result?.classification}

@@ -258,3 +258,6 @@ class ValidationStudyResponse(BaseModel):
     # change_7.3 section 11: the report as one projection of the evidence, the plan and the issues.
     # The page, the JSON export and the markdown export all render from this, so they cannot drift.
     report_summary: dict | None = None
+    # What bioAF is doing on the study right now: ``{"advancing", "working", "since"}``. The page polls
+    # while ``advancing`` and says the work is under way while ``working``.
+    activity: dict | None = None

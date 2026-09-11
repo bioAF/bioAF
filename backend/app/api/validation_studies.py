@@ -43,7 +43,7 @@ from app.services.literature.ground_truth_fetch_service import GroundTruthFetchS
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.validation_issue_service import ValidationIssueService
 from app.services.reproduction_plan_service import ReproductionPlanService
-from app.services.validation_driver_service import ValidationDriverService
+from app.services.validation_driver_service import ValidationDriverService, study_activity
 from app.services.pipeline_mapper import deposit_conflict
 from app.services.validation_level3_service import supported_finding_kinds
 from app.services.validation_study_service import ValidationStudyService
@@ -188,6 +188,7 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         paper_id=study.paper_id,
         source_doi=study.source_doi,
         source_accession=study.source_accession,
+        intended_route=study.intended_route,
         experiment_id=study.experiment_id,
         reproduction_plan_id=study.reproduction_plan_id,
         approved_by_user_id=study.approved_by_user_id,
@@ -201,6 +202,9 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         issues=await ValidationIssueService.list_for_study(session, study.id, org_id),
         # change_7.3 section 11: the same projection the provenance export carries.
         report_summary=await report_summary_for(session, study, org_id),
+        # Study 37: whether bioAF moves this study on by itself and whether a worker holds it now, so
+        # the page shows the work under way instead of offering a click that races it.
+        activity=await study_activity(session, study),
     )
 
 
