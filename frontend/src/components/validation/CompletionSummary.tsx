@@ -16,6 +16,8 @@
  * reproduce from.
  */
 
+import type { ReportSummary } from "@/lib/validationReport";
+
 export interface Limitation {
   kind: string;
   resource: string | null;
@@ -55,7 +57,94 @@ function Fact({ testId, label, value }: { testId: string; label: string; value: 
   );
 }
 
-export function CompletionSummary({ completion }: { completion: Completion | null | undefined }) {
+const TRISTATE_CLASS: Record<string, string> = {
+  yes: "bg-emerald-50 text-emerald-700",
+  no: "bg-gray-100 text-gray-600",
+  not_established: "bg-amber-50 text-amber-700",
+  unknown: "bg-amber-50 text-amber-700",
+};
+
+/**
+ * change_7.3 sections 10 and 11: the same statements, from the report projection.
+ *
+ * The two facts are tri-state: a failed download is "Not established", never "No". The limitation
+ * label applies only when an absence is established, and a route leg that was not chosen is reported
+ * as context. A failure affecting several attachments is one line, not one per attachment.
+ */
+function ProjectedCompletion({ summary }: { summary: ReportSummary }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="space-y-1">
+        {summary.completion_facts.map((fact) => (
+          <div key={fact.key} className="flex flex-wrap items-baseline gap-x-2" data-testid={`fact-${fact.key}`}>
+            <span className="text-gray-700">{fact.label}</span>
+            <span
+              className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                TRISTATE_CLASS[fact.value] ?? "bg-gray-100 text-gray-600"
+              }`}
+            >
+              {fact.value_label}
+            </span>
+            {fact.reason && <span className="text-xs text-gray-500">{fact.reason}</span>}
+          </div>
+        ))}
+      </div>
+
+      {summary.limitations.length > 0 && (
+        <table className="min-w-full">
+          <tbody className="divide-y divide-gray-100">
+            {summary.limitations.map((limitation, i) => (
+              <tr
+                key={`${limitation.kind}-${limitation.leg}-${i}`}
+                data-testid={limitation.governs ? `limitation-${limitation.kind}` : `limitation-context-${limitation.leg}`}
+              >
+                <td className="py-1.5 pr-4 text-gray-700">
+                  {limitation.label}
+                  {!limitation.governs && (
+                    <span className="ml-1 text-xs text-gray-500">(route not chosen; reported as context)</span>
+                  )}
+                </td>
+                <td className="py-1.5 pr-4 text-xs text-gray-500">
+                  {limitation.resource}
+                  {limitation.leg && <span className="ml-2">{limitation.leg} route</span>}
+                </td>
+                <td className="py-1.5 text-xs text-gray-500">
+                  {limitation.detail}
+                  {limitation.observation && <span className="block">Observed: {limitation.observation}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {[
+        { heading: "Checks completed", rows: summary.checks_completed },
+        { heading: "Checks not completed", rows: summary.checks_not_completed },
+      ]
+        .filter(({ rows }) => rows?.length > 0)
+        .map(({ heading, rows }) => (
+          <div key={heading}>
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{heading}</p>
+            <ul className="mt-1 list-disc pl-5 text-xs text-gray-600">
+              {rows.map((row) => (
+                <li key={row}>{row}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+export function CompletionSummary({
+  completion,
+  summary,
+}: {
+  completion: Completion | null | undefined;
+  summary?: ReportSummary | null;
+}) {
+  if (summary && summary.completion_facts.length > 0) return <ProjectedCompletion summary={summary} />;
   if (!completion) return null;
 
   return (

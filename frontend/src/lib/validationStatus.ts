@@ -18,7 +18,8 @@ export type ValidationStatusKey =
   | "questionable"
   | "unlikely"
   | "very_unlikely"
-  | "could_not_reproduce";
+  | "could_not_reproduce"
+  | "reproduction_not_attempted";
 
 export type ValidationStatusTone = "positive" | "caution" | "negative" | "neutral";
 
@@ -36,6 +37,17 @@ const COULD_NOT_REPRODUCE: ValidationStatus = {
   tone: "neutral",
   needsHumanReview: false,
   description: "Validation could not be run for this study.",
+};
+
+// change_7.3 section 10 item 1: nothing executed on this paper's data, so nothing was compared. This
+// is not "Could Not Reproduce", which is kept for a study that ran and reached no verdict: that one
+// says an attempt failed, and study 34 attempted nothing.
+const REPRODUCTION_NOT_ATTEMPTED: ValidationStatus = {
+  key: "reproduction_not_attempted",
+  label: "Reproduction not attempted",
+  tone: "neutral",
+  needsHumanReview: false,
+  description: "No analysis was executed on this paper's data, so no result was compared.",
 };
 
 // The `partially_reproduced` classification (ADR-069) is not a point on the confidence scale: the
@@ -119,7 +131,13 @@ const BANDS: ReadonlyArray<{ min: number; status: ValidationStatus }> = [
 export function getValidationStatus(
   confidencePct: number | null | undefined,
   classification?: string | null,
+  // Whether reproduction was attempted, from the report projection. The bucket alone cannot say:
+  // `inconclusive` is reached both by a run that failed and by a study that never ran.
+  attempt?: "attempted" | "not_attempted" | null,
 ): ValidationStatus {
+  if (attempt === "not_attempted") {
+    return REPRODUCTION_NOT_ATTEMPTED;
+  }
   // A discrete classification bucket that does not map cleanly onto the confidence scale wins over the
   // band: partially_reproduced reads as its own factual state regardless of the fallback confidence.
   if (classification === "partially_reproduced") {

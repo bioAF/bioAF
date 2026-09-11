@@ -15,6 +15,8 @@
  * names its model, because that is the one an administrator can request an account exception for.
  */
 
+import { TechnicalDetails } from "./TechnicalDetails";
+
 export interface ValidationIssue {
   step: string;
   outcome: string;
@@ -22,6 +24,9 @@ export interface ValidationIssue {
   message: string;
   model: string | null;
   at: string | null;
+  // change_7.3 section 9: URL, HTTP status, error class, attempts and times. Collapsed under the
+  // plain row; the message itself stays one plain sentence.
+  technical_detail?: Record<string, unknown> | null;
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
@@ -32,6 +37,9 @@ const OUTCOME_LABEL: Record<string, string> = {
   // change_7.2 section 7: an answer cut off at the token limit is its own event. Reporting it as
   // badly formatted is a true statement about the text and a false one about what happened.
   truncated: "the model's answer was cut off at its token limit",
+  // change_7.3 section 9: failures that are not a model's.
+  retrieval_failed: "bioAF could not retrieve a file it needed",
+  not_performed: "this step could not run",
 };
 
 const IMPACT_LABEL: Record<string, string> = {
@@ -78,6 +86,11 @@ export function ValidationIssuesSection({ issues }: { issues: ValidationIssue[] 
             )}
             {issue.message && (
               <span className="basis-full text-xs text-gray-500">{issue.message}</span>
+            )}
+            {issue.technical_detail && (
+              <span className="basis-full">
+                <TechnicalDetails detail={issue.technical_detail} />
+              </span>
             )}
           </li>
         ))}

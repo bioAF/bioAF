@@ -1,0 +1,1197 @@
+{
+  "attempted_no_verdict": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [
+        "analysis pipeline run"
+      ],
+      "status": "attempted"
+    },
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "the reproduction produced nothing any claim could be compared against"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": true
+    },
+    "figures": 0,
+    "headline": {
+      "key": "could_not_reproduce",
+      "label": "Could Not Reproduce"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "summary": [
+      "Reproduction was attempted and reached no verdict.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "enums": {
+    "headline": {
+      "could_not_reproduce": "Could Not Reproduce",
+      "reproduction_not_attempted": "Reproduction not attempted"
+    },
+    "issue_outcome": {
+      "internal": "bioAF hit an internal error",
+      "not_performed": "this step could not run",
+      "refusal": "the model declined to answer",
+      "retrieval_failed": "bioAF could not retrieve a file it needed",
+      "truncated": "the model's answer was cut off at its token limit",
+      "unparseable": "the model's answer was not in the format bioAF asked for",
+      "unreachable": "bioAF could not reach the language model"
+    },
+    "limitation_kind": {
+      "controlled_access": "Controlled access",
+      "failed_discovery": "Could not be established",
+      "missing_input": "Required input not published",
+      "retrieval_failed": "Could not be retrieved in this attempt",
+      "unsupported_acquisition": "Acquisition not supported"
+    },
+    "retrieval_outcome": {
+      "forbidden": "the server refused the request",
+      "not_found": "the server answered that it was not found",
+      "retrieved": "retrieved",
+      "too_large": "it is larger than bioAF will download",
+      "transient": "the request failed before an answer came back",
+      "unreadable": "it arrived but could not be opened"
+    },
+    "retrieval_status": {
+      "failed": "Could not be retrieved in this attempt",
+      "not_attempted": "Not retrieved",
+      "not_in_bundle": "Not found in the paper's supplementary bundle",
+      "retrieved": "Retrieved"
+    },
+    "role": {
+      "code": "Analysis code",
+      "expression_matrix": "Expression matrix",
+      "results_table": "Differential results",
+      "sample_metadata": "Sample metadata",
+      "supporting_input": "Supporting input",
+      "unknown": "Retrieved; role not established"
+    },
+    "tristate": {
+      "no": "No",
+      "not_established": "Not established",
+      "unknown": "Unknown",
+      "yes": "Yes"
+    }
+  },
+  "groff_failed": {
+    "artifacts": [
+      {
+        "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "identification": [
+          "article_manifest"
+        ],
+        "identification_label": "the article's list of attachments",
+        "identity": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S1",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt)",
+          "Supplemental File S1"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S2",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx)",
+          "Supplemental File S2"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S3",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt)",
+          "Supplemental File S3"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      }
+    ],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "capability_rows": [
+      {
+        "detail": "bioAF holds the paper's full text",
+        "key": "paper_readable",
+        "label": "Paper text available",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access",
+        "key": "deposit_exists",
+        "label": "Data deposit exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "raw_data",
+        "label": "Raw sample data deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "raw_data_available",
+        "label": "Raw sample data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA lists 108 file(s), none of them processed tables",
+        "key": "preprocessed_data",
+        "label": "Pre-processed data deposited",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "nothing of this kind is deposited",
+        "key": "preprocessed_data_available",
+        "label": "Pre-processed data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA registers 54 sample(s) for EGAD00001005044",
+        "key": "sample_metadata",
+        "label": "Sample metadata deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "sample_metadata_available",
+        "label": "Sample metadata available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "Supplemental File S2",
+        "key": "code_artifact",
+        "label": "Code artifact exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": null,
+        "key": "code_repository",
+        "label": "Code repository linked",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [
+      "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
+    ],
+    "claim_counts": {
+      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 4,
+      "tested": 0,
+      "total": 8
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+        "mapping": {
+          "bound_key": "total_samples",
+          "confidence": 0.9,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_samples",
+          "model": "claude-opus-4-8",
+          "reason": "Directly reports the dataset sample count (35 WE + 19 TE = 54 samples).",
+          "status": "mapped"
+        },
+        "population": "whole embryo and TE biopsy",
+        "provisional": true,
+        "stage": "post-QC",
+        "unit": "RNA-seq samples (35 WE + 19 TE)",
+        "unresolved_reason": null,
+        "value": 54.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+        "mapping": {
+          "bound_key": "total_sequences",
+          "confidence": 0.7,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "mean_reads_per_cell",
+          "model": "claude-opus-4-8",
+          "reason": "Average raw sequencing depth per library is a per-sample read count, matching total_sequences; mean_reads_per_cell is a single-cell metric that does not apply to bulk RNA-seq libraries.",
+          "status": "mapped"
+        },
+        "population": "all RNA-seq libraries",
+        "provisional": true,
+        "stage": "as collected",
+        "unit": "reads per library (average)",
+        "unresolved_reason": null,
+        "value": 44600000.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across WE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "whole embryo",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 13175.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "TE samples expressed 6086 transcripts",
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across TE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "TE biopsy",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 6086.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo XX vs XY",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 194.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo aneuploid vs euploid",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 53.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo AA vs CC morphology",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 10.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo high vs low morphokinetic quality",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 9.0
+      }
+    ],
+    "code_sources": [
+      {
+        "execution": {
+          "label": "Not executed",
+          "outcome": null,
+          "status": "not_attempted"
+        },
+        "identification": [
+          "methods",
+          "article_manifest"
+        ],
+        "identification_label": "the methods, the article's list of attachments",
+        "inspection": {
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "supplementary",
+        "label": "Supplemental File S2",
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "reason": "retrieval was attempted and the file could not be retrieved in this attempt",
+          "status": "failed"
+        }
+      }
+    ],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": "4 of the paper's attachment(s) were not inspected, so whether the paper publishes processed results is not established",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "reproduction_input_available",
+        "label": "Reproduction input acquired by bioAF",
+        "reason": "4 of the paper's attachment(s) were not inspected, so whether the paper attaches a usable input is not established; bioAF acquired none in this attempt",
+        "value": "not_established",
+        "value_label": "Not established"
+      }
+    ],
+    "consistency": {
+      "checked": true,
+      "label": "No contradictions found among the checked statements",
+      "pairs": [
+        "x"
+      ],
+      "unresolved": []
+    },
+    "facts": {
+      "attachments": {
+        "failed": 4,
+        "identified": 4,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [
+          "controlled"
+        ],
+        "available_to_bioaf": "no",
+        "deposited": "yes"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 1,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "EGAS00001003667 is in EGA (controlled access), and bioAF has no adapter for EGA, so it cannot acquire anything from it. Its public listing holds no pre-processed data to reproduce the finding from",
+        "governs": true,
+        "kind": "unsupported_acquisition",
+        "label": "Acquisition not supported",
+        "leg": "deposit",
+        "observation": "EGA lists 108 file(s), none of them processed tables",
+        "resource": "EGAS00001003667"
+      },
+      {
+        "detail": "bioAF could not retrieve 4 of the paper's attachment(s) in this attempt, so what they hold is not established",
+        "governs": true,
+        "kind": "retrieval_failed",
+        "label": "Could not be retrieved in this attempt",
+        "leg": "retrieval",
+        "observation": null,
+        "resource": "the paper's supplementary files"
+      },
+      {
+        "detail": "EGAS00001003667 publishes raw sequencing reads to fetch and re-run under controlled access, and bioAF has no adapter for EGA. The data is published; the limitation is bioAF's",
+        "governs": false,
+        "kind": "unsupported_acquisition",
+        "label": "Acquisition not supported",
+        "leg": "pipeline",
+        "observation": "EGA lists 108 fastq.gz file(s) for this dataset",
+        "resource": "EGAS00001003667"
+      }
+    ],
+    "reconciliation": {
+      "basis": "paper_text",
+      "label": "Reconciled against the paper's own passages; from the paper text only; not checked against the attachments",
+      "reason": "r",
+      "status": "performed"
+    },
+    "resume": {
+      "label": "Review and resume",
+      "requirements": [
+        "bioAF cannot yet acquire data from EGA, so credentials alone will not make this study runnable.",
+        "Approving again retries the attachment download."
+      ]
+    },
+    "retrieval_failures": [
+      {
+        "artifacts": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+          "Supplemental File S1",
+          "Supplemental File S2",
+          "Supplemental File S3"
+        ],
+        "message": "bioAF could not download the paper's supplementary files in this attempt",
+        "source": "the article's supplementary bundle from Europe PMC",
+        "technical_detail": {
+          "attempts": 3,
+          "error_class": "_NotFound",
+          "first_at": "2026-09-10T13:09:18+00:00",
+          "http_status": 404,
+          "last_at": "2026-09-10T13:09:18+00:00",
+          "outcome": "the server answered that it was not found",
+          "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles"
+        }
+      }
+    ],
+    "summary": [
+      "Reproduction not attempted.",
+      "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",
+      "Four supplementary attachments were identified, but their download failed.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "study_34_legacy": {
+    "artifacts": [
+      {
+        "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "identification": [
+          "article_manifest"
+        ],
+        "identification_label": "the article's list of attachments",
+        "identity": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": null,
+          "recorded_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S1",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt)",
+          "Supplemental File S1"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": null,
+          "recorded_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S2",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx)",
+          "Supplemental File S2"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": null,
+          "recorded_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S3",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt)",
+          "Supplemental File S3"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": null,
+          "recorded_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)",
+          "status": "failed"
+        }
+      }
+    ],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "capability_rows": [
+      {
+        "detail": "bioAF holds the paper's full text",
+        "key": "paper_readable",
+        "label": "Paper text available",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "deposit_exists",
+        "label": "Data deposit exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "raw_data",
+        "label": "Raw sample data deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "raw_data_available",
+        "label": "Raw sample data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "preprocessed_data",
+        "label": "Pre-processed data deposited",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "nothing of this kind is deposited",
+        "key": "preprocessed_data_available",
+        "label": "Pre-processed data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "sample_metadata",
+        "label": "Sample metadata deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "sample_metadata_available",
+        "label": "Sample metadata available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "Supplemental File S2",
+        "key": "code_artifact",
+        "label": "Code artifact exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": null,
+        "key": "code_repository",
+        "label": "Code repository linked",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "checks": [
+      {
+        "basis": "paper_text",
+        "detail": "The methods specify aligner (RSEM v1.2.29), reference (hg19), QC tools (FastQC, fastx_toolkit), differential expression package (DESeq2 with versions), explicit thresholds (>1 TPM filtering, >5000 genes, Y-sum >25 TPM, Z-score \u00b12, bootstrapped P-values with 3000 permutations, BH-adjusted P<0.05), and grading/partition criteria, making an equivalent analysis reconstructable.",
+        "key": "methods_detailed_enough",
+        "label": "Methods described in enough detail",
+        "provisional": true,
+        "verdict": "ok"
+      },
+      {
+        "basis": "inspected_evidence",
+        "detail": "no deposited files were listed to compare against",
+        "key": "sample_data_matches_paper",
+        "label": "Sample data matches the paper",
+        "provisional": false,
+        "verdict": "unknown"
+      },
+      {
+        "basis": "paper_text",
+        "detail": "Figure 1C is described as a data overview table labeling each embryo (E1-39) with which data types it has, and the text repeatedly identifies specific embryos by their condition (e.g., karyotype outliers E5+13, morphokinetic calls, euploid/aneuploid, XX/XY), plus supplemental files list per-sample metadata, making per-sample condition assignments recoverable.",
+        "key": "samples_described_enough",
+        "label": "Samples described in enough detail",
+        "provisional": true,
+        "verdict": "ok"
+      },
+      {
+        "basis": "inspected_evidence",
+        "detail": "bioAF has no organism declaration for this deposit to compare against",
+        "key": "species_matches",
+        "label": "Species matches the deposit",
+        "provisional": false,
+        "verdict": "unknown"
+      }
+    ],
+    "checks_completed": [],
+    "checks_not_completed": [
+      "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
+    ],
+    "claim_counts": {
+      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 4,
+      "tested": 0,
+      "total": 8
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+        "mapping": {
+          "bound_key": "total_samples",
+          "confidence": 0.9,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_samples",
+          "model": "claude-opus-4-8",
+          "reason": "Directly reports the dataset sample count (35 WE + 19 TE = 54 samples).",
+          "status": "mapped"
+        },
+        "population": "whole embryo and TE biopsy",
+        "provisional": true,
+        "stage": "post-QC",
+        "unit": "RNA-seq samples (35 WE + 19 TE)",
+        "unresolved_reason": null,
+        "value": 54.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+        "mapping": {
+          "bound_key": "total_sequences",
+          "confidence": 0.7,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "mean_reads_per_cell",
+          "model": "claude-opus-4-8",
+          "reason": "Average raw sequencing depth per library is a per-sample read count, matching total_sequences; mean_reads_per_cell is a single-cell metric that does not apply to bulk RNA-seq libraries.",
+          "status": "mapped"
+        },
+        "population": "all RNA-seq libraries",
+        "provisional": true,
+        "stage": "as collected",
+        "unit": "reads per library (average)",
+        "unresolved_reason": null,
+        "value": 44600000.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across WE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "whole embryo",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 13175.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": null,
+        "description": "TE samples expressed 6086 transcripts",
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across TE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "TE biopsy",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 6086.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo XX vs XY",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 194.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo aneuploid vs euploid",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 53.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo AA vs CC morphology",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 10.0
+      },
+      {
+        "basis": "paper_text",
+        "contrast": null,
+        "cutoff": "0.05 (padj)",
+        "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+          "label": "No supported metric",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo high vs low morphokinetic quality",
+        "provisional": true,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 9.0
+      }
+    ],
+    "code_sources": [
+      {
+        "execution": {
+          "label": "Not executed",
+          "outcome": null,
+          "status": "not_attempted"
+        },
+        "identification": [],
+        "identification_label": "",
+        "inspection": {
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "supplementary",
+        "label": "Supplemental File S2",
+        "retrieval": {
+          "label": "Not retrieved",
+          "reason": null,
+          "status": "not_attempted"
+        }
+      }
+    ],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": "recorded before bioAF distinguished an established absence from one it could not establish",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "reproduction_input_available",
+        "label": "Reproduction input acquired by bioAF",
+        "reason": "recorded before bioAF distinguished an established absence from one it could not establish",
+        "value": "not_established",
+        "value_label": "Not established"
+      }
+    ],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "facts": {
+      "attachments": {
+        "failed": 4,
+        "identified": 4,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [
+          "controlled"
+        ],
+        "available_to_bioaf": "no",
+        "deposited": "yes"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 1,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "EGAS00001003667 publishes no pre-processed data to reproduce the finding from",
+        "governs": true,
+        "kind": "missing_input",
+        "label": "Not established",
+        "leg": "deposit",
+        "observation": null,
+        "resource": "EGAS00001003667"
+      }
+    ],
+    "reconciliation": {
+      "basis": null,
+      "label": "Reconciliation not performed: no attachments were inspected",
+      "reason": "no attachments were inspected",
+      "status": "not_performed"
+    },
+    "resume": {
+      "label": "Review and resume",
+      "requirements": [
+        "Approving again retries the attachment download."
+      ]
+    },
+    "retrieval_failures": [
+      {
+        "artifacts": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+          "Supplemental File S1",
+          "Supplemental File S2",
+          "Supplemental File S3"
+        ],
+        "message": "bioAF could not download the paper's supplementary files in this attempt",
+        "source": "the article's supplementary bundle from Europe PMC",
+        "technical_detail": {
+          "recorded_reason": "bioAF could not download this paper's supplementary bundle (Client error '404 Not Found' for url 'https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404)"
+        }
+      }
+    ],
+    "summary": [
+      "Reproduction not attempted.",
+      "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",
+      "Four supplementary attachments were identified, but their download failed.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  }
+}

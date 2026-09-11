@@ -43,6 +43,7 @@ import {
 import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/components/validation/DepositPanel";
 import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSection";
 import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
+import type { ReportSummary } from "@/lib/validationReport";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -97,6 +98,9 @@ interface ValidationStudy {
   // carries failures that happened before there was a plan to hang them off. Empty is the normal
   // case and renders nothing.
   issues?: ValidationIssue[] | null;
+  // change_7.3 section 11: the report as one projection of the evidence. The panels below render from
+  // it, and the JSON and markdown exports carry the same statements.
+  report_summary?: ReportSummary | null;
 }
 
 // The evidence keys the plan_7 panels read. The bundle carries more than this; these are the ones
@@ -203,6 +207,7 @@ export default function ValidationStudyPage() {
 
   const plan = study.plan;
   const plan7 = (study.evidence ?? {}) as Plan7Evidence;
+  const summary = study.report_summary ?? null;
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
 
@@ -259,6 +264,7 @@ export default function ValidationStudyPage() {
             confidence={study.confidence}
             classification={study.classification}
             failureReason={study.failure_reason}
+            summary={summary}
           />
         </section>
 
@@ -277,7 +283,7 @@ export default function ValidationStudyPage() {
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
               What this paper has
             </h2>
-            <CapabilityChecklist capabilities={plan7.capabilities} />
+            <CapabilityChecklist capabilities={plan7.capabilities} rows={summary?.capability_rows} />
           </section>
         )}
 
@@ -286,16 +292,24 @@ export default function ValidationStudyPage() {
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
               What could and could not be established
             </h2>
-            <CompletionSummary completion={plan7.completion} />
+            <CompletionSummary completion={plan7.completion} summary={summary} />
+            {/* change_7.3 section 10 item 13: whether reconciliation ran and on what, and whether the
+                assessment's statements were checked against each other at all. */}
+            {summary?.reconciliation?.label && (
+              <p className="mt-2 text-xs text-gray-600">{summary.reconciliation.label}.</p>
+            )}
+            {summary?.consistency?.label && (
+              <p className="text-xs text-gray-600">{summary.consistency.label}.</p>
+            )}
           </section>
         )}
 
-        {plan7.supplements && plan7.supplements.length > 0 && (
+        {((plan7.supplements && plan7.supplements.length > 0) || (summary?.artifacts?.length ?? 0) > 0) && (
           <section className="mb-6">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
               What the paper attached
             </h2>
-            <SupplementInventory supplements={plan7.supplements} />
+            <SupplementInventory supplements={plan7.supplements} summary={summary} />
           </section>
         )}
 
@@ -351,7 +365,7 @@ export default function ValidationStudyPage() {
               <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
             </dl>
             {plan.ai_decisions && plan.ai_decisions.length > 0 && (
-              <AiDecisionList decisions={plan.ai_decisions} />
+              <AiDecisionList decisions={plan.ai_decisions} testedCount={summary?.claim_counts?.tested ?? 0} />
             )}
             {plan.blockers && plan.blockers.length > 0 && (
               <div className="mt-3">
@@ -455,6 +469,7 @@ export default function ValidationStudyPage() {
                 awaiting_adoption: plan7.awaiting_adoption ?? null,
               },
               plan: { deposit_conflict: plan?.deposit_conflict ?? null },
+              resume: summary?.resume ?? null,
             }}
             onChanged={(updated) => setStudy(updated as ValidationStudy)}
             suggestedClassification={study.evidence?.classification_result?.classification}
@@ -463,17 +478,32 @@ export default function ValidationStudyPage() {
 
         <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
-          <ValidationEvidenceTable evidence={study.evidence} />
+          <ValidationEvidenceTable evidence={study.evidence} attemptStatus={summary?.attempt?.status ?? null} />
         </section>
 
         {/* plan_7 step 19 part 2's sibling: what the deposit and its metadata led us to expect,
             against what the acquired data turned out to be. The metric comparison above is not
             rebuilt; this is the second comparison it has no home for. */}
-        {(plan7.deposit_inspection || plan7.precompute_checks) && (
+        {(plan7.deposit_inspection ||
+          plan7.precompute_checks ||
+          (study.state === "classified" && summary && !summary.comparisons.performed)) && (
           <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              What we expected, and what we saw
-            </h2>
+            {/* change_7.3 section 10 item 9: a heading that promises a comparison stays for runs that
+                compared something. Where nothing was compared, it says so and why. */}
+            {summary && !summary.comparisons.performed ? (
+              <>
+                <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-gray-500">
+                  {summary.comparisons.label}
+                </h2>
+                <p className="mb-2 text-xs text-gray-600">
+                  {summary.comparisons.reason ? `${summary.comparisons.reason.charAt(0).toUpperCase()}${summary.comparisons.reason.slice(1)}.` : null}
+                </p>
+              </>
+            ) : (
+              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+                What we expected, and what we saw
+              </h2>
+            )}
             <ExpectedVsObserved evidence={plan7} />
           </section>
         )}

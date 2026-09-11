@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { PROVISIONAL_NOTE } from "@/lib/validationReport";
 
 /**
  * plan_7 step 14 at the C1 gate: the cheap checks, in front of the person authorising the spend.
@@ -24,6 +25,16 @@ export interface PrecomputeCheck {
   model: string | null;
   reason: string;
   confidence: number;
+  // change_7.3 section 6: what the verdict rests on. A judgment from the prose is provisional until
+  // something inspected settles it, and must never render as a settled "Yes".
+  basis?: "paper_text" | "inspected_evidence" | null;
+}
+
+// A check recorded before `basis` existed is read the way the backend reads it: a model's judgment
+// rests on the paper's text, a measurement that answered rests on the evidence it compared.
+function isProvisional(check: PrecomputeCheck): boolean {
+  if (check.basis) return check.basis === "paper_text";
+  return check.decided_by === "model";
 }
 
 export interface PrecomputeChecks {
@@ -85,11 +96,15 @@ export function PrecomputeChecksPanel({
               <span className="text-gray-800">{label}</span>
               <span
                 className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                  VERDICT_CLASS[check.verdict] ?? "bg-gray-100 text-gray-600"
+                  isProvisional(check)
+                    ? "bg-gray-100 text-gray-600"
+                    : (VERDICT_CLASS[check.verdict] ?? "bg-gray-100 text-gray-600")
                 }`}
               >
                 {VERDICT_LABEL[check.verdict] ?? check.verdict}
+                {isProvisional(check) && " (provisional)"}
               </span>
+              {isProvisional(check) && <span className="text-xs text-gray-500">{PROVISIONAL_NOTE}</span>}
               {!check.blocking && check.verdict === "mismatch" && (
                 <span className="text-xs text-gray-500">advisory</span>
               )}

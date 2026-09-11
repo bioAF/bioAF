@@ -50,12 +50,14 @@ describe("AiDecisionList", () => {
   });
 
   it("counts how many claims were resolved", () => {
+    // change_7.3 section 10 item 5 (flagged test change): "Resolved 1 of 2 claims" read as though
+    // the mapped claims had been tested. The count now says mapped, and how many were tested.
     render(
       <AiDecisionList
         decisions={[decision(), decision({ metric_key: "deg_count", bound_key: null, resolved: false })]}
       />,
     );
-    expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+    expect(screen.getByText(/1 claim mapped to candidate comparison metrics; none tested/)).toBeInTheDocument();
   });
 
   it("says when a claim was declined rather than leaving it blank", () => {

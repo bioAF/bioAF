@@ -377,17 +377,48 @@ test("a study that reached an outcome can be resumed at the gate", async () => {
   mockPost.mockResolvedValue({ id: 7, state: "plan_ready" });
   render(<ValidationStudyActions study={{ id: 7, state: "classified" }} onChanged={jest.fn()} />);
 
-  await userEvent.click(screen.getByRole("button", { name: /resume at the gate/i }));
+  // change_7.3 section 10 item 10 (flagged test change): "Resume at the gate" is "Review and resume".
+  await userEvent.click(screen.getByRole("button", { name: /review and resume/i }));
 
   await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/resume", {}));
 });
 
 test("a study parked in error can be resumed the same way", () => {
   render(<ValidationStudyActions study={{ id: 7, state: "error" }} onChanged={jest.fn()} />);
-  expect(screen.getByRole("button", { name: /resume at the gate/i })).toBeInTheDocument();
+  // change_7.3 section 10 item 10 (flagged test change): the control's new name.
+  expect(screen.getByRole("button", { name: /review and resume/i })).toBeInTheDocument();
 });
 
 test("resuming says it returns to the gate rather than restarting a run", () => {
   render(<ValidationStudyActions study={{ id: 7, state: "classified" }} onChanged={jest.fn()} />);
   expect(screen.getByText(/decide again/i)).toBeInTheDocument();
+});
+
+
+describe("change_7.3 section 10 item 10: resuming says what would unblock this study", () => {
+  const requirements = [
+    "bioAF cannot yet acquire data from EGA, so credentials alone will not make this study runnable.",
+    "Approving again retries the attachment download.",
+  ];
+
+  test("the helper text is generated from this study's limitations", () => {
+    render(
+      <ValidationStudyActions
+        study={{ id: 7, state: "classified", resume: { label: "Review and resume", requirements } }}
+        onChanged={jest.fn()}
+      />,
+    );
+    expect(screen.getByText(/credentials alone will not make this study runnable/)).toBeInTheDocument();
+    expect(screen.getByText(/retries the attachment download/)).toBeInTheDocument();
+  });
+
+  test("it never implies credentials alone would do for an archive bioAF cannot read", () => {
+    render(
+      <ValidationStudyActions
+        study={{ id: 7, state: "classified", resume: { label: "Review and resume", requirements } }}
+        onChanged={jest.fn()}
+      />,
+    );
+    expect(screen.queryByText(/Credentials, a corrected accession/)).not.toBeInTheDocument();
+  });
 });
