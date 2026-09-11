@@ -36,18 +36,52 @@ _EGA_FILES = (
     + "]"
 )
 
+# change_7.3 section 12: the extraction study 34 actually produced, in shape. The 54 is tagged post-QC
+# though the paper excludes three TE biopsies; the contrast carries the 88-gene subset's cutoff pair;
+# the per-sample blocker is worded so neither consistency regex matches it. The 194 claim is here
+# beside the 88 so the cutoffs mechanism is exercised; whether a model separates them is a
+# model-quality question, not something a stubbed extraction can prove.
+_SAMPLE_BLOCKER = (
+    "Sample IDs assigned to each differential group (aneuploid/euploid, XX/XY, AA/CC, morphokinetic) are not "
+    "explicitly enumerated in the text"
+)
 _EXTRACTION = (
-    '```json\n{"accessions": ["EGAS00001003667"], "sample_structure": {"organism": "Homo sapiens"}, '
+    '```json\n{"accessions": ["EGAS00001003667"], '
+    '"sample_structure": {"organism": "Homo sapiens", "sample_count": 54}, '
     '"method": {"assay": "bulk RNA-seq"}, '
+    '"differential_design": {"contrasts": [{"name": "XX vs XY WE", "test_condition": "XX WE", '
+    '"reference_condition": "XY WE", "thresholds": {"padj": 0.05, "log2fc": 2.0}, "finding_claim_index": 2}], '
+    '"thresholds": {"padj": 0.05, "log2fc": null}}, '
     '"claims": [{"metric_key": "", "claim_text": "digital karyotypes were concordant with PGT-A", '
     '"source_locator": "Results"}, '
-    '{"metric_key": "differentially_expressed_genes", "value": 88, "unit": "genes", '
-    '"claim_text": "88 of the 194 significant genes had |log2FC| > 2", '
-    '"threshold": 2.0, "threshold_kind": "abs_log2fc", "source_locator": "Results"}], '
+    '{"metric_key": "total_samples", "value": 54, "unit": "RNA-seq samples (35 WE + 19 TE)", '
+    '"claim_text": "The resulting data set includes 35 WE samples, 19 TE biopsies", "qc_stage": "post-QC", '
+    '"output_type": "count", "source_locator": "Results, Fig. 1C"}, '
+    '{"metric_key": "", "value": 194, "unit": "genes", "output_type": "gene_set_size", '
+    '"claim_text": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked", '
+    '"contrast": "XX vs XY WE", "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}], '
+    '"source_locator": "Results"}, '
+    '{"metric_key": "differentially_expressed_genes", "value": 88, "unit": "genes", "output_type": "gene_set_size", '
+    '"claim_text": "88 of the 194 significant genes had |log2FC| > 2", "contrast": "XX vs XY WE", '
+    '"threshold": 2.0, "threshold_kind": "abs_log2fc", '
+    '"cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}, {"kind": "abs_log2fc", "operator": ">", "value": 2}], '
+    '"source_locator": "Results"}], '
     '"data_availability": "restricted", '
-    '"code_availability": [{"kind": "supplementary", "identifier": "Supplemental File S2"}], '
-    '"blockers": []}\n```'
+    '"code_availability": [{"kind": "supplementary", "identifier": "Supplemental File S2", "stated_in": "methods"}], '
+    f'"blockers": [{{"text": "{_SAMPLE_BLOCKER}", "kind": "sample_assignment"}}]}}\n```'
 )
+
+_JUDGMENT = (
+    '```json\n{"answer": "yes", "reason": "supplemental files list per-sample metadata", "confidence": 0.7}\n```'
+)
+
+
+class _NotFound(Exception):
+    """httpx's shape for a 404: the status lives on `.response`."""
+
+    def __init__(self):
+        super().__init__("Client error '404 Not Found' for url")
+        self.response = type("R", (), {"status_code": 404})()
 
 
 def _docx(text: str) -> bytes:
@@ -117,11 +151,18 @@ def _groff_world(monkeypatch):
 
         def __init__(self):
             self.binding_payloads: list[str] = []
+            # What the bundle endpoint answers, one entry per request: bytes, or an exception. The
+            # last entry repeats. change_7.3 section 12: each failure mode is a sequence here.
+            self.bundle: list = [_bundle()]
+            self.bundle_calls = 0
 
         async def submit(self, prompt, payload, model, api_key, attachments=None):
             if prompt.startswith("You are binding"):
                 self.binding_payloads.append(payload)
-                if "The paper's supplements:" in payload:
+                # The reconciliation call carries the inventory or the paper's kept statements, and
+                # that is the call that can answer. The read-time binding sees prose only and gets
+                # the unparseable response the owner's run actually got.
+                if "The paper's supplements:" in payload or "statements about its samples" in payload:
                     return (
                         '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, '
                         '"reason": "S3 holds 194 rows; the 88 is the fold-change subset", '
@@ -129,6 +170,8 @@ def _groff_world(monkeypatch):
                         '"qc_stage": "post-QC"}]}\n```'
                     )
                 return "the model wrote prose instead of JSON"
+            if prompt.startswith("You are judging"):
+                return _JUDGMENT
             return _EXTRACTION
 
     client = _Client()
@@ -145,12 +188,20 @@ def _groff_world(monkeypatch):
 
     async def _fetch_bytes(url: str) -> bytes:
         if "supplementaryFiles" in url:
-            return _bundle()
+            answer = client.bundle[min(client.bundle_calls, len(client.bundle) - 1)]
+            client.bundle_calls += 1
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         raise RuntimeError(f"404 {url}")
 
     async def _full_text(**_kw):
+        import xml.etree.ElementTree as ET
+
+        # The article's own text, so the passages kept at read time are the paper's.
+        body = " ".join(ET.fromstring(_JATS).itertext())
         return FullTextResult(
-            text="the paper body",
+            text=body,
             source="europepmc",
             external_id="PMC6771404",
             supplements=parse_jats_supplements(_JATS),
@@ -168,19 +219,32 @@ def _groff_world(monkeypatch):
     return client
 
 
-async def _run(session, admin_user):
+async def _run(session, admin_user, route="pipeline", approval="driver"):
+    """Groff the way the owner ran it: ``driver`` chooses the route at the button and lets the driver
+    approve it; ``hand`` reads the paper and approves at the C1 gate. change_7.3 section 12: study 34
+    took the default deposit route under driver approval, which no test here had exercised."""
     study = await ValidationStudyService.create_study(
         session,
         admin_user.organization_id,
         admin_user.id,
         source_doi="10.1101/gr.252981.119",
-        intended_route="pipeline",
+        intended_route=route if approval == "driver" else None,
     )
     await session.flush()
-    for _ in range(4):  # read, then decide the route, then finish the assessment
-        await ValidationDriverService.advance_active_studies(session)
-        await session.refresh(study)
+    if approval == "driver":
+        for _ in range(4):  # read, then decide the route, then finish the assessment
+            await ValidationDriverService.advance_active_studies(session)
+            await session.refresh(study)
+        return study
+    await ValidationDriverService.read_and_plan(session, study, None, admin_user.organization_id, admin_user.id)
+    study = await ValidationStudyService.approve_plan(
+        session, study.id, admin_user.organization_id, admin_user.id, route=route
+    )
+    await session.refresh(study)
     return study
+
+
+_PATHS = [("deposit", "driver"), ("deposit", "hand"), ("pipeline", "driver"), ("pipeline", "hand")]
 
 
 class TestTheDepositIsFound:
@@ -369,3 +433,196 @@ class TestTheOutcomeDescribesTheRealObstacle:
         completed = " ".join(study.evidence_json["completion"]["checks_completed"])
         assert "Supplemental File S2" in completed
         assert "Supplemental File S3" in completed
+
+
+# ---- change_7.3 section 12: the regression the owner's run needed ----------------------------------
+
+
+async def _summary(session, admin_user, study):
+    from app.services.validation_report_summary import report_summary_for
+
+    return await report_summary_for(session, study, admin_user.organization_id)
+
+
+async def _issues(session, admin_user, study, outcome=None):
+    from app.services.validation_issue_service import ValidationIssueService
+
+    issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+    return [i for i in issues if outcome is None or i["outcome"] == outcome]
+
+
+class TestEveryWayTheOwnerCouldHaveRunIt:
+    """Study 34 took the default deposit route under driver approval; this file only ever ran the
+    pipeline route with a bundle that always arrived."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("route,approval", _PATHS)
+    async def test_it_reaches_access_restricted(self, session, admin_user, _groff_world, route, approval):
+        study = await _run(session, admin_user, route, approval)
+        assert study.state == "classified"
+        assert study.classification == "access_restricted"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("route,approval", _PATHS)
+    async def test_the_refusal_is_the_missing_adapter(self, session, admin_user, _groff_world, route, approval):
+        study = await _run(session, admin_user, route, approval)
+        assert study.evidence_json["route_decision"]["action"] == "no_adapter"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("route,approval", _PATHS)
+    async def test_the_headline_says_reproduction_was_not_attempted(
+        self, session, admin_user, _groff_world, route, approval
+    ):
+        study = await _run(session, admin_user, route, approval)
+        summary = await _summary(session, admin_user, study)
+        assert summary["headline"]["key"] == "reproduction_not_attempted"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("route,approval", _PATHS)
+    async def test_both_legs_are_reported(self, session, admin_user, _groff_world, route, approval):
+        study = await _run(session, admin_user, route, approval)
+        completion = study.evidence_json["completion"]
+        legs = {limitation["operation"] for limitation in completion["limitations"] + completion["other_legs"]}
+        assert {"deposit", "pipeline"} <= legs
+
+
+class TestTheBundleFailureModes:
+    """Each way the attachment bundle can fail. In every one the attachments keep their identity and
+    existence, processed results are not established, the failure is one issue and one notice, and
+    the headline says reproduction was not attempted."""
+
+    _FAILURES = {
+        "404 on every attempt": lambda: [_NotFound()],
+        "an unreadable zip": lambda: [b"this is not a zip"],
+    }
+
+    async def _failed(self, session, admin_user, world, failure, monkeypatch=None):
+        world.bundle = self._FAILURES[failure]()
+        return await _run(session, admin_user, "deposit", "driver")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["404 on every attempt", "an unreadable zip"])
+    async def test_the_attachments_keep_their_identity_and_existence(self, session, admin_user, _groff_world, failure):
+        study = await self._failed(session, admin_user, _groff_world, failure)
+        summary = await _summary(session, admin_user, study)
+        attachments = [a for a in summary["artifacts"] if a["kind"] == "attachment"]
+        assert len(attachments) == 4
+        assert all(a["identity"] for a in attachments)
+        assert {a["retrieval"]["status"] for a in attachments} == {"failed"}
+        assert study.evidence_json["capabilities"]["code_sources"][0]["exists"] == "yes"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["404 on every attempt", "an unreadable zip"])
+    async def test_processed_results_are_not_established(self, session, admin_user, _groff_world, failure):
+        study = await self._failed(session, admin_user, _groff_world, failure)
+        assert study.evidence_json["completion"]["processed_results_available"] == "not_established"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["404 on every attempt", "an unreadable zip"])
+    async def test_it_is_one_issue_and_one_notice(self, session, admin_user, _groff_world, failure):
+        study = await self._failed(session, admin_user, _groff_world, failure)
+        summary = await _summary(session, admin_user, study)
+        assert len(await _issues(session, admin_user, study, "retrieval_failed")) == 1
+        assert len(summary["retrieval_failures"]) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", ["404 on every attempt", "an unreadable zip"])
+    async def test_the_summary_states_the_owner_s_four_facts(self, session, admin_user, _groff_world, failure):
+        study = await self._failed(session, admin_user, _groff_world, failure)
+        facts = (await _summary(session, admin_user, study))["facts"]
+        assert facts["reproduction_attempted"] is False
+        assert (facts["raw_data"]["deposited"], facts["raw_data"]["available_to_bioaf"]) == ("yes", "no")
+        assert facts["raw_data"]["access"] == ["controlled"]
+        assert (facts["attachments"]["identified"], facts["attachments"]["failed"]) == (4, 4)
+        assert facts["inputs_acquired"] is False
+        assert facts["claims_tested"] == 0
+
+    @pytest.mark.asyncio
+    async def test_an_oversized_bundle_is_the_same_kind_of_failure(
+        self, session, admin_user, _groff_world, monkeypatch
+    ):
+        from app.services import supplement_inventory
+
+        monkeypatch.setattr(supplement_inventory, "_MAX_BUNDLE_BYTES", 1024)
+        study = await _run(session, admin_user, "deposit", "driver")
+        summary = await _summary(session, admin_user, study)
+        assert study.evidence_json["retrieval_ledger"][-1]["outcome"] == "too_large"
+        assert study.evidence_json["completion"]["processed_results_available"] == "not_established"
+        assert len(summary["retrieval_failures"]) == 1
+        assert summary["headline"]["key"] == "reproduction_not_attempted"
+
+    @pytest.mark.asyncio
+    async def test_a_404_then_the_bundle_keeps_both_attempts_and_no_stale_failure(
+        self, session, admin_user, _groff_world
+    ):
+        _groff_world.bundle = [_NotFound(), _bundle()]
+        study = await _run(session, admin_user, "deposit", "driver")
+        ledger = study.evidence_json["retrieval_ledger"]
+        assert [e["outcome"] for e in ledger] == ["not_found", "retrieved"]
+        summary = await _summary(session, admin_user, study)
+        assert summary["retrieval_failures"] == []
+        assert await _issues(session, admin_user, study, "retrieval_failed") == []
+        assert study.evidence_json["completion"]["processed_results_available"] == "yes"
+        assert summary["headline"]["key"] == "reproduction_not_attempted"
+
+
+class TestTheGroffSpecificsAreRepresented:
+    """The 54/51 population, the 194/88 cutoffs and the samples-described contradiction."""
+
+    @pytest.mark.asyncio
+    async def test_the_194_and_the_88_are_two_claims_with_their_own_cutoffs(self, session, admin_user, _groff_world):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        await _run(session, admin_user, "deposit", "driver")
+        rows = (await session.execute(select(ComparisonTarget))).scalars().all()
+        by_value = {t.claimed_value: t for t in rows}
+        assert [c["kind"] for c in by_value[194.0].cutoffs] == ["padj"]
+        assert {c["kind"] for c in by_value[88.0].cutoffs} == {"padj", "abs_log2fc"}
+        assert by_value[194.0].contrast_index == by_value[88.0].contrast_index == 0
+
+    @pytest.mark.asyncio
+    async def test_the_contrast_takes_the_194_claim_s_cutoff_not_the_subset_s(self, session, admin_user, _groff_world):
+        from app.services.reproduction_plan_service import ReproductionPlanService
+
+        study = await _run(session, admin_user, "deposit", "driver")
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        assert plan.differential_design_json["contrasts"][0]["thresholds"] == {"padj": 0.05, "log2fc": None}
+
+    @pytest.mark.asyncio
+    async def test_the_54_is_marked_as_the_collected_inventory_not_rewritten(self, session, admin_user, _groff_world):
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+
+        _groff_world.bundle = [_NotFound()]
+        await _run(session, admin_user, "deposit", "driver")
+        target = next(t for t in (await session.execute(select(ComparisonTarget))).scalars() if t.claimed_value == 54)
+        assert target.claimed_value == 54
+        assert "EGAS00001003667" in (target.unresolved_reason or "")
+        assert "excluded" in target.unresolved_reason
+
+    @pytest.mark.asyncio
+    async def test_the_samples_described_contradiction_is_reported_unresolved(self, session, admin_user, _groff_world):
+        _groff_world.bundle = [_NotFound()]
+        study = await _run(session, admin_user, "deposit", "driver")
+        unresolved = study.evidence_json["assessment"]["unresolved_contradictions"]
+        assert unresolved, "the paraphrased blocker and the ok check were never compared"
+        assert "Supplemental File S1 may carry them" in unresolved[0]["outcome"]
+        assert "not retrieved in this attempt" in unresolved[0]["outcome"]
+
+    @pytest.mark.asyncio
+    async def test_the_inspected_sample_table_settles_it_when_the_bundle_arrives(
+        self, session, admin_user, _groff_world
+    ):
+        study = await _run(session, admin_user, "deposit", "driver")
+        contradictions = study.evidence_json["assessment"]["contradictions"]
+        assert contradictions and contradictions[0]["status"] == "resolved"
+        assert "54" in contradictions[0]["settled_by"]
+
+    @pytest.mark.asyncio
+    async def test_the_read_keeps_the_paper_s_exclusion_statement(self, session, admin_user, _groff_world):
+        study = await _run(session, admin_user, "deposit", "driver")
+        statements = study.evidence_json["paper_passages"]["statements"]
+        assert any("three TE biopsy samples were excluded" in s for s in statements)
