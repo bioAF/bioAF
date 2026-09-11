@@ -140,10 +140,13 @@ def completion_for(
         if isinstance(extra, dict) and extra.get("kind"):
             limitations.append(extra)
 
+    # change_7.3 section 3: a retrieved file the classifier could not place is still a retrieved file.
+    # Dropping it made a downloaded document vanish from the report. Figures and index pages are the
+    # article's own packaging, not attachments, and are not checks.
     checks_completed = [
-        f"{s.get('label')}: {_CHECK_DESCRIPTION.get(s.get('role'), 'inspected')}"
+        f"{s.get('label')}: {_CHECK_DESCRIPTION.get(s.get('role'), 'retrieved; role not established')}"
         for s in resolved
-        if s.get("role") != "unknown"
+        if s.get("kind") not in ("figure", "index")
     ]
     checks_not_completed = [
         f"{s.get('label')}: {s.get('failure_reason') or 'not retrieved'}"

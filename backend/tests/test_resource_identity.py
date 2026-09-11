@@ -399,3 +399,90 @@ class TestAnUnmatchedReferenceIsADiscoveryLimitation:
         )
         table = next(r for r in rows if r["kind"] == "attachment")
         assert not any("S4" in ref for ref in table["references"])
+
+
+# ---- change_7.3 section 3: identification, retrieval, inspection and execution, separately -------
+
+
+def _code_source(identifier="Supplemental File S2", stated_in="methods"):
+    return {
+        "kind": "supplementary",
+        "url": None,
+        "identifier": identifier,
+        "stated_in": stated_in,
+        "exists": "yes",
+        "accessible": "not_attempted",
+        "accessible_reason": None,
+    }
+
+
+def _failed_s2():
+    return {
+        "label": "Supplemental File S2",
+        "filename": "supp_Supplemental_File_2_code.docx",
+        "references": ["Supplemental Material (supp_Supplemental_File_2_code.docx)", "Supplemental File S2"],
+        "identified_in": ["article_manifest", "prose"],
+        "kind": "attachment",
+        "resolved": False,
+        "role": "unknown",
+        "retrieval": {"status": "failed", "ledger": "R3"},
+    }
+
+
+class TestAFailedAttemptIsNotNotAttempted:
+    def test_accessibility_becomes_unknown_with_the_reason(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source()], [_failed_s2()])
+        assert updated[0]["accessible"] == "unknown"
+        assert "could not" in (updated[0]["accessible_reason"] or "")
+
+    def test_the_retrieval_points_at_the_ledger(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source()], [_failed_s2()])
+        assert updated[0]["retrieval"] == {"status": "failed", "ledger": "R3"}
+
+    def test_code_extracted_does_not_claim_the_file_is_not_code(self):
+        """`code_extracted: false` reads as "retrieved and not code". It was never retrieved."""
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source()], [_failed_s2()])
+        assert updated[0]["code_extracted"] is None
+
+    def test_a_source_never_attempted_does_not_claim_it_either(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source("Supplemental File S9")], [])
+        assert updated[0]["accessible"] == "not_attempted"
+        assert updated[0]["code_extracted"] is None
+
+
+class TestGroffsCodeReadsAsFourStatuses:
+    """Identified in the methods and the article manifest; retrieval attempted and failed; not
+    inspected; not executed."""
+
+    def test_identification_names_both_places(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source()], [_failed_s2()])
+        assert set(updated[0]["identified_in"]) == {"methods", "article_manifest"}
+
+    def test_inspection_is_not_performed(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        updated = apply_retrieval_to_code_sources([_code_source()], [_failed_s2()])
+        assert updated[0]["inspection"] == {"status": "not_inspected", "role": None}
+
+    def test_a_retrieved_code_file_is_inspected_with_its_role(self):
+        from app.services.supplement_inventory import apply_retrieval_to_code_sources
+
+        retrieved = {
+            **_failed_s2(),
+            "resolved": True,
+            "role": CODE,
+            "retrieval": {"status": "retrieved", "ledger": "R4"},
+        }
+        updated = apply_retrieval_to_code_sources([_code_source()], [retrieved])
+        assert updated[0]["inspection"] == {"status": "inspected", "role": CODE}
+        assert updated[0]["code_extracted"] is True

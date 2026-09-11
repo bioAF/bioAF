@@ -176,3 +176,39 @@ class TestTheChecksThatRanAreStated:
         joined = " ".join(outcome["checks_completed"]).lower()
         assert "consistency" in joined
         assert "reproduc" not in joined
+
+
+class TestARetrievedFileWithNoEstablishedRoleIsReported:
+    """change_7.3 section 3: `checks_completed` dropped resolved rows whose role was unknown, so a
+    retrieved document the classifier could not place disappeared from the report."""
+
+    def test_it_is_listed_as_retrieved_with_no_role(self):
+        from app.services.validation_completion import completion_for
+
+        outcome = completion_for(
+            route="deposit",
+            capabilities={"preprocessed_data": {"value": "no"}, "deposits": []},
+            supplements=[
+                {
+                    "label": "Supplemental Material (materials.docx)",
+                    "filename": "materials.docx",
+                    "kind": "attachment",
+                    "resolved": True,
+                    "role": "unknown",
+                }
+            ],
+        )
+        assert any("retrieved; role not established" in row for row in outcome["checks_completed"])
+
+    def test_figures_and_index_pages_are_not_listed_as_checks(self):
+        from app.services.validation_completion import completion_for
+
+        outcome = completion_for(
+            route="deposit",
+            capabilities={"preprocessed_data": {"value": "no"}, "deposits": []},
+            supplements=[
+                {"label": "f1.jpg", "filename": "f1.jpg", "kind": "figure", "resolved": True, "role": "unknown"},
+                {"label": "index.html", "filename": "index.html", "kind": "index", "resolved": True, "role": "unknown"},
+            ],
+        )
+        assert outcome["checks_completed"] == []

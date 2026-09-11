@@ -77,6 +77,9 @@ def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dic
             "kind": row.get("kind") or "other",
             "url": row.get("url"),
             "identifier": row.get("identifier"),
+            # Where the paper named it, which is the identification status change_7.3 section 3
+            # reports beside retrieval, inspection and execution.
+            "stated_in": row.get("stated_in"),
             "exists": YES,
             # Answered by step 16, when something tries to fetch it. A repository can be known and
             # private, and flattening the two facts into one cell loses the useful half.

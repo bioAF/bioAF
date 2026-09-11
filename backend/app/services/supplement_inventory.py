@@ -910,6 +910,13 @@ def apply_retrieval_to_code_sources(sources: list[dict] | None, supplements: lis
 
     **Retrieval, extraction and execution are separate statuses.** A DOCX that downloaded but could
     not be read is accessible and unextracted, and collapsing the two would claim we had the code.
+
+    change_7.3 section 3: **an attempt that failed is not an attempt that never happened.** Only
+    success set ``accessible``, so study 34's S2 read ``not_attempted`` after a download of it had
+    been tried and had failed. A failed attempt reads ``unknown`` with the reason, and
+    ``code_extracted`` stays None until something has read the file: ``False`` means "retrieved and
+    not code", which nothing had established. Identification and inspection are carried beside
+    them; execution is the code arm's to record.
     """
     by_reference: dict[str, dict] = {}
     for row in supplements or []:
@@ -924,11 +931,40 @@ def apply_retrieval_to_code_sources(sources: list[dict] | None, supplements: lis
         row = dict(source)
         key = str(row.get("identifier") or row.get("url") or "").strip().lower()
         supplement = by_reference.get(key)
+        retrieval = (supplement or {}).get("retrieval") or {}
+        status = retrieval.get("status")
         if supplement and supplement.get("resolved"):
+            status = RETRIEVAL_RETRIEVED
+
+        identified = [_code_stated_in(row.get("stated_in"))]
+        if supplement and IDENTIFIED_IN_MANIFEST in (supplement.get("identified_in") or []):
+            identified.append(IDENTIFIED_IN_MANIFEST)
+        row["identified_in"] = list(dict.fromkeys(identified))
+
+        if status == RETRIEVAL_RETRIEVED:
             row["accessible"] = YES_ANSWER
             row["accessible_reason"] = f"retrieved as {supplement.get('filename')}"
             row["code_extracted"] = supplement.get("role") == CODE
+            row["retrieval"] = {"status": RETRIEVAL_RETRIEVED, "ledger": retrieval.get("ledger")}
+            row["inspection"] = {"status": "inspected", "role": supplement.get("role")}
+        elif status in (RETRIEVAL_FAILED, RETRIEVAL_NOT_IN_BUNDLE):
+            row["accessible"] = "unknown"
+            row["accessible_reason"] = (
+                "retrieval was attempted and bioAF could not download the paper's supplementary files in this attempt"
+                if status == RETRIEVAL_FAILED
+                else "retrieval was attempted and the paper's supplementary bundle did not contain this file"
+            )
+            row["code_extracted"] = None
+            row["retrieval"] = {"status": status, "ledger": retrieval.get("ledger")}
+            row["inspection"] = {"status": "not_inspected", "role": None}
         else:
-            row.setdefault("code_extracted", False)
+            row["code_extracted"] = row.get("code_extracted") if row.get("code_extracted") is True else None
+            row.setdefault("retrieval", {"status": RETRIEVAL_NOT_ATTEMPTED, "ledger": None})
+            row.setdefault("inspection", {"status": "not_inspected", "role": None})
         updated.append(row)
     return updated
+
+
+def _code_stated_in(stated_in: str | None) -> str:
+    """Where the paper named its code, in the identification vocabulary."""
+    return "methods" if (stated_in or "").strip().lower() == "methods" else IDENTIFIED_IN_PROSE
