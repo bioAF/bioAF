@@ -90,3 +90,17 @@ test("the attachments show one failure notice, not one per row (item 4)", async 
   render(<ValidationStudyPage />);
   await waitFor(() => expect(screen.getAllByTestId("retrieval-failure")).toHaveLength(1));
 });
+
+test("blockers read from the prose are marked provisional (section 6)", async () => {
+  mockGet.mockResolvedValue({
+    ...study(),
+    plan: { pipeline_key: "nf-core/rnaseq", blockers: ["Sample IDs are not enumerated in the text"], ai_decisions: [] },
+    report_summary: {
+      ...contract.groff_failed,
+      blockers: [{ text: "Sample IDs are not enumerated in the text", kind: "sample_assignment", basis: "paper_text", provisional: true }],
+    },
+  });
+  render(<ValidationStudyPage />);
+  await waitFor(() => expect(screen.getByText("Sample IDs are not enumerated in the text")).toBeInTheDocument());
+  expect(screen.getByTestId("blockers-provisional")).toHaveTextContent(/not checked against the attachments/);
+});

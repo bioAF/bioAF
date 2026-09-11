@@ -43,7 +43,7 @@ import {
 import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/components/validation/DepositPanel";
 import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSection";
 import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
-import type { ReportSummary } from "@/lib/validationReport";
+import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
 
 // States the background driver advances on its own; while a study sits in one, poll so the page
 // reflects progress toward the next human gate (plan_ready / comparing) or a terminal state.
@@ -375,6 +375,13 @@ export default function ValidationStudyPage() {
                     <li key={i}>{b}</li>
                   ))}
                 </ul>
+                {/* change_7.3 section 6: a blocker is a reading of the prose until inspected evidence
+                    settles it, and it must not read as an established fact about the paper. */}
+                {summary?.blockers?.some((b) => b.provisional) && (
+                  <p className="mt-1 text-xs text-gray-500" data-testid="blockers-provisional">
+                    Provisional: {PROVISIONAL_NOTE}.
+                  </p>
+                )}
               </div>
             )}
           </section>
