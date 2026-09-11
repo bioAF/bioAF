@@ -22,8 +22,14 @@ MAX_STATEMENT_CHARS = 400
 
 # A statement about the analysed population: something was excluded, removed or failed QC, and what
 # it was is a sample-like unit. "regions we otherwise excluded" is about the genome, not the samples.
+# A removal counts only when what was removed is a sample-like unit: the deployed Groff run kept
+# "embryos were removed only for the purpose of embryo biopsy" and "the removal of a single
+# blastomere", which handle samples without excluding any from the analysis.
+_UNITS = r"(?:samples?|biops(?:y|ies)|embryos?|cells?|librar(?:y|ies)|replicates?|subjects?|patients?|donors?)"
 _EXCLUSION = re.compile(
-    r"\b(exclud\w*|remov\w*|discard\w*|did not pass|fail\w* (?:to pass )?(?:quality|qc)|filtered out|omitted|dropped)\b",
+    r"\b(exclud\w*|discard\w*|did not pass|fail\w* (?:to pass )?(?:quality|qc)|filtered out|omitted"
+    rf"|remov\w*\s+(?:\w+\s+){{0,3}}?{_UNITS}"
+    rf"|{_UNITS}\s+(?:\w+\s+){{0,2}}?(?:were|was)\s+removed\s+(?:from|due|because|after|for failing))\b",
     re.I,
 )
 _POPULATION = re.compile(

@@ -55,3 +55,19 @@ class TestExclusionStatements:
 
     def test_nothing_is_kept_from_an_empty_text(self):
         assert paper_passages("", ["x"]) == {"claims": [{"claim_text": "x", "passage": None}], "statements": []}
+
+
+class TestAStatementIsAboutTheAnalysedPopulation:
+    """The deployed Groff run kept "embryos were removed only for the purpose of embryo biopsy" and
+    "the removal of a single blastomere": a removal, but not from the analysis."""
+
+    def test_handling_samples_is_not_excluding_them(self):
+        text = (
+            "Embryos were removed only for the purpose of embryo biopsy and were replaced in the well. "
+            "A laser created a defect sufficient for the removal of a single blastomere."
+        )
+        assert paper_passages(text, [])["statements"] == []
+
+    def test_removing_samples_from_the_analysis_is_kept(self):
+        text = "We also removed samples expressing fewer than 5000 genes. The rest were analysed."
+        assert paper_passages(text, [])["statements"] == ["We also removed samples expressing fewer than 5000 genes."]
