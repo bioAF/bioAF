@@ -44,6 +44,8 @@ import { DepositPanel, type DepositEvidence, type DepositSelection } from "@/com
 import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSection";
 import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
 import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
+import { ClaimSelection } from "@/components/validation/ClaimSelection";
+import { ResourceInventory } from "@/components/validation/ResourceInventory";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -285,6 +287,27 @@ export default function ValidationStudyPage() {
               What this paper has
             </h2>
             <CapabilityChecklist capabilities={plan7.capabilities} rows={summary?.capability_rows} />
+          </section>
+        )}
+
+        {/* change_7.5 section 2.1: every resource the paper names, and what bioAF can do with it. */}
+        {(summary?.resources?.length ?? 0) > 0 && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              Resources the paper names
+            </h2>
+            <ResourceInventory summary={summary} />
+          </section>
+        )}
+
+        {/* change_7.5 sections 2.2 to 2.6: the experiments, each claim's four checks, and the one
+            claim and check this run selected. */}
+        {(summary?.selection || (summary?.experiments?.length ?? 0) > 0) && (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+              What this run checks
+            </h2>
+            <ClaimSelection summary={summary} />
           </section>
         )}
 

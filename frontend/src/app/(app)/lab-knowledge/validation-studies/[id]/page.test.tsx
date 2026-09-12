@@ -157,3 +157,13 @@ test("blockers read from the prose are marked provisional (section 6)", async ()
   await waitFor(() => expect(screen.getByText("Sample IDs are not enumerated in the text")).toBeInTheDocument());
   expect(screen.getByTestId("blockers-provisional")).toHaveTextContent(/not checked against the attachments/);
 });
+
+// change_7.5 stage 2: the resources the paper names, and what this run checks, from the projection.
+test("the page shows the paper's resources and each claim's checks", async () => {
+  mockGet.mockResolvedValue({ ...study(), state: "plan_ready", report_summary: contract.stage2_selection });
+  render(<ValidationStudyPage />);
+  await waitFor(() => expect(screen.getByText("PXD099001")).toBeInTheDocument());
+  expect(screen.getByText("Resources the paper names")).toBeInTheDocument();
+  expect(screen.getByText("What this run checks")).toBeInTheDocument();
+  expect(screen.getByTestId("claim-selection-current")).toBeInTheDocument();
+});
