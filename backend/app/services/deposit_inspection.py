@@ -38,6 +38,10 @@ def _to_float(v: str) -> float | None:
 
 
 def _unusable(reason: str, **extra) -> dict:
+    """A table that could not be read as a matrix at all. change_7.4 section 1.1: its content was not
+    identified, which is ``input_unreadable``."""
+    from app.services.validation_acquisition_outcome import INPUT_UNREADABLE
+
     return {
         "n_rows": 0,
         "n_columns": 0,
@@ -55,6 +59,7 @@ def _unusable(reason: str, **extra) -> dict:
         "looks_transposed": False,
         "usable": False,
         "unusable_reason": reason,
+        "unusable_cause": INPUT_UNREADABLE,
         **extra,
     }
 
@@ -154,18 +159,26 @@ def inspect_matrix(
     id_set = set(ids)
     looks_transposed = bool(wanted) and not found and sum(1 for s in wanted if s in id_set) > 0
 
+    from app.services.validation_acquisition_outcome import SAMPLE_MAPPING_UNRESOLVED, UNSUPPORTED_PROCESSING
+
     usable = True
     reason = None
+    # change_7.4 section 1.1: a matrix read and identified as a shape bioAF cannot analyze is
+    # `unsupported_processing`; one whose columns cannot be placed is an unresolved mapping.
+    cause = None
     if len(sample_columns) < 2:
         usable, reason = False, "the deposited matrix has only one sample column, so it cannot carry a contrast"
+        cause = UNSUPPORTED_PROCESSING
     elif looks_transposed:
         usable, reason = False, "the deposited matrix appears to be transposed (samples in rows, features in columns)"
+        cause = UNSUPPORTED_PROCESSING
     elif gate_on_coverage and wanted and not found:
         usable, reason = (
             False,
             f"none of the study's design samples appear in the deposited matrix "
             f"(looked for {', '.join(wanted[:5])}; the matrix has {', '.join(sample_columns[:5])})",
         )
+        cause = SAMPLE_MAPPING_UNRESOLVED
 
     return {
         "n_rows": n_rows,
@@ -185,6 +198,7 @@ def inspect_matrix(
         "looks_transposed": looks_transposed,
         "usable": usable,
         "unusable_reason": reason,
+        "unusable_cause": cause,
     }
 
 

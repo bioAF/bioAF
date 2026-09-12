@@ -319,6 +319,12 @@ class DepositInventory:
     triplets: list[dict] = field(default_factory=list)
     unavailable_reason: str | None = None
     source: str | None = None  # "filelist" | "directory"
+    # change_7.4 section 1.1: what the listing's failure was, as a typed acquisition cause. An empty
+    # listing is an absence within that listing; a listing GEO did not return is a retrieval failure
+    # of whichever kind its error was.
+    unavailable_cause: str | None = None
+    # Where the listing was asked for, so a failure can name it.
+    listing_url: str | None = None
 
 
 def group_triplets(entries: list[DepositEntry]) -> list[dict]:
@@ -366,9 +372,14 @@ async def list_deposit(accession: str, *, fetcher: Fetcher | None = None) -> Dep
     not a GSE or GEO cannot be reached; it never raises, because an unlistable deposit is a reason to
     take the pipeline route rather than a failure of the study.
     """
+    from app.services.validation_acquisition_outcome import INPUT_UNIDENTIFIED, NO_INPUT, retrieval_cause
+
     base = series_suppl_url(accession)
     if not base:
-        return DepositInventory(unavailable_reason=f"{accession or 'the accession'} is not a GEO series id")
+        return DepositInventory(
+            unavailable_reason=f"{accession or 'the accession'} is not a GEO series id",
+            unavailable_cause=INPUT_UNIDENTIFIED,
+        )
 
     fetch = fetcher or _http_fetch_text
     acc = accession.strip().upper()
@@ -390,20 +401,26 @@ async def list_deposit(accession: str, *, fetcher: Fetcher | None = None) -> Dep
             rows = []
 
     names: list[str] = []
-    listing_failed = False
+    listing_error: Exception | None = None
     try:
         names = parse_dir_listing(await fetch(base))
-    except Exception:
-        listing_failed = True
+    except Exception as exc:
+        listing_error = exc
         logger.info("GEO supplementary listing unreachable for %s", acc)
 
     if not rows and not names:
-        reason = (
-            f"GEO did not return a supplementary listing for {acc}"
-            if listing_failed
-            else f"GEO listed no supplementary files for {acc}"
+        if listing_error is not None:
+            return DepositInventory(
+                unavailable_reason=f"GEO did not return a supplementary listing for {acc} ({listing_error})",
+                unavailable_cause=retrieval_cause(listing_error),
+                listing_url=base,
+            )
+        # An absence, and a scoped one: this listing, for this accession, held nothing.
+        return DepositInventory(
+            unavailable_reason=f"GEO listed no supplementary files for {acc}",
+            unavailable_cause=NO_INPUT,
+            listing_url=base,
         )
-        return DepositInventory(unavailable_reason=reason)
 
     def _entry(filename: str, size_bytes: int | None, deposited_type: str | None) -> DepositEntry:
         gsm = _gsm_of(filename)

@@ -425,3 +425,36 @@ class TestTheStudiesListFollowsTheAttemptToo:
         by_id = {r["id"]: r for r in rows}
         assert by_id[idle.id]["attempt"] == "not_attempted"
         assert by_id[ran.id]["attempt"] == "attempted"
+
+
+class TestADepositRetrievalFailureResumesAsWhatItWas:
+    """change_7.4 section 1.1: an exhausted deposit retrieval now concludes `retrieval_failed`. The
+    resume line for that must not promise an attachment download the study never attempted."""
+
+    def _deposit_failure(self):
+        return {
+            "completion": {
+                "limitations": [
+                    {
+                        "kind": "retrieval_failed",
+                        "resource": "GSE1_counts.tsv.gz",
+                        "operation": "deposit",
+                        "detail": "GSE1_counts.tsv.gz was not found at https://x/GSE1_counts.tsv.gz in 3 attempts",
+                    }
+                ]
+            }
+        }
+
+    def test_it_does_not_mention_attachments(self):
+        requirements = " ".join(
+            _summary(self._deposit_failure(), classification="inconclusive")["resume"]["requirements"]
+        )
+        assert "attachment" not in requirements
+
+    def test_it_says_approving_again_retries(self):
+        requirements = _summary(self._deposit_failure(), classification="inconclusive")["resume"]["requirements"]
+        assert any("Approving again retries" in r for r in requirements)
+
+    def test_it_is_labelled_for_what_failed(self):
+        limitation = _summary(self._deposit_failure(), classification="inconclusive")["limitations"][0]
+        assert limitation["label"] == "Could not be retrieved in this attempt"

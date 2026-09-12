@@ -64,7 +64,9 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # is never automatic. `classified` is the genuine early exit (the deposit is a PDF, or the
     # matrix holds none of the design's samples and the paper deposited no raw data either).
     "acquiring_processed": ["inspecting_deposit", "acquiring_data", "classified", "error"],
-    "inspecting_deposit": ["reproducing", "acquiring_data", "classified", "error"],
+    # change_7.4 section 1.1: back to `acquiring_processed` when bioAF's own acquisition record turns
+    # out incomplete. The deposit is acquired again under the same attempt bound.
+    "inspecting_deposit": ["reproducing", "acquiring_processed", "acquiring_data", "classified", "error"],
     # samples_mismatch: a picked sample was not fetched, so the run is held before compute is spent; a
     # human either runs with the samples we have (-> setup) or stops (-> plan_declined).
     "acquiring_data": ["setup", "samples_mismatch", "classified", "error"],

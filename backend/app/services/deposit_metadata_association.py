@@ -226,6 +226,27 @@ def associate_columns(
     return rows
 
 
+# The sources that STATE what a column is. A column name read by pattern is an inference.
+_AUTHORITATIVE_SOURCES = ("metadata_file", "series_matrix")
+
+
+def empty_arm_cause(associations: list[dict]) -> str:
+    """Why an arm came out empty, decided by the evidence behind the columns.
+
+    change_7.4 section 1.4: study 37 read ``KO Cl16`` as condition "KO Cl", replicate 16, from the
+    name alone, and then reported that no column matched "SAMD1 KO". When every column is placed by a
+    source that states it (a metadata file, or the repository's sample manifest) and none lands in
+    the arm, the input really lacks that condition: ``design_incompatible``. When any column rests on
+    its name alone, or on nothing, the mapping is what failed: ``sample_mapping_unresolved``.
+    """
+    from app.services.validation_acquisition_outcome import DESIGN_INCOMPATIBLE, SAMPLE_MAPPING_UNRESOLVED
+
+    rows = [a for a in associations or [] if a.get("column")]
+    if rows and all(a.get("source") in _AUTHORITATIVE_SOURCES for a in rows):
+        return DESIGN_INCOMPATIBLE
+    return SAMPLE_MAPPING_UNRESOLVED
+
+
 def rewrite_design_to_columns(design: dict, associations: list[dict]) -> tuple[dict, str, str | None]:
     """Rewrite the design's arms to the matrix's own column names.
 

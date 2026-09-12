@@ -31,6 +31,15 @@ LIMITATION_LABELS = {
     "missing_input": "Required input not published",
     "failed_discovery": "Could not be established",
     "retrieval_failed": "Could not be retrieved in this attempt",
+    # change_7.4 section 1.1. The plan's proposed labels, pending the owner's sign-off item by item.
+    "access_refused": "Access refused to bioAF's automated request",
+    "resource_limit": "Input exceeds bioAF's processing limits",
+    "input_unreadable": "Acquired input could not be read",
+    "unsupported_processing": "bioAF cannot yet analyze this kind of file",
+    "input_unidentified": "No compatible input identified",
+    "sample_mapping_unresolved": "Samples could not be assigned to the comparison",
+    "design_incompatible": "Acquired input does not contain the compared conditions",
+    "no_compatible_contrast": "No comparison this route can analyze",
 }
 # A missing input the evidence has not established is not a missing input. Worded as what it is.
 _UNESTABLISHED_ABSENCE_LABEL = "Not established"
@@ -554,9 +563,21 @@ def _resume(limitations: list[dict], failures: list[dict]) -> dict:
                 f"Approved access to {limitation.get('resource')} from its data access committee, entered in bioAF, "
                 f"would let the {limitation.get('leg') or 'chosen'} route run."
             )
-    if failures or any(limitation["kind"] == "retrieval_failed" for limitation in limitations):
+    # change_7.4 section 1.1: a deposit whose retrieval ran out of attempts is `retrieval_failed` too,
+    # and it is not an attachment. Only the attachment failures promise the attachment download.
+    attachment_failure = any(
+        limitation["kind"] == "retrieval_failed" and limitation.get("leg") == "retrieval" for limitation in limitations
+    )
+    if failures or attachment_failure:
         requirements.append("Approving again retries the attachment download.")
-    if any(limitation["kind"] == "failed_discovery" and limitation["governs"] for limitation in limitations):
+    if any(
+        limitation["governs"]
+        and (
+            limitation["kind"] == "failed_discovery"
+            or (limitation["kind"] == "retrieval_failed" and limitation.get("leg") != "retrieval")
+        )
+        for limitation in limitations
+    ):
         requirements.append("Approving again retries what could not be established in this attempt.")
     return {"label": "Review and resume", "requirements": list(dict.fromkeys(requirements))}
 

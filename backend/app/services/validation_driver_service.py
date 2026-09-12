@@ -51,14 +51,21 @@ from app.services.validation_assessment import (
 )
 from app.services.validation_acquisition_outcome import (
     AWAITING_INPUT,
+    INPUT_UNIDENTIFIED,
+    INPUT_UNREADABLE,
     MAX_ATTEMPTS,
+    NO_ADAPTER,
+    RESOURCE_LIMIT,
+    RETRIEVAL_TRANSIENT,
     acquisition_accession,
     backoff_for,
     classify_hold,
     exhausted,
+    exhaustion_detail,
+    outcome_for,
+    retrieval_cause,
 )
-from app.services.validation_completion import KIND_FOR_ACTION
-from app.services.validation_route_policy import UNDETERMINED, decide_route
+from app.services.validation_route_policy import decide_route
 from app.services.validation_ownership import (
     ClaimLost,
     adopt,
@@ -987,6 +994,10 @@ class ValidationDriverService:
             proceed = await ValidationDriverService._choose_from_deposit(
                 session, study, evidence, fetcher=inventory_fetcher
             )
+            # change_7.4 section 1.1: a hold that is not retried concludes the study where it arose.
+            # Falling through would hold the recorded blocker a second time and conclude it twice.
+            if study.state != "acquiring_processed":
+                return True
             if not proceed:
                 return False
             selection = evidence.get("deposit_selection") or {}
@@ -995,15 +1006,15 @@ class ValidationDriverService:
         wanted = list(selection.get("matrix_files") or [])
         if not wanted:
             if blocker:
-                return await ValidationDriverService._hold_deposit(session, study, evidence, blocker)
+                # The cause recorded where the blocker arose. A record written before causes carries
+                # only its wording, which is read the old way.
+                return await ValidationDriverService._hold_deposit(
+                    session, study, evidence, blocker, cause=evidence.get("deposit_unusable_cause")
+                )
             # Assisted mode arrives here with nothing chosen yet. A wait, not a failure.
             return False
 
-        from app.services.deposit_acquisition import (
-            DepositTooLargeError,
-            UnreadableDepositError,
-            decode_deposit,
-        )
+        from app.services import deposit_acquisition
         from app.services.file_service import FileService
         from app.services.literature.deposit_inventory_service import series_suppl_url
 
@@ -1038,13 +1049,27 @@ class ValidationDriverService:
             except Exception as exc:  # noqa: BLE001
                 # A partial deposit is worse than none: step 8 would build a matrix missing an arm.
                 # Held on the route rather than failed, so the gate can escalate to raw reads.
+                # change_7.4 section 1.1: the only hold here that reads an error, and it reads the
+                # retrieval call's own: a 404 names its location, a 403 is a refusal, not an access model.
                 return await ValidationDriverService._hold_deposit(
-                    session, study, evidence, f"{filename} could not be downloaded from GEO ({exc})"
+                    session,
+                    study,
+                    evidence,
+                    f"{filename} could not be downloaded from GEO ({exc})",
+                    cause=retrieval_cause(exc),
+                    resource=filename,
+                    location=url,
                 )
             try:
-                text, fmt = decode_deposit(filename, raw)
-            except (UnreadableDepositError, DepositTooLargeError) as exc:
-                return await ValidationDriverService._hold_deposit(session, study, evidence, str(exc))
+                text, fmt = deposit_acquisition.decode_deposit(filename, raw)
+            except deposit_acquisition.UnreadableDepositError as exc:
+                return await ValidationDriverService._hold_deposit(
+                    session, study, evidence, str(exc), cause=INPUT_UNREADABLE, resource=filename
+                )
+            except deposit_acquisition.DepositTooLargeError as exc:
+                return await ValidationDriverService._hold_deposit(
+                    session, study, evidence, str(exc), cause=RESOURCE_LIMIT, resource=filename
+                )
 
             # Stored DECODED, so step 8's notebook reads a table rather than re-deriving the format
             # from magic bytes inside R.
@@ -1110,16 +1135,19 @@ class ValidationDriverService:
         deposit = evidence.get("deposit") or {}
         matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]
         if not matrices:
-            return await ValidationDriverService._hold_deposit(
-                session, study, evidence, "no deposited matrix was acquired to inspect"
-            )
+            return await ValidationDriverService._reacquire_incomplete_deposit(session, study, evidence)
 
         storage = storage_adapter or get_storage_adapter()
         try:
             text = await storage.read_text(matrices[0]["storage_uri"])
         except Exception as exc:  # noqa: BLE001
             return await ValidationDriverService._hold_deposit(
-                session, study, evidence, f"the acquired deposit could not be read back: {exc}"
+                session,
+                study,
+                evidence,
+                f"the acquired deposit could not be read back: {exc}",
+                cause=RETRIEVAL_TRANSIENT,
+                resource=f"the stored copy of {matrices[0].get('filename') or 'the acquired matrix'}",
             )
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
@@ -1147,7 +1175,13 @@ class ValidationDriverService:
             # completed cleanly having written nothing, and the empty output was scored as a real
             # comparison of zero against the paper's 5,607.
             return await ValidationDriverService._hold_deposit(
-                session, study, evidence, inspection["unusable_reason"] or "the deposited matrix is not usable"
+                session,
+                study,
+                evidence,
+                f"{matrices[0].get('filename') or 'the deposited matrix'}: "
+                f"{inspection['unusable_reason'] or 'the deposited matrix is not usable'}",
+                cause=inspection.get("unusable_cause") or INPUT_UNREADABLE,
+                resource=matrices[0].get("filename"),
             )
 
         # plan_7 step 7: work out what each COLUMN is, then rewrite the design onto those columns so
@@ -1155,6 +1189,7 @@ class ValidationDriverService:
         # on the pipeline route, including its held-before-compute contract.
         from app.services.deposit_metadata_association import (
             associate_columns,
+            empty_arm_cause,
             parse_metadata_table,
             rewrite_design_to_columns,
         )
@@ -1184,8 +1219,16 @@ class ValidationDriverService:
         if design.get("contrasts"):
             rewritten, status, reason = rewrite_design_to_columns(design, associations)
             if status == "mismatch":
+                # change_7.4 sections 1.1 and 1.4: never retried. Whether the input lacks the
+                # condition or the columns could not be placed is decided by what placed them.
                 return await ValidationDriverService._hold_deposit(
-                    session, study, evidence, reason or "design mismatch"
+                    session,
+                    study,
+                    evidence,
+                    f"bioAF downloaded and read {matrices[0].get('filename') or 'the deposited matrix'}. "
+                    f"{reason or 'design mismatch'}",
+                    cause=empty_arm_cause(associations),
+                    resource=matrices[0].get("filename"),
                 )
             plan.differential_design_json = rewritten
             await session.flush()
@@ -1222,7 +1265,7 @@ class ValidationDriverService:
         from dataclasses import asdict
 
         from app.services.archive_discovery import GEO, can_acquire_from
-        from app.services.deposit_selection import deposit_blocker, select_deposit, selectable
+        from app.services.deposit_selection import select_deposit, unusable_listing
         from app.services.literature.deposit_inventory_service import list_deposit
 
         # change_7.2 section 3: resolve the accession the way discovery already does, and dispatch by
@@ -1233,11 +1276,14 @@ class ValidationDriverService:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         target = acquisition_accession(_named_accessions(study, plan), prefer_archive=GEO)
         if target is None:
+            # change_7.4 section 1.1: the reading named nothing bioAF can point at. That is not a
+            # statement by the paper that nothing was deposited, so it is never an absence.
             return await ValidationDriverService._hold_deposit(
                 session,
                 study,
                 evidence,
                 "this paper names no deposit accession that an acquisition could be pointed at",
+                cause=INPUT_UNIDENTIFIED,
             )
         accession = target["accession"]
         archive = target["archive"]
@@ -1249,27 +1295,34 @@ class ValidationDriverService:
                 study,
                 evidence,
                 f"{accession} is deposited in {archive.upper()}",
+                cause=NO_ADAPTER,
                 archive=archive,
+                resource=accession,
             )
         inventory = await list_deposit(accession, fetcher=fetcher)
         if inventory.unavailable_reason:
             return await ValidationDriverService._hold_deposit(
-                session, study, evidence, inventory.unavailable_reason, archive=archive
+                session,
+                study,
+                evidence,
+                inventory.unavailable_reason,
+                cause=inventory.unavailable_cause,
+                archive=archive,
+                resource=f"GEO's supplementary listing for {accession}",
+                location=inventory.listing_url,
             )
 
         entries = inventory.entries
-        # `deposit_blocker` names what IS deposited and why it cannot serve (GSE312719's nine
-        # pre-cell-calling matrices); the fallback covers a deposit whose files are simply not
-        # reproduction inputs at all.
-        reason = deposit_blocker(entries)
-        if not reason and not selectable(entries):
-            reason = (
-                f"GEO listed {len(entries)} supplementary file(s) for {accession}, none of which holds "
-                "per-feature values a differential test could read."
-            )
-        if reason:
+        # `unusable_listing` names what IS deposited and why it cannot serve (GSE312719's nine
+        # pre-cell-calling matrices), and says when the classifier could not place the files at all.
+        unusable = unusable_listing(entries, accession)
+        if unusable:
+            cause, reason = unusable
             evidence["deposit_unusable"] = reason
-            return await ValidationDriverService._hold_deposit(session, study, evidence, reason)
+            evidence["deposit_unusable_cause"] = cause
+            return await ValidationDriverService._hold_deposit(
+                session, study, evidence, reason, cause=cause, resource=accession
+            )
 
         # The inventory is kept whichever way the choice is made: in `assisted` it is the list the
         # C1 gate shows a person, and in `autonomous` it is what the model chose FROM, which is part
@@ -1318,35 +1371,106 @@ class ValidationDriverService:
 
         evidence["deposit_selection"] = chosen
         if chosen.get("declined"):
-            # Looked and said no. A finding, and not the same as never having looked.
+            # Looked and said no. A finding, and not the same as never having looked; and a decision
+            # from filenames, so never an established absence (change_7.4 section 1.1).
             declined = chosen.get("reason") or "the model found nothing in this deposit worth reproducing from"
             evidence["deposit_unusable"] = declined
-            return await ValidationDriverService._hold_deposit(session, study, evidence, declined)
+            evidence["deposit_unusable_cause"] = INPUT_UNIDENTIFIED
+            return await ValidationDriverService._hold_deposit(
+                session, study, evidence, declined, cause=INPUT_UNIDENTIFIED, resource=accession
+            )
 
         study.evidence_json = dict(evidence)
         return True
 
     @staticmethod
+    async def _reacquire_incomplete_deposit(session: AsyncSession, study: ValidationStudy, evidence: dict) -> bool:
+        """An acquisition record with no matrix in it: bioAF's own inconsistency, not the deposit's.
+
+        change_7.4 section 1.1: this was held as "no deposited matrix was acquired to inspect", which
+        read as a finding about the deposit. It is recorded as an issue, the incomplete record is
+        cleared, and acquisition runs again under the same attempt bound.
+        """
+        await ValidationIssueService.record(
+            session,
+            study,
+            [
+                {
+                    "step": "inspecting the deposited matrix",
+                    "outcome": "internal",
+                    "impact": "degraded",
+                    "message": "bioAF's record of the acquired deposit held no matrix, so the deposit is being acquired again.",
+                    "model": None,
+                }
+            ],
+        )
+        evidence.pop("deposit", None)
+        attempts = int(evidence.get("acquisition_attempts") or 0) + 1
+        evidence["acquisition_attempts"] = attempts
+        if exhausted(attempts):
+            evidence.pop("acquisition_retry_at", None)
+            study.evidence_json = dict(evidence)
+            await conclude_without_execution(
+                session,
+                study,
+                "bioAF's record of the acquired deposit was incomplete",
+                limitation={
+                    "kind": "failed_discovery",
+                    "resource": (evidence.get("deposit_inventory") or {}).get("accession")
+                    or study.source_accession
+                    or "this paper's deposits",
+                    "operation": study.intended_route or "deposit",
+                    "detail": (
+                        f"bioAF's record of the acquired deposit was incomplete after {attempts} attempts, so the "
+                        "input it would analyze was never established"
+                    ),
+                },
+            )
+            return True
+        evidence["acquisition_retry_at"] = (_now() + timedelta(seconds=backoff_for(attempts))).isoformat()
+        study.evidence_json = dict(evidence)
+        await ValidationStudyService.transition(
+            session, study.id, study.organization_id, study.requested_by_user_id, "acquiring_processed"
+        )
+        return True
+
+    @staticmethod
     async def _hold_deposit(
-        session: AsyncSession, study: ValidationStudy, evidence: dict, reason: str, *, archive: str | None = None
+        session: AsyncSession,
+        study: ValidationStudy,
+        evidence: dict,
+        reason: str,
+        *,
+        cause: str | None = None,
+        archive: str | None = None,
+        resource: str | None = None,
+        location: str | None = None,
     ) -> bool:
-        """Classify why acquisition could not proceed, and ACT on the classification.
+        """Act on why acquisition could not proceed.
 
         change_7.2 section 3: this used to produce one behaviour for three situations. It recorded a
         reason, logged it, and returned False with no transition and no backoff, so study 33 repeated
         the same failing listing every 30 seconds until a person stopped it with a database write and
         study 29 has been in that loop since 2026-09-07.
 
-        Not `error` in any of the three cases: a legacy .xls or a withdrawn supplementary file is a
-        fact about the deposit, not an infrastructure failure.
+        change_7.4 section 1.1: the caller passes ``cause``, because the caller knows what failed.
+        Study 37's design rewrite was read from its wording, matched nothing, and was retried and
+        reported as "could not reach the deposit". A hold raised with no cause is retrieval text and
+        is read the old way, where "unrecognised means transient" is still the right rule.
+        ``resource`` and ``location`` are what an exhausted retrieval names.
+
+        Not `error` in any case: a legacy .xls or a withdrawn supplementary file is a fact about the
+        deposit, not an infrastructure failure.
         """
-        outcome = classify_hold(reason, archive=archive)
+        outcome = outcome_for(cause, reason, archive=archive) if cause else classify_hold(reason, archive=archive)
         evidence["deposit_failed"] = {
             "reason": outcome.reason,
             "kind": outcome.kind,
             "action": outcome.action,
+            "cause": outcome.cause,
             "at": _now().isoformat(),
         }
+        resource = resource or (evidence.get("deposit_inventory") or {}).get("accession") or study.source_accession
 
         if outcome.kind == AWAITING_INPUT:
             # A person's turn. Visible, and logged ONCE rather than on every tick.
@@ -1393,27 +1517,37 @@ class ValidationDriverService:
                 study,
                 outcome.reason,
                 limitation={
-                    "kind": KIND_FOR_ACTION[UNDETERMINED],
-                    "resource": study.source_accession or "this paper's deposits",
+                    "kind": outcome.limitation_kind,
+                    "resource": resource or "this paper's deposits",
                     "operation": study.intended_route or "deposit",
-                    "detail": (
-                        f"bioAF could not reach the deposit after {attempts} attempts, so whether it "
-                        f"holds usable data was never established ({outcome.reason})"
+                    # change_7.4 section 1.1: built from the cause. "Could not reach" is written for
+                    # a failure to reach, and a 404 names where it was looked for.
+                    "detail": exhaustion_detail(
+                        outcome.cause,
+                        attempts=attempts,
+                        resource=resource or "the deposit",
+                        reason=outcome.reason,
+                        location=location,
                     ),
                 },
             )
             return True
 
-        # Terminal, and it says which of the three it is.
+        # Terminal, and it says which one it is.
         study.evidence_json = dict(evidence)
-        logger.info("validation study %d: acquisition refused (%s): %s", study.id, outcome.action, outcome.reason)
+        logger.info(
+            "validation study %d: acquisition refused (%s): %s",
+            study.id,
+            outcome.cause or outcome.action,
+            outcome.reason,
+        )
         await conclude_without_execution(
             session,
             study,
             outcome.reason,
             limitation={
-                "kind": KIND_FOR_ACTION.get(outcome.action, KIND_FOR_ACTION[UNDETERMINED]),
-                "resource": study.source_accession or "this paper's deposits",
+                "kind": outcome.limitation_kind,
+                "resource": resource or "this paper's deposits",
                 "operation": study.intended_route or "deposit",
                 "detail": outcome.reason,
             },
