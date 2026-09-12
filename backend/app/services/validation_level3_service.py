@@ -273,8 +273,8 @@ def _analysis_cutoffs(study_id: int, claim: dict, design: dict, contrast: dict) 
     """The cutoffs the analysis applies, or the refusal that stops it before anything is launched.
 
     change_7.4 section 1.6: both builders filled a missing fold change with 1.0 and a missing adjusted
-    P with 0.05, and study 37's ``P < 0.01`` became neither. No cutoff is ever supplied, and a raw P
-    value is refused until the templates can apply one.
+    P with 0.05, and study 37's ``P < 0.01`` became neither. No cutoff is ever supplied. change_7.5
+    section 1.2: a raw P value is carried, because every template writes it.
     """
     from app.services.validation_claim_cutoffs import resolve_analysis_thresholds
 
@@ -430,8 +430,18 @@ async def resolve_level3(
             "paper_finding_set": finding_set,
             "kind": kind,
             "contrast": primary.get("name"),
+            # change_7.5 section 1.2: the definition the reproduced set is filtered at, with its kind and
+            # operators. The template applies no threshold; this is what the comparison applies.
+            **_recorded(cutoffs),
         }
     )
+
+
+def _recorded(cutoffs: dict) -> dict:
+    """The applied definition, as the bundle carries it: structured, and in the reader's words."""
+    from app.services.validation_claim_cutoffs import recorded_cutoffs
+
+    return {"cutoffs": recorded_cutoffs(cutoffs), "cutoff_statement": cutoffs.get("statement")}
 
 
 async def _select_input_files(
@@ -646,6 +656,7 @@ async def resolve_level3_from_deposit(
             # than charge the gap to the paper (the study-26 lesson).
             "method": template_spec.method,
             "source": "deposit",
+            **_recorded(cutoffs),
         }
     )
 

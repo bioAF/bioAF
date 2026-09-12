@@ -9,10 +9,13 @@ import { type Arm, type ManifestSample, SampleManifestPicker, sampleId } from ".
 
 // Shapes mirror the backend plan surface (ReproductionPlanResponse.differential_design / finding_claim).
 export interface Contrast {
-  // The cutoffs THIS contrast was reported at. A paper states them per finding: DEGs at a |log2FC|
-  // and an adjusted p, differential binding usually on the adjusted p alone.
+  // The legacy cutoff pair. It can hold only an adjusted P and a |log2FC|, so a contrast stated at a
+  // P value leaves both null and says so in `stated_cutoff`.
   assay?: string | null;
   thresholds?: { log2fc: number | null; padj: number | null } | null;
+  // change_7.5 section 1.2: the contrast's stated cutoff in words ("P < 0.01"), computed server-side
+  // from the cutoffs its claims state.
+  stated_cutoff?: string | null;
   name?: string | null;
   test_condition?: string | null;
   reference_condition?: string | null;
@@ -301,7 +304,7 @@ export function Level3Gate({
     setFetchMsg(null);
     try {
       const res = await api.get<{
-        candidates: Array<{ filename: string; source: string; n_sig: number; table_text?: string }>;
+        candidates: Array<{ filename: string; source: string; n_sig: number | null; table_text?: string }>;
       }>(`${base}/finding-set/candidates?kind=${kind}`);
       const cands = res.candidates ?? [];
       if (cands.length === 0) {
@@ -313,9 +316,9 @@ export function Level3Gate({
       const top = cands[0];
       if (top.table_text) setTableText(top.table_text);
       if (top.filename) setSource(top.filename);
-      setFetchMsg(
-        `Found ${cands.length} candidate(s); pre-filled from ${top.filename} (${top.n_sig} significant). Review, then confirm.`,
-      );
+      // A candidate is counted only at the contrast's stated cutoff; with none, it is offered uncounted.
+      const counted = top.n_sig != null ? ` (${top.n_sig} significant)` : "";
+      setFetchMsg(`Found ${cands.length} candidate(s); pre-filled from ${top.filename}${counted}. Review, then confirm.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Auto-fetch failed.");
     } finally {
@@ -376,6 +379,9 @@ export function Level3Gate({
             <input className={input} aria-label="Contrast name" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <div className="grid grid-cols-2 gap-2">
+            {primary.stated_cutoff && (
+              <p className="col-span-2 text-xs text-gray-700">{`Stated cutoff: ${primary.stated_cutoff}`}</p>
+            )}
             <label className="text-xs text-gray-600">
               |log2FC| threshold
               <input className={input} aria-label="log2FC threshold" value={lfc} onChange={(e) => setLfc(e.target.value)} />

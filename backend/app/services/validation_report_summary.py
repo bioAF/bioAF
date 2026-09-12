@@ -218,10 +218,14 @@ def _contrasts(plan: dict, evidence: dict) -> list[dict]:
     # change_7.4 section 1.4: only the selected contrast is validated and executed. The others stay
     # in the plan and are reported as not assessed, never as checked and found wanting.
     selected = (design.get("selected_contrast") or {}).get("contrast_index")
+    from app.services.validation_claim_cutoffs import contrast_cutoff_words
+
     return [
         {
             "name": c.get("name"),
-            "thresholds": c.get("thresholds"),
+            # change_7.5 section 1.2: the stated cutoff in words ("P < 0.01"), never the legacy pair,
+            # which cannot hold a P value.
+            "cutoff": contrast_cutoff_words(c, design),
             "basis": basis,
             "provisional": basis != "inspected_evidence",
             "status": "selected" if index == selected else "unassessed",
@@ -642,21 +646,6 @@ def _archive_of(limitation: dict) -> str:
 # ---- claims -------------------------------------------------------------------------------------------
 
 
-def _cutoff_text(target: dict) -> str | None:
-    cutoffs = target.get("cutoffs") or []
-    if cutoffs:
-        words = {"padj": "padj", "pvalue": "p", "abs_log2fc": "|log2FC|", "fold_change": "fold change"}
-        return " and ".join(
-            f"{words.get(c.get('kind'), c.get('kind'))} {c.get('operator')} {c.get('value'):g}"
-            for c in cutoffs
-            if isinstance(c, dict) and isinstance(c.get("value"), (int, float))
-        )
-    if target.get("threshold") is not None:
-        kind = target.get("threshold_kind")
-        return f"{target['threshold']} ({kind})" if kind else str(target["threshold"])
-    return None
-
-
 def _tested_count(evidence: dict) -> int:
     comparisons = (evidence.get("classification_result") or {}).get("comparisons") or []
     tested = sum(1 for c in comparisons if isinstance(c, dict) and c.get("computed_value") is not None)
@@ -666,6 +655,8 @@ def _tested_count(evidence: dict) -> int:
 
 
 def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict], dict]:
+    from app.services.validation_claim_cutoffs import claim_cutoff_words
+
     assessment = evidence.get("assessment") or {}
     basis = assessment.get("basis") or "paper_text"
     contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
@@ -701,7 +692,7 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                 "contrast": (
                     contrasts[index].get("name") if isinstance(index, int) and 0 <= index < len(contrasts) else None
                 ),
-                "cutoff": _cutoff_text(target),
+                "cutoff": claim_cutoff_words(target),
                 "basis": basis,
                 "provisional": basis != "inspected_evidence",
                 "unresolved_reason": target.get("unresolved_reason"),

@@ -1060,13 +1060,12 @@ def _cutoff(target: dict[str, Any]) -> str:
     """The cutoff a claim names, with the kind that makes it meaningful.
 
     A bare 2.0 says nothing: the same number is a fold change, a log2 fold change or an adjusted
-    p-value depending on the kind beside it.
+    p-value depending on the kind beside it. change_7.5 section 1.2: in the one vocabulary every
+    surface uses, from the claim's stated cutoffs where it has them.
     """
-    threshold = target.get("threshold")
-    if threshold is None:
-        return "--"
-    kind = target.get("threshold_kind")
-    return f"{threshold} ({kind})" if kind else str(threshold)
+    from app.services.validation_claim_cutoffs import claim_cutoff_words
+
+    return claim_cutoff_words(target) or "--"
 
 
 def _append_what_was_not_attempted(
@@ -1317,7 +1316,12 @@ def _append_level3_concordance(parts: list[str], plan: dict[str, Any], evidence:
         else {}
     )
     contrast = primary.get("name")
-    thresholds = design.get("thresholds") or {}
+    # change_7.5 section 1.2: the cutoff the reproduction was filtered at, as the bundle recorded it;
+    # else the contrast's stated cutoff. The paper-level pair cannot hold a P value.
+    from app.services.validation_claim_cutoffs import contrast_cutoff_words
+
+    applied = (evidence.get("level3") or {}).get("cutoff_statement") if isinstance(evidence, dict) else None
+    cutoff = applied or contrast_cutoff_words(primary, design) or "--"
     frac = conc.get("directional_overlap_frac")
     pct = f"{round((frac or 0) * 100)}% ({conc.get('concordant')}/{conc.get('paper_n')})"
 
@@ -1335,7 +1339,7 @@ def _append_level3_concordance(parts: list[str], plan: dict[str, Any], evidence:
             [
                 ["Contrast", contrast or "--"],
                 ["Design", design_desc],
-                ["Thresholds", f"|log2FC| >= {thresholds.get('log2fc')}, padj <= {thresholds.get('padj')}"],
+                ["Cutoff", cutoff],
                 ["Paper's set", conc.get("paper_n")],
                 ["Our reproduced set", conc.get("our_n")],
                 ["Directional overlap", pct],

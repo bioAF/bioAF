@@ -262,10 +262,13 @@ class TestTheAnalysisCutoffsAreNeverDefaulted:
         assert out["refusal"] is None
         assert out["lfc_threshold"] == pytest.approx(1.5849625, rel=1e-6)
 
-    def test_a_raw_p_value_is_refused_until_the_route_can_apply_it(self):
+    def test_a_raw_p_value_is_applied_as_a_p_value(self):
+        """change_7.5 section 1.2 changed this test: it asserted a raw P value was refused until the
+        templates could apply one. Every template now writes the raw P value, so it is carried with its
+        kind and operator, and never read as an adjusted P."""
         out = self._cutoffs({"cutoffs": _P_ONLY["cutoffs"]})
-        assert out["padj_threshold"] is None
-        assert "P value" in out["refusal"]
+        assert out["refusal"] is None
+        assert out["significance"] == {"kind": "pvalue", "operator": "<", "value": 0.005}
 
     def test_a_missing_significance_cutoff_is_refused(self):
         out = self._cutoffs(

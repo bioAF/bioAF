@@ -149,19 +149,21 @@ async def test_a_ground_truth_set_is_never_normalized_at_a_default_cutoff(sessio
 
 
 @pytest.mark.asyncio
-async def test_a_p_value_definition_is_refused_rather_than_read_as_adjusted(session, admin_user):
-    from fastapi import HTTPException
-
+async def test_a_p_value_definition_is_never_read_as_adjusted(session, admin_user):
+    """change_7.5 section 1.2 changed this test: it asserted a P-value definition was refused. A P value
+    is applied to the table's P column now. This table has none, so nothing is read from its adjusted
+    column, the note says which column is missing, and the gate asks which column holds it."""
     design = {
         "contrasts": [{"name": "x", "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.01}]}],
         "selected_contrast": {"contrast_index": 0},
     }
     study, _ = await _plan_ready_study(session, admin_user, design=design)
-    with pytest.raises(HTTPException) as refused:
-        await ReproductionPlanService.set_finding_claim(
-            session, study.id, admin_user.organization_id, admin_user.id, kind="gene", table_text=_DE_TABLE
-        )
-    assert "P value" in refused.value.detail
+    claim = await ReproductionPlanService.set_finding_claim(
+        session, study.id, admin_user.organization_id, admin_user.id, kind="gene", table_text=_DE_TABLE
+    )
+    assert claim["finding_set"]["entities"] == []
+    assert any("P-value column" in n for n in claim["finding_set"]["parse_notes"])
+    assert claim["needs_column_mapping"] is not None
 
 
 @pytest.mark.asyncio

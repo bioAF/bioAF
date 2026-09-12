@@ -112,7 +112,8 @@ export interface ReportSummary {
   blockers: { text: string; kind: string | null; basis: string; provisional: boolean }[];
   contrasts: {
     name: string | null;
-    thresholds: Record<string, number | null> | null;
+    // change_7.5 section 1.2: the stated cutoff in words ("P < 0.01"), never the legacy pair.
+    cutoff: string | null;
     basis: string;
     provisional: boolean;
     // change_7.4 section 1.4: only the selected contrast is validated and executed.

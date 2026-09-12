@@ -179,10 +179,9 @@ def derive_contrast_thresholds(contrasts: list[dict], claims: list[dict]) -> lis
 def analysis_cutoffs(contrast: dict, design: dict) -> dict:
     """The significance and effect cutoffs an analysis of this contrast applies, or why it cannot.
 
-    Returns ``{"padj_threshold", "lfc_threshold", "refusal", "statement"}``. change_7.4 section 1.6:
-    nothing here is ever filled with a default. The analysis runs only on a stated significance
-    cutoff of a kind this route can apply, and "no fold-change requirement" is only ever what the
-    claim states:
+    Returns ``{"significance", "effect", "padj_threshold", "lfc_threshold", "refusal", "statement"}``.
+    change_7.4 section 1.6: nothing here is ever filled with a default. The analysis runs only on a
+    stated significance cutoff, and "no fold-change requirement" is only ever what the claim states:
 
     - the finding claim's cutoffs (``contrast["cutoffs"]``) are its complete statement, so a
       significance cutoff with no effect cutoff states no effect requirement;
@@ -190,7 +189,12 @@ def analysis_cutoffs(contrast: dict, design: dict) -> dict:
       the contrast is null;
     - the paper-level pair says nothing either way about a null fold change, so that is refused.
 
-    A raw P value is refused until the templates can apply one (plan_7_4 section 2.4, open question 4).
+    change_7.5 section 1.2: each cutoff keeps its kind and operator. ``significance`` is
+    ``{"kind": "pvalue" | "padj", "operator", "value"}``; ``effect`` is ``{"kind": "abs_log2fc",
+    "operator", "value"}`` on the log2 scale, or None when the claim states no fold-change requirement.
+    A raw P value is executable: every template writes it. ``padj_threshold`` and ``lfc_threshold``
+    are the two values under the templates' parameter names, which apply no threshold of their own.
+    The legacy pair states no operator, and is read the way it was always applied: ``<=`` and ``>=``.
     """
     unresolved = contrast.get("thresholds_unresolved")
     if unresolved:
@@ -202,22 +206,17 @@ def analysis_cutoffs(contrast: dict, design: dict) -> dict:
         effect = next((c for c in cutoffs if c.get("kind") in _EFFECT_KINDS), None)
         none_stated = True
     elif isinstance(contrast.get("thresholds"), dict):
-        pair = contrast["thresholds"]
-        significance = {"kind": "padj", "value": pair["padj"]} if pair.get("padj") is not None else None
-        effect = {"kind": "abs_log2fc", "value": pair["log2fc"]} if pair.get("log2fc") is not None else None
+        significance, effect = _legacy_pair(contrast["thresholds"])
         none_stated = True
     else:
-        pair = (design or {}).get("thresholds") or {}
-        significance = {"kind": "padj", "value": pair["padj"]} if pair.get("padj") is not None else None
-        effect = {"kind": "abs_log2fc", "value": pair["log2fc"]} if pair.get("log2fc") is not None else None
+        significance, effect = _legacy_pair((design or {}).get("thresholds") or {})
         none_stated = False
 
     if significance is None:
         return _refused("the comparison's significance cutoff is not stated, and bioAF does not supply one")
-    if significance["kind"] == "pvalue":
+    if significance.get("operator") not in ("<", "<="):
         return _refused(
-            f"the comparison is defined at {describe_cutoff(significance)}, a raw P value, and this route's analysis "
-            "applies only an adjusted P value; bioAF does not substitute one for the other"
+            f"the significance cutoff ({describe_cutoff(significance)}) does not bound a P value from above"
         )
     if effect is None and not none_stated:
         return _refused("the comparison's fold-change requirement is not stated, and bioAF does not supply one")
@@ -225,25 +224,125 @@ def analysis_cutoffs(contrast: dict, design: dict) -> dict:
     import math
 
     if effect is None:
-        lfc, effect_words = 0.0, "no fold-change requirement"
+        applied_effect, effect_words = None, "no fold-change requirement"
     elif effect["kind"] == "fold_change":
         # Linear fold change, evaluated on the log2 scale in either direction: "more than threefold"
         # is |log2FC| > log2(3). A value at or below 1 is not a fold change anyone states.
         if not isinstance(effect.get("value"), (int, float)) or effect["value"] <= 1:
             return _refused(f"the fold-change cutoff ({describe_cutoff(effect)}) cannot be read on the log2 scale")
-        lfc, effect_words = math.log2(float(effect["value"])), describe_cutoff(effect)
+        applied_effect = {
+            "kind": "abs_log2fc",
+            "operator": effect["operator"],
+            "value": math.log2(float(effect["value"])),
+        }
+        effect_words = describe_cutoff(effect)
     else:
-        lfc, effect_words = float(effect["value"]), describe_cutoff(effect)
+        applied_effect = {"kind": "abs_log2fc", "operator": effect["operator"], "value": float(effect["value"])}
+        effect_words = describe_cutoff(effect)
+    applied_significance = {
+        "kind": significance["kind"],
+        "operator": significance["operator"],
+        "value": float(significance["value"]),
+    }
     return {
-        "padj_threshold": float(significance["value"]),
-        "lfc_threshold": lfc,
+        "significance": applied_significance,
+        "effect": applied_effect,
+        "padj_threshold": applied_significance["value"],
+        "lfc_threshold": applied_effect["value"] if applied_effect else 0.0,
         "refusal": None,
         "statement": f"{describe_cutoff(significance)}, {effect_words}",
     }
 
 
+def _legacy_pair(pair: dict) -> tuple[dict | None, dict | None]:
+    """The legacy ``{padj, log2fc}`` pair as cutoffs. It could hold only an adjusted P and an absolute
+    log2 fold change, and stated no operator; it was always applied as ``<=`` and ``>=``."""
+    significance = {"kind": "padj", "operator": "<=", "value": pair["padj"]} if pair.get("padj") is not None else None
+    effect = (
+        {"kind": "abs_log2fc", "operator": ">=", "value": pair["log2fc"]} if pair.get("log2fc") is not None else None
+    )
+    return significance, effect
+
+
 def _refused(reason: str) -> dict:
-    return {"padj_threshold": None, "lfc_threshold": None, "refusal": reason, "statement": None}
+    return {
+        "significance": None,
+        "effect": None,
+        "padj_threshold": None,
+        "lfc_threshold": None,
+        "refusal": reason,
+        "statement": None,
+    }
+
+
+def recorded_cutoffs(cutoffs: dict) -> dict:
+    """The applied definition as it is recorded on a bundle or a finding claim."""
+    return {"significance": cutoffs.get("significance"), "effect": cutoffs.get("effect")}
+
+
+def normalizer_arguments(recorded: dict | None, *, legacy: dict | None = None) -> dict | None:
+    """The keyword arguments that make a table normalizer apply ``recorded``, or None when it cannot.
+
+    ``recorded`` is ``{"significance", "effect"}`` as :func:`recorded_cutoffs` writes it. A bundle or
+    claim written before it existed carries only the legacy numbers, which were always an adjusted P at
+    ``<=`` and an absolute log2 fold change at ``>=``; ``legacy`` is that pair, read the same way.
+    """
+    significance = (recorded or {}).get("significance")
+    if isinstance(significance, dict):
+        effect = (recorded or {}).get("effect")
+        return {
+            "padj_threshold": float(significance["value"]),
+            "significance_kind": significance["kind"],
+            "significance_operator": significance["operator"],
+            "lfc_threshold": float(effect["value"]) if isinstance(effect, dict) else 0.0,
+            "effect_operator": effect["operator"] if isinstance(effect, dict) else ">=",
+        }
+    legacy = legacy or {}
+    if legacy.get("padj_threshold") is None or legacy.get("lfc_threshold") is None:
+        return None
+    return {
+        "padj_threshold": float(legacy["padj_threshold"]),
+        "significance_kind": "padj",
+        "significance_operator": "<=",
+        "lfc_threshold": float(legacy["lfc_threshold"]),
+        "effect_operator": ">=",
+    }
+
+
+def contrast_cutoff_words(contrast: dict, design: dict | None = None) -> str | None:
+    """A contrast's stated cutoff in the reader's words ("P < 0.01"), or None when it states none.
+
+    change_7.5 section 1.2: the gate and the report showed the legacy ``{padj, log2fc}`` pair, which
+    cannot hold a P value, so study 38's "P < 0.01" displayed as two nulls. A legacy pair is described
+    in the same vocabulary, with the operators it was applied at.
+    """
+    cutoffs = [c for c in (contrast or {}).get("cutoffs") or [] if isinstance(c, dict)]
+    if not cutoffs:
+        pair = (contrast or {}).get("thresholds")
+        if not isinstance(pair, dict):
+            pair = (design or {}).get("thresholds") or {}
+        # The legacy pair states no operator, so none is shown.
+        cutoffs = [{**c, "operator": None} for c in _legacy_pair(pair) if c is not None]
+    words = [describe_cutoff(c) for c in cutoffs if isinstance(c.get("value"), (int, float))]
+    return " and ".join(words) or None
+
+
+def claim_cutoff_words(claim: dict) -> str | None:
+    """A claim's stated cutoffs in the reader's words, or None when it states none.
+
+    change_7.5 section 1.2: one vocabulary. A scalar threshold states no operator, so none is shown.
+    """
+    cutoffs = [c for c in (claim or {}).get("cutoffs") or [] if isinstance(c, dict)]
+    words = [describe_cutoff(c) for c in cutoffs if isinstance(c.get("value"), (int, float))]
+    if words:
+        return " and ".join(words)
+    threshold = (claim or {}).get("threshold")
+    if threshold is None:
+        return None
+    canonical = _KINDS.get(str((claim or {}).get("threshold_kind") or "").strip().lower())
+    if canonical is None:
+        return f"{threshold:g}" if isinstance(threshold, (int, float)) else str(threshold)
+    return describe_cutoff({"kind": canonical, "value": threshold})
 
 
 def resolve_analysis_thresholds(claim: dict | None, design: dict | None, contrast: dict | None) -> dict:
@@ -253,14 +352,29 @@ def resolve_analysis_thresholds(claim: dict | None, design: dict | None, contras
     compared against that set has to apply the same ones. A claim that recorded none leaves the
     contrast's statistical definition to decide, through ``analysis_cutoffs``, which never defaults.
     """
-    recorded = (claim or {}).get("thresholds") or {}
-    if recorded.get("padj") is not None and recorded.get("log2fc") is not None:
-        padj, lfc = float(recorded["padj"]), float(recorded["log2fc"])
+    recorded = (claim or {}).get("cutoffs")
+    if isinstance(recorded, dict) and isinstance(recorded.get("significance"), dict):
+        significance, effect = recorded["significance"], recorded.get("effect")
+        effect_words = describe_cutoff(effect) if isinstance(effect, dict) else "no fold-change requirement"
         return {
-            "padj_threshold": padj,
-            "lfc_threshold": lfc,
+            "significance": significance,
+            "effect": effect if isinstance(effect, dict) else None,
+            "padj_threshold": float(significance["value"]),
+            "lfc_threshold": float(effect["value"]) if isinstance(effect, dict) else 0.0,
             "refusal": None,
-            "statement": f"adjusted P {padj:g}, |log2FC| {lfc:g}",
+            "statement": f"{describe_cutoff(significance)}, {effect_words}",
+        }
+    legacy = (claim or {}).get("thresholds") or {}
+    if legacy.get("padj") is not None and legacy.get("log2fc") is not None:
+        significance, effect = _legacy_pair(legacy)
+        significance["value"], effect["value"] = float(significance["value"]), float(effect["value"])
+        return {
+            "significance": significance,
+            "effect": effect,
+            "padj_threshold": significance["value"],
+            "lfc_threshold": effect["value"],
+            "refusal": None,
+            "statement": f"{describe_cutoff(significance)}, {describe_cutoff(effect)}",
         }
     if contrast is None:
         return analysis_cutoffs({}, design or {})

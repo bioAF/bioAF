@@ -93,10 +93,23 @@ async def _http_fetch_text(url: str) -> str:
 
 class GroundTruthFetchService:
     @staticmethod
-    async def fetch_geo_candidates(accession: str, *, kind: str = "gene", fetcher: Fetcher | None = None) -> list[dict]:
+    async def fetch_geo_candidates(
+        accession: str, *, kind: str = "gene", cutoffs: dict | None = None, fetcher: Fetcher | None = None
+    ) -> list[dict]:
         """List a GEO series' supplementary dir, download the DE (gene) or DA (interval) table
         candidates, and parse each into a best-effort FindingSet. Returns [] on any failure or when
-        nothing matches (assist, never a gate)."""
+        nothing matches (assist, never a gate).
+
+        change_7.5 section 1.2: ``cutoffs`` is the selected contrast's stated definition, as
+        ``analysis_cutoffs`` returns it. A candidate is counted at that definition, with its kind and
+        operators, or not counted at all: with no definition, or a refused one, ``n_sig`` is None and
+        ``not_counted_because`` says why. The table is offered either way."""
+        from app.services.validation_claim_cutoffs import normalizer_arguments, recorded_cutoffs
+
+        applied = normalizer_arguments(recorded_cutoffs(cutoffs)) if cutoffs and not cutoffs.get("refusal") else None
+        not_counted = None
+        if applied is None:
+            not_counted = (cutoffs or {}).get("refusal") or "the comparison's significance cutoff is not stated"
         url = geo_suppl_dir_url(accession)
         if not url:
             return []
@@ -118,14 +131,17 @@ class GroundTruthFetchService:
             except Exception:
                 logger.info("GEO suppl file fetch failed: %s", file_url)
                 continue
-            fs = normalize_interval_table(text) if kind == "interval" else normalize_gene_table(text)
+            fs = None
+            if applied is not None:
+                fs = (normalize_interval_table if kind == "interval" else normalize_gene_table)(text, **applied)
             candidates.append(
                 {
                     "source": "geo_supplementary",
                     "filename": name,
                     "url": file_url,
-                    "n_sig": len(fs.entities),
-                    "finding_set": fs.to_dict(),
+                    "n_sig": len(fs.entities) if fs is not None else None,
+                    "finding_set": fs.to_dict() if fs is not None else None,
+                    "not_counted_because": not_counted,
                     # The raw table so the C1 gate can pre-fill the confirm textarea; the human reviews
                     # and confirms through the same normalize-on-submit path (never auto-confirmed).
                     "table_text": text,

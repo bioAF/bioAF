@@ -91,6 +91,19 @@ _END_COLS = ["end", "chromend", "peak_end", "stop"]
 
 _LFC_TOKENS = ("log2foldchange", "log2fc", "logfc", "log2 fold", "logfoldchange", "fold change", "logratio")
 _PADJ_TOKENS = ("padj", "fdr", "adj.p", "adjp", "q.value", "qvalue", "p.adjust", "adjusted p")
+_PVAL_TOKENS = ("p.value", "pvalue", "p value", "pval", "p_val")
+
+# change_7.5 section 1.2: the stated operators, applied as stated.
+_COMPARE = {
+    "<": lambda value, cutoff: value < cutoff,
+    "<=": lambda value, cutoff: value <= cutoff,
+    ">": lambda value, cutoff: value > cutoff,
+    ">=": lambda value, cutoff: value >= cutoff,
+}
+
+# A parse note that says the stated measure has no column in this table. Matched by callers that must
+# not score such a table as an empty result.
+MISSING_MEASURE = "cannot be applied to it"
 
 
 @dataclass
@@ -244,22 +257,26 @@ def _pick(cands: list[str], header_lc: list[str]) -> int | None:
     return None
 
 
-def _find_contrast_columns(header: list[str], contrast: str) -> tuple[int | None, int | None]:
-    """In a wide multi-contrast table, find the lfc + padj columns for one contrast.
+def _find_contrast_columns(header: list[str], contrast: str) -> tuple[int | None, int | None, int | None]:
+    """In a wide multi-contrast table, find the lfc, padj and raw P columns for one contrast.
 
     spike-03: tables like `HG v NG logFC` / `HG v NG FDR` have no bare log2FoldChange
     column, so we match columns whose header contains the contrast label AND an lfc/padj token.
+    change_7.5 section 1.2: a raw P column is found the same way, because a claim can be stated at P.
     """
     key = re.sub(r"\s+", " ", contrast.strip().lower())
-    lfc_i = padj_i = None
+    lfc_i = padj_i = pval_i = None
     for i, h in enumerate(header):
         hl = re.sub(r"\s+", " ", h.strip().lower())
         if key and key in hl:
             if lfc_i is None and any(t in hl for t in _LFC_TOKENS):
                 lfc_i = i
-            if padj_i is None and any(t in hl for t in _PADJ_TOKENS):
+            adjusted = any(t in hl for t in _PADJ_TOKENS)
+            if padj_i is None and adjusted:
                 padj_i = i
-    return lfc_i, padj_i
+            elif pval_i is None and not adjusted and any(t in hl for t in _PVAL_TOKENS):
+                pval_i = i
+    return lfc_i, padj_i, pval_i
 
 
 def _count_contrast_groups(header: list[str]) -> int:
@@ -319,14 +336,26 @@ def _significance_column(kind: str, padj_i: int | None, pval_i: int | None, fs: 
     """
     if kind == "pvalue":
         if pval_i is None:
-            fs.parse_notes.append("the table has no P-value column, so a P-value cutoff cannot be applied to it")
+            fs.parse_notes.append(
+                f"the table has no P-value column, so a P-value cutoff {MISSING_MEASURE}; "
+                "bioAF does not substitute the adjusted P value"
+            )
         return pval_i
     if padj_i is None:
         fs.parse_notes.append(
-            "the table has no adjusted P-value column, so an adjusted P cutoff cannot be applied to it; "
+            f"the table has no adjusted P-value column, so an adjusted P cutoff {MISSING_MEASURE}; "
             "bioAF does not substitute the raw P value"
         )
     return padj_i
+
+
+def missing_measure(fs: FindingSet) -> str | None:
+    """The parse note saying the stated measure has no column in the table, or None."""
+    return next((n for n in fs.parse_notes if MISSING_MEASURE in n), None)
+
+
+def _passes(sig: float, lfc: float, *, padj_threshold, significance_operator, lfc_threshold, effect_operator) -> bool:
+    return _COMPARE[significance_operator](sig, padj_threshold) and _COMPARE[effect_operator](abs(lfc), lfc_threshold)
 
 
 def normalize_gene_table(
@@ -337,11 +366,16 @@ def normalize_gene_table(
     contrast: str | None = None,
     column_map: dict | None = None,
     significance_kind: str = "padj",
+    significance_operator: str = "<=",
+    effect_operator: str = ">=",
 ) -> FindingSet:
     """A deposited DE table as a directional FindingSet at the given cutoffs.
 
     ``padj_threshold`` is the significance cutoff, applied to the column ``significance_kind`` names:
     the adjusted P value (``padj``, the default) or the raw P value (``pvalue``). Never the other one.
+    change_7.5 section 1.2: ``significance_operator`` and ``effect_operator`` are the stated ones
+    (``<`` or ``<=`` on significance, ``>`` or ``>=`` on |log2FC|). The defaults are how the legacy
+    pair was always applied, for the callers that still hold only that pair.
     """
     header, rows = _read_rows(text)
     if not header:
@@ -361,11 +395,13 @@ def normalize_gene_table(
     if lfc_i is None or padj_i is None:
         groups = _count_contrast_groups(header)
         if contrast:
-            c_lfc, c_padj = _find_contrast_columns(header, contrast)
+            c_lfc, c_padj, c_pval = _find_contrast_columns(header, contrast)
             if c_lfc is not None:
                 lfc_i = c_lfc
             if c_padj is not None:
                 padj_i = c_padj
+            if c_pval is not None:
+                pval_i = c_pval
             if c_lfc is None:
                 notes.append(f"contrast '{contrast}' not found among columns")
         elif groups > 1:
@@ -394,7 +430,14 @@ def normalize_gene_table(
         sig = _to_float(r[sig_src]) if sig_src is not None else None
         if lfc is None or sig is None:
             continue
-        if sig <= padj_threshold and abs(lfc) >= lfc_threshold:
+        if _passes(
+            sig,
+            lfc,
+            padj_threshold=padj_threshold,
+            significance_operator=significance_operator,
+            lfc_threshold=lfc_threshold,
+            effect_operator=effect_operator,
+        ):
             fs.entities.append(
                 FindingEntity(
                     id=_clean(r[id_i]),
@@ -415,6 +458,8 @@ def normalize_interval_table(
     contrast: str | None = None,
     column_map: dict | None = None,
     significance_kind: str = "padj",
+    significance_operator: str = "<=",
+    effect_operator: str = ">=",
 ) -> FindingSet:
     """Normalize a differential-peak table (ATAC/ChIP DA) into interval entities.
 
@@ -442,11 +487,13 @@ def normalize_interval_table(
     # This must run BEFORE the locate check below, mirroring the gene path (previously it sat after
     # the early return and was dead code, so multi-contrast peak tables silently yielded nothing).
     if (lfc_i is None or padj_i is None) and contrast:
-        c_lfc, c_padj = _find_contrast_columns(header, contrast)
+        c_lfc, c_padj, c_pval = _find_contrast_columns(header, contrast)
         if c_lfc is not None:
             lfc_i = c_lfc
         if c_padj is not None:
             padj_i = c_padj
+        if c_pval is not None:
+            pval_i = c_pval
 
     if lfc_i is None or (padj_i is None and pval_i is None):
         fs.parse_notes.append("could not locate log2FC and/or significance columns")
@@ -470,7 +517,14 @@ def normalize_interval_table(
         sig = _to_float(r[sig_src]) if sig_src is not None else None
         if lfc is None or sig is None:
             continue
-        if sig <= padj_threshold and abs(lfc) >= lfc_threshold:
+        if _passes(
+            sig,
+            lfc,
+            padj_threshold=padj_threshold,
+            significance_operator=significance_operator,
+            lfc_threshold=lfc_threshold,
+            effect_operator=effect_operator,
+        ):
             chrom = _clean(r[chrom_i])
             fs.entities.append(
                 FindingEntity(

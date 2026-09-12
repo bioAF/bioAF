@@ -147,7 +147,9 @@ async def test_finding_set_candidates_returns_autofetched(client, admin_token, m
 
     from app.services.literature.ground_truth_fetch_service import GroundTruthFetchService
 
-    async def _fake(accession, *, kind="gene", fetcher=None):
+    # change_7.5 section 1.2 changed this fake's signature (setup only): the endpoint passes the
+    # selected contrast's stated cutoffs, so a candidate is counted at them.
+    async def _fake(accession, *, kind="gene", cutoffs=None, fetcher=None):
         return [{"source": "geo_supplementary", "filename": f"{accession}_DEG.csv", "n_sig": 5, "finding_set": {}}]
 
     monkeypatch.setattr(GroundTruthFetchService, "fetch_geo_candidates", _fake)

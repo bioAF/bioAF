@@ -21,7 +21,12 @@ from app.services.column_resolution import ROLES as COLUMN_ROLES
 from app.services.column_resolution import resolve_columns
 from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
 from app.services.llm_provider_clients import get_client
-from app.services.result_set_normalizer import _read_rows, normalize_gene_table, normalize_interval_table
+from app.services.result_set_normalizer import (
+    _read_rows,
+    missing_measure,
+    normalize_gene_table,
+    normalize_interval_table,
+)
 from app.services.validation_autonomy import AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS
 
 
@@ -111,6 +116,38 @@ async def _autonomy_for(session: AsyncSession, org_id: int) -> str:
 
     org = await session.get(Organization, org_id)
     return (org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED
+
+
+def _carry_stated_cutoffs(saved: dict, original: dict) -> None:
+    """change_7.5 section 1.2: the gate's design edit keeps the contrast's stated cutoffs.
+
+    The gate posts arms, names and the legacy ``{padj, log2fc}`` pair, which cannot hold a P value,
+    and rebuilding the contrast from the normalizer dropped ``cutoffs``: study 38's ``P < 0.01`` would
+    have been lost the moment a person filled in the arms. Where the posted pair is the one the gate
+    was shown, nothing was changed and the stated cutoffs are carried. Where a person typed a different
+    pair, that is their decision and it is recorded as the contrast's cutoffs, said to be theirs.
+    """
+    stated = [c for c in original.get("cutoffs") or [] if isinstance(c, dict)]
+    if not stated:
+        return
+    posted = saved.get("thresholds") or {}
+    shown = original.get("thresholds") or {}
+    unchanged = all(posted.get(k) is None for k in ("padj", "log2fc")) or all(
+        posted.get(k) == shown.get(k) for k in ("padj", "log2fc")
+    )
+    if unchanged:
+        saved["cutoffs"] = stated
+        for key in ("thresholds_from_claim", "thresholds_unresolved"):
+            if key in original:
+                saved[key] = original[key]
+        return
+    chosen = []
+    if posted.get("padj") is not None:
+        chosen.append({"kind": "padj", "operator": "<=", "value": float(posted["padj"])})
+    if posted.get("log2fc") is not None:
+        chosen.append({"kind": "abs_log2fc", "operator": ">=", "value": float(posted["log2fc"])})
+    saved["cutoffs"] = chosen
+    saved["cutoffs_decided_by"] = "human"
 
 
 class ReproductionPlanService:
@@ -424,6 +461,8 @@ class ReproductionPlanService:
                 and not saved[0].get("assay")
             ):
                 saved[0]["assay"] = (originals[source_index] or {}).get("assay")
+            if len(saved) == 1 and isinstance(source_index, int) and 0 <= source_index < len(originals):
+                _carry_stated_cutoffs(saved[0], originals[source_index] or {})
             kept = (
                 previous
                 and previous.get("contrast_index") is not None
@@ -517,39 +556,43 @@ class ReproductionPlanService:
         design_json = plan.differential_design_json or {}
         selected = (design_json.get("selected_contrast") or {}).get("contrast_index")
         contrasts = design_json.get("contrasts") or []
-        contrast = (
+        design_contrast = (
             contrasts[selected]
             if isinstance(selected, int) and not isinstance(selected, bool) and 0 <= selected < len(contrasts)
             else {}
         )
+        # change_7.5 section 1.2: ``contrast`` is the caller's label for a wide table's columns. It was
+        # overwritten by the selected contrast's dict, which reached `.strip()` in the normalizer and
+        # was stored as the claim's contrast. The label is the caller's, else the contrast's name.
+        contrast_label = (contrast or "").strip() or design_contrast.get("name") or None
         # change_7.4 section 1.6: a cutoff the caller states is used as stated; anything else comes
         # from the contrast's statistical definition, and nothing is ever defaulted. A null fold change
         # on the CONTRAST is the model answering the question it was asked (this cutoff does not apply
         # to this finding), which is significance alone; a significance cutoff nobody stated is a
-        # refusal, never 0.05, and a raw P value is never read as an adjusted one.
-        if lfc_threshold is not None and padj_threshold is not None:
-            lfc, padj = float(lfc_threshold), float(padj_threshold)
-        else:
-            from app.services.validation_claim_cutoffs import analysis_cutoffs
+        # refusal, never 0.05. change_7.5 section 1.2: the stated kind and operators are applied, so a
+        # P-value definition reads the table's P column.
+        from app.services.validation_claim_cutoffs import analysis_cutoffs, normalizer_arguments, recorded_cutoffs
 
-            cutoffs = analysis_cutoffs(contrast, design_json)
+        if lfc_threshold is not None and padj_threshold is not None:
+            # The API's pair names an adjusted P, applied the way the pair always was.
+            cutoffs = analysis_cutoffs(
+                {"thresholds": {"padj": float(padj_threshold), "log2fc": float(lfc_threshold)}}, {}
+            )
+        else:
+            cutoffs = analysis_cutoffs(design_contrast, design_json)
             if cutoffs["refusal"]:
                 raise HTTPException(
                     400,
                     f"The paper's result table cannot be read yet: {cutoffs['refusal']}. State the comparison's "
                     "significance cutoff in the differential design, then confirm the table again.",
                 )
-            lfc = float(lfc_threshold) if lfc_threshold is not None else cutoffs["lfc_threshold"]
-            padj = float(padj_threshold) if padj_threshold is not None else cutoffs["padj_threshold"]
+        applied = normalizer_arguments(recorded_cutoffs(cutoffs))
+        lfc, padj = applied["lfc_threshold"], applied["padj_threshold"]
 
         def _normalize(cmap: dict | None):
             if kind == "interval":
-                return normalize_interval_table(
-                    table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast, column_map=cmap
-                )
-            return normalize_gene_table(
-                table_text, lfc_threshold=lfc, padj_threshold=padj, contrast=contrast, column_map=cmap
-            )
+                return normalize_interval_table(table_text, contrast=contrast_label, column_map=cmap, **applied)
+            return normalize_gene_table(table_text, contrast=contrast_label, column_map=cmap, **applied)
 
         fs = _normalize(column_map)
         # A map the caller supplied is the assisted picker's answer, so it is the human's decision.
@@ -563,7 +606,9 @@ class ReproductionPlanService:
         # The alias list only knows the spellings someone enumerated, and a real csaw deposit names
         # its columns `regions.seqnames` / `regions.start` / `regions.end`. Rather than report that
         # as an unusable deposit, ask: the model in `autonomous`, a person at the gate in `assisted`.
-        if not fs.entities and any("could not locate" in n for n in fs.parse_notes):
+        # change_7.5 section 1.2: a table with no column for the stated measure asks the same question,
+        # because the column may be there under a name nobody enumerated.
+        if not fs.entities and (any("could not locate" in n for n in fs.parse_notes) or missing_measure(fs)):
             header, _ = _read_rows(table_text)
             resolved = None
             if header and await _autonomy_for(session, org_id) == AUTONOMY_AUTONOMOUS:
@@ -597,9 +642,12 @@ class ReproductionPlanService:
             "kind": kind,
             "namespace": fs.namespace,
             "source_locator": source_locator,
-            "contrast": contrast,
+            "contrast": contrast_label,
             "confirmed": True,
-            "thresholds": {"log2fc": lfc, "padj": padj},
+            # The legacy pair can hold only an adjusted P, so a P-value definition leaves it null and
+            # lives in ``cutoffs``, which is what the analysis reads first.
+            "thresholds": {"log2fc": lfc, "padj": padj if applied["significance_kind"] == "padj" else None},
+            "cutoffs": recorded_cutoffs(cutoffs),
             "finding_set": fs.to_dict(),
             "column_mapping": mapping,
             "needs_column_mapping": needs_help,
