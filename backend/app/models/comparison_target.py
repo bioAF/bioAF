@@ -86,6 +86,19 @@ class ComparisonTarget(Base):
     # deposit's registered inventory is evidence reaching a consumer; changing the number would not be.
     unresolved_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # change_7.5 section 2.2: the reported experiment this claim was measured in (an id within the
+    # plan's `reported_experiments_json`). A scalar claim has no contrast, so the link is direct.
+    reported_experiment_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # change_7.5 section 2.4: how the paper's number is aggregated (per_sample, per_group,
+    # merged_replicates, consensus, per_experiment, not_stated), validated on write. It supersedes
+    # `measurement_basis`, which stays readable for rows written before it.
+    aggregation: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # change_7.5 section 2.4: population, aggregation and denominator as the binding read them, each
+    # with the quote it rests on, and the metric the model proposed when the facts did not match it.
+    binding_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # change_7.5 section 2.5: this claim's four checks, each `{status, reason, requirement}`.
+    checks: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     reproduction_plan = relationship("ReproductionPlan", back_populates="comparison_targets")

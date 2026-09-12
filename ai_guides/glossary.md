@@ -341,6 +341,13 @@ supersession lineage. Associated to [Pipeline Runs](#pipeline-run). May also be
 associated to [Notebook Sessions](#notebook-session) or [Work Nodes](#work-node) (the
 relationship exists; not used today).
 
+### Reported Experiment
+
+One experiment a [Paper](#paper) reports: an assay applied to stated conditions, with its own
+reference and deposited data. Read from the paper by literature validation, so that each claim is
+checked against the experiment it was measured in. Not an [Experiment](#experiment), which is the
+lab entity that owns [Samples](#sample).
+
 ### Review Handoff
 
 A lightweight, advisory review step where a bioinformatician verdicts a
