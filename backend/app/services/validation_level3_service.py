@@ -269,6 +269,21 @@ def _selected_contrast(study_id: int, plan, design: dict) -> tuple[dict | None, 
     return design["contrasts"][index], None
 
 
+def _analysis_cutoffs(study_id: int, claim: dict, design: dict, contrast: dict) -> tuple[dict, Level3Decision | None]:
+    """The cutoffs the analysis applies, or the refusal that stops it before anything is launched.
+
+    change_7.4 section 1.6: both builders filled a missing fold change with 1.0 and a missing adjusted
+    P with 0.05, and study 37's ``P < 0.01`` became neither. No cutoff is ever supplied, and a raw P
+    value is refused until the templates can apply one.
+    """
+    from app.services.validation_claim_cutoffs import resolve_analysis_thresholds
+
+    cutoffs = resolve_analysis_thresholds(claim, design, contrast)
+    if cutoffs["refusal"]:
+        return cutoffs, _decline(study_id, "threshold_unresolved", cutoffs["refusal"])
+    return cutoffs, None
+
+
 # A declared pairing that does not label every sample. Distinct from an unpaired contrast.
 _PAIRING_LOST = object()
 _PAIRING_LOST_REASON = (
@@ -334,6 +349,9 @@ async def resolve_level3(
     replicate_errors = validate_replicates({"contrasts": [primary]})
     if replicate_errors:
         return _decline(study.id, "too_few_replicates", " ".join(replicate_errors))
+    cutoffs, refusal = _analysis_cutoffs(study.id, claim, design, primary)
+    if refusal is not None:
+        return refusal
 
     if study.analysis_run_id is None:
         return _decline(study.id, "no_analysis_run", "the study has no completed analysis run to reproduce from")
@@ -372,18 +390,14 @@ async def resolve_level3(
     name_cache = await _resolve_input_file_context(session, {f.id: f for f in files})
     paths = [f"/data/{_build_relative_path(f, name_cache)}" for f in files]
 
-    thresholds = claim.get("thresholds") or design.get("thresholds") or {}
-    lfc = thresholds.get("log2fc")
-    padj = thresholds.get("padj")
-
     test_samples = primary.get("test_samples") or []
     reference_samples = primary.get("reference_samples") or []
     parameters: dict = {
         wiring.path_parameter: ",".join(paths) if wiring.multiple else paths[0],
         "test_samples": ",".join(test_samples),
         "reference_samples": ",".join(reference_samples),
-        "lfc_threshold": float(lfc) if lfc is not None else 1.0,
-        "padj_threshold": float(padj) if padj is not None else 0.05,
+        "lfc_threshold": cutoffs["lfc_threshold"],
+        "padj_threshold": cutoffs["padj_threshold"],
     }
     if wiring.id_column:
         parameters["id_column"] = wiring.id_column
@@ -557,6 +571,9 @@ async def resolve_level3_from_deposit(
     replicate_errors = validate_replicates({"contrasts": [primary]})
     if replicate_errors:
         return _decline(study.id, "too_few_replicates", " ".join(replicate_errors))
+    cutoffs, refusal = _analysis_cutoffs(study.id, claim, design, primary)
+    if refusal is not None:
+        return refusal
 
     ev = evidence if evidence is not None else (study.evidence_json or {})
     deposit = ev.get("deposit") or {}
@@ -584,9 +601,6 @@ async def resolve_level3_from_deposit(
             "registered, so the reproduction could not be run here",
         )
 
-    thresholds = claim.get("thresholds") or design.get("thresholds") or {}
-    lfc = thresholds.get("log2fc")
-    padj = thresholds.get("padj")
     test_samples = primary.get("test_samples") or []
     reference_samples = primary.get("reference_samples") or []
 
@@ -600,8 +614,8 @@ async def resolve_level3_from_deposit(
         "counts_path": paths[0],
         "test_samples": ",".join(test_samples),
         "reference_samples": ",".join(reference_samples),
-        "lfc_threshold": float(lfc) if lfc is not None else 1.0,
-        "padj_threshold": float(padj) if padj is not None else 0.05,
+        "lfc_threshold": cutoffs["lfc_threshold"],
+        "padj_threshold": cutoffs["padj_threshold"],
         # A deposit's id column is whatever the depositor wrote, INCLUDING empty (GSE274331 leaves it
         # unnamed). The wiring's fixed id_column describes an nf-core output and cannot speak for a
         # deposit, so it is carried from what step 6 measured.

@@ -302,3 +302,55 @@ class TestItRunsOnThePaperText:
         for _ in range(2):
             await rec.reconcile(session, study, plan, supplements=[], client=provider, model="m", api_key=None)
         assert len(provider.calls) == 1
+
+
+class TestAReconciledThresholdThatDisagreesWithTheCutoffsIsUnresolved:
+    """change_7.4 section 1.6: a binding's threshold and the claim's cutoffs are two readings of one
+    definition. Where they disagree the disagreement is recorded as an issue and the cutoff is
+    unresolved; the binding's reading does not overwrite the cutoffs, and the cutoffs do not
+    overwrite it."""
+
+    @pytest.mark.asyncio
+    async def test_a_padj_reading_of_a_p_value_claim_is_unresolved(self, session, admin_user, monkeypatch):
+        from app.services import validation_reconciliation as rec
+
+        async def _bind(claims, *, client, model, api_key, inventory=None, previous=None, on_issue=None):
+            return [
+                {
+                    "claim_index": 0,
+                    "bound_key": None,
+                    "reason": "a DE count",
+                    "confidence": 0.9,
+                    "declined": True,
+                    "threshold": 0.01,
+                    "threshold_kind": "padj",
+                }
+            ]
+
+        monkeypatch.setattr(rec, "bind_claims", _bind)
+        study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        plan = await ReproductionPlanService.create_plan(session, study, admin_user.id)
+        await ReproductionPlanService.add_comparison_targets(
+            session,
+            plan,
+            [
+                {
+                    "metric_key": "",
+                    "claim_text": "We identified 312 significantly (P < 0.01) up-regulated genes",
+                    "claimed_value": 312,
+                    "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.01}],
+                }
+            ],
+        )
+        await session.flush()
+        issues: list[dict] = []
+
+        await rec.reconcile(
+            session, study, plan, supplements=[_S3], client=object(), model="m", api_key=None, on_issue=issues.append
+        )
+
+        [target] = await _targets(session, plan)
+        assert target.threshold_kind == "padj"
+        assert target.cutoffs == [{"kind": "pvalue", "operator": "<", "value": 0.01}]
+        assert "disagrees" in (target.unresolved_reason or "")
+        assert any("disagrees" in (i.get("message") or "") for i in issues)

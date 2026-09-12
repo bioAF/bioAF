@@ -30,8 +30,15 @@ async def _plan_ready_study(session, user, autonomy="assisted"):
     org = (await session.execute(select(Organization).where(Organization.id == user.organization_id))).scalar_one()
     org.lit_validation_autonomy = autonomy
     study = await ValidationStudyService.create_study(session, user.organization_id, user.id, source_doi="10.1/x")
+    # change_7.4 section 1.6 (flagged, setup only): the plan states the cutoffs its tables are read
+    # at, because confirming a table no longer defaults them.
     await ReproductionPlanService.create_plan(
-        session, study, user.id, accessions=["GSE1"], pipeline_key="nf-core/chipseq"
+        session,
+        study,
+        user.id,
+        accessions=["GSE1"],
+        pipeline_key="nf-core/chipseq",
+        differential_design={"contrasts": [{"name": "KO vs WT"}], "thresholds": {"log2fc": 1.0, "padj": 0.05}},
     )
     study.state = "plan_ready"
     await session.flush()

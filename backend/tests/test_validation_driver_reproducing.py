@@ -171,7 +171,15 @@ async def test_reproducing_completed_scores_concordance_and_advances(session, ad
     monkeypatch.setattr(ValidationDriverService, "_read_reproduction_output", _output)
     monkeypatch.setattr(ValidationDriverService, "_extract_reproduced_set", _extract)
 
-    level3 = {"template_id": 1, "kind": "gene", "paper_finding_set": _paper_genes().to_dict(), "universe": 20000}
+    # change_7.4 section 1.6 (flagged, setup only): a bundle carries the cutoffs it was built with, and
+    # one that carries none is no longer scored at a default.
+    level3 = {
+        "template_id": 1,
+        "kind": "gene",
+        "paper_finding_set": _paper_genes().to_dict(),
+        "universe": 20000,
+        "parameters": {"lfc_threshold": 1.0, "padj_threshold": 0.05},
+    }
     study = await _study_in(
         session, admin_user, "reproducing", evidence={"level3": level3, "level3_run_session_id": 777}
     )
@@ -380,3 +388,33 @@ async def test_reproducing_completed_with_no_output_degrades_instead_of_scoring_
     assert "no output" in failed["reason"].lower() or "produced no" in failed["reason"].lower()
     # and it must NOT masquerade as a computed comparison
     assert "level3_result" not in study.evidence_json
+
+
+@pytest.mark.asyncio
+async def test_a_bundle_that_carries_no_cutoff_is_not_scored_at_a_default(session, admin_user, monkeypatch):
+    """change_7.4 section 1.6: `_handle_reproducing` read the cutoffs as 1.0 and 0.05 when the bundle
+    had none. It degrades with the reason instead."""
+
+    async def _load(_session, sid):
+        return SimpleNamespace(id=sid, status="completed")
+
+    async def _poll(_session, cs):
+        return SimpleNamespace(status="completed")
+
+    async def _output(_session, cs):
+        return "gene,log2FoldChange,padj\n"
+
+    async def _extract(*args, **kwargs):
+        raise AssertionError("scored at a default cutoff")
+
+    monkeypatch.setattr(ValidationDriverService, "_load_compute_session", _load)
+    monkeypatch.setattr(NotebookExecutionService, "poll_execution", _poll)
+    monkeypatch.setattr(ValidationDriverService, "_read_reproduction_output", _output)
+    monkeypatch.setattr(ValidationDriverService, "_extract_reproduced_set", _extract)
+    level3 = {"template_id": 1, "kind": "gene", "paper_finding_set": _paper_genes().to_dict()}
+    study = await _study_in(session, admin_user, "reproducing", evidence={"level3": level3, "level3_run_session_id": 7})
+
+    await ValidationDriverService._handle_reproducing(session, study)
+
+    assert "level3_result" not in study.evidence_json
+    assert "cutoff" in str(study.evidence_json.get("level3_failed") or study.evidence_json)

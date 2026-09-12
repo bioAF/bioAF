@@ -60,7 +60,7 @@ _SCHEMA_HINT = (
     '"claim_text": "the paper\'s own sentence, quoted", "value": 0, "unit": "", "tolerance": null, '
     '"source_locator": "section/figure", "sample_subset": "which samples, e.g. whole embryo", '
     '"qc_stage": "as collected | post-QC | as analysed", "direction": "up | down | null, relative to the '
-    'reference arm", "threshold": null, "threshold_kind": "padj | abs_log2fc | null", '
+    'reference arm", "threshold": null, "threshold_kind": "padj | pvalue | abs_log2fc | null", '
     '"contrast": "the name of the contrast this claim reports on, or null", '
     '"cutoffs": [{"kind": "padj | pvalue | abs_log2fc", "operator": "< | <= | > | >=", "value": 0}], '
     '"output_type": "count | percentage | gene_set_size | ratio"}], '
@@ -564,7 +564,7 @@ def build_binding_prompt(
         '"confidence": 0.0 to 1.0, "sample_subset": "which samples the number describes, or null", '
         '"qc_stage": "as collected | post-QC | as analysed | null", '
         '"direction": "up | down | null, relative to the reference arm", '
-        '"threshold": null, "threshold_kind": "padj | abs_log2fc | null", '
+        '"threshold": null, "threshold_kind": "padj | pvalue | abs_log2fc | null", '
         '"output_type": "count | percentage | gene_set_size | ratio | null", '
         '"measurement_basis": "cell | sample | library | subject | cohort | null"}]}\n\n'
         # change_7.3 section 7: the context fields were only ever volunteered. A reconciliation call
@@ -808,6 +808,21 @@ async def bind_claims(
     ]
 
 
+CUTOFF_STEP = "settling a claim's statistical cutoff"
+
+
+def _cutoff_issue(disagreement: str) -> dict:
+    """change_7.4 section 1.6: a claim whose threshold and cutoffs disagree, as an issue. The cutoff
+    is not settled, which is a step that could not be performed, not a model's failure."""
+    return {
+        "step": CUTOFF_STEP,
+        "outcome": "not_performed",
+        "impact": "degraded",
+        "message": disagreement,
+        "model": None,
+    }
+
+
 async def _scoped_sample_titles(study) -> list[str]:
     """The titles of the samples this run is actually scoped to, for the contrast selector.
 
@@ -973,6 +988,7 @@ class ValidationExtractionService:
             claim_cutoffs,
             contrast_index_for,
             derive_contrast_thresholds,
+            threshold_disagreement,
         )
 
         design_contrasts = parsed["differential_design"].get("contrasts") or []
@@ -1009,6 +1025,14 @@ class ValidationExtractionService:
                     "bound_by": "alias_table",
                 }
             )
+            # change_7.4 section 1.6: a scalar threshold that disagrees with the claim's own cutoffs
+            # leaves the cutoff unresolved, on the record. Neither reading overwrites the other.
+            disagreement = threshold_disagreement(
+                _to_float(c.get("threshold")), c.get("threshold_kind"), claim_cutoffs(c)
+            )
+            if disagreement:
+                targets[-1]["unresolved_reason"] = disagreement
+                issues.append(_cutoff_issue(disagreement))
             claims_to_bind.append(
                 {
                     "metric_key": metric_key,

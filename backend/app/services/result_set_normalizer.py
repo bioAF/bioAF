@@ -310,6 +310,25 @@ def _read_rows(text: str) -> tuple[list[str], list[list[str]]]:
     return rows[0], rows[1:]
 
 
+def _significance_column(kind: str, padj_i: int | None, pval_i: int | None, fs: FindingSet) -> int | None:
+    """The column the significance cutoff applies to, by the cutoff's kind, or None with a note.
+
+    change_7.4 section 1.6: a table with no adjusted P column had its raw P value compared against the
+    adjusted cutoff. A P value and an adjusted P value are different definitions, so a table without
+    the column the cutoff names is not checkable against it, and the note says which column is missing.
+    """
+    if kind == "pvalue":
+        if pval_i is None:
+            fs.parse_notes.append("the table has no P-value column, so a P-value cutoff cannot be applied to it")
+        return pval_i
+    if padj_i is None:
+        fs.parse_notes.append(
+            "the table has no adjusted P-value column, so an adjusted P cutoff cannot be applied to it; "
+            "bioAF does not substitute the raw P value"
+        )
+    return padj_i
+
+
 def normalize_gene_table(
     text: str,
     *,
@@ -317,7 +336,13 @@ def normalize_gene_table(
     padj_threshold: float = 0.05,
     contrast: str | None = None,
     column_map: dict | None = None,
+    significance_kind: str = "padj",
 ) -> FindingSet:
+    """A deposited DE table as a directional FindingSet at the given cutoffs.
+
+    ``padj_threshold`` is the significance cutoff, applied to the column ``significance_kind`` names:
+    the adjusted P value (``padj``, the default) or the raw P value (``pvalue``). Never the other one.
+    """
     header, rows = _read_rows(text)
     if not header:
         return FindingSet(kind="gene", namespace="unknown", parse_notes=["empty table"])
@@ -355,9 +380,10 @@ def normalize_gene_table(
         fs.n_tested = len(rows)
         return fs
 
-    sig_src = padj_i if padj_i is not None else pval_i
-    if padj_i is None:
-        fs.parse_notes.append("no adjusted-p column; used raw p-value")
+    sig_src = _significance_column(significance_kind, padj_i, pval_i, fs)
+    if sig_src is None:
+        fs.n_tested = len(rows)
+        return fs
 
     tested = 0
     for r in rows:
@@ -388,6 +414,7 @@ def normalize_interval_table(
     padj_threshold: float = 0.05,
     contrast: str | None = None,
     column_map: dict | None = None,
+    significance_kind: str = "padj",
 ) -> FindingSet:
     """Normalize a differential-peak table (ATAC/ChIP DA) into interval entities.
 
@@ -425,7 +452,9 @@ def normalize_interval_table(
         fs.parse_notes.append("could not locate log2FC and/or significance columns")
         return fs
 
-    sig_src = padj_i if padj_i is not None else pval_i
+    sig_src = _significance_column(significance_kind, padj_i, pval_i, fs)
+    if sig_src is None:
+        return fs
     tested = 0
     for r in rows:
         need = max(x for x in (chrom_i, start_i, end_i, lfc_i, sig_src) if x is not None)

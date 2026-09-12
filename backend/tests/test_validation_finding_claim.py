@@ -45,6 +45,8 @@ async def _plan_ready_study(session, admin_user, design=None):
 @pytest.mark.asyncio
 async def test_set_finding_claim_normalizes_and_persists_gene_set(session, admin_user):
     study, plan = await _plan_ready_study(session, admin_user)
+    # change_7.4 section 1.6 (flagged, setup only): this plan states no cutoff, and the cutoffs are no
+    # longer defaulted, so the test states them.
     claim = await ReproductionPlanService.set_finding_claim(
         session,
         study.id,
@@ -53,6 +55,8 @@ async def test_set_finding_claim_normalizes_and_persists_gene_set(session, admin
         kind="gene",
         table_text=_DE_TABLE,
         source_locator="Table S3",
+        lfc_threshold=1.0,
+        padj_threshold=0.05,
     )
     await session.commit()
 
@@ -70,8 +74,16 @@ async def test_set_finding_claim_normalizes_and_persists_gene_set(session, admin
 @pytest.mark.asyncio
 async def test_set_finding_claim_normalizes_interval_set(session, admin_user):
     study, plan = await _plan_ready_study(session, admin_user)
+    # change_7.4 section 1.6 (flagged, setup only): the cutoffs are stated rather than defaulted.
     claim = await ReproductionPlanService.set_finding_claim(
-        session, study.id, admin_user.organization_id, admin_user.id, kind="interval", table_text=_DA_TABLE
+        session,
+        study.id,
+        admin_user.organization_id,
+        admin_user.id,
+        kind="interval",
+        table_text=_DA_TABLE,
+        lfc_threshold=1.0,
+        padj_threshold=0.05,
     )
     await session.commit()
     fs = claim["finding_set"]
@@ -118,3 +130,49 @@ async def test_set_finding_claim_is_org_scoped(session, admin_user):
             kind="gene",
             table_text=_DE_TABLE,
         )
+
+
+# ---- change_7.4 section 1.6: a ground-truth set is normalized only at a stated cutoff ----
+
+
+@pytest.mark.asyncio
+async def test_a_ground_truth_set_is_never_normalized_at_a_default_cutoff(session, admin_user):
+    from fastapi import HTTPException
+
+    study, _ = await _plan_ready_study(session, admin_user)
+    with pytest.raises(HTTPException) as refused:
+        await ReproductionPlanService.set_finding_claim(
+            session, study.id, admin_user.organization_id, admin_user.id, kind="gene", table_text=_DE_TABLE
+        )
+    assert refused.value.status_code == 400
+    assert "cutoff" in refused.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_p_value_definition_is_refused_rather_than_read_as_adjusted(session, admin_user):
+    from fastapi import HTTPException
+
+    design = {
+        "contrasts": [{"name": "x", "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.01}]}],
+        "selected_contrast": {"contrast_index": 0},
+    }
+    study, _ = await _plan_ready_study(session, admin_user, design=design)
+    with pytest.raises(HTTPException) as refused:
+        await ReproductionPlanService.set_finding_claim(
+            session, study.id, admin_user.organization_id, admin_user.id, kind="gene", table_text=_DE_TABLE
+        )
+    assert "P value" in refused.value.detail
+
+
+@pytest.mark.asyncio
+async def test_a_significance_only_claim_is_normalized_with_no_fold_change_requirement(session, admin_user):
+    design = {
+        "contrasts": [{"name": "x", "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}]}],
+        "selected_contrast": {"contrast_index": 0},
+    }
+    study, _ = await _plan_ready_study(session, admin_user, design=design)
+    claim = await ReproductionPlanService.set_finding_claim(
+        session, study.id, admin_user.organization_id, admin_user.id, kind="gene", table_text=_DE_TABLE
+    )
+    assert claim["thresholds"] == {"log2fc": 0.0, "padj": 0.05}
+    assert {e["id"] for e in claim["finding_set"]["entities"]} == {"A1BG", "TP53"}

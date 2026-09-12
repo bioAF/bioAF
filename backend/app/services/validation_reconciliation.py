@@ -195,6 +195,7 @@ async def reconcile(
         return not_performed("bioAF hit an internal error while reconciling the plan", error_class=type(exc).__name__)
 
     revisions = _apply(targets, decisions)
+    _mark_cutoff_disagreements(targets, on_issue)
     if decisions and all(d.get("bound_by") == BINDING_FAILED for d in decisions):
         # The model could not answer. Each claim is marked unresolved by `_apply`; the provisional
         # reading is not confirmed by our failure to check it, and a later attempt may ask again.
@@ -217,6 +218,23 @@ async def reconcile(
     study.evidence_json = evidence
     await session.flush()
     return record
+
+
+def _mark_cutoff_disagreements(targets: list, on_issue=None) -> None:
+    """change_7.4 section 1.6: a revised threshold that disagrees with the claim's own cutoffs.
+
+    Both readings are kept: the binding's threshold where the decision put it, the cutoffs where the
+    extraction put them. The claim is marked unresolved and the disagreement reaches the issues.
+    """
+    from app.services.validation_claim_cutoffs import threshold_disagreement
+    from app.services.validation_extraction_service import _cutoff_issue
+
+    for target in targets:
+        disagreement = threshold_disagreement(target.threshold, target.threshold_kind, target.cutoffs)
+        if disagreement and target.unresolved_reason != disagreement:
+            target.unresolved_reason = disagreement
+            if on_issue:
+                on_issue(_cutoff_issue(disagreement))
 
 
 def _apply(targets: list, decisions: list[dict]) -> list[dict]:
