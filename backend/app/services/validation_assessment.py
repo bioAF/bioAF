@@ -568,6 +568,11 @@ async def conclude_without_execution(
         # A paper read from a pasted body carries no manifest, so an empty inventory there means
         # nobody listed its attachments, not that it has none.
         manifest_known=bool(evidence.get("pmcid") or evidence.get("supplements")),
+        # change_7.4 section 1.3: the acquisition record, so an acquired input is never reported as
+        # none acquired.
+        acquisition=evidence,
+        data_run_id=study.data_run_id,
+        fetched_samples=await _fetched_samples(session, study),
     )
     # The assessment reason is a dependent too: an unresolved contradiction has to reach the reader
     # of the outcome, not only the reader of the evidence bundle.
@@ -596,6 +601,26 @@ async def conclude_without_execution(
         study.requested_by_user_id,
         "classified",
         classification=outcome["classification"],
+    )
+
+
+async def _fetched_samples(session: AsyncSession, study) -> int | None:
+    """How many of the study's samples carry a fetched sequencing file, or None with no data run."""
+    if not study.data_run_id or study.experiment_id is None:
+        return None
+    from sqlalchemy import func
+
+    from app.models.sample import Sample, sample_files
+
+    return int(
+        (
+            await session.execute(
+                select(func.count(func.distinct(Sample.id)))
+                .join(sample_files, Sample.id == sample_files.c.sample_id)
+                .where(Sample.experiment_id == study.experiment_id)
+            )
+        ).scalar()
+        or 0
     )
 
 

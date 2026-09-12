@@ -139,7 +139,8 @@ class TestGroffReadsAsTheOwnerSummaryStatesIt:
     async def test_processed_results_are_not_established(self):
         facts = {f["key"]: f for f in _summary(await _groff_failed_evidence())["completion_facts"]}
         assert facts["processed_results_available"]["value"] == "not_established"
-        assert facts["reproduction_input_available"]["label"] == "Reproduction input acquired by bioAF"
+        # change_7.4 section 1.3 (flagged test change): the acquisition fact is one of three now.
+        assert facts["input_acquired"]["label"] == "Analysis input acquired"
 
     @pytest.mark.asyncio
     async def test_the_raw_read_leg_is_reported_though_it_was_not_chosen(self):
@@ -458,3 +459,102 @@ class TestADepositRetrievalFailureResumesAsWhatItWas:
     def test_it_is_labelled_for_what_failed(self):
         limitation = _summary(self._deposit_failure(), classification="inconclusive")["limitations"][0]
         assert limitation["label"] == "Could not be retrieved in this attempt"
+
+
+_SAMD1 = json.loads((pathlib.Path(__file__).parent / "fixtures" / "samd1" / "study_37_persisted.json").read_text())
+
+
+class TestAnAcquiredInputIsNeverReportedAsNone:
+    """change_7.4 section 1.3: study 37 downloaded and read its matrix, and its completion said "no
+    attachment bioAF inspected holds a sample-level input, and it acquired none". The input fact read
+    attachments and never the acquisition record."""
+
+    def _summary(self):
+        return summarize(
+            study={"state": "classified", "classification": "inconclusive"},
+            evidence=_SAMD1["evidence"],
+            plan=_SAMD1["reproduction_plan"],
+            targets=_SAMD1["reproduction_plan"]["comparison_targets"],
+            issues=[],
+        )
+
+    def test_a_legacy_record_is_read_from_its_acquisition_record(self):
+        facts = {f["key"]: f for f in self._summary()["completion_facts"]}
+        assert facts["input_acquired"]["value"] == "yes"
+        assert "GSE144396_RNA-Seq_NormalizedCounts.txt.gz" in facts["input_acquired"]["reason"]
+
+    def test_the_three_facts_carry_their_labels(self):
+        labels = {f["key"]: f["label"] for f in self._summary()["completion_facts"]}
+        assert labels["input_acquired"] == "Analysis input acquired"
+        assert labels["input_usable"] == "Analysis input usable"
+        assert labels["ready_for_analysis"] == "Ready for analysis"
+
+    def test_the_inspection_makes_it_usable(self):
+        facts = {f["key"]: f for f in self._summary()["completion_facts"]}
+        assert facts["input_usable"]["value"] == "yes"
+
+    def test_nothing_in_the_projection_says_acquired_none(self):
+        summary = self._summary()
+        text = " ".join(str(f.get("reason")) for f in summary["completion_facts"]) + " " + " ".join(summary["summary"])
+        assert "acquired none" not in text
+        assert "No analysis inputs were acquired" not in text
+
+    @pytest_asyncio.fixture
+    async def _enabled(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_no_surface_renders_acquired_none(self, _enabled, client, session, admin_user, admin_token):
+        """Asserted through the API, the JSON export and the markdown renderer's entry point."""
+        from app.services.provenance.report_service import ProvenanceReportService
+        from app.services.reproduction_plan_service import ReproductionPlanService
+        from app.services.validation_study_service import ValidationStudyService
+
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_doi=_SAMD1["study"]["source_doi"]
+        )
+        plan_record = _SAMD1["reproduction_plan"]
+        plan = await ReproductionPlanService.create_plan(
+            session,
+            study,
+            admin_user.id,
+            accessions=plan_record["accessions"],
+            pipeline_key=plan_record["pipeline_key"],
+            differential_design=plan_record["differential_design"],
+        )
+        await ReproductionPlanService.add_comparison_targets(
+            session, plan, [dict(t) for t in plan_record["comparison_targets"]]
+        )
+        study.state = "classified"
+        study.classification = "inconclusive"
+        study.evidence_json = _SAMD1["evidence"]
+        await session.commit()
+
+        api = (
+            await client.get(f"/api/validation-studies/{study.id}", headers={"Authorization": f"Bearer {admin_token}"})
+        ).json()["report_summary"]
+        rendered = [json.dumps(api)]
+        for fmt in ("json", "md"):
+            exported = await ProvenanceReportService.generate(
+                session=session,
+                entity_type="validation_study",
+                entity_id=study.id,
+                org_id=admin_user.organization_id,
+                user_email=admin_user.email,
+                format=fmt,
+            )
+            text = exported.content if isinstance(exported.content, str) else exported.content.decode()
+            if fmt == "json":
+                # The export also carries the persisted evidence verbatim, and a record written before
+                # this change keeps the sentence it was written with. What the export RENDERS is its
+                # projection.
+                body = json.loads(text)
+                entity = body["report"]["entity"] if "report" in body else body["entity"]
+                text = json.dumps(entity["report_summary"])
+            rendered.append(text)
+        for text in rendered:
+            assert "acquired none" not in text
+            assert "Analysis input acquired" in text

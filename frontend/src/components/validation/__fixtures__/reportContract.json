@@ -577,11 +577,25 @@
         "value_label": "Not established"
       },
       {
-        "key": "reproduction_input_available",
-        "label": "Reproduction input acquired by bioAF",
-        "reason": "4 of the paper's attachment(s) were not inspected, so whether the paper attaches a usable input is not established; bioAF acquired none in this attempt",
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt; 4 of the paper's attachment(s) were not inspected, so whether the paper attaches one is not established; EGAS00001003667 holds a published input that bioAF cannot acquire",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
         "value": "not_established",
         "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
       }
     ],
     "consistency": {
@@ -1198,11 +1212,25 @@
         "value_label": "Not established"
       },
       {
-        "key": "reproduction_input_available",
-        "label": "Reproduction input acquired by bioAF",
-        "reason": "recorded before bioAF distinguished an established absence from one it could not establish",
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt; 8 of the paper's attachment(s) were not inspected, so whether the paper attaches one is not established; EGAS00001003667 holds a published input that bioAF cannot acquire",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
         "value": "not_established",
         "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
       }
     ],
     "consistency": {
