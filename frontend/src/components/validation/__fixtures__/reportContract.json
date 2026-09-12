@@ -681,7 +681,8 @@
         "label": "Acquisition not supported",
         "leg": "deposit",
         "observation": "EGA lists 108 file(s), none of them processed tables",
-        "resource": "EGAS00001003667"
+        "resource": "EGAS00001003667",
+        "technical_detail": null
       },
       {
         "detail": "bioAF could not retrieve 4 of the paper's attachment(s) in this attempt, so what they hold is not established",
@@ -690,7 +691,8 @@
         "label": "Could not be retrieved in this attempt",
         "leg": "retrieval",
         "observation": null,
-        "resource": "the paper's supplementary files"
+        "resource": "the paper's supplementary files",
+        "technical_detail": null
       },
       {
         "detail": "EGAS00001003667 publishes raw sequencing reads to fetch and re-run under controlled access, and bioAF has no adapter for EGA. The data is published; the limitation is bioAF's",
@@ -699,7 +701,8 @@
         "label": "Acquisition not supported",
         "leg": "pipeline",
         "observation": "EGA lists 108 fastq.gz file(s) for this dataset",
-        "resource": "EGAS00001003667"
+        "resource": "EGAS00001003667",
+        "technical_detail": null
       }
     ],
     "reconciliation": {
@@ -741,6 +744,126 @@
       "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",
       "Four supplementary attachments were identified, but their download failed.",
       "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "mapping_unresolved": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [
+        "deposited files"
+      ],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": "bioAF inspected every attachment it found and none is a results table",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired GSE1_counts.tsv.gz from GSE1",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "bioAF read GSE1_counts.tsv.gz: 4 sample columns, values identified as counts",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no column of the deposited matrix could be matched to KO",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": true,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "bioAF downloaded and read GSE1_counts.tsv.gz. Held before running: no column of the deposited matrix could be matched to KO. An arm with no samples is not a smaller experiment.",
+        "governs": true,
+        "kind": "sample_mapping_unresolved",
+        "label": "Samples could not be assigned to the comparison",
+        "leg": "deposit",
+        "observation": null,
+        "resource": "GSE1_counts.tsv.gz",
+        "technical_detail": {
+          "cause": "sample_mapping_unresolved"
+        }
+      }
+    ],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "Analysis inputs were acquired and no scientific claims were tested."
     ],
     "version": 1
   },
@@ -1318,7 +1441,8 @@
         "label": "Not established",
         "leg": "deposit",
         "observation": null,
-        "resource": "EGAS00001003667"
+        "resource": "EGAS00001003667",
+        "technical_detail": null
       }
     ],
     "reconciliation": {
