@@ -78,6 +78,7 @@ _COUNTS_GZ = gzip.compress(_COUNTS.encode(), mtime=0)
 _METADATA = "sample\tcondition\nCTRL_1\tControl\nCTRL_2\tControl\nCTRL_3\tControl\nKD_1\tKD\nKD_2\tKD\nKD_3\tKD\n"
 
 _DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "KD vs Control",

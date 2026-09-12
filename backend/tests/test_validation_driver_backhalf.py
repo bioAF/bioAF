@@ -271,6 +271,7 @@ async def test_acquiring_data_resolves_picks_and_rewrites_design_to_external_ids
         admin_user,
         monkeypatch,
         design={
+            "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
             "contrasts": [
                 {
                     "name": "t vs c",
@@ -310,6 +311,7 @@ async def test_acquiring_data_parks_in_samples_mismatch_when_a_pick_was_not_fetc
         admin_user,
         monkeypatch,
         design={
+            "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
             "contrasts": [{"name": "t vs c", "test_samples": ["SRX1"], "reference_samples": ["SRX3"]}],
             "thresholds": {"log2fc": 1.0, "padj": 0.05},
         },
@@ -635,6 +637,7 @@ async def test_extracting_activates_level3_and_routes_to_reproducing(session, ad
     # B2e design + B4 confirmed finding claim on the plan.
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.differential_design_json = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
         "contrasts": [{"name": "t vs c", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
         "thresholds": {"log2fc": 1.0, "padj": 0.05},
     }
@@ -809,6 +812,7 @@ async def test_extracting_records_why_a_configured_level3_did_not_run(session, a
 
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.differential_design_json = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
         "contrasts": [{"name": "t vs c", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
         "thresholds": {"log2fc": 1.0, "padj": 0.05},
     }
@@ -869,6 +873,7 @@ async def test_extracting_activates_level3_for_an_scrnaseq_study(session, admin_
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.pipeline_key = "nf-core/scrnaseq"
     plan.differential_design_json = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
         "contrasts": [
             {
                 "name": "stim vs ctrl",
@@ -967,6 +972,7 @@ async def test_setup_answers_the_design_columns_from_the_ratified_contrast(sessi
     b = await _make_runnable_sample(session, admin_user, exp_id, external_id="SRX2")
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
     plan.differential_design_json = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
         "contrasts": [
             {
                 "test_condition": "H3K27me3",
@@ -975,7 +981,7 @@ async def test_setup_answers_the_design_columns_from_the_ratified_contrast(sessi
                 "reference_samples": ["SRX2"],
                 "subjects": {},
             }
-        ]
+        ],
     }
     await session.flush()
 
@@ -1021,3 +1027,67 @@ async def test_setup_still_launches_a_pipeline_that_is_not_in_the_catalog(sessio
 
     assert len(spy.calls) == 1
     assert spy.calls[0].sample_values == {}
+
+
+# ---- change_7.4 sections 1.4 and 1.5: only the selected contrast is required on the raw-reads route ----
+
+
+@pytest.mark.asyncio
+async def test_a_null_selection_still_runs_the_qc_comparison(session, admin_user, monkeypatch):
+    """No contrast fits this workflow, so there is no differential to resolve, and the scalar claims'
+    QC comparison runs exactly as before. The unfetched pick of a contrast nobody selected holds
+    nothing."""
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    study = await _acquiring_with_design(
+        session,
+        admin_user,
+        monkeypatch,
+        design={
+            "selected_contrast": {"contrast_index": None, "reason": "measured on RNA-seq, not this run's assay"},
+            "contrasts": [
+                {"name": "KO vs WT", "assay": "RNA-seq", "test_samples": ["SRX9"], "reference_samples": ["SRX8"]}
+            ],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        },
+        samples=[("GSM_A_SRR1", "experiment_accession=SRX1")],
+    )
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "setup"
+
+
+@pytest.mark.asyncio
+async def test_only_the_selected_contrast_s_picks_are_required(session, admin_user, monkeypatch):
+    spy = _LaunchSpy()
+    monkeypatch.setattr(PipelineRunService, "launch_run", spy)
+    study = await _acquiring_with_design(
+        session,
+        admin_user,
+        monkeypatch,
+        design={
+            "selected_contrast": {"contrast_index": 1, "decided_by": "model"},
+            "contrasts": [
+                # Another experiment's contrast, whose samples this fetch never held.
+                {"name": "day 7", "test_samples": ["SRX7"], "reference_samples": ["SRX8"]},
+                {"name": "t vs c", "test_samples": ["SRX1"], "reference_samples": ["SRX2"]},
+            ],
+            "thresholds": {"log2fc": 1.0, "padj": 0.05},
+        },
+        samples=[
+            ("GSM_A_SRR1", "run_accession=SRR1 experiment_accession=SRX1"),
+            ("GSM_B_SRR2", "run_accession=SRR2 experiment_accession=SRX2"),
+        ],
+    )
+
+    await ValidationDriverService.advance_active_studies(session)
+
+    await session.refresh(study)
+    assert study.state == "setup"
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    contrasts = plan.differential_design_json["contrasts"]
+    assert contrasts[1]["test_samples"] == ["GSM_A_SRR1"]
+    # The unselected contrast stays in the plan untouched.
+    assert contrasts[0]["test_samples"] == ["SRX7"]

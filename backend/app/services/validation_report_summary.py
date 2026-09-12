@@ -214,14 +214,19 @@ def _blockers(plan: dict, evidence: dict) -> list[dict]:
 
 def _contrasts(plan: dict, evidence: dict) -> list[dict]:
     basis = _basis(evidence)
+    design = plan.get("differential_design") or {}
+    # change_7.4 section 1.4: only the selected contrast is validated and executed. The others stay
+    # in the plan and are reported as not assessed, never as checked and found wanting.
+    selected = (design.get("selected_contrast") or {}).get("contrast_index")
     return [
         {
             "name": c.get("name"),
             "thresholds": c.get("thresholds"),
             "basis": basis,
             "provisional": basis != "inspected_evidence",
+            "status": "selected" if index == selected else "unassessed",
         }
-        for c in ((plan.get("differential_design") or {}).get("contrasts") or [])
+        for index, c in enumerate(design.get("contrasts") or [])
         if isinstance(c, dict)
     ]
 

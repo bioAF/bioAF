@@ -342,7 +342,11 @@ class TestEditingTheDesignKeepsTheAttribution:
         assert sel["contrast_index"] == 0
 
     @pytest.mark.asyncio
-    async def test_a_design_that_never_had_a_selection_gains_none(self, session, admin_user):
+    async def test_a_design_that_never_had_a_selection_records_the_person_s_choice(self, session, admin_user):
+        """change_7.4 section 1.4 (flagged test change): this asserted the saved design gained no
+        selection. Nothing downstream picks a contrast by position any more, so a contrast a person
+        saved at the gate with nothing selected before is recorded as that person's choice, or it
+        would never run."""
         from app.services.reproduction_plan_service import ReproductionPlanService as RPS
 
         study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
@@ -360,7 +364,62 @@ class TestEditingTheDesignKeepsTheAttribution:
                 "thresholds": {"log2fc": 1.0, "padj": 0.05},
             },
         )
-        assert plan.differential_design_json.get("selected_contrast") is None
+        sel = plan.differential_design_json["selected_contrast"]
+        assert sel["contrast_index"] == 0
+        assert sel["decided_by"] == "human"
+        assert sel["model"] is None
+
+    @pytest.mark.asyncio
+    async def test_saving_a_contrast_after_a_null_selection_is_the_person_s_choice(self, session, admin_user):
+        """Study 37's selector said no contrast fits. A person who then saves one has chosen it, and
+        the record must not keep crediting the model with a pick it declined."""
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study, plan = await TestEditingTheDesignKeepsTheAttribution._plan_with_selection(session, admin_user)
+        plan.differential_design_json = {
+            **plan.differential_design_json,
+            "selected_contrast": {"contrast_index": None, "decided_by": "model", "reason": "neither fits"},
+        }
+        await session.flush()
+        plan = await RPS.set_differential_design(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            {
+                "contrasts": [{"name": "ChIP", "test_samples": ["a", "b"], "reference_samples": ["c", "d"]}],
+                "thresholds": {"log2fc": None, "padj": 0.05},
+            },
+            selected_contrast_index=1,
+        )
+        sel = plan.differential_design_json["selected_contrast"]
+        assert sel["decided_by"] == "human"
+        assert sel["contrast_index"] == 0
+
+    @pytest.mark.asyncio
+    async def test_the_saved_contrast_keeps_the_assay_it_was_measured_on(self, session, admin_user):
+        """The gate posts arms and names, not the assay. The contrast is still the one the paper
+        measured on that assay, and the compatibility check needs to know which."""
+        from app.services.reproduction_plan_service import ReproductionPlanService as RPS
+
+        study, plan = await TestEditingTheDesignKeepsTheAttribution._plan_with_selection(session, admin_user)
+        plan.differential_design_json = {
+            **plan.differential_design_json,
+            "contrasts": [{"name": "RNA", "assay": "RNA-seq"}, {"name": "ChIP", "assay": "ChIP-seq"}],
+        }
+        await session.flush()
+        plan = await RPS.set_differential_design(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            {
+                "contrasts": [{"name": "ChIP", "test_samples": ["a", "b"], "reference_samples": ["c", "d"]}],
+                "thresholds": {"log2fc": None, "padj": 0.05},
+            },
+            selected_contrast_index=1,
+        )
+        assert plan.differential_design_json["contrasts"][0]["assay"] == "ChIP-seq"
 
     @pytest.mark.asyncio
     async def test_clearing_the_design_clears_the_selection_with_it(self, session, admin_user):
@@ -371,3 +430,158 @@ class TestEditingTheDesignKeepsTheAttribution:
             session, study.id, admin_user.organization_id, admin_user.id, {"contrasts": []}
         )
         assert plan.differential_design_json is None
+
+
+# ---- change_7.4 section 1.5: every selected contrast passes the same checks ----
+
+_RNA_ONLY = [{"name": "SAMD1 KO vs WT (undifferentiated ES cells)", "assay": "bulk RNA-seq"}]
+
+
+class _NeverAsk:
+    async def submit(self, *args, **kwargs):
+        raise AssertionError("the answer was deterministic; no model should have been asked")
+
+
+class TestEverySelectedContrastIsChecked:
+    """Study 37: a ChIP-seq run, two RNA-seq contrasts. One contrast makes a choice unambiguous; it
+    does not make it compatible."""
+
+    @pytest.mark.asyncio
+    async def test_one_rnaseq_contrast_with_a_chipseq_workflow_is_never_selected(self):
+        out = await cs.select_contrast(
+            _RNA_ONLY, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_NeverAsk(), model="m", api_key=None
+        )
+        assert out["contrast_index"] is None
+        assert out["outcome"] == "no_compatible_contrast"
+        assert "nf-core/chipseq" in out["reason"]
+
+    @pytest.mark.asyncio
+    async def test_contrasts_all_measured_on_another_assay_need_no_call(self):
+        both = [*_RNA_ONLY, {"name": "SAMD1 KO vs WT (day 7)", "assay": "bulk RNA-seq"}]
+        out = await cs.select_contrast(
+            both, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_NeverAsk(), model="m", api_key=None
+        )
+        assert out["contrast_index"] is None
+        assert out["outcome"] == "no_compatible_contrast"
+
+    @pytest.mark.asyncio
+    async def test_a_sole_contrast_with_no_stated_assay_goes_to_the_selector(self):
+        asked = []
+
+        class _C:
+            async def submit(self, prompt, payload, model, api_key, attachments=None):
+                asked.append(payload)
+                return _response(0, reason="the only contrast, on this run's assay")
+
+        out = await cs.select_contrast(
+            [{"name": "KO vs WT"}], pipeline_key="nf-core/rnaseq", assay="RNA-seq", client=_C(), model="m", api_key=None
+        )
+        assert asked
+        assert out["contrast_index"] == 0
+        assert out["decided_by"] == "model"
+
+    @pytest.mark.asyncio
+    async def test_a_null_answer_for_a_sole_contrast_is_no_compatible_contrast(self):
+        class _C:
+            async def submit(self, prompt, payload, model, api_key, attachments=None):
+                return _response(None, reason="not measured on this run's assay")
+
+        out = await cs.select_contrast(
+            [{"name": "KO vs WT"}], pipeline_key="nf-core/rnaseq", assay="RNA-seq", client=_C(), model="m", api_key=None
+        )
+        assert out["contrast_index"] is None
+        assert out["outcome"] == "no_compatible_contrast"
+        assert out["reason"] == "not measured on this run's assay"
+
+    @pytest.mark.asyncio
+    async def test_a_models_pick_measured_on_another_assay_is_refused(self):
+        class _C:
+            async def submit(self, prompt, payload, model, api_key, attachments=None):
+                return _response(0, reason="picked the RNA-seq one")
+
+        out = await cs.select_contrast(
+            _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_C(), model="m", api_key=None
+        )
+        assert out["contrast_index"] is None
+        assert out["outcome"] == "no_compatible_contrast"
+
+    @pytest.mark.asyncio
+    async def test_assisted_mode_records_the_deterministic_answer_and_asks_nobody(self):
+        out = await cs.select_contrast(
+            _RNA_ONLY,
+            pipeline_key="nf-core/chipseq",
+            assay="ChIP-seq",
+            client=_NeverAsk(),
+            model="m",
+            api_key=None,
+            ask=False,
+        )
+        assert out["outcome"] == "no_compatible_contrast"
+
+    @pytest.mark.asyncio
+    async def test_assisted_mode_leaves_a_real_choice_to_the_person(self):
+        out = await cs.select_contrast(
+            _CONTRASTS,
+            pipeline_key="nf-core/chipseq",
+            assay="ChIP-seq",
+            client=_NeverAsk(),
+            model="m",
+            api_key=None,
+            ask=False,
+        )
+        assert out is None
+
+
+class TestCompatibility:
+    def test_an_expression_contrast_is_incompatible_with_a_binding_workflow(self):
+        status, reason = cs.contrast_compatibility(_RNA_ONLY[0], pipeline_key="nf-core/chipseq")
+        assert status == cs.INCOMPATIBLE
+        assert "bulk RNA-seq" in reason and "nf-core/chipseq" in reason
+
+    def test_the_same_assay_is_compatible(self):
+        status, _ = cs.contrast_compatibility({"assay": "ChIP-seq"}, pipeline_key="nf-core/chipseq")
+        assert status == cs.COMPATIBLE
+
+    def test_a_compound_assay_is_not_resolved_by_declaration_order(self):
+        """`map_method("ChIP-seq and bulk RNA-seq")` returns nf-core/chipseq because routes are swept
+        in declaration order. A contrast that names two assays is not established as either."""
+        status, _ = cs.contrast_compatibility({"assay": "ChIP-seq and bulk RNA-seq"}, pipeline_key="nf-core/chipseq")
+        assert status == cs.UNSTATED
+
+    def test_an_unstated_assay_is_not_established(self):
+        status, _ = cs.contrast_compatibility({"name": "KO vs WT"}, pipeline_key="nf-core/rnaseq")
+        assert status == cs.UNSTATED
+
+    def test_the_input_s_library_strategy_is_checked_when_known(self):
+        status, reason = cs.contrast_compatibility(
+            {"assay": "ATAC-seq"}, pipeline_key="nf-core/atacseq", library_strategy="RNA-Seq"
+        )
+        assert status == cs.INCOMPATIBLE
+        assert "RNA-Seq" in reason
+
+
+class TestNothingDownstreamPicksByPosition:
+    _TWO = [{"name": "RNA", "assay": "RNA-seq"}, {"name": "ChIP", "assay": "ChIP-seq"}]
+
+    def test_the_recorded_selection_is_what_runs(self):
+        design = {"contrasts": self._TWO, "selected_contrast": {"contrast_index": 1}}
+        assert cs.selected_contrast_for(design, pipeline_key="nf-core/chipseq") == (1, None)
+
+    def test_no_selection_record_selects_nothing(self):
+        index, reason = cs.selected_contrast_for({"contrasts": self._TWO}, pipeline_key="nf-core/chipseq")
+        assert index is None
+        assert "none was selected" in reason
+
+    def test_a_null_selection_selects_nothing_with_the_selector_s_reason(self):
+        design = {"contrasts": self._TWO, "selected_contrast": {"contrast_index": None, "reason": "no ChIP contrast"}}
+        assert cs.selected_contrast_for(design, pipeline_key="nf-core/chipseq") == (None, "no ChIP contrast")
+
+    def test_a_selection_that_fails_the_check_selects_nothing(self):
+        design = {"contrasts": self._TWO, "selected_contrast": {"contrast_index": 0}}
+        index, reason = cs.selected_contrast_for(design, pipeline_key="nf-core/chipseq")
+        assert index is None
+        assert "RNA" in reason
+
+    def test_an_index_outside_the_list_selects_nothing(self):
+        design = {"contrasts": self._TWO, "selected_contrast": {"contrast_index": 5}}
+        assert cs.selected_contrast_for(design, pipeline_key="nf-core/chipseq")[0] is None

@@ -826,27 +826,18 @@ async def _scoped_sample_titles(study) -> list[str]:
 
 
 async def _select_contrast_for(
-    session, study, contrasts, pipeline_key, assay, cfg, client, *, on_issue=None
+    session, study, contrasts, pipeline_key, assay, cfg, client, *, on_issue=None, library_strategy=None
 ) -> dict | None:
-    """Ask which contrast this run reproduces, in autonomous mode; propose nothing in assisted.
+    """Which contrast this run reproduces: asked of the model in autonomous mode, and left to a
+    person at the gate in assisted mode.
 
-    In `assisted` the gate shows every contrast for a person to pick, which is the same question
-    asked of a human instead of a model. A single-contrast paper needs neither: there is one answer.
+    change_7.4 section 1.5: the deterministic check settles some answers with no one asked, in
+    either mode: every contrast measured on an assay this workflow does not analyze is a recorded
+    null, and one contrast whose stated assay it does analyze is selected. A sole contrast with no
+    stated assay is a real question, and goes to the selector like any other.
     """
-    if len(contrasts) == 1:
-        return await select_contrast(
-            contrasts,
-            pipeline_key=pipeline_key,
-            assay=assay,
-            client=client,
-            model=cfg.model,
-            api_key=cfg.api_key,
-            on_issue=on_issue,
-        )
-
     org = await session.get(Organization, study.organization_id)
-    if ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) != AUTONOMY_AUTONOMOUS:
-        return None
+    autonomous = ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) == AUTONOMY_AUTONOMOUS
     return await select_contrast(
         contrasts,
         pipeline_key=pipeline_key,
@@ -855,8 +846,10 @@ async def _select_contrast_for(
         model=cfg.model,
         api_key=cfg.api_key,
         accession=(study.source_accession or "").strip() or None,
-        sample_titles=await _scoped_sample_titles(study),
+        sample_titles=await _scoped_sample_titles(study) if autonomous and len(contrasts) > 1 else None,
         on_issue=on_issue,
+        library_strategy=library_strategy,
+        ask=autonomous,
     )
 
 
@@ -1084,6 +1077,7 @@ class ValidationExtractionService:
                 cfg,
                 client,
                 on_issue=issues.append,
+                library_strategy=library_strategy,
             )
             if selection is not None:
                 design["selected_contrast"] = selection

@@ -558,3 +558,23 @@ class TestAnAcquiredInputIsNeverReportedAsNone:
         for text in rendered:
             assert "acquired none" not in text
             assert "Analysis input acquired" in text
+
+
+class TestUnselectedContrastsAreRecordedAsUnassessed:
+    """change_7.4 section 1.4: only the selected contrast is validated and executed; the others stay
+    in the plan, and the report says they were not assessed."""
+
+    def test_the_selected_contrast_and_the_others(self):
+        plan = {
+            "differential_design": {
+                "contrasts": [{"name": "ESC"}, {"name": "day 7"}],
+                "selected_contrast": {"contrast_index": 0},
+            }
+        }
+        contrasts = summarize(study={"state": "classified"}, evidence={}, plan=plan, targets=[], issues=[])["contrasts"]
+        assert [c["status"] for c in contrasts] == ["selected", "unassessed"]
+
+    def test_with_nothing_selected_none_was_assessed(self):
+        plan = {"differential_design": {"contrasts": [{"name": "ESC"}], "selected_contrast": {"contrast_index": None}}}
+        contrasts = summarize(study={"state": "classified"}, evidence={}, plan=plan, targets=[], issues=[])["contrasts"]
+        assert [c["status"] for c in contrasts] == ["unassessed"]

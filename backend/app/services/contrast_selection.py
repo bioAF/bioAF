@@ -13,6 +13,12 @@ contrasts and the pipeline being run, and picks.
 
 Selecting nothing is a real answer. A paper whose findings none of this pipeline can reproduce is a
 Level-2 study, and saying so is better than reproducing the wrong contrast confidently.
+
+change_7.4 section 1.5: **every selected contrast passes the same checks, including a sole one.**
+Study 37 ran nf-core/chipseq on a paper whose contrasts were both RNA-seq; one contrast makes a choice
+unambiguous and does not make it compatible. Where the contrast states its assay, that assay is
+mapped through the same markers the workflow was chosen with and compared with the workflow and, when
+known, with the input's library strategy. A contrast that states no assay is never auto-selected.
 """
 
 from __future__ import annotations
@@ -25,6 +31,89 @@ logger = logging.getLogger("bioaf.contrast_selection")
 
 # The step in the user's language, for the issues section of the report.
 CONTRAST_SELECTION_INTENT = "choosing which of the paper's contrasts this run reproduces"
+
+# What the deterministic check establishes about one contrast and one route.
+COMPATIBLE = "compatible"
+INCOMPATIBLE = "incompatible"
+# The contrast's assay is not stated, names no workflow, or names more than one. Not established
+# either way, so the selector (a model, or a person at the gate) decides.
+UNSTATED = "unstated"
+# A null selection, recorded as what it means for the route.
+NO_COMPATIBLE_CONTRAST = "no_compatible_contrast"
+
+
+def contrast_compatibility(
+    contrast: dict, *, pipeline_key: str | None, library_strategy: str | None = None
+) -> tuple[str, str]:
+    """``(status, reason)``: whether this route can analyze this contrast, as far as the evidence says."""
+    from app.services.pipeline_mapper import pipelines_named_by, route_for_library_strategy, same_route_family
+    from app.services.validation_level3_service import supported_finding_kinds
+
+    assay = str(contrast.get("assay") or "").strip()
+    if not assay:
+        return UNSTATED, "the contrast does not state the assay it was measured on"
+    named = pipelines_named_by(assay)
+    if not named:
+        return UNSTATED, f"bioAF maps the contrast's assay ({assay}) to no workflow"
+    if len(named) > 1:
+        return UNSTATED, f"the contrast's assay ({assay}) names more than one workflow"
+    measured = named[0]
+    workflow = pipeline_key or "this route"
+    if pipeline_key and not same_route_family(measured, pipeline_key):
+        return INCOMPATIBLE, f"it was measured by {assay}, which {workflow} does not analyze"
+    strategy = route_for_library_strategy(library_strategy)
+    if strategy is not None and measured not in strategy.compatible:
+        return INCOMPATIBLE, f"it was measured by {assay}, and the input is {strategy.strategy} data"
+    measured_kinds, route_kinds = set(supported_finding_kinds(measured)), set(supported_finding_kinds(pipeline_key))
+    if measured_kinds and route_kinds and not measured_kinds & route_kinds:
+        kind = sorted(measured_kinds)[0]
+        return INCOMPATIBLE, f"it is a {kind} comparison, which {workflow} cannot analyze"
+    return COMPATIBLE, f"it was measured by {assay}, which {workflow} analyzes"
+
+
+def selected_contrast_for(
+    design: dict | None, *, pipeline_key: str | None, library_strategy: str | None = None
+) -> tuple[int | None, str | None]:
+    """``(index, None)`` for the contrast this run analyzes, or ``(None, reason)``.
+
+    change_7.4 sections 1.4 and 1.5: the only way any later step learns which contrast to validate
+    and execute. Both analysis routes executed ``contrasts[0]`` whatever was selected, and a null
+    selection stopped nothing. Nothing may pick a contrast by position, and a selection that fails
+    the check is refused here as well as where it was made, because the pipeline or the design can
+    change at the gate after the selection was recorded.
+    """
+    contrasts = [c for c in (design or {}).get("contrasts") or [] if isinstance(c, dict)]
+    if not contrasts:
+        return None, "the plan declares no differential contrast to reproduce"
+    record = (design or {}).get("selected_contrast")
+    if not isinstance(record, dict):
+        return None, f"the paper reports {len(contrasts)} contrast(s) and none was selected for this run"
+    index = record.get("contrast_index")
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(contrasts):
+        return None, str(record.get("reason") or "no contrast was selected for this run")
+    status, why = contrast_compatibility(contrasts[index], pipeline_key=pipeline_key, library_strategy=library_strategy)
+    if status == INCOMPATIBLE:
+        return None, f"the selected contrast ({contrasts[index].get('name') or index}) cannot be analyzed here: {why}"
+    return index, None
+
+
+def _none_compatible(contrasts: list[dict], checks: list[tuple[str, str]]) -> dict:
+    """A null selection every check agrees on, made without asking anyone."""
+    if len(contrasts) == 1:
+        reason = f"the paper reports one contrast, and {checks[0][1]}"
+    else:
+        reason = "; ".join(
+            f"{c.get('name') or f'contrast {i}'}: {why}" for i, (c, (_, why)) in enumerate(zip(contrasts, checks))
+        )
+        reason = f"none of the paper's {len(contrasts)} contrasts can be analyzed on this route ({reason})"
+    return {
+        "contrast_index": None,
+        "reason": reason,
+        "confidence": 1.0,
+        "decided_by": "compatibility_check",
+        "model": None,
+        "outcome": NO_COMPATIBLE_CONTRAST,
+    }
 
 
 def build_contrast_prompt(
@@ -104,23 +193,37 @@ async def select_contrast(
     accession: str | None = None,
     sample_titles: list[str] | None = None,
     on_issue=None,
+    library_strategy: str | None = None,
+    ask: bool = True,
 ) -> dict | None:
     """The contrast this run reproduces, or None when there is nothing to pick or the ask failed.
 
     A provider failure returns None rather than falling back to the first contrast: defaulting to
     ``contrasts[0]`` is precisely the defect this replaces, and doing it on an outage would put it
     back exactly where it is hardest to notice.
+
+    change_7.4 section 1.5: the deterministic check runs first, on every contrast. Where it settles
+    the answer (every contrast incompatible, or one contrast whose stated assay is compatible) no one
+    is asked. Otherwise the selector is asked, even for a sole contrast, and its pick is checked. With
+    ``ask=False`` (assisted mode) only a settled answer is returned; a person chooses the rest.
     """
     if not contrasts:
         return None
-    if len(contrasts) == 1:
+    checks = [
+        contrast_compatibility(c, pipeline_key=pipeline_key, library_strategy=library_strategy) for c in contrasts
+    ]
+    if all(status == INCOMPATIBLE for status, _ in checks):
+        return _none_compatible(contrasts, checks)
+    if len(contrasts) == 1 and checks[0][0] == COMPATIBLE:
         return {
             "contrast_index": 0,
-            "reason": "the paper reports one contrast",
+            "reason": f"the paper reports one contrast, and {checks[0][1]}",
             "confidence": 1.0,
             "decided_by": "only_contrast",
             "model": None,
         }
+    if not ask:
+        return None
 
     system, payload = build_contrast_prompt(
         contrasts, pipeline_key=pipeline_key, assay=assay, accession=accession, sample_titles=sample_titles
@@ -142,4 +245,20 @@ async def select_contrast(
         return None
 
     selected = parse_contrast_selection(decision.text, n=len(contrasts))
+    index = selected["contrast_index"]
+    if index is None:
+        return {**selected, "decided_by": "model", "model": model, "outcome": NO_COMPATIBLE_CONTRAST}
+    status, why = checks[index]
+    if status == INCOMPATIBLE:
+        # The model's pick fails the same check a sole contrast does. Recorded with its choice, so
+        # the report can say what was proposed and why it was refused.
+        return {
+            "contrast_index": None,
+            "reason": f"the model chose {contrasts[index].get('name') or f'contrast {index}'}, but {why}",
+            "confidence": selected["confidence"],
+            "decided_by": "compatibility_check",
+            "model": model,
+            "model_choice": index,
+            "outcome": NO_COMPATIBLE_CONTRAST,
+        }
     return {**selected, "decided_by": "model", "model": model}

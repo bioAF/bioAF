@@ -55,9 +55,11 @@ from app.services.validation_acquisition_outcome import (
     INPUT_UNREADABLE,
     MAX_ATTEMPTS,
     NO_ADAPTER,
+    NO_COMPATIBLE_CONTRAST,
     READINESS_CAUSES,
     RESOURCE_LIMIT,
     RETRIEVAL_TRANSIENT,
+    SAMPLE_MAPPING_UNRESOLVED,
     acquisition_accession,
     backoff_for,
     classify_hold,
@@ -66,6 +68,7 @@ from app.services.validation_acquisition_outcome import (
     outcome_for,
     retrieval_cause,
 )
+from app.services.contrast_selection import selected_contrast_for
 from app.services.validation_route_policy import decide_route
 from app.services.validation_ownership import (
     ClaimLost,
@@ -932,10 +935,20 @@ class ValidationDriverService:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         design = (plan.differential_design_json if plan else None) or {}
         contrasts = design.get("contrasts") or []
+        # change_7.4 section 1.4: only the selected contrast's samples are resolved and required.
+        # Every contrast's picks were unioned here, so a sample of a contrast nobody selected could
+        # hold a run it has nothing to do with. With no compatible selection there is no differential
+        # to resolve, and the QC comparison for scalar claims runs as before.
+        selected, _ = selected_contrast_for(
+            design,
+            pipeline_key=plan.pipeline_key if plan else None,
+            library_strategy=plan.library_strategy if plan else None,
+        )
+        if selected is None:
+            return "ok", None
         picked: set[str] = set()
-        for contrast in contrasts:
-            picked.update(contrast.get("test_samples") or [])
-            picked.update(contrast.get("reference_samples") or [])
+        picked.update(contrasts[selected].get("test_samples") or [])
+        picked.update(contrasts[selected].get("reference_samples") or [])
         if not picked:
             return "ok", None  # QC-only paper: no differential design to resolve
 
@@ -958,20 +971,18 @@ class ValidationDriverService:
                         out.append(external_id)
             return out
 
-        new_contrasts = []
-        for contrast in contrasts:
-            new_subjects: dict[str, str] = {}
-            for pick, label in (contrast.get("subjects") or {}).items():
-                for external_id in _resolve(pick):
-                    new_subjects[external_id] = label
-            new_contrasts.append(
-                {
-                    **contrast,
-                    "test_samples": _remap(contrast.get("test_samples")),
-                    "reference_samples": _remap(contrast.get("reference_samples")),
-                    "subjects": new_subjects,
-                }
-            )
+        new_contrasts = list(contrasts)
+        contrast = contrasts[selected]
+        new_subjects: dict[str, str] = {}
+        for pick, label in (contrast.get("subjects") or {}).items():
+            for external_id in _resolve(pick):
+                new_subjects[external_id] = label
+        new_contrasts[selected] = {
+            **contrast,
+            "test_samples": _remap(contrast.get("test_samples")),
+            "reference_samples": _remap(contrast.get("reference_samples")),
+            "subjects": new_subjects,
+        }
         plan.differential_design_json = {**design, "contrasts": new_contrasts}
         await session.flush()
 
@@ -1004,6 +1015,16 @@ class ValidationDriverService:
         if _waiting_to_retry(study):
             return False
         evidence = dict(study.evidence_json or {})
+
+        # change_7.4 section 1.5: the deposit route acquires for a differential analysis, and a plan
+        # whose contrasts none of which this route can analyze has nothing to acquire for. Study 37
+        # downloaded an RNA-seq matrix for a ChIP-seq run whose selector had already said no.
+        if not evidence.get("deposit"):
+            unanalyzable = await ValidationDriverService._no_compatible_contrast(session, study)
+            if unanalyzable:
+                return await ValidationDriverService._hold_deposit(
+                    session, study, evidence, unanalyzable, cause=NO_COMPATIBLE_CONTRAST
+                )
 
         # The driver ticks repeatedly; re-downloading each time would hammer NCBI and duplicate the
         # File rows.
@@ -1252,17 +1273,22 @@ class ValidationDriverService:
         evidence["deposit_metadata_association"] = associations
 
         if design.get("contrasts"):
-            rewritten, status, reason = rewrite_design_to_columns(design, associations)
-            if status == "mismatch":
+            # change_7.4 section 1.4: only the selected contrast is validated and rewritten.
+            selected, _ = selected_contrast_for(
+                design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy
+            )
+            rewritten, status, reason = rewrite_design_to_columns(design, associations, contrast_index=selected)
+            if status in ("mismatch", "pairing_lost"):
                 # change_7.4 sections 1.1 and 1.4: never retried. Whether the input lacks the
-                # condition or the columns could not be placed is decided by what placed them.
+                # condition or the columns could not be placed is decided by what placed them, and a
+                # pairing that cannot be carried is an unresolved mapping, never an unpaired run.
                 return await ValidationDriverService._hold_deposit(
                     session,
                     study,
                     evidence,
                     f"bioAF downloaded and read {matrices[0].get('filename') or 'the deposited matrix'}. "
                     f"{reason or 'design mismatch'}",
-                    cause=empty_arm_cause(associations),
+                    cause=empty_arm_cause(associations) if status == "mismatch" else SAMPLE_MAPPING_UNRESOLVED,
                     resource=matrices[0].get("filename"),
                 )
             plan.differential_design_json = rewritten
@@ -1419,6 +1445,21 @@ class ValidationDriverService:
 
         study.evidence_json = dict(evidence)
         return True
+
+    @staticmethod
+    async def _no_compatible_contrast(session: AsyncSession, study: ValidationStudy) -> str | None:
+        """Why no contrast of the plan can be analyzed on this route, or None when one can (or the
+        plan declares none, which is a QC-only paper and not this refusal)."""
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        design = (plan.differential_design_json if plan else None) or {}
+        if not design.get("contrasts"):
+            return None
+        selected, why = selected_contrast_for(
+            design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy
+        )
+        if selected is not None:
+            return None
+        return f"No contrast of this paper can be analyzed on this route: {why}."
 
     @staticmethod
     async def _reacquire_incomplete_deposit(session: AsyncSession, study: ValidationStudy, evidence: dict) -> bool:

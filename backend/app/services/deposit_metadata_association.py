@@ -35,10 +35,13 @@ logger = logging.getLogger("bioaf.deposit_metadata_association")
 
 # What a sample-metadata table needs. Registered as a `column_resolution` kind so the "headers may be
 # incorrect" case reaches the same seam result tables use.
-METADATA_ROLES = ("sample_id", "condition", "replicate", "batch")
+METADATA_ROLES = ("sample_id", "condition", "replicate", "batch", "sample_accession")
 
 _ROLE_ALIASES: dict[str, tuple[str, ...]] = {
     "sample_id": ("sample", "sampleid", "sample_name", "samplename", "name", "id", "title", "library"),
+    # change_7.4 section 1.4: the repository accession a row describes. A design names GSMs, and a
+    # column placed by its accession is the only kind a declared pairing can be carried onto.
+    "sample_accession": ("geoaccession", "gsm", "gsmid", "sampleaccession", "accession"),
     "condition": ("condition", "group", "treatment", "genotype", "status", "arm", "phenotype", "class"),
     "replicate": ("replicate", "rep", "biologicalreplicate", "biorep", "repnum"),
     "batch": ("batch", "run", "lane", "block"),
@@ -98,14 +101,16 @@ def parse_metadata_table(text: str, *, column_map: dict | None = None) -> list[d
         sample_id = _cell("sample_id")
         if not sample_id:
             continue
-        rows.append(
-            {
-                "sample_id": sample_id,
-                "condition": _cell("condition"),
-                "replicate": _cell("replicate"),
-                "batch": _cell("batch"),
-            }
-        )
+        row = {
+            "sample_id": sample_id,
+            "condition": _cell("condition"),
+            "replicate": _cell("replicate"),
+            "batch": _cell("batch"),
+        }
+        # Only a table that states an accession carries one; the row is otherwise unchanged.
+        if idx["sample_accession"] is not None:
+            row["sample_accession"] = _cell("sample_accession")
+        rows.append(row)
     return rows
 
 
@@ -180,7 +185,7 @@ def associate_columns(
             rows.append(
                 {
                     "column": col,
-                    "sample_accession": None,
+                    "sample_accession": meta.get("sample_accession"),
                     "condition": meta.get("condition"),
                     "replicate": meta.get("replicate"),
                     "batch": meta.get("batch"),
@@ -247,53 +252,83 @@ def empty_arm_cause(associations: list[dict]) -> str:
     return SAMPLE_MAPPING_UNRESOLVED
 
 
-def rewrite_design_to_columns(design: dict, associations: list[dict]) -> tuple[dict, str, str | None]:
-    """Rewrite the design's arms to the matrix's own column names.
+def rewrite_design_to_columns(
+    design: dict, associations: list[dict], *, contrast_index: int | None
+) -> tuple[dict, str, str | None]:
+    """Rewrite the SELECTED contrast's arms to the matrix's own column names.
 
-    Returns ``(design, "ok", None)`` or ``(design, "mismatch", reason)``. Mirrors
-    ``_resolve_sample_design`` on the pipeline route, including its contract: an arm that resolves to
-    nothing HOLDS rather than launching, because a contrast with an empty arm is not a smaller
-    experiment, it is not an experiment.
+    Returns ``(design, status, reason)`` where status is ``"ok"``, ``"mismatch"`` (an arm resolved
+    to nothing) or ``"pairing_lost"`` (a declared pairing could not be carried onto the columns).
+    Mirrors ``_resolve_sample_design`` on the pipeline route, including its contract: an arm that
+    resolves to nothing HOLDS rather than launching, because a contrast with an empty arm is not a
+    smaller experiment, it is not an experiment.
 
-    Arms are matched by accession first, then by CONDITION, because a deposited matrix rarely names
-    GSMs in its columns and matching on the condition is what makes a column-named matrix usable.
+    change_7.4 section 1.4: only the selected contrast is validated and rewritten. Study 37 was
+    refused for the day-7 contrast's arms, which the selected matrix never held and nothing had
+    selected. The other contrasts stay in the plan untouched. A declared pairing is carried onto the
+    column names, exactly as the raw-reads route does; where a label cannot be carried the run stops,
+    because running a paired design unpaired is a different analysis that nothing would record.
+
+    A pick is matched to columns by the accession the association carries or by the column's own
+    name, and only then, for the whole arm, by CONDITION: a deposited matrix rarely names GSMs in its
+    columns, and matching on the condition is what makes a column-named matrix usable at all. A
+    column matched by condition cannot say which sample it was, so it cannot carry a pairing.
     """
     contrasts = (design or {}).get("contrasts") or []
-    if not contrasts:
+    if not contrasts or not isinstance(contrast_index, int) or not 0 <= contrast_index < len(contrasts):
         return design or {}, "ok", None
 
-    by_accession: dict[str, list[str]] = {}
+    by_pick: dict[str, list[str]] = {}
     by_condition: dict[str, list[str]] = {}
     for a in associations or []:
         col = a.get("column")
         if not col:
             continue
+        # A pick that names the column itself is the plainest identity there is.
+        by_pick.setdefault(str(col).strip().lower(), []).append(col)
         if a.get("sample_accession"):
-            by_accession.setdefault(str(a["sample_accession"]).strip().lower(), []).append(col)
+            by_pick.setdefault(str(a["sample_accession"]).strip().lower(), []).append(col)
         if a.get("condition"):
             by_condition.setdefault(str(a["condition"]).strip().lower(), []).append(col)
 
-    def _resolve_arm(picks: list[str] | None, condition: str | None) -> list[str]:
+    def _resolve_arm(picks: list[str] | None, condition: str | None) -> tuple[list[str], dict[str, str]]:
         out: list[str] = []
+        carried_from: dict[str, str] = {}
         for pick in picks or []:
-            for col in by_accession.get(str(pick).strip().lower(), []):
+            for col in by_pick.get(str(pick).strip().lower(), []):
                 if col not in out:
                     out.append(col)
+                    carried_from[col] = pick
         if not out and condition:
             out = list(by_condition.get(str(condition).strip().lower(), []))
-        return out
+        return out, carried_from
 
-    new_contrasts = []
+    c = contrasts[contrast_index]
+    test, test_from = _resolve_arm(c.get("test_samples"), c.get("test_condition"))
+    reference, reference_from = _resolve_arm(c.get("reference_samples"), c.get("reference_condition"))
     empty_arms: list[str] = []
-    for c in contrasts:
-        test = _resolve_arm(c.get("test_samples"), c.get("test_condition"))
-        reference = _resolve_arm(c.get("reference_samples"), c.get("reference_condition"))
-        if not test:
-            empty_arms.append(str(c.get("test_condition") or c.get("name") or "test"))
-        if not reference:
-            empty_arms.append(str(c.get("reference_condition") or c.get("name") or "reference"))
-        new_contrasts.append({**c, "test_samples": test, "reference_samples": reference})
+    if not test:
+        empty_arms.append(str(c.get("test_condition") or c.get("name") or "test"))
+    if not reference:
+        empty_arms.append(str(c.get("reference_condition") or c.get("name") or "reference"))
 
+    rewritten_contrast = {**c, "test_samples": test, "reference_samples": reference}
+    lost: list[str] = []
+    subjects = c.get("subjects") or {}
+    if subjects:
+        carried_from = {**test_from, **reference_from}
+        new_subjects: dict[str, str] = {}
+        for col in test + reference:
+            pick = carried_from.get(col)
+            label = subjects.get(pick) if pick is not None else None
+            if label is None:
+                lost.append(col)
+            else:
+                new_subjects[col] = label
+        rewritten_contrast["subjects"] = new_subjects
+
+    new_contrasts = list(contrasts)
+    new_contrasts[contrast_index] = rewritten_contrast
     rewritten = {**(design or {}), "contrasts": new_contrasts}
     if empty_arms:
         return (
@@ -302,5 +337,13 @@ def rewrite_design_to_columns(design: dict, associations: list[dict]) -> tuple[d
             "Held before running: no column of the deposited matrix could be matched to "
             f"{'; '.join(sorted(set(empty_arms)))}. An arm with no samples is not a smaller "
             "experiment.",
+        )
+    if lost:
+        return (
+            rewritten,
+            "pairing_lost",
+            f"Held before running: {c.get('name') or 'the selected contrast'} is a paired design, and the pairing "
+            f"could not be carried onto the deposited matrix's columns ({', '.join(lost)} carry no identifier that "
+            "places them in a pair). A paired design is never run unpaired.",
         )
     return rewritten, "ok", None

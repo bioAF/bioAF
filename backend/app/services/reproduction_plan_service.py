@@ -403,25 +403,51 @@ class ReproductionPlanService:
         # the human was looking at in the ORIGINAL list: when it differs from what was chosen for
         # them, the choice is now theirs and the record must say so rather than keep crediting a
         # model for a pick a person overrode.
-        previous = (plan.differential_design_json or {}).get("selected_contrast")
+        original = plan.differential_design_json or {}
+        previous = original.get("selected_contrast")
         updated = _differential_design_or_none(normalized)
-        if updated and previous:
-            overridden = (
-                selected_contrast_index is not None
+        if updated:
+            saved = updated.get("contrasts") or []
+            # The gate posts arms and names, not the assay a contrast was measured on. It is still
+            # the contrast the paper measured on that assay, and change_7.4 section 1.5's check needs
+            # to know which, so the assay is carried from the contrast the person was editing.
+            source_index = (
+                selected_contrast_index
+                if selected_contrast_index is not None
+                else (previous or {}).get("contrast_index")
+            )
+            originals = original.get("contrasts") or []
+            if (
+                len(saved) == 1
+                and isinstance(source_index, int)
+                and 0 <= source_index < len(originals)
+                and not saved[0].get("assay")
+            ):
+                saved[0]["assay"] = (originals[source_index] or {}).get("assay")
+            kept = (
+                previous
                 and previous.get("contrast_index") is not None
-                and selected_contrast_index != previous.get("contrast_index")
+                and (selected_contrast_index is None or selected_contrast_index == previous.get("contrast_index"))
             )
-            carried = dict(previous)
-            carried["contrast_index"] = (
-                0 if len(updated.get("contrasts") or []) == 1 else previous.get("contrast_index")
-            )
-            if overridden:
-                carried.update(
-                    decided_by="human",
-                    model=None,
-                    confidence=None,
-                    reason="chosen at the C1 gate, replacing the contrast selected for this run",
-                )
+            if kept:
+                carried = dict(previous)
+                carried["contrast_index"] = 0 if len(saved) == 1 else previous.get("contrast_index")
+            else:
+                # change_7.4 section 1.4: nothing downstream picks a contrast by position, so a
+                # contrast a person saved is recorded as that person's choice. That covers a person
+                # overriding the selection, choosing where nothing was selected, and choosing where the
+                # selector found nothing compatible.
+                carried = {
+                    "contrast_index": 0 if len(saved) == 1 else selected_contrast_index,
+                    "decided_by": "human",
+                    "model": None,
+                    "confidence": None,
+                    "reason": (
+                        "chosen at the C1 gate, replacing the contrast selected for this run"
+                        if previous and previous.get("contrast_index") is not None
+                        else "chosen at the C1 gate"
+                    ),
+                }
             updated["selected_contrast"] = carried
         plan.differential_design_json = updated
         await session.flush()
