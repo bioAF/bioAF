@@ -354,8 +354,20 @@ def missing_measure(fs: FindingSet) -> str | None:
     return next((n for n in fs.parse_notes if MISSING_MEASURE in n), None)
 
 
-def _passes(sig: float, lfc: float, *, padj_threshold, significance_operator, lfc_threshold, effect_operator) -> bool:
-    return _COMPARE[significance_operator](sig, padj_threshold) and _COMPARE[effect_operator](abs(lfc), lfc_threshold)
+def _passes(
+    sig: float, lfc: float, *, padj_threshold, significance_operator, lfc_threshold, effect_operator, significance_kind="padj"
+) -> bool:
+    """change_7.5 section 3.1: the predicate is applied in one function, whoever filters. Entities keep
+    their direction here; concordance filters by it."""
+    from app.services import validation_predicate
+
+    predicate = {
+        "significance": {"kind": significance_kind, "operator": significance_operator, "value": padj_threshold},
+        "effect": {"kind": "abs_log2fc", "operator": effect_operator, "value": lfc_threshold},
+        "direction": "either",
+    }
+    measures = {"pvalue": sig, "padj": None} if significance_kind == "pvalue" else {"pvalue": None, "padj": sig}
+    return validation_predicate.row_passes(predicate, lfc=lfc, **measures) is True
 
 
 def normalize_gene_table(
@@ -437,6 +449,7 @@ def normalize_gene_table(
             significance_operator=significance_operator,
             lfc_threshold=lfc_threshold,
             effect_operator=effect_operator,
+            significance_kind=significance_kind,
         ):
             fs.entities.append(
                 FindingEntity(
@@ -524,6 +537,7 @@ def normalize_interval_table(
             significance_operator=significance_operator,
             lfc_threshold=lfc_threshold,
             effect_operator=effect_operator,
+            significance_kind=significance_kind,
         ):
             chrom = _clean(r[chrom_i])
             fs.entities.append(

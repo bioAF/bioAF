@@ -22,6 +22,7 @@ REVISION_SCOPED = (
     "level3",
     "level3_result",
     "classification_result",
+    "author_consistency",
 )
 FINDING_CLAIM = "finding_claim"
 ANALYSIS_RUN = "analysis_run_id"
@@ -48,7 +49,9 @@ _DEPENDENTS = {
     # the result table itself, which stage 3 records on the input.
     "input": frozenset(REVISION_SCOPED) | {ANALYSIS_RUN},
     "sample_mapping": frozenset({"deposit_metadata_association", "level3", "level3_result", "classification_result", ANALYSIS_RUN}),
-    "predicate": frozenset({"level3", "level3_result", "classification_result", FINDING_CLAIM, ANALYSIS_RUN}),
+    "predicate": frozenset(
+        {"level3", "level3_result", "classification_result", "author_consistency", FINDING_CLAIM, ANALYSIS_RUN}
+    ),
 }
 _BY_FIELD = {field: part for part, field in _FIELDS.items()}
 

@@ -711,6 +711,11 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
             parts.append("No comparison targets.")
         parts.append("")
 
+    # change_7.5 section 4.3: each claim, its experiment, predicate, four checks and results, and the
+    # resources the paper names, from the same projection the page renders.
+    _append_each_claim(parts, summary)
+    _append_resources(parts, summary)
+
     # Level 3: differential-finding concordance (ADR-069). Only present when the reproducing step ran.
     _append_level3_concordance(parts, plan, evidence)
 
@@ -1515,3 +1520,93 @@ def _append_projected_attachments(parts: list[str], summary: dict[str, Any]) -> 
     if extras:
         parts.append(f"The bundle's packaging, not counted as attachments: {', '.join(extras)}.")
         parts.append("")
+
+
+def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
+    """change_7.5 section 4.3: every claim as the projection states it. Absent for a report whose
+    claims carry no checks (a plan read before stage 2)."""
+    claims = [c for c in summary.get("claims") or [] if c.get("checks") or c.get("consistency") or c.get("result")]
+    if not claims:
+        return
+    parts.append("## Each claim")
+    parts.append("")
+    selection = summary.get("selection") or {}
+    if selection.get("check_label"):
+        parts.append(
+            f"This run checks claim {(selection.get('claim_index') or 0) + 1} by {selection['check_label']}"
+            f"{' on ' + selection['workflow'] if selection.get('workflow') else ''} (revision {selection.get('revision')})."
+        )
+        parts.append("")
+    for number, claim in enumerate(summary.get("claims") or [], start=1):
+        if claim not in claims:
+            continue
+        parts.append(f"### Claim {number}: {claim.get('description')}")
+        parts.append("")
+        experiment = claim.get("experiment") or {}
+        lines = []
+        if experiment:
+            lines.append(f"- Experiment: {experiment.get('id')} ({experiment.get('assay') or 'assay not stated'})")
+        if claim.get("predicate"):
+            lines.append(f"- Predicate: {claim['predicate']}")
+        selected = claim.get("selection") or {}
+        if selected:
+            reason = f" ({selected.get('reason')})" if selected.get("status") == "unassessed" and selected.get("reason") else ""
+            lines.append(f"- {selected.get('label')}{': ' + selected['check_label'] if selected.get('check_label') else ''}{reason}")
+        for check in claim.get("checks") or []:
+            lines.append(
+                f"- {check.get('label')}: {check.get('status_label') or check.get('status')}"
+                f"{' (' + check['reason'] + ')' if check.get('reason') else ''}"
+            )
+        consistency = claim.get("consistency") or {}
+        if consistency:
+            counts = (
+                f"; {consistency.get('rows_passing')} of {consistency.get('rows_tested')} rows pass"
+                if consistency.get("rows_passing") is not None
+                else ""
+            )
+            lines.append(
+                f"- {consistency.get('label')} ({consistency.get('table') or 'no table'}{counts})"
+                f"{': ' + consistency['reason'] if consistency.get('reason') else ''}"
+            )
+            for candidate in consistency.get("candidates") or []:
+                lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
+        result = claim.get("result") or {}
+        if result:
+            count = result.get("count") or {}
+            lines.append(
+                f"- {result.get('tier')}: {result.get('verdict') or 'no concordance'}"
+                f"{'; ' + count.get('label') + ': ' + count.get('words') if count.get('words') else ''}"
+            )
+        parts.extend(lines)
+        parts.append("")
+    history = summary.get("selection_history") or []
+    for entry in history:
+        parts.append(f"{entry.get('label')}: {', '.join(entry.get('artifacts') or [])}")
+    if history:
+        parts.append("")
+
+
+def _append_resources(parts: list[str], summary: dict[str, Any]) -> None:
+    """change_7.5 section 2.1: the resources the paper names, and what bioAF can do with each."""
+    rows = summary.get("resources") or []
+    if not rows:
+        return
+    parts.append("## Resources the paper names")
+    parts.append("")
+    parts.append(
+        _table(
+            ["Resource", "Type", "Experiment", "Retrievable by bioAF", "Analyzable by bioAF", "Limitation"],
+            [
+                [
+                    r.get("identifier"),
+                    r.get("type_label"),
+                    ", ".join(r.get("reported_experiment_ids") or []) or "Not linked",
+                    r.get("retrievable_label") or "--",
+                    r.get("analyzable_label") or "--",
+                    r.get("limitation") or "--",
+                ]
+                for r in rows
+            ],
+        )
+    )
+    parts.append("")

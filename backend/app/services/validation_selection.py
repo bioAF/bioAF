@@ -173,6 +173,10 @@ async def select_analysis(
             if status == INCOMPATIBLE:
                 refusal = {"outcome": "no_compatible_contrast", "reason": why}
         if refusal is None:
+            from app.services.validation_predicate import build_predicate, predicate_words
+
+            contrast = contrasts[contrast_index] if contrast_index is not None and 0 <= contrast_index < len(contrasts) else None
+            predicate = build_predicate(target, contrast=contrast) if contrast is not None else None
             reference = experiment.get("reference") or {}
             current = {
                 "revision": ((previous or {}).get("current") or {}).get("revision", 0) + 1,
@@ -188,7 +192,8 @@ async def select_analysis(
                 },
                 "input": None,
                 "sample_mapping": None,
-                "predicate": None,
+                "predicate": predicate,
+                "predicate_words": predicate_words(predicate, contrast=contrast) if predicate else None,
                 "decided_by": decided_by,
                 "reason": reason,
                 "confidence": confidence,

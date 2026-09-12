@@ -176,6 +176,28 @@ async def active_plan(session: AsyncSession, study):
     )
 
 
+async def claimed_predicates(session: AsyncSession, study) -> list[dict]:
+    """change_7.5 section 4.1: each claim's predicate, for checking a results table against it."""
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_author_consistency import claim_predicates
+
+    plan = await active_plan(session, study)
+    if plan is None:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return claim_predicates(list(rows), plan)
+
+
 async def claimed_thresholds(session: AsyncSession, study) -> list[float]:
     """The fold-change cutoffs this paper's claims actually name.
 
@@ -262,6 +284,7 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
             fetcher=deposit_bytes_fetcher,
             thresholds=await claimed_thresholds(session, study),
             ledger=ledger,
+            predicates=await claimed_predicates(session, study),
         )
     except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
         logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
@@ -680,3 +703,21 @@ def _now_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
+
+async def deposit_head_fetcher(url: str, max_bytes: int) -> bytes:
+    """change_7.5 section 3.2: at most ``max_bytes`` of a deposited file's first bytes, streamed. A
+    preview never downloads the whole file."""
+    import httpx
+
+    chunks: list[bytes] = []
+    size = 0
+    async with httpx.AsyncClient(timeout=httpx.Timeout(60.0), follow_redirects=True) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_raw():
+                chunks.append(chunk)
+                size += len(chunk)
+                if size >= max_bytes:
+                    break
+    return b"".join(chunks)[:max_bytes]

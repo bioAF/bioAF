@@ -72,6 +72,14 @@ REFERENCE_STATUS_LABELS = {
     "unresolved": "Unresolved",
     "unstated": "Not stated",
 }
+# change_7.5 section 4, pending the owner's sign-off item by item (7.4 section 3.2's tiers).
+CONSISTENCY_LABELS = {
+    "agree": "Consistent with the authors' deposited results",
+    "disagree": "Differs from the authors' results",
+    "unresolved": "Unresolved against the authors' results",
+    "not_checkable": "Not checkable against the authors' results",
+}
+TIER_LABELS = {"deposit": "Deposited data", "pipeline": "Raw reads"}
 SELECTED_LABEL = "Selected for this run"
 UNASSESSED_LABEL = "Not assessed in this run"
 
@@ -164,6 +172,8 @@ def enum_labels() -> dict[str, dict[str, str]]:
         "claim_check_status": dict(CLAIM_CHECK_STATUS_LABELS),
         "reference_status": dict(REFERENCE_STATUS_LABELS),
         "selection": {"selected": SELECTED_LABEL, "unassessed": UNASSESSED_LABEL},
+        "consistency": dict(CONSISTENCY_LABELS),
+        "tier": dict(TIER_LABELS),
         "role": dict(ROLE_LABELS),
         "retrieval_status": dict(RETRIEVAL_LABELS),
         "retrieval_outcome": dict(RETRIEVAL_OUTCOME_LABELS),
@@ -370,6 +380,101 @@ def _claim_checks(target: dict) -> list[dict]:
         for key, label in CLAIM_CHECK_LABELS.items()
         if key in checks
     ]
+
+
+def _predicate_words(target: dict, contrasts: list[dict], plan: dict) -> str | None:
+    """A differential claim's predicate in words, or None for a claim that reports on no contrast."""
+    from app.services.validation_predicate import build_predicate, predicate_words
+
+    index = target.get("contrast_index")
+    if not isinstance(index, int) or not 0 <= index < len(contrasts):
+        return None
+    contrast = contrasts[index]
+    predicate = build_predicate(
+        target, contrast=contrast, design=plan.get("differential_design"), finding_claim=plan.get("finding_claim")
+    )
+    return predicate_words(predicate, contrast=contrast)
+
+
+def _consistency_row(record: dict) -> dict:
+    return {
+        "outcome": record.get("outcome"),
+        "label": CONSISTENCY_LABELS.get(record.get("outcome"), record.get("outcome")),
+        "reason": record.get("reason"),
+        "table": record.get("table"),
+        "source": record.get("source"),
+        "columns": record.get("columns") or {},
+        "rows_tested": record.get("rows_tested"),
+        "rows_passing": record.get("rows_passing"),
+        "rows_missing": record.get("rows_missing"),
+        "count_range": record.get("count_range"),
+        "duplicates_disagreeing": record.get("duplicates_disagreeing") or [],
+        "candidates": record.get("candidates") or [],
+        "assumptions": record.get("assumptions") or [],
+    }
+
+
+def _claim_consistency(index: int, target: dict, contrasts: list[dict], evidence: dict) -> dict | None:
+    """The claim checked against the authors' results: the table identified with the input first, then
+    the one results supplement checked for it, then the supplement whose own columns name its contrast.
+    Several candidate tables and none naming the contrast is not established."""
+    for record in (evidence.get("author_consistency") or {}).get("records") or []:
+        if isinstance(record, dict) and record.get("claim_index") == index:
+            return _consistency_row(record)
+    tables = [s for s in evidence.get("supplements") or [] if isinstance(s, dict) and s.get("role") == "results_table"]
+    checked = [
+        (s, r) for s in tables for r in s.get("consistency") or [] if isinstance(r, dict) and r.get("claim_index") == index
+    ]
+    if len(tables) == 1 and checked:
+        return _consistency_row(checked[0][1])
+    position = target.get("contrast_index")
+    name = contrasts[position].get("name") if isinstance(position, int) and 0 <= position < len(contrasts) else None
+    named = [r for s, r in checked if name and name.lower() in " ".join(str(v) for v in (r.get("columns") or {}).values()).lower()]
+    if len(named) == 1:
+        return _consistency_row(named[0])
+    if checked:
+        return {
+            "outcome": "unresolved",
+            "label": CONSISTENCY_LABELS["unresolved"],
+            "reason": f"{len(tables)} results tables were inspected, and which one reports this claim's contrast is not established",
+            "table": None,
+            "source": "supplement",
+            "columns": {},
+            "rows_tested": None,
+            "rows_passing": None,
+            "rows_missing": None,
+            "count_range": None,
+            "duplicates_disagreeing": [],
+            "candidates": [{"interpretation": s.get("filename"), "count": r.get("rows_passing")} for s, r in checked],
+            "assumptions": [],
+        }
+    return None
+
+
+def _claim_result(index: int, target: dict, contrasts: list[dict], evidence: dict) -> dict | None:
+    """change_7.5 section 4.3: a Level 3 result attaches to the claim whose contrast it tested."""
+    level3, result = evidence.get("level3") or {}, evidence.get("level3_result") or {}
+    if not result:
+        return None
+    if isinstance(level3.get("claim_index"), int):
+        # The count and the direction filter are the selected claim's own.
+        attached = level3["claim_index"] == index
+    else:
+        attached = bool(level3.get("contrast")) and _contrast_name(target, contrasts) == level3.get("contrast")
+    if not attached:
+        return None
+    concordance = result.get("concordance") or {}
+    return {
+        "tier": TIER_LABELS.get(level3.get("source") or "pipeline", "Raw reads"),
+        "verdict": concordance.get("verdict"),
+        "ground_truth": (level3.get("ground_truth") or {}).get("source"),
+        "count": result.get("claim_count"),
+    }
+
+
+def _contrast_name(target: dict, contrasts: list[dict]) -> str | None:
+    position = target.get("contrast_index")
+    return contrasts[position].get("name") if isinstance(position, int) and 0 <= position < len(contrasts) else None
 
 
 def _claim_selection(index: int, plan: dict) -> dict | None:
@@ -919,6 +1024,11 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                 ),
                 "checks": _claim_checks(target),
                 "selection": _claim_selection(position, plan),
+                # change_7.5 section 3.1: the claim's statistical definition, in words.
+                "predicate": _predicate_words(target, contrasts, plan),
+                # change_7.5 section 4: the authors' results and the reanalysis, on the claim itself.
+                "consistency": _claim_consistency(position, target, contrasts, evidence),
+                "result": _claim_result(position, target, contrasts, evidence),
             }
         )
     counts = {"total": len(claims), "mapped": mapped, "tested": tested, "label": _counts_label(mapped, tested)}
@@ -1182,4 +1292,5 @@ def target_dict(t) -> dict:
         "aggregation": t.aggregation,
         "binding_facts": t.binding_facts,
         "checks": t.checks,
+        "count_relation": t.count_relation,
     }

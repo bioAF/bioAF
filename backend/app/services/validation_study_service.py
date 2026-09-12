@@ -814,6 +814,11 @@ class ValidationStudyService:
             evidence.pop(key, None)
         if (evidence.get("deposit_selection") or {}).get("declined"):
             evidence.pop("deposit_selection", None)
+        # change_7.5 section 3.3: an unresolved mapping resumes into mapping with the same input, whose
+        # revision is still current. It never re-enters acquisition.
+        choice = evidence.get("input_choice")
+        if isinstance(choice, dict) and (choice.get("mapping_validation") or {}).get("status") == "unresolved":
+            evidence["input_choice"] = {**choice, "remap": True}
         # change_7.5 section 2.2: a plan read before experiments existed whose contrasts span two assays
         # resumes only after a person renews the selection at the gate; nothing acquires or launches
         # for it until then.

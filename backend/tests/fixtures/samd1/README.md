@@ -71,3 +71,22 @@ list whenever the fixture gains one.
 - `WT-2`
 - `WT-3`
 - `WT-4`
+
+## Owner-owed input for the consistency acceptance (change_7.5 section 4.1)
+
+The consistency route is built and tested on synthetic tables. Its SAMD1 acceptance is seeded from the
+owner's manual checks (2026-09-11), and the plan requires this file to record the following BEFORE the
+seeding. None of it may be inferred by bioAF or filled in by an agent; each item is the owner's to state.
+
+| Item | Undifferentiated table | Differentiation table |
+|---|---|---|
+| Source file | owed | owed |
+| Significance definition applied | owed | owed |
+| Column roles (the differentiation table is headerless), and why | not applicable | owed |
+| Effect scale, with the evidence that establishes it | owed | owed |
+| Ratio orientation, with the evidence that establishes it | owed | owed |
+
+Until these are recorded, a directional check against either table is `unresolved` with both
+readings shown (the tables' headers do not name the ratio), and the headerless table is `unresolved`
+with its candidate column roles. A recorded confirmation is passed to the consistency route as an
+`interpretation` (`validation_author_consistency.check_claim`) and is reported in `assumptions`.
