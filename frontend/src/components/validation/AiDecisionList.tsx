@@ -37,9 +37,11 @@ export interface AiDecision {
   mapping_explanation?: string | null;
 }
 
-const NO_SUPPORTED_METRIC = "No supported metric";
+// change_7.5 section 1.4: a declined QC binding decides the QC check alone. Worded as the projection
+// words it, for a row from before the projection carried the words.
+const NO_SUPPORTED_METRIC = "No QC metric measures this claim";
 const NO_SUPPORTED_EXPLANATION =
-  "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.";
+  "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.";
 
 const MAPPING_CLASS: Record<string, string> = {
   mapped: "bg-emerald-50 text-emerald-700",

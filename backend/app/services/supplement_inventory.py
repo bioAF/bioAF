@@ -84,6 +84,15 @@ _NAMED_SUPPLEMENT_RE = re.compile(
     re.I,
 )
 _ONE_IDENT_RE = re.compile(rf"\b({_IDENT})\b")
+# change_7.5 section 1.5: the Science family writes "table S1", "data file S1" and "fig. S1" with no
+# "Supplementary" before them. The S is required, because "table 1" is the paper's own main table.
+_SID = r"S\d+[A-Za-z]?"
+_S_CONVENTION_RE = re.compile(
+    rf"\b(?P<noun>data\s+files?|tables?|figs?\.?|figures?)\s+(?P<ids>{_SID}(?:\s*(?:,|and|&|to)\s*{_SID})*)\b",
+    re.I,
+)
+_ONE_SID_RE = re.compile(rf"\b({_SID})\b", re.I)
+_S_CONVENTION_NOUN = {"data file": "Data File", "table": "Table", "fig": "Figure", "figure": "Figure"}
 
 _CANONICAL_NOUN = {
     "file": "File",
@@ -184,7 +193,8 @@ def parse_jats_supplements(xml_text: str) -> list[dict]:
                 filename=None,
                 mimetype=None,
                 source=NAMED_IN_TEXT,
-                kind=KIND_REFERENCE,
+                # A supplementary figure is the article's own packaging, never an input.
+                kind=KIND_FIGURE if citation["noun"] == "figure" else KIND_REFERENCE,
                 identified_in=IDENTIFIED_IN_PROSE,
                 identity=identity,
             ),
@@ -310,7 +320,7 @@ def _citations(text: str) -> list[dict]:
     ``key`` is what makes two spellings one citation ("Supplementary File S2", "Supplemental file
     s2"); ``label`` is the canonical form a reader recognises.
     """
-    found: dict[str, dict] = {}
+    found: dict[tuple[int, str], dict] = {}
     for match in _NAMED_SUPPLEMENT_RE.finditer(text or ""):
         if match.group("additional"):
             word = match.group("additional").lower()
@@ -322,15 +332,38 @@ def _citations(text: str) -> list[dict]:
         for ident in _ONE_IDENT_RE.findall(match.group("ids")):
             ident = ident.upper()
             key = f"{noun}:{ident}"
-            found.setdefault(key, {"key": key, "label": f"{prefix} {ident}", "noun": noun, "ident": ident})
-    return list(found.values())
+            found.setdefault(
+                (match.start(), key), {"key": key, "label": f"{prefix} {ident}", "noun": noun, "ident": ident}
+            )
+    for match in _S_CONVENTION_RE.finditer(text or ""):
+        raw = " ".join(match.group("noun").split()).lower().rstrip(".")
+        raw = raw[:-1] if raw.endswith("s") and raw not in ("figs",) and raw != "data files" else raw
+        raw = {"figs": "fig", "data files": "data file"}.get(raw, raw)
+        canonical = _S_CONVENTION_NOUN.get(raw)
+        if canonical is None:
+            continue
+        noun = canonical.lower().replace(" ", "")
+        for ident in _ONE_SID_RE.findall(match.group("ids")):
+            ident = ident.upper()
+            key = f"{noun}:{ident}"
+            found.setdefault(
+                (match.start(), key),
+                {"key": key, "label": f"Supplemental {canonical} {ident}", "noun": noun, "ident": ident},
+            )
+    # One citation per key, in order of first mention.
+    unique: dict[str, dict] = {}
+    for _at, citation in sorted(found.items(), key=lambda item: item[0][0]):
+        unique.setdefault(citation["key"], citation)
+    return list(unique.values())
 
 
 _NOUN_TOKENS = {
     "file": r"files?",
     "table": r"(?:tables?|tab)",
     "dataset": r"(?:data_?sets?|data)",
+    "datafile": r"(?:data_?files?|data)",
     "material": r"materials?",
+    "figure": r"(?:figures?|fig)",
     "additional_file": r"additional_files?",
     "additional_table": r"additional_tables?",
 }

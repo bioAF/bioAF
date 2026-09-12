@@ -71,7 +71,9 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # human either runs with the samples we have (-> setup) or stops (-> plan_declined).
     "acquiring_data": ["setup", "samples_mismatch", "classified", "error"],
     "samples_mismatch": ["setup", "plan_declined", "error"],
-    "setup": ["running", "error"],
+    # change_7.5 section 1.3: `classified` when the analysis would need a reference bioAF cannot supply.
+    # It is never launched on the pipeline's seeded genome instead.
+    "setup": ["running", "classified", "error"],
     "running": ["extracting", "error"],
     # extracting routes to reproducing when Level-3 inputs are present, else straight to comparing
     # (Level-2 only), so the existing QC-only flow is unchanged.

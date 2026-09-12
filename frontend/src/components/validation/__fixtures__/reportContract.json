@@ -100,6 +100,7 @@
       "input_unreadable": "Acquired input could not be read",
       "missing_input": "Required input not published",
       "no_compatible_contrast": "No comparison this route can analyze",
+      "reference_unavailable": "Stated reference not available to bioAF",
       "resource_limit": "Input exceeds bioAF's processing limits",
       "retrieval_failed": "Could not be retrieved in this attempt",
       "sample_mapping_unresolved": "Samples could not be assigned to the comparison",
@@ -454,8 +455,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
@@ -477,8 +478,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
@@ -500,8 +501,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
@@ -523,8 +524,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",
@@ -654,7 +655,7 @@
       },
       "reproduction_attempted": false
     },
-    "figures": 0,
+    "figures": 2,
     "headline": {
       "key": "reproduction_not_attempted",
       "label": "Reproduction not attempted"
@@ -766,9 +767,9 @@
       {
         "key": "processed_results_available",
         "label": "Processed results published",
-        "reason": "bioAF inspected every attachment it found and none is a results table",
-        "value": "no",
-        "value_label": "No"
+        "reason": "bioAF found no attachments to inspect",
+        "value": "not_established",
+        "value_label": "Not established"
       },
       {
         "key": "input_acquired",
@@ -852,6 +853,122 @@
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
       "Analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "reference_unavailable": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": "bioAF found no attachments to inspect",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "The paper states mm9; bioAF cannot supply mm9 to nf-core/chipseq, so bioAF did not run reanalysis from raw reads and QC metrics from a run. bioAF never substitutes a default or another assembly; checks that need no reference are unaffected.",
+        "governs": true,
+        "kind": "reference_unavailable",
+        "label": "Stated reference not available to bioAF",
+        "leg": "pipeline",
+        "observation": null,
+        "resource": "mm9",
+        "technical_detail": null
+      }
+    ],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
     ],
     "version": 1
   },
@@ -1207,8 +1324,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
@@ -1230,8 +1347,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
@@ -1253,8 +1370,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
@@ -1276,8 +1393,8 @@
           "bound_key": null,
           "confidence": 0.97,
           "decided_by": "model",
-          "explanation": "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
-          "label": "No supported metric",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
           "metric_key": "de_gene_count",
           "model": "claude-opus-4-8",
           "reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",

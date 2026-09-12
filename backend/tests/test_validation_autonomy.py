@@ -209,11 +209,15 @@ class TestTheDecisionLeadsWithTheScience:
         assert row["population"] == "whole embryo XX vs XY"
 
     def test_it_carries_the_contrast_and_cutoff(self):
+        # change_7.5 section 1.2 changed this assertion (flagged): one vocabulary, `describe_cutoff`,
+        # so an adjusted P reads "adjusted P", never "padj".
         row = self._row()
         assert row["contrast"] == "XX vs XY WE"
-        assert row["cutoff"] == "padj < 0.05"
+        assert row["cutoff"] == "adjusted P < 0.05"
 
     def test_a_decline_by_the_model_says_no_supported_metric(self):
+        # change_7.5 section 1.4 changed this assertion (flagged): a declined QC binding decides the QC
+        # check only.
         row = self._row()
         assert row["mapping_status"] == "no_supported_metric"
-        assert "bioAF has no metric that measures this claim" in row["mapping_explanation"]
+        assert "bioAF computes no QC metric that measures this claim" in row["mapping_explanation"]

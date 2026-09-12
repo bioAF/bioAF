@@ -342,6 +342,23 @@ def _no_accession_manifest_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_supplement_bundle_network(monkeypatch):
+    """No test reaches Europe PMC for a paper's supplementary bundle.
+
+    change_7.5 section 1.5 requests the bundle for an article whose JATS listed no attachments, so a
+    study carrying only a PMC id now asks for it during the assessment. The fetch is stubbed to fail
+    here, which the retrieval ledger records as a failed attempt; a test that wants the bundle
+    supplies its own fetcher.
+    """
+    from app.services import validation_assessment
+
+    async def _offline(url: str, *args, **kwargs):
+        raise RuntimeError(f"tests do not fetch {url}")
+
+    monkeypatch.setattr(validation_assessment, "deposit_bytes_fetcher", _offline)
+
+
+@pytest.fixture(autouse=True)
 def _no_retrieval_backoff(monkeypatch):
     """Supplement retrieval retries with real backoff (change_7.3 section 1).
 

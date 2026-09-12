@@ -73,7 +73,9 @@ describe("AiDecisionList", () => {
         ]}
       />,
     );
-    expect(screen.getByText(/declined/i)).toBeInTheDocument();
+    // change_7.5 section 1.4 changed this assertion (flagged): the decline is worded for the QC check
+    // alone, "No QC metric measures this claim", rather than "the mapping was declined".
+    expect(screen.getByText("No QC metric measures this claim")).toBeInTheDocument();
     expect(screen.getByText(/a DE gene count is not a controlled metric/)).toBeInTheDocument();
   });
 

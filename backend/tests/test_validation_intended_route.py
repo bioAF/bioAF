@@ -138,11 +138,19 @@ class TestAChoiceThatCannotWorkStopsAndSaysWhy:
         # and a study with no list of the paper's attachments has not established one. This fixture
         # read a paper with a PMC id whose manifest lists no attachments, which is the absence the
         # assertion below always meant.
+        # change_7.5 section 1.5 changed this fixture (flagged): a PMC id alone no longer makes the
+        # attachment list known. The bundle was retrieved and held nothing, which is the absence the
+        # assertion below means.
         study = await _study(
             session,
             admin_user,
             intended_route="deposit",
-            evidence={**_caps(preprocessed="no"), "pmcid": "PMC1", "supplements": []},
+            evidence={
+                **_caps(preprocessed="no"),
+                "pmcid": "PMC1",
+                "supplements": [],
+                "retrieval_ledger": [{"id": "l1", "source": "bundle", "outcome": "retrieved"}],
+            },
             state="plan_ready",
         )
         await ValidationDriverService.advance_active_studies(session)

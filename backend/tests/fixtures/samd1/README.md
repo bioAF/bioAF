@@ -36,3 +36,38 @@ consistency route. Before they are seeded this file records, per plan_7_4 sectio
 for each table, the significance definition applied, the owner's reading of the headerless
 differentiation table (which column was read as which role, and why), and each table's effect scale
 and ratio orientation with the evidence that establishes them.
+
+## Values that must never reach production
+
+`test_prompt_fixture_guard.py` renders every lit_validation prompt and fails if any value below appears
+in one (change_7.5 section 1.6). Identifiers, filenames, counts and labels from this fixture; add to the
+list whenever the fixture gains one.
+
+- `10.1126/sciadv.abf2229`
+- `PMC8115922`
+- `GSE144396`
+- `PXD016781`
+- `6LUI`
+- `6LUJ`
+- `6LUK`
+- `STI20A`
+- `GSE144396_RNA-Seq_NormalizedCounts.txt.gz`
+- `GSE144396_RNA-Seq_DeSeq2.txt.gz`
+- `GSE144396_DeSeq2-Differentiation-SAMD1KOvsWT.txt.gz`
+- `SAMD1`
+- `L3MBTL3`
+- `samd1_chip_peaks`
+- `8733`
+- `576`
+- `257`
+- `524`
+- `5904`
+- `1904`
+- `KO Cl5 repl1`
+- `KO Cl5 repl2`
+- `KO Cl16`
+- `KO Cl33`
+- `WT-1`
+- `WT-2`
+- `WT-3`
+- `WT-4`

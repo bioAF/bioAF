@@ -24,6 +24,7 @@ const groff = contract.groff_failed as unknown as ReportSummary;
 const legacy = contract.study_34_legacy as unknown as ReportSummary;
 const attempted = contract.attempted_no_verdict as unknown as ReportSummary;
 const mappingUnresolved = contract.mapping_unresolved as unknown as ReportSummary;
+const referenceUnavailable = contract.reference_unavailable as unknown as ReportSummary;
 
 describe("the headline follows the reproduction attempt (item 1)", () => {
   it("says reproduction was not attempted when nothing executed", () => {
@@ -173,9 +174,11 @@ describe("the claims at the gate (items 5, 6 and 7)", () => {
     contrast: "XX vs XY WE",
     cutoff: "padj < 0.05",
     mapping_status: "no_supported_metric",
-    mapping_label: "No supported metric",
+    // change_7.5 section 1.4 changed this row's wording (flagged): a declined QC binding decides the
+    // QC check only.
+    mapping_label: "No QC metric measures this claim",
     mapping_explanation:
-      "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared.",
+      "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
   };
 
   it("counts mapped claims without calling them tested", () => {
@@ -183,10 +186,20 @@ describe("the claims at the gate (items 5, 6 and 7)", () => {
     expect(screen.getByText(/1 claim mapped to candidate comparison metrics; none tested\./)).toBeInTheDocument();
   });
 
-  it("says No supported metric and why", () => {
+  it("says no QC metric measures the claim, and that this decides the QC check only", () => {
     render(<AiDecisionList decisions={[row]} />);
-    expect(screen.getByText("No supported metric")).toBeInTheDocument();
-    expect(screen.getByText(/bioAF has no metric that measures this claim/)).toBeInTheDocument();
+    expect(screen.getByText("No QC metric measures this claim")).toBeInTheDocument();
+    expect(screen.getByText(/This does not decide its other checks/)).toBeInTheDocument();
+  });
+
+  it("words a row from before the projection carried its words the same way", () => {
+    const { mapping_status, mapping_label, mapping_explanation, ...bare } = row;
+    void mapping_status;
+    void mapping_label;
+    void mapping_explanation;
+    render(<AiDecisionList decisions={[bare]} />);
+    expect(screen.getByText("No QC metric measures this claim")).toBeInTheDocument();
+    expect(screen.queryByText(/the claim cannot be compared\./)).not.toBeInTheDocument();
   });
 
   it("leads with the claim's science", () => {
@@ -379,5 +392,15 @@ describe("the stated cutoff, in one vocabulary (change_7.5 section 1.2)", () => 
       expect(contrast).not.toHaveProperty("thresholds");
       expect(contrast).toHaveProperty("cutoff");
     }
+  });
+});
+
+describe("a reference bioAF cannot supply (change_7.5 section 1.3)", () => {
+  it("renders reference_unavailable with its label and its detail", () => {
+    render(<CompletionSummary completion={null} summary={referenceUnavailable} />);
+    const row = screen.getByTestId("limitation-reference_unavailable");
+    expect(row).toHaveTextContent("Stated reference not available to bioAF");
+    expect(row).toHaveTextContent("The paper states mm9; bioAF cannot supply mm9 to nf-core/chipseq");
+    expect(row).toHaveTextContent(/never substitutes a default or another assembly/);
   });
 });

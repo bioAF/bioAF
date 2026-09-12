@@ -40,7 +40,34 @@ GEO = "geo"
 EGA = "ega"
 SRA = "sra"
 ARRAYEXPRESS = "arrayexpress"
+# change_7.5 section 1.5: archives bioAF recognises and has no adapter for. Named, so the report can say
+# "bioAF has no PRIDE adapter" rather than "an archive bioAF does not recognise", which is reserved for
+# identifiers that match no pattern at all.
+PRIDE = "pride"
+MASSIVE = "massive"
+PDB = "pdb"
+EMDB = "emdb"
+ZENODO = "zenodo"
+FIGSHARE = "figshare"
+GITHUB = "github"
+GITLAB = "gitlab"
 OTHER = "other"
+
+# How an archive is written in a sentence.
+ARCHIVE_NAMES = {
+    GEO: "GEO",
+    EGA: "EGA",
+    SRA: "SRA",
+    ARRAYEXPRESS: "ArrayExpress",
+    PRIDE: "PRIDE",
+    MASSIVE: "MassIVE",
+    PDB: "PDB",
+    EMDB: "EMDB",
+    ZENODO: "Zenodo",
+    FIGSHARE: "figshare",
+    GITHUB: "GitHub",
+    GITLAB: "GitLab",
+}
 
 # How the data may be reached, which is not the same question as whether it is there.
 PUBLIC = "public"
@@ -64,6 +91,13 @@ _ARCHIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (EGA, re.compile(r"^EGA[SDFP]\d+$", re.I)),
     (SRA, re.compile(r"^(PRJNA|PRJEB|PRJDB|SRP|ERP|DRP|SRX|ERX|SRR|ERR|SRS)\d+$", re.I)),
     (ARRAYEXPRESS, re.compile(r"^E-[A-Z]{4}-\d+$", re.I)),
+    (PRIDE, re.compile(r"^PXD\d{6}$", re.I)),
+    (MASSIVE, re.compile(r"^MSV\d{9}$", re.I)),
+    (EMDB, re.compile(r"^EMD-\d{4,5}$", re.I)),
+    (ZENODO, re.compile(r"^(?:https?://(?:dx\.)?doi\.org/)?10\.5281/zenodo\.\d+$", re.I)),
+    (FIGSHARE, re.compile(r"^(?:https?://(?:dx\.)?doi\.org/)?10\.6084/m9\.figshare\.\d+(?:\.v\d+)?$", re.I)),
+    (GITHUB, re.compile(r"^https?://(?:www\.)?github\.com/\S+$", re.I)),
+    (GITLAB, re.compile(r"^https?://(?:www\.)?gitlab\.com/\S+$", re.I)),
 )
 
 # Extensions that ARE the sequencing reads, and extensions that are a derived table. A dataset of
@@ -318,16 +352,17 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         sample_metadata = UNKNOWN
         failure_reason = manifest.unavailable_reason or f"GEO returned no series record for {acc}"
 
-    rows, ena_failure = await _ena_rows(acc, fetcher, manifest)
+    rows, ena_failure, scope = await _ena_rows(acc, fetcher, manifest)
     if rows is None:
         raw_data = UNKNOWN
         failure_reason = failure_reason or ena_failure
     else:
-        raw_data, raw_evidence = _raw_read_answer(rows)
+        raw_data, raw_evidence = _raw_read_answer(rows, scope=scope)
         evidence.append(raw_evidence)
         by_key["raw_data"] = raw_evidence
 
     inventory = await list_deposit(acc, fetcher=fetcher)
+    result_tables: list[str] = []
     if inventory.unavailable_reason:
         # An unlistable directory is a discovery failure. It says nothing about whether the record
         # exists, which is why that question was answered from the series matrix instead.
@@ -343,6 +378,9 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         )
         evidence.append(listing)
         by_key["preprocessed_data"] = listing
+        # change_7.5 section 1.5: the authors' own result tables are processed results the paper
+        # published, and were never counted as such.
+        result_tables = [e.filename for e in inventory.entries if e.classification in ("de_table", "da_table")]
 
     return _deposit(
         acc,
@@ -357,13 +395,14 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         evidence_by_key=by_key,
         registered_samples=len(manifest.samples) or None,
         failure_reason=failure_reason,
+        result_tables=result_tables,
     )
 
 
 async def describe_sra_deposit(accession: str, *, fetcher: Fetcher) -> dict:
     """An SRA/ENA study, which publishes reads and no processed matrix of its own."""
     acc = (accession or "").strip()
-    rows, failure = await _ena_rows(acc, fetcher, None)
+    rows, failure, _scope = await _ena_rows(acc, fetcher, None)
     if rows is None:
         return _deposit(acc, SRA, supported=YES, failure_reason=failure)
     raw, evidence = _raw_read_answer(rows)
@@ -391,66 +430,96 @@ def _unsupported_deposit(accession: str, archive: str) -> dict:
     """An accession bioAF cannot look up. UNKNOWN, and the reason names the archive.
 
     Answering NO here would report our own gap as a fact about the paper, which is the precise
-    error this change exists to remove.
+    error this change exists to remove. change_7.5 section 1.5: a recognised archive is named as one
+    bioAF has no adapter for; "an archive bioAF does not recognise" is kept for what matches no
+    pattern.
     """
-    named = archive if archive != OTHER else "an archive bioAF does not recognise"
-    return _deposit(
-        accession,
-        archive,
-        failure_reason=f"bioAF cannot look up deposits in {named}, so what {accession} holds is unknown",
-    )
+    if archive == OTHER:
+        reason = f"bioAF cannot look up deposits in an archive bioAF does not recognise, so what {accession} holds is unknown"
+    else:
+        reason = f"bioAF has no adapter for {ARCHIVE_NAMES.get(archive, archive)}, so what {accession} holds is unknown"
+    return _deposit(accession, archive, failure_reason=reason)
 
 
-def _raw_read_answer(rows: list[dict]) -> tuple[str, str]:
+def not_looked_up(accession: str, archive: str, *, provenance: str, scoped: bool) -> dict:
+    """change_7.5 section 1.5: a deposit named past the lookup bound. Listed, never described."""
+    deposit = _deposit(accession, archive, failure_reason="Not looked up")
+    deposit.update(provenance=provenance, scoped=scoped, looked_up=False)
+    return deposit
+
+
+def needs_lookup(accession: str, archive: str | None = None) -> bool:
+    """Whether describing ``accession`` calls an archive: only the archives bioAF has an adapter for."""
+    return (archive or classify_archive(accession)) in (GEO, EGA, SRA)
+
+
+def _raw_read_answer(rows: list[dict], *, scope: str | None = None) -> tuple[str, str]:
     """Whether there are raw reads something could actually fetch, and the evidence for it.
 
     **Registered is not the same as available**, measured live on GSE96583 (2026-09-07): ENA returns
     run rows and a read count with ZERO ``fastq_bytes``, because the study deposits 10x BAMs rather
     than FASTQ. Answering YES off the run rows alone would put a route on the checklist that nothing
     can run.
+
+    ``scope`` says what was asked when it was less than the whole study, so a count over one sample is
+    never read as the study's.
     """
+    within = f" ({scope})" if scope else ""
     if not rows:
-        return NO, "ENA lists no sequencing runs for this study"
+        return NO, f"ENA lists no sequencing runs for this study{within}"
     with_fastq = [r for r in rows if (r.get("fastq_bytes") or "").strip()]
     if not with_fastq:
         return NO, (
-            f"ENA lists {len(rows)} run(s) for this study, none of which publishes FASTQ files "
+            f"ENA lists {len(rows)} run(s) for this study{within}, none of which publishes FASTQ files "
             "(a study can register its runs and deposit aligned reads instead)"
         )
-    return YES, f"ENA publishes FASTQ files for {len(with_fastq)} of {len(rows)} run(s)"
+    return YES, f"ENA publishes FASTQ files for {len(with_fastq)} of {len(rows)} run(s){within}"
 
 
-async def _ena_rows(accession: str, fetch: Fetcher, manifest) -> tuple[list[dict] | None, str | None]:
-    """The ENA run rows for this study, or a reason we could not get them.
+async def _ena_rows(accession: str, fetch: Fetcher, manifest) -> tuple[list[dict] | None, str | None, str | None]:
+    """The ENA run rows for this study, a reason we could not get them, and the scope asked.
 
     Reuses ``accession_manifest_service``'s ENA client rather than adding a second one. A GEO series
     is not itself queryable at ENA; its SRA study is, and the manifest resolved that link already,
     so re-deriving it would be a second round trip for an answer we are holding.
+
+    change_7.5 section 1.5: the series' SRA study is asked, so every run of the series is counted.
+    Asking the first sample's experiment counted one run of a 55-sample series. Where the series names
+    no SRA study, the first experiment is still asked, and the scope says so.
     """
     from app.services.literature.accession_manifest_service import _ena_filereport_url, parse_ena_filereport
 
-    target = accession
-    if manifest is not None and manifest.samples:
+    target, scope = accession, None
+    if manifest is not None and getattr(manifest, "series_sra", None):
+        target = manifest.series_sra
+    elif manifest is not None and manifest.samples:
         exp = next((s.get("experiment_accession") for s in manifest.samples if s.get("experiment_accession")), None)
-        target = exp or accession
+        if exp:
+            target = exp
+            scope = f"only the first sample's experiment, {exp}, was asked; the series names no SRA study"
     try:
         tsv = await fetch(_ena_filereport_url(target))
     except Exception as exc:  # noqa: BLE001 - a discovery failure is UNKNOWN, never an absence
         logger.info("ENA availability check failed for %s: %s", target, exc)
-        return None, "bioAF could not reach ENA to check whether raw reads are published"
-    return parse_ena_filereport(tsv), None
+        return None, "bioAF could not reach ENA to check whether raw reads are published", scope
+    return parse_ena_filereport(tsv), None, scope
 
 
-async def describe_deposit(accession: str, *, provenance: str, scoped: bool, fetcher: Fetcher) -> dict:
+async def describe_deposit(
+    accession: str, *, provenance: str, scoped: bool, fetcher: Fetcher, archive: str | None = None
+) -> dict:
     """One deposit, described by whichever archive it lives in.
 
     ``provenance`` records whether the accession was requested by a person or extracted from the
     paper, and ``scoped`` marks the one a run would actually use. Both travel with the answer,
     because "the paper also deposited this" and "this is what we are about to fetch" are different
     claims and the report makes both.
+
+    ``archive`` is given where the identifier's form cannot say it alone: a PDB entry is four
+    characters, and only the text around it says it is one.
     """
     acc = (accession or "").strip()
-    archive = classify_archive(acc)
+    archive = archive or classify_archive(acc)
     if archive == GEO:
         deposit = await describe_geo_deposit(acc, fetcher=fetcher)
     elif archive == EGA:

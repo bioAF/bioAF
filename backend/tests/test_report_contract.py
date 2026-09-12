@@ -61,6 +61,13 @@ async def _contract() -> dict:
         targets=[],
         issues=[],
     )
+    reference_unavailable = summarize(
+        study={"state": "classified", "classification": "inconclusive"},
+        evidence=_reference_unavailable_evidence(),
+        plan={},
+        targets=[],
+        issues=[],
+    )
     return json.loads(
         json.dumps(
             {
@@ -69,9 +76,28 @@ async def _contract() -> dict:
                 "study_34_legacy": legacy,
                 "attempted_no_verdict": attempted,
                 "mapping_unresolved": mapping_unresolved,
+                "reference_unavailable": reference_unavailable,
             }
         )
     )
+
+
+def _reference_unavailable_evidence() -> dict:
+    """change_7.5 section 1.3: a raw-reads study whose paper states a reference bioAF cannot supply,
+    concluded the way the driver concludes it, before any read is fetched."""
+    from app.services.validation_completion import completion_for
+    from app.services.validation_reference import paper_reference, reference_limitation
+
+    reference = paper_reference("mm9", "nf-core/chipseq")
+    evidence: dict = {}
+    evidence["completion"] = completion_for(
+        route="pipeline",
+        capabilities={"deposits": [], "preprocessed_data": {"value": "yes"}, "raw_data": {"value": "yes"}},
+        supplements=[],
+        acquisition=evidence,
+        extra_limitations=[reference_limitation(reference, operation="pipeline")],
+    )
+    return evidence
 
 
 def _mapping_unresolved_evidence() -> dict:

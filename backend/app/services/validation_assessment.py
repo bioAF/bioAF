@@ -74,6 +74,35 @@ def independent_checks_outstanding(evidence: dict) -> bool:
     )
 
 
+def _bundle_never_requested(evidence: dict) -> bool:
+    """An article whose JATS listed no attachments, and whose supplementary bundle nobody asked for.
+
+    change_7.5 section 1.5: an empty manifest never requested the bundle, so study 38 inspected
+    nothing and reported "none is a results table". The bundle is the paper's own attachments,
+    whatever the JATS happened to list, and it is asked for once.
+    """
+    return (
+        bool((evidence.get("pmcid") or "").strip())
+        and not evidence.get("supplements")
+        and not any(isinstance(entry, dict) for entry in evidence.get("retrieval_ledger") or [])
+    )
+
+
+def manifest_known(evidence: dict) -> bool:
+    """Whether bioAF holds a list of the paper's attachments.
+
+    change_7.5 section 1.5: a PMCID alone made the manifest "known", so an article whose JATS listed
+    nothing read as one that attaches nothing. A list is known when the JATS named attachments, or
+    when the supplementary bundle was retrieved.
+    """
+    if evidence.get("supplements"):
+        return True
+    return any(
+        isinstance(entry, dict) and entry.get("outcome") == "retrieved"
+        for entry in evidence.get("retrieval_ledger") or []
+    )
+
+
 RETRIEVAL_STEP = "retrieving the paper's supplementary files"
 
 
@@ -376,7 +405,7 @@ async def run_assessment(session: AsyncSession, study) -> dict:
 
     record_stage(study, "assessment")
     evidence = dict(study.evidence_json or {})
-    if independent_checks_outstanding(evidence):
+    if independent_checks_outstanding(evidence) or _bundle_never_requested(evidence):
         evidence["supplements"] = await resolve_study_supplements(session, study, evidence)
         # What retrieval established has to reach the rows that answer for it. Study 32 recorded
         # Supplemental File S2 as "not attempted" in the same bundle that had downloaded and read it.
@@ -590,7 +619,7 @@ async def conclude_without_execution(
         extra_limitations=[limitation] if limitation else None,
         # A paper read from a pasted body carries no manifest, so an empty inventory there means
         # nobody listed its attachments, not that it has none.
-        manifest_known=bool(evidence.get("pmcid") or evidence.get("supplements")),
+        manifest_known=manifest_known(evidence),
         # change_7.4 section 1.3: the acquisition record, so an acquired input is never reported as
         # none acquired.
         acquisition=evidence,

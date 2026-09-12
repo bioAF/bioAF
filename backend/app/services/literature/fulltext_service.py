@@ -46,23 +46,36 @@ class FullTextResult:
 
 
 def _jats_to_text(xml_text: str) -> str:
-    """Flatten a JATS full-text document to plain text, preferring the article ``<body>``."""
+    """Flatten a JATS full-text document to plain text: the article ``<body>``, then its back matter.
+
+    change_7.5 section 1.5: data availability, code availability and acknowledgments usually sit in
+    ``<back>``, and reading ``<body>`` alone lost the statements that say where a paper's data are. The
+    reference list is left out: it names other papers' deposits, and a scan of it would list them as
+    this paper's own.
+    """
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
         logger.warning("Europe PMC full text: could not parse JATS XML: %s", exc)
         return ""
     # {*} matches the body element in any namespace (or none), which JATS documents vary on.
-    node = root.find(".//{*}body")
-    if node is None:
-        node = root
+    body = root.find(".//{*}body")
+    parts = [body] if body is not None else [root]
+    back = root.find(".//{*}back") if body is not None else None
+    if back is not None:
+        parts.extend(child for child in back if not _local_name(child.tag) == "ref-list")
     # ``itertext`` already yields tag-free, entity-decoded plain text, so only whitespace needs
     # normalizing. Do NOT run the abstract/title HTML sanitizer here: its ``<[^>]+>`` tag-stripper
     # treats the span between a literal ``<`` and the next ``>`` in statistical prose (P < 0.05,
     # Q-value < 1E-10, enrichment scores > 1.5) as a tag and deletes it, which routinely swallows the
     # data-availability accession the reproduction extractor exists to read.
-    text = " ".join(t.strip() for t in node.itertext() if t and t.strip())
+    text = " ".join(t.strip() for node in parts for t in node.itertext() if t and t.strip())
     return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def _local_name(tag: str) -> str:
+    """An element's name without its namespace."""
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
 
 
 async def _resolve_open_access_id(

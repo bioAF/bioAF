@@ -642,7 +642,11 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
         basis_mismatch = basis_conflicts(claim_basis=claim_basis, metric_key=t.get("bound_key") or key)
 
         binding_failed = t.get("bound_by") == BINDING_FAILED
-        if binding_failed:
+        # change_7.5 section 1.4: a model's decline is authoritative for the QC check. Study 38's
+        # declined counts still reached a comparison through the alias table, which contradicted the
+        # report. The alias table stays for rows no model decided (legacy rows).
+        declined_by_model = t.get("bound_by") == "model" and not bound
+        if binding_failed or declined_by_model:
             mapped, advisory = None, False
         elif bound in _SPEC_BY_KEY:
             mapped, advisory = bound, False
@@ -743,8 +747,12 @@ def compare_targets(targets: list[dict], computed_metrics: dict | None) -> list[
     return rows
 
 
-def _attribute(mapping_confidence: str | None, reference_genome: str | None) -> dict:
-    """E3: try to clear OUR side for a divergence. If we cannot, the divergence is unattributable."""
+def _attribute(mapping_confidence: str | None, reference_genome: str | None, *, aligned: bool = True) -> dict:
+    """E3: try to clear OUR side for a divergence. If we cannot, the divergence is unattributable.
+
+    change_7.5 section 1.3: a reference mismatch is a possible cause only for a result that aligned
+    reads. The deposit route reanalyses the authors' own processed values and aligns nothing.
+    """
     reasons: list[str] = []
     cleared = True
     if (mapping_confidence or "").lower() not in _CLEARED_MAPPING_CONFIDENCE:
@@ -753,7 +761,7 @@ def _attribute(mapping_confidence: str | None, reference_genome: str | None) -> 
             f"pipeline mapping confidence is '{mapping_confidence or 'unknown'}', so a pipeline/toolchain "
             "difference could explain the divergence"
         )
-    if not reference_genome:
+    if aligned and not reference_genome:
         cleared = False
         reasons.append("no recognized reference genome was used, so a reference-build mismatch cannot be ruled out")
     if cleared:
@@ -1011,7 +1019,7 @@ def classify_study(
             "finding reproduced and part did not. Suggesting partially reproduced; needs a human."
         )
     else:
-        attribution = _attribute(mapping_confidence, reference_genome)
+        attribution = _attribute(mapping_confidence, reference_genome, aligned=route != "deposit")
         # E3' (ADR-069): a concordance divergence carries extra our-side risk beyond the QC guard.
         # Before it can strike the paper, the DIFFERENTIAL step must also be cleared: our reproduction
         # applied the paper's stated thresholds and used a comparable DE/DA method. If the caller

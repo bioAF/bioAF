@@ -238,9 +238,27 @@ class TestWhatStudy37Reproduced:
 
 class TestStudy37ReplayedOnTheCurrentBuild:
     @pytest.mark.asyncio
-    async def test_it_ends_with_no_compatible_contrast_before_acquiring_anything(self, session, admin_user):
+    async def test_it_ends_with_no_compatible_contrast_before_acquiring_anything(
+        self, session, admin_user, monkeypatch
+    ):
         """Until stage 2 the workflow is still chosen first, so a ChIP-seq plan with two RNA-seq
-        contrasts ends with `no_compatible_contrast`. That is accurate for stage 1."""
+        contrasts ends with `no_compatible_contrast`. That is accurate for stage 1.
+
+        change_7.5 section 1.5 changed this test's setup (flagged): study 37's JATS listed no
+        attachments, and an empty manifest now requests the supplementary bundle. The bundle is served
+        here, empty, so the attachment list is known and nothing about it is "not established"."""
+        import io
+        import zipfile
+
+        from app.services import validation_assessment
+
+        empty = io.BytesIO()
+        zipfile.ZipFile(empty, "w").close()
+
+        async def _empty_bundle(_url):
+            return empty.getvalue()
+
+        monkeypatch.setattr(validation_assessment, "deposit_bytes_fetcher", _empty_bundle)
         record = _STUDY_37["reproduction_plan"]
         study = ValidationStudy(
             organization_id=admin_user.organization_id,
