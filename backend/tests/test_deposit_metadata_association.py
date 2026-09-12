@@ -376,5 +376,6 @@ async def test_a_matrix_whose_columns_match_no_arm_holds(session, admin_user):
     await ValidationDriverService._handle_inspecting_deposit(
         session, study, storage_adapter=_FakeStorage({"s3://x/m.tsv": other})
     )
-    assert study.state == "inspecting_deposit"
+    # change_7.4 sections 1.1 and 1.4: an empty arm is never retried; it concludes before compute.
+    assert study.state == "classified"
     assert "arm" in study.evidence_json["deposit_failed"]["reason"].lower()

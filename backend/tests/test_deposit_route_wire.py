@@ -293,7 +293,8 @@ class TestTheDepositCannotServe:
             inventory_fetcher=_listing_fetcher(_UNFILTERED_LISTING),
         )
 
-        assert unwired_study.state == "acquiring_processed"
+        # change_7.4 section 1.1: not retried; concluded with its own limitation.
+        assert unwired_study.state == "classified"
         reason = unwired_study.evidence_json["deposit_failed"]["reason"]
         assert "cell-calling" in reason
         assert unwired_study.evidence_json["deposit_unusable"]
@@ -318,7 +319,8 @@ class TestTheDepositCannotServe:
             inventory_fetcher=_listing_fetcher(_DIR_LISTING),
         )
 
-        assert unwired_study.state == "acquiring_processed"
+        # change_7.4 section 1.1: not retried; concluded with its own limitation.
+        assert unwired_study.state == "classified"
         assert "coverage track" in unwired_study.evidence_json["deposit_failed"]["reason"]
 
 

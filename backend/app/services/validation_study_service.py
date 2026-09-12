@@ -423,9 +423,7 @@ class ValidationStudyService:
         return decide_route(
             route=route,
             capabilities=evidence.get("capabilities") or {},
-            conflict=deposit_conflict(
-                plan.blockers_json if plan else None, plan.library_strategy if plan else None
-            ),
+            conflict=deposit_conflict(plan.blockers_json if plan else None, plan.library_strategy if plan else None),
             species_hold=species_hold(evidence.get("precompute_checks")),
             deposit_override=bool(evidence.get("deposit_override")),
             species_override=bool(evidence.get("species_override")),
@@ -801,6 +799,13 @@ class ValidationStudyService:
         # The counters that would otherwise refuse the very attempt this resumption authorises.
         for key in ("acquisition_attempts", "acquisition_retry_at", "route_blocked", "discovery_unresolved"):
             evidence.pop(key, None)
+        # change_7.4 section 1.1: a resumed study re-derives why its deposit could not serve. The hold
+        # and its blocker are cleared, and so is a declined choice, so the next attempt decides again
+        # and records the cause where it arises. A record written before causes held only wording.
+        for key in ("deposit_failed", "deposit_unusable", "deposit_unusable_cause"):
+            evidence.pop(key, None)
+        if (evidence.get("deposit_selection") or {}).get("declined"):
+            evidence.pop("deposit_selection", None)
         evidence["resumed"] = {
             "at": datetime.now(timezone.utc).isoformat(),
             "by_user_id": user_id,

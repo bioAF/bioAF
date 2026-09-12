@@ -91,6 +91,52 @@ def deposit_blocker(inventory: list[DepositEntry]) -> str | None:
     return None
 
 
+# Kinds the classifier recognises and bioAF cannot analyze as a reproduction input, in the words a
+# reader is given. A results table is the paper's answer, which stage 3 checks for consistency and
+# nothing reproduces from.
+_UNANALYZABLE_KINDS = {
+    "coverage": "coverage track",
+    "raw": "raw-read archive",
+    "de_table": "differential results table",
+    "da_table": "differential results table",
+    "code": "code file",
+    "metadata": "sample metadata file",
+    "matrix_unfiltered": "pre-cell-calling matrix",
+}
+
+
+def unusable_listing(inventory: list[DepositEntry], accession: str) -> tuple[str, str] | None:
+    """``(cause, reason)`` for a listing that holds files and nothing selectable, or None.
+
+    change_7.4 section 1.1: a classification of the listing is a decision from filenames, so it
+    never establishes an absence. Where every file is a kind the classifier recognises and bioAF
+    cannot analyze, the listing is ``unsupported_processing`` and the reason names what is there.
+    Where the classifier could not place some of them, bioAF could not identify an input, which is
+    ``input_unidentified``.
+    """
+    from app.services.validation_acquisition_outcome import INPUT_UNIDENTIFIED, UNSUPPORTED_PROCESSING
+
+    if not inventory or selectable(inventory):
+        return None
+    blocker = deposit_blocker(inventory)
+    if blocker:
+        return UNSUPPORTED_PROCESSING, blocker
+    if all(e.classification in _UNANALYZABLE_KINDS for e in inventory):
+        counts: dict[str, int] = {}
+        for e in inventory:
+            noun = _UNANALYZABLE_KINDS[e.classification]
+            counts[noun] = counts.get(noun, 0) + 1
+        held = ", ".join(f"{n} {noun}{'s' if n != 1 else ''}" for noun, n in counts.items())
+        return UNSUPPORTED_PROCESSING, (
+            f"GEO listed {len(inventory)} supplementary file(s) for {accession}: {held}. None of them is a per-feature "
+            "matrix bioAF can analyze."
+        )
+    return INPUT_UNIDENTIFIED, (
+        f"GEO listed {len(inventory)} supplementary file(s) for {accession}, none of which bioAF could identify from "
+        "its name as holding per-feature values a differential test could read."
+    )
+
+
 def build_selection_prompt(
     inventory: list[DepositEntry], *, pipeline_key: str | None, kind: str | None
 ) -> tuple[str | None, str | None]:

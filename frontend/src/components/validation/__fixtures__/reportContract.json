@@ -92,11 +92,19 @@
       "unreachable": "bioAF could not reach the language model"
     },
     "limitation_kind": {
+      "access_refused": "Access refused to bioAF's automated request",
       "controlled_access": "Controlled access",
+      "design_incompatible": "Acquired input does not contain the compared conditions",
       "failed_discovery": "Could not be established",
+      "input_unidentified": "No compatible input identified",
+      "input_unreadable": "Acquired input could not be read",
       "missing_input": "Required input not published",
+      "no_compatible_contrast": "No comparison this route can analyze",
+      "resource_limit": "Input exceeds bioAF's processing limits",
       "retrieval_failed": "Could not be retrieved in this attempt",
-      "unsupported_acquisition": "Acquisition not supported"
+      "sample_mapping_unresolved": "Samples could not be assigned to the comparison",
+      "unsupported_acquisition": "Acquisition not supported",
+      "unsupported_processing": "bioAF cannot yet analyze this kind of file"
     },
     "retrieval_outcome": {
       "forbidden": "the server refused the request",

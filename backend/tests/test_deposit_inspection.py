@@ -227,5 +227,6 @@ async def test_an_unusable_matrix_holds_rather_than_running_the_notebook(session
     nothing, and its empty output was scored as a real comparison against the paper's 5,607."""
     storage = _FakeStorage({"s3://x/m.tsv": "gene\tonly_one\nA\t5\n"})
     await ValidationDriverService._handle_inspecting_deposit(session, inspecting_study, storage_adapter=storage)
-    assert inspecting_study.state == "inspecting_deposit"
+    # change_7.4 section 1.1: concluded with its limitation rather than held, and never reproducing.
+    assert inspecting_study.state == "classified"
     assert inspecting_study.evidence_json["deposit_failed"]["reason"]

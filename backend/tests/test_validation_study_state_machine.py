@@ -210,3 +210,9 @@ def test_the_pipeline_route_is_unchanged():
     assert can_transition("comparing", "classified")
     assert not can_transition("plan_ready", "setup")
     assert not can_transition("plan_ready", "reproducing")
+
+
+def test_an_incomplete_acquisition_record_returns_to_acquisition():
+    """change_7.4 section 1.1: bioAF's own record of an acquired deposit held no matrix. That is not
+    a finding about the deposit, so the study goes back and acquires it again."""
+    assert can_transition("inspecting_deposit", "acquiring_processed")

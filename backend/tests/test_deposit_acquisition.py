@@ -359,7 +359,9 @@ async def test_an_unreadable_deposit_holds_for_a_human_rather_than_erroring(sess
         fetcher=_bytes_fetcher({base + "GSE1_counts.tsv": png, base + "GSE1_meta.tsv": b"a\n"}),
         storage_adapter=storage,
     )
-    assert deposit_study.state == "acquiring_processed"
+    # change_7.4 section 1.1: an unreadable input is not retried. It concludes with its own
+    # limitation instead of holding, and is still never an error.
+    assert deposit_study.state == "classified"
     reason = deposit_study.evidence_json["deposit_failed"]["reason"]
     assert "GSE1_counts.tsv" in reason
 
@@ -376,7 +378,8 @@ async def test_a_corrupt_workbook_also_holds_and_names_the_file(session, deposit
         fetcher=_bytes_fetcher({base + "GSE1_counts.tsv": _OLE2_MAGIC + b"\x00" * 64, base + "GSE1_meta.tsv": b"a\n"}),
         storage_adapter=storage,
     )
-    assert deposit_study.state == "acquiring_processed"
+    # change_7.4 section 1.1: concluded with its limitation rather than held.
+    assert deposit_study.state == "classified"
     assert "GSE1_counts.tsv" in deposit_study.evidence_json["deposit_failed"]["reason"]
 
 
