@@ -633,8 +633,12 @@ async def resolve_supplements(
     fetcher,
     thresholds: list[float] | None = None,
     ledger: list[dict] | None = None,
+    predicates: list[dict] | None = None,
 ) -> list[dict]:
     """Resolve named references to real files and classify each by its content. Never raises.
+
+    change_7.5 section 4.1: a results table is checked for each claim's predicate (``predicates``, as
+    ``validation_author_consistency.claim_predicates`` builds them) while its bytes are in hand.
 
     The prose says "Supplemental File S2" and the publisher deposits
     ``supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx``. Nothing connected the two, so
@@ -689,6 +693,7 @@ async def resolve_supplements(
                 role=classify_supplement(filename, contents[filename]),
                 **measure_table(contents[filename], thresholds=thresholds),
             )
+            _check_claims(row, filename, contents[filename], predicates)
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
     # the bundle holds seventeen, and the ones that are not figures can carry real inputs. The
@@ -714,8 +719,20 @@ async def resolve_supplements(
             row.update(
                 role=classify_supplement(filename, blob_bytes), **measure_table(blob_bytes, thresholds=thresholds)
             )
+            _check_claims(row, filename, blob_bytes, predicates)
         rows.append(row)
     return rows
+
+
+def _check_claims(row: dict, filename: str, blob: bytes, predicates: list[dict] | None) -> None:
+    """change_7.5 section 4.1: a results table checked for each claim's predicate. Rows never kept."""
+    if not predicates or row.get("role") != "results_table":
+        return
+    from app.services.validation_author_consistency import supplement_consistency
+
+    records = supplement_consistency(blob, filename, predicates)
+    if records:
+        row["consistency"] = records
 
 
 def recorded_failures(rows: list[dict] | None, *, pmcid: str, at: str | None) -> list[dict]:

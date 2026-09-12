@@ -539,12 +539,116 @@ def template_for_value_type(value_type: str | None, *, kind: str = "gene") -> De
     return None
 
 
+async def _identified_ground_truth(
+    session: AsyncSession, study: ValidationStudy, plan, evidence: dict, *, storage_adapter=None
+) -> tuple[dict | None, dict | None, str | None]:
+    """change_7.5 section 3.4: in autonomous mode, the authors' result table identified with the input
+    becomes the ground-truth set, normalized at the selected claim's own predicate.
+
+    Returns ``(finding_set, ground_truth, refusal)``: ``(None, None, None)`` when no table was
+    identified (the reanalysis then reports its count and no concordance), and a refusal when the
+    organisation is assisted (a person still confirms the table at the gate) or the table cannot be
+    read at the stated definition.
+    """
+    from app.models.organization import Organization
+    from app.services.result_set_normalizer import missing_measure, normalize_gene_table, normalize_interval_table
+    from app.adapters.registry import get_storage_adapter
+    from app.services.validation_autonomy import AUTONOMY_ASSISTED, AUTONOMY_AUTONOMOUS
+
+    org = await session.get(Organization, study.organization_id)
+    if ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) != AUTONOMY_AUTONOMOUS:
+        return None, None, "assisted"
+    current = ((plan.analysis_selection_json or {}).get("current")) or {}
+    table = next(
+        (f for f in (evidence.get("deposit") or {}).get("files") or [] if f.get("artifact_type") == "deposited_result_table"),
+        None,
+    )
+    if table is None:
+        return None, None, None
+    predicate = current.get("predicate") or {}
+    significance = predicate.get("significance")
+    if not isinstance(significance, dict):
+        return None, None, "the selected claim's predicate states no significance cutoff to read the authors' table at"
+    effect = predicate.get("effect") if isinstance(predicate.get("effect"), dict) else {"kind": "none"}
+    storage = storage_adapter or get_storage_adapter()
+    try:
+        text = await storage.read_text(table["storage_uri"])
+    except Exception as exc:  # noqa: BLE001 - a table that cannot be read back is a stated refusal
+        return None, None, f"the identified authors' table {table.get('filename')} could not be read back: {exc}"
+    arguments = {
+        "padj_threshold": float(significance["value"]),
+        "significance_kind": significance["kind"],
+        "significance_operator": significance["operator"],
+        "lfc_threshold": float(effect["value"]) if effect.get("kind") == "abs_log2fc" else 0.0,
+        "effect_operator": effect.get("operator") if effect.get("kind") == "abs_log2fc" else ">=",
+    }
+    kinds = supported_finding_kinds(plan.pipeline_key)
+    normalize = normalize_interval_table if kinds and kinds[0] == "interval" else normalize_gene_table
+    finding_set = normalize(text, **arguments)
+    missing = missing_measure(finding_set)
+    if missing:
+        return None, None, f"the identified authors' table cannot be read at the claim's definition: {missing}"
+    ground_truth = {
+        "source": "identified_author_table",
+        "file": table.get("filename"),
+        "decided_by": (evidence.get("input_choice") or {}).get("decided_by"),
+        "predicate_words": current.get("predicate_words"),
+    }
+    return finding_set.to_dict(), ground_truth, None
+
+
+def score_reproduction(level3: dict, ours, *, universe: int) -> dict:
+    """change_7.5 section 3.4: the reanalysis against the claim. The same predicate filtered both sets
+    (the stated cutoffs, in the normalizers); here both are filtered by the claim's direction before
+    the existing Level 3 scoring, and the reanalysis count is evaluated against the claim's count
+    relation, labelled as coming from a different method. With no ground-truth set there is no
+    concordance, and the count still stands beside the claim."""
+    from app.services.result_set_normalizer import FindingSet
+    from app.services.validation_concordance_service import compare_gene_sets, compare_interval_sets
+    from app.services.validation_predicate import evaluate_count
+
+    predicate = level3.get("predicate") or {}
+    direction = predicate.get("direction") if predicate.get("direction") in ("up", "down") else None
+
+    def _directional(fs):
+        if direction is None:
+            return fs
+        return FindingSet(
+            kind=fs.kind,
+            namespace=fs.namespace,
+            entities=[e for e in fs.entities if e.direction == direction],
+            n_tested=fs.n_tested,
+            parse_notes=list(fs.parse_notes),
+        )
+
+    ours_directional = _directional(ours)
+    concordance = None
+    if level3.get("paper_finding_set"):
+        paper = _directional(FindingSet.from_dict(level3["paper_finding_set"]))
+        compare = compare_interval_sets if level3.get("kind") == "interval" else compare_gene_sets
+        concordance = compare(paper, ours_directional, universe).to_dict()
+    n = len({e.id for e in ours_directional.entities})
+    status, words = evaluate_count(predicate.get("count"), [n, n])
+    return {
+        "concordance": concordance,
+        "our_finding_set": ours.to_dict(),
+        "claim_count": {
+            "count": n,
+            "direction": direction or "either",
+            "status": status,
+            "words": words,
+            "label": "Reanalysis count, from a different method than the paper's",
+        },
+    }
+
+
 async def resolve_level3_from_deposit(
     session: AsyncSession,
     study: ValidationStudy,
     plan: ReproductionPlan | None,
     *,
     evidence: dict | None = None,
+    storage_adapter=None,
 ) -> Level3Decision:
     """Assemble ``evidence["level3"]`` from an acquired DEPOSIT rather than from a pipeline run.
 
@@ -561,14 +665,25 @@ async def resolve_level3_from_deposit(
     if plan is None:
         return _decline(study.id, "no_plan", "the study has no reproduction plan")
 
+    ev = evidence if evidence is not None else (study.evidence_json or {})
     claim = plan.finding_claim_json or {}
     finding_set = claim.get("finding_set") or {}
+    ground_truth = {"source": "confirmed_finding_claim", "file": None} if claim and finding_set else None
     if not claim or not finding_set:
-        return _decline(
-            study.id,
-            "no_finding_claim",
-            "no ground-truth result set from the paper was confirmed, so there is nothing to reproduce against",
+        # change_7.5 section 3.4: the comparison needs no person in autonomous mode.
+        identified, ground_truth, refusal = await _identified_ground_truth(
+            session, study, plan, ev, storage_adapter=storage_adapter
         )
+        if refusal is not None or not ((plan.analysis_selection_json or {}).get("current")):
+            return _decline(
+                study.id,
+                "no_finding_claim",
+                (refusal if refusal and refusal != "assisted" else None)
+                or "no ground-truth result set from the paper was confirmed, so there is nothing to reproduce against",
+            )
+        finding_set = identified
+        kinds = supported_finding_kinds(plan.pipeline_key)
+        claim = {"kind": kinds[0] if kinds else "gene"}
 
     design = plan.differential_design_json or {}
     contrasts = design.get("contrasts") or []
@@ -585,7 +700,6 @@ async def resolve_level3_from_deposit(
     if refusal is not None:
         return refusal
 
-    ev = evidence if evidence is not None else (study.evidence_json or {})
     deposit = ev.get("deposit") or {}
     matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]
     if not matrices:
@@ -641,6 +755,19 @@ async def resolve_level3_from_deposit(
     if blocks:
         parameters["block_labels"] = blocks
 
+    # change_7.5 section 3.3: only a confirmed technical group is collapsed, by the value type's rule:
+    # counts summed, normalized or log values averaged on the scale they are stored in.
+    collapse = None
+    technical = primary.get("technical_groups") or {}
+    if technical:
+        ordered = list(test_samples) + list(reference_samples)
+        parameters["technical_group_labels"] = ",".join(str(technical.get(s, s)) for s in ordered)
+        collapse = {
+            "rule": "sum of counts" if template_spec.method == "deseq2" else "mean on the stored scale",
+            "groups": dict(technical),
+        }
+
+    current = (plan.analysis_selection_json or {}).get("current") or {}
     return Level3Decision(
         inputs={
             "template_id": template.id,
@@ -648,9 +775,15 @@ async def resolve_level3_from_deposit(
             "input_file_ids": [f.id for f in files],
             "input_files": [f.filename for f in files],
             "transform": None,
-            "paper_finding_set": finding_set,
+            "paper_finding_set": finding_set or None,
             "kind": kind,
             "contrast": primary.get("name"),
+            # change_7.5 sections 3.1, 3.3 and 3.4: what the reanalysis is scored against, the claim's
+            # predicate, and the collapse applied.
+            "ground_truth": ground_truth,
+            "predicate": current.get("predicate"),
+            "claim_index": current.get("claim_index"),
+            "collapse": collapse,
             # Which statistical test actually ran. A limma-trend result compared against a paper's
             # DESeq2 result is a METHOD difference, and attribution has to be able to name it rather
             # than charge the gap to the paper (the study-26 lesson).

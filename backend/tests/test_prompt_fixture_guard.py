@@ -81,6 +81,28 @@ def _prompts() -> dict[str, str]:
     prompts["sufficiency judgment"] = "\n".join((_JUDGMENT_SYSTEM, _METHODS_QUESTION, _SAMPLES_QUESTION))
     prompts["entry point"] = _ENTRY_POINT_SYSTEM
     prompts["ratification"] = "\n".join(build_ratification_prompt({}))
+    # change_7.5 stages 2 and 3: the claim selection and the input decision.
+    from app.services.validation_input_choice import build_input_prompt
+    from app.services.validation_selection import _prompt as selection_prompt
+
+    prompts["claim selection"] = "\n".join(
+        selection_prompt(
+            [{"claim_text": "a claim", "reported_experiment_id": "e1"}],
+            [{"claim_index": 0, "check": "processed_reanalysis", "status": "unresolved", "requirement": "sample_mapping"}],
+            [{"id": "e1", "assay": "bulk RNA-seq"}],
+        )
+    )
+    prompts["input choice"] = "\n".join(
+        build_input_prompt(
+            claim={"claim_text": "a claim"},
+            predicate_words="a versus b, P < 0.05, up, no fold-change requirement",
+            contrast={"name": "a vs b", "test_condition": "a", "reference_condition": "b"},
+            experiment={"id": "e1", "assay": "bulk RNA-seq"},
+            sample_records=[{"geo_accession": "ACC1", "title": "s1", "condition": "c"}],
+            previews=[{"filename": "matrix.tsv.gz", "header": ["id", "s1"], "rows": [["g", "1"]]}],
+            tables=["table.tsv.gz"],
+        )
+    )
     return prompts
 
 

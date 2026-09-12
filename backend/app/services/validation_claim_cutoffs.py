@@ -50,10 +50,15 @@ def _cutoff(kind, operator, value) -> dict | None:
 def claim_cutoffs(claim: dict) -> list[dict]:
     """A claim's cutoffs as ``[{"kind", "operator", "value"}]``. An unusable entry is dropped, never
     guessed; a scalar ``threshold`` with its kind becomes one cutoff."""
+    from app.services.validation_predicate import adjustment_of
+
     found: list[dict] = []
     for raw in claim.get("cutoffs") or []:
         if isinstance(raw, dict):
             cutoff = _cutoff(raw.get("kind"), raw.get("operator"), raw.get("value"))
+            # change_7.5 section 3.1: an adjustment method the paper states rides on its adjusted P.
+            if cutoff is not None and cutoff["kind"] == "padj" and adjustment_of(raw):
+                cutoff["adjustment"] = adjustment_of(raw)
             if cutoff is not None and cutoff not in found:
                 found.append(cutoff)
     if not found and claim.get("threshold") is not None:

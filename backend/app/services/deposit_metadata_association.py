@@ -268,7 +268,8 @@ def rewrite_design_to_columns(
     """Rewrite the SELECTED contrast's arms to the matrix's own column names.
 
     Returns ``(design, status, reason)`` where status is ``"ok"``, ``"mismatch"`` (an arm resolved
-    to nothing) or ``"pairing_lost"`` (a declared pairing could not be carried onto the columns).
+    to nothing), ``"pairing_lost"`` (a declared pairing could not be carried onto the columns) or
+    ``"duplicate"`` (a pick matched several columns).
     Mirrors ``_resolve_sample_design`` on the pipeline route, including its contract: an arm that
     resolves to nothing HOLDS rather than launching, because a contrast with an empty arm is not a
     smaller experiment, it is not an experiment.
@@ -301,11 +302,20 @@ def rewrite_design_to_columns(
         if a.get("condition"):
             by_condition.setdefault(str(a["condition"]).strip().lower(), []).append(col)
 
+    duplicates: list[str] = []
+
     def _resolve_arm(picks: list[str] | None, condition: str | None) -> tuple[list[str], dict[str, str]]:
         out: list[str] = []
         carried_from: dict[str, str] = {}
         for pick in picks or []:
-            for col in by_pick.get(str(pick).strip().lower(), []):
+            matched = list(dict.fromkeys(by_pick.get(str(pick).strip().lower(), [])))
+            # change_7.5 section 3.3: a pick is one sample. One that matches several columns is a
+            # duplicate, and none of them is added under its label (a pairing label would otherwise
+            # be carried onto two columns as if they were one sample).
+            if len(matched) > 1:
+                duplicates.append(f"{pick} matches {', '.join(matched)}")
+                continue
+            for col in matched:
                 if col not in out:
                     out.append(col)
                     carried_from[col] = pick
@@ -316,6 +326,13 @@ def rewrite_design_to_columns(
     c = contrasts[contrast_index]
     test, test_from = _resolve_arm(c.get("test_samples"), c.get("test_condition"))
     reference, reference_from = _resolve_arm(c.get("reference_samples"), c.get("reference_condition"))
+    if duplicates:
+        return (
+            design or {},
+            "duplicate",
+            "Held before running: a sample the design names matches more than one column of the deposited "
+            f"matrix ({'; '.join(duplicates)}), so neither column was taken as that sample.",
+        )
     empty_arms: list[str] = []
     if not test:
         empty_arms.append(str(c.get("test_condition") or c.get("name") or "test"))

@@ -52,7 +52,21 @@ TARGETS = [
 EVIDENCE = {
     "selection_history": [
         {"revision": 1, "artifacts": {"level3": {"x": 1}}, "invalidated_by": ["claim"], "at": "2026-09-12T00:00:00+00:00"}
-    ]
+    ],
+    # change_7.5 section 4: the selected claim checked against the authors' table, and its reanalysis.
+    "author_consistency": {"records": [{
+        "claim_index": 1, "table": "t.txt.gz", "source": "deposit", "outcome": "unresolved",
+        "reason": "the table's ratio orientation is not established by its header, a legend, the methods or a confirmation",
+        "columns": {"id": "gene", "lfc": "log2FoldChange", "pvalue": "pvalue", "padj": "padj"},
+        "rows_tested": 20000, "rows_passing": None, "rows_missing": 312, "count_range": None,
+        "duplicates_disagreeing": [], "assumptions": [],
+        "candidates": [{"interpretation": "the table is KO over WT", "count": 257},
+                       {"interpretation": "the table is WT over KO", "count": 524}],
+    }]},
+    "level3": {"claim_index": 1, "source": "deposit", "contrast": "KO vs WT"},
+    "level3_result": {"concordance": None, "claim_count": {
+        "count": 250, "status": "fails", "words": "250 against the claim's exactly 257",
+        "label": "Reanalysis count, from a different method than the paper's"}},
 }
 
 
@@ -115,3 +129,16 @@ def test_a_legacy_plan_has_no_checks_and_no_selection():
     assert summary["claims"][0]["selection"] is None
     assert summary["selection"] is None
     assert summary["experiments"] == []
+
+
+def test_the_selected_claim_carries_its_consistency_and_its_reanalysis():
+    claim = _summary()["claims"][1]
+    assert claim["consistency"]["label"] == "Unresolved against the authors' results"
+    assert [c["count"] for c in claim["consistency"]["candidates"]] == [257, 524]
+    assert claim["result"]["tier"] == "Deposited data"
+    assert claim["result"]["count"]["words"] == "250 against the claim's exactly 257"
+    assert claim["predicate"] == "KO vs WT, P < 0.01, either direction, no fold-change requirement"
+
+
+def test_a_reanalysis_attaches_only_to_the_claim_it_was_scored_for():
+    assert _summary()["claims"][2]["result"] is None

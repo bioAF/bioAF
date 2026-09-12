@@ -98,6 +98,8 @@ class ComparisonTarget(Base):
     binding_facts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # change_7.5 section 2.5: this claim's four checks, each `{status, reason, requirement}`.
     checks: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # change_7.5 section 3.1: "= | > | >= | < | <= | approx", as the paper states its count.
+    count_relation: Mapped[str | None] = mapped_column(String(8), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

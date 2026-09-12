@@ -125,6 +125,7 @@ BUILTIN_TEMPLATES = [
             # labels for a matched-pairs design (`~ block + condition`). The injector rebuilds the whole
             # parameters cell from this merged dict, so the default MUST live here to stay defined.
             "block_labels": "",
+            "technical_group_labels": "",  # change_7.5 section 3.3: collapse by confirmed technical group
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
         },
@@ -154,6 +155,7 @@ BUILTIN_TEMPLATES = [
             "test_samples": "",
             "reference_samples": "",
             "block_labels": "",
+            "technical_group_labels": "",  # change_7.5 section 3.3: collapse by confirmed technical group
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
             "already_logged": "false",
@@ -205,6 +207,7 @@ BUILTIN_TEMPLATES = [
             # unread by the notebook, so an ATAC/ChIP study whose plan declared matched pairs was
             # analysed unpaired and nothing said so.
             "block_labels": "",
+            "technical_group_labels": "",  # change_7.5 section 3.3: collapse by confirmed technical group
             "lfc_threshold": 1.0,
             "padj_threshold": 0.05,
         },

@@ -14,6 +14,7 @@ from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
 from app.services.validation_binding import AGGREGATIONS
+from app.services.validation_predicate import RELATIONS as _RELATIONS
 from app.services.validation_measurement_basis import basis_of
 from app.services.audit_service import log_action
 from app.services.pipeline_mapper import declared_route_version, deposit_conflict, is_library_strategy_conflict
@@ -48,8 +49,19 @@ def validate_replicates(design: dict) -> list[str]:
     errors: list[str] = []
     for c in design.get("contrasts") or []:
         name = c.get("name") or "contrast"
+        # change_7.5 section 3.3: replicates are distinct biological units, when the mapping recorded
+        # them. Three columns from one donor are one replicate, whatever the column count.
+        units = c.get("units") if isinstance(c.get("units"), dict) else None
         for arm in ("test", "reference"):
             samples = c.get(f"{arm}_samples") or []
+            if units:
+                distinct = len({units.get(s, s) for s in samples})
+                if distinct < MIN_SAMPLES_PER_ARM:
+                    errors.append(
+                        f"{name}: the {arm} arm has {distinct} biological unit(s) across {len(samples)} column(s); "
+                        f"differential analysis needs at least {MIN_SAMPLES_PER_ARM} independent units per arm."
+                    )
+                continue
             if len(samples) < MIN_SAMPLES_PER_ARM:
                 errors.append(
                     f"{name}: the {arm} arm has {len(samples)} sample(s); differential analysis needs at "
@@ -365,6 +377,7 @@ class ReproductionPlanService:
                 aggregation=t.get("aggregation") if t.get("aggregation") in AGGREGATIONS else None,
                 binding_facts=t.get("binding_facts") or None,
                 checks=t.get("checks") or None,
+                count_relation=t.get("count_relation") if t.get("count_relation") in _RELATIONS else None,
             )
             session.add(target)
             created.append(target)

@@ -75,7 +75,9 @@ _SCHEMA_HINT = (
     'reference arm", "threshold": null, "threshold_kind": "padj | pvalue | abs_log2fc | null", '
     '"contrast": "the name of the contrast this claim reports on, or null", '
     '"cutoffs": [{"kind": "pvalue | padj | fdr | qvalue | abs_log2fc | fold_change", '
-    '"operator": "< | <= | > | >=", "value": 0}], '
+    '"operator": "< | <= | > | >=", "value": 0, '
+    '"adjustment": "BH | Bonferroni | q-value | FDR unspecified | null"}], '
+    '"count_relation": "= | > | >= | < | <= | approx", '
     '"output_type": "count | percentage | gene_set_size | ratio"}], '
     '"significance_ambiguities": [{"claim_index": 0, "readings": [{"kind": "pvalue | padj | fdr | qvalue", '
     '"operator": "< | <=", "value": 0, "quote": "the paper\'s exact words for this reading"}]}], '
@@ -281,6 +283,11 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "the claim's index, and each reading with the paper's exact words as its quote. Never write a "
         "blocker saying a stated measure is missing, ambiguous, nominal or unadjusted. A stated measure is "
         "the paper's definition; a real ambiguity is shown with its quotes, or not recorded at all.\n\n"
+        # change_7.5 section 3.1: the finding predicate keeps what the sentence says about its count.
+        'Give every counted claim its count_relation as the sentence states it: "more than 3,000" is >, '
+        '"at least" is >=, "about 3,000" is approx (with its tolerance when the paper states one), and a '
+        "plain number is =. For an adjusted P value, give the adjustment method when the paper names it "
+        "(Benjamini-Hochberg is BH), and leave it null when it does not.\n\n"
         "Give each blocker a kind: sample_assignment when which sample belongs to which group is not "
         "stated, data_access when the data sits behind an access agreement, missing_detail for an "
         "unstated methods detail, no_accession when no data deposit is named, method_mismatch when the "
@@ -1268,6 +1275,8 @@ class ValidationExtractionService:
                     "threshold": _to_float(c.get("threshold")),
                     "threshold_kind": c.get("threshold_kind"),
                     "output_type": c.get("output_type"),
+                    # change_7.5 section 3.1: "more than", "exactly" and "about" are three claims.
+                    "count_relation": c.get("count_relation"),
                     # change_7.3 section 7: the claim's own cutoffs and the contrast it reports on.
                     "cutoffs": claim_cutoffs(c) or None,
                     "contrast_index": contrast_index_for(c, design_contrasts),

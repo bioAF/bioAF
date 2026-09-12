@@ -1106,7 +1106,13 @@ class ValidationDriverService:
 
     @staticmethod
     async def _handle_acquiring_processed(
-        session: AsyncSession, study: ValidationStudy, *, fetcher=None, storage_adapter=None, inventory_fetcher=None
+        session: AsyncSession,
+        study: ValidationStudy,
+        *,
+        fetcher=None,
+        storage_adapter=None,
+        inventory_fetcher=None,
+        stream=None,
     ) -> bool:
         """plan_7 step 5: download the deposited files, decode them, and land them as Files.
 
@@ -1153,7 +1159,7 @@ class ValidationDriverService:
         # here forever. This is that wire, and it mirrors `_handle_acquiring_data`'s first visit.
         if not selection and not blocker:
             proceed = await ValidationDriverService._choose_from_deposit(
-                session, study, evidence, fetcher=inventory_fetcher
+                session, study, evidence, fetcher=inventory_fetcher, stream=stream
             )
             # change_7.4 section 1.1: a hold that is not retried concludes the study where it arose.
             # Falling through would hold the recorded blocker a second time and conclude it twice.
@@ -1191,6 +1197,10 @@ class ValidationDriverService:
         targets = [(n, "deposited_matrix") for n in wanted]
         if metadata_name:
             targets.append((metadata_name, "deposited_metadata"))
+        # change_7.5 section 3.4: the authors' result table identified with the input is the ground
+        # truth the reanalysis is compared with. It is an input to the comparison only, never the matrix.
+        if selection.get("author_table") and selection.get("author_table") not in wanted:
+            targets.append((selection["author_table"], "deposited_result_table"))
 
         if study.experiment_id is None:
             label = study.source_doi or study.source_accession or f"study {study.id}"
@@ -1208,6 +1218,10 @@ class ValidationDriverService:
             try:
                 raw = await fetch(url)
             except Exception as exc:  # noqa: BLE001
+                if artifact_type == "deposited_result_table":
+                    # The comparison loses its ground truth; the reanalysis still runs and reports its count.
+                    evidence["author_table_failed"] = {"filename": filename, "reason": str(exc)[:300]}
+                    continue
                 # A partial deposit is worse than none: step 8 would build a matrix missing an arm.
                 # Held on the route rather than failed, so the gate can escalate to raw reads.
                 # change_7.4 section 1.1: the only hold here that reads an error, and it reads the
@@ -1380,20 +1394,35 @@ class ValidationDriverService:
                 # association records which one answered.
                 logger.info("validation study %d: deposited metadata unreadable; falling back", study.id)
 
-        associations = associate_columns(
-            inspection["columns"],
-            metadata_rows=metadata_rows or None,
-            manifest=(evidence.get("sample_manifest") or None),
-        )
-        evidence["deposit_metadata_association"] = associations
+        choice = evidence.get("input_choice") or {}
+        mapped_from_choice = bool(design.get("contrasts")) and choice.get("primary_matrix") in {
+            m.get("filename") for m in matrices
+        }
+        if mapped_from_choice:
+            # change_7.5 sections 3.2 and 3.3: the mapping proposed with the input, validated against
+            # the matrix's actual columns. It replaces the name-convention association entirely.
+            held = await ValidationDriverService._map_from_input_choice(
+                session, study, evidence, plan, design, inspection, matrices[0], choice
+            )
+            if held is not None:
+                return held
+            design = plan.differential_design_json or {}
+            associations = evidence.get("deposit_metadata_association") or []
+        else:
+            associations = associate_columns(
+                inspection["columns"],
+                metadata_rows=metadata_rows or None,
+                manifest=(evidence.get("sample_manifest") or None),
+            )
+            evidence["deposit_metadata_association"] = associations
 
-        if design.get("contrasts"):
+        if design.get("contrasts") and not mapped_from_choice:
             # change_7.4 section 1.4: only the selected contrast is validated and rewritten.
             selected, _ = selected_contrast_for(
                 design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy
             )
             rewritten, status, reason = rewrite_design_to_columns(design, associations, contrast_index=selected)
-            if status in ("mismatch", "pairing_lost"):
+            if status in ("mismatch", "pairing_lost", "duplicate"):
                 # change_7.4 sections 1.1 and 1.4: never retried. Whether the input lacks the
                 # condition or the columns could not be placed is decided by what placed them, and a
                 # pairing that cannot be carried is an unresolved mapping, never an unpaired run.
@@ -1412,7 +1441,11 @@ class ValidationDriverService:
         # Build the SAME level3 bundle the pipeline route builds in `_handle_extracting`, out of the
         # deposit instead of a run. This is where the two routes converge: `_handle_reproducing`
         # reads evidence["level3"] and is deliberately untouched by plan_7.
-        decision = await resolve_level3_from_deposit(session, study, plan, evidence=evidence)
+        # change_7.5 section 4.1: the claims on this contrast checked against the authors' own table.
+        await ValidationDriverService._check_author_table(session, evidence, plan, storage)
+        decision = await resolve_level3_from_deposit(
+            session, study, plan, evidence=evidence, storage_adapter=storage
+        )
         if decision.inputs:
             evidence["level3"] = decision.inputs
             _record_readiness(evidence, "yes", _readiness_statement(decision.inputs))
@@ -1429,7 +1462,7 @@ class ValidationDriverService:
 
     @staticmethod
     async def _choose_from_deposit(
-        session: AsyncSession, study: ValidationStudy, evidence: dict, *, fetcher=None
+        session: AsyncSession, study: ValidationStudy, evidence: dict, *, fetcher=None, stream=None
     ) -> bool:
         """plan_7 step 11: list what the study deposited and decide what to reproduce from.
 
@@ -1539,6 +1572,12 @@ class ValidationDriverService:
         # change_7.5 section 2.6: told the selected claim's experiment and the claim, not a paper-level
         # mapping. A plan with no extracted experiment keeps the old sentence.
         experiment = _plan_experiment(plan)
+        current = ((plan.analysis_selection_json if plan else None) or {}).get("current") or {}
+        if experiment is not None and isinstance(current.get("contrast_index"), int):
+            # change_7.5 section 3.2: the input, its mapping and the authors' table in one decision.
+            return await ValidationDriverService._choose_input(
+                session, study, evidence, plan, entries, experiment, current, cfg, stream=stream, accession=accession
+            )
         chosen = await select_deposit(
             entries,
             pipeline_key=plan.pipeline_key if plan else None,
@@ -1569,6 +1608,238 @@ class ValidationDriverService:
 
         study.evidence_json = dict(evidence)
         return True
+
+    @staticmethod
+    async def _choose_input(
+        session: AsyncSession,
+        study: ValidationStudy,
+        evidence: dict,
+        plan,
+        entries,
+        experiment: dict,
+        current: dict,
+        cfg,
+        *,
+        stream=None,
+        accession: str,
+    ) -> bool:
+        """change_7.5 section 3.2: choose the input from the selected claim and the evidence.
+
+        The decision sees the claim, its predicate and contrast, the experiment, the repository's sample
+        records scoped to the experiment, and bounded previews of the candidate files. It is recorded on
+        ``evidence["input_choice"]`` and as a revision of the selection (input and sample mapping)."""
+        from app.services.validation_assessment import deposit_head_fetcher
+        from app.services.validation_input_choice import choose_input, scoped_records
+        from app.services.validation_revisions import current_revision, invalidate, revise
+
+        contrasts = (plan.differential_design_json or {}).get("contrasts") or []
+        index = current["contrast_index"]
+        contrast = contrasts[index] if 0 <= index < len(contrasts) else {}
+        issues: list[dict] = []
+        choice = await choose_input(
+            entries,
+            stream=stream or deposit_head_fetcher,
+            claim={"claim_text": await _selected_claim_text(session, plan)},
+            predicate_words=current.get("predicate_words"),
+            contrast=contrast,
+            experiment=experiment,
+            sample_records=scoped_records(evidence.get("sample_manifest") or [], experiment),
+            client=get_client(cfg.provider),
+            model=cfg.model,
+            api_key=cfg.api_key,
+            on_issue=issues.append,
+        )
+        await ValidationIssueService.record(session, study, issues)
+        evidence["input_choice"] = {**choice, "at": _now().isoformat()}
+        if not choice["primary_matrix"]:
+            if not choice.get("decided_by") and not choice["reason"].startswith("the deposit lists no matrix"):
+                study.evidence_json = dict(evidence)
+                return False  # the ask failed: a person picks at the gate rather than an outage choosing
+            evidence["deposit_unusable"] = choice["reason"]
+            evidence["deposit_unusable_cause"] = INPUT_UNIDENTIFIED
+            return await ValidationDriverService._hold_deposit(
+                session, study, evidence, choice["reason"], cause=INPUT_UNIDENTIFIED, resource=accession
+            )
+        evidence["deposit_selection"] = {
+            "primary_matrix": choice["primary_matrix"],
+            "matrix_files": choice["matrix_files"],
+            "metadata_file": None,
+            "value_type": "unknown",
+            "reason": choice["reason"],
+            "confidence": choice["confidence"],
+            "declined": False,
+            "decided_by": choice["decided_by"],
+            "model": choice["model"],
+            "author_table": choice["author_table"],
+        }
+        before = current_revision(plan)
+        plan.analysis_selection_json, changed = revise(
+            plan.analysis_selection_json,
+            {
+                "input": {
+                    "matrix": choice["primary_matrix"],
+                    "author_table": choice["author_table"],
+                    "decided_by": choice["decided_by"],
+                    "reason": choice["reason"],
+                },
+                "sample_mapping": {
+                    "status": (choice.get("mapping_validation") or {}).get("status"),
+                    "decided_by": choice["decided_by"],
+                },
+            },
+            decided_by=current.get("decided_by") or "model",
+            reason=current.get("reason") or "",
+            confidence=current.get("confidence"),
+            model=current.get("model"),
+        )
+        study.evidence_json = dict(evidence)
+        invalidate(study, plan, changed, revision=before)
+        evidence.clear()
+        evidence.update(study.evidence_json or {})
+        await session.flush()
+        return True
+
+    @staticmethod
+    async def _check_author_table(session: AsyncSession, evidence: dict, plan, storage) -> None:
+        """change_7.5 section 4.1: every claim on the selected contrast checked against the acquired
+        authors' table, at its own predicate. Never raises; the rows are never kept."""
+        from app.models.comparison_target import ComparisonTarget
+        from app.services.validation_author_consistency import check_claim, claim_predicates
+
+        table = next(
+            (f for f in (evidence.get("deposit") or {}).get("files") or [] if f.get("artifact_type") == "deposited_result_table"),
+            None,
+        )
+        if table is None or plan is None:
+            return
+        try:
+            text = await storage.read_text(table["storage_uri"])
+        except Exception as exc:  # noqa: BLE001 - the consistency record says why, the run goes on
+            evidence["author_consistency"] = {"records": [], "table": table.get("filename"), "reason": str(exc)[:300]}
+            return
+        rows = (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
+        ).scalars().all()
+        selected = ((plan.analysis_selection_json or {}).get("current") or {}).get("contrast_index")
+        records = []
+        for item in claim_predicates(list(rows), plan):
+            if selected is not None and item["predicate"].get("contrast_index") != selected:
+                continue
+            record = check_claim(
+                {}, item["predicate"], {"name": table.get("filename"), "text": text, "source": "deposit"},
+                contrast=item["contrast"],
+            )
+            record.pop("predicate", None)
+            records.append({**record, "claim_index": item["claim_index"]})
+        evidence["author_consistency"] = {"records": records, "table": table.get("filename"), "at": _now().isoformat()}
+
+    @staticmethod
+    async def _map_from_input_choice(
+        session: AsyncSession, study: ValidationStudy, evidence: dict, plan, design: dict, inspection: dict, matrix: dict, choice: dict
+    ) -> bool | None:
+        """change_7.5 section 3.3: validate the proposed mapping against the acquired matrix's columns
+        and rewrite the selected contrast from it. None when the design is rewritten; otherwise the
+        result of a hold that keeps the acquired input and the proposal, and never re-retrieves.
+
+        "Review and resume" marks the mapping for re-entry (``remap``): in autonomous mode the same
+        decision is asked again of the same input's own columns."""
+        from app.services.validation_input_choice import (
+            associations_from_mapping,
+            design_from_mapping,
+            propose_mapping,
+            scoped_records,
+            validate_mapping,
+        )
+
+        selected, _ = selected_contrast_for(design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy)
+        contrast = design["contrasts"][selected] if selected is not None else {}
+        experiment = _plan_experiment(plan)
+        records = scoped_records(evidence.get("sample_manifest") or [], experiment)
+        claim_text = await _selected_claim_text(session, plan)
+        if choice.get("remap") or not choice.get("mapping"):
+            org = await session.get(Organization, study.organization_id)
+            cfg = await llm_provider_config_service.get_for_feature(
+                session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+            )
+            if cfg is not None and ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) == AUTONOMY_AUTONOMOUS:
+                issues: list[dict] = []
+                current = (plan.analysis_selection_json or {}).get("current") or {}
+                proposal = await propose_mapping(
+                    choice["primary_matrix"],
+                    list(inspection.get("columns") or []),
+                    claim={"claim_text": claim_text},
+                    predicate_words=current.get("predicate_words"),
+                    contrast=contrast,
+                    experiment=experiment,
+                    sample_records=records,
+                    client=get_client(cfg.provider),
+                    model=cfg.model,
+                    api_key=cfg.api_key,
+                    on_issue=issues.append,
+                )
+                await ValidationIssueService.record(session, study, issues)
+                choice = {**choice, "previous_mapping": choice.get("mapping"), "mapping": proposal["mapping"]}
+        choice.pop("remap", None)
+        validation = validate_mapping(
+            choice.get("mapping") or [],
+            columns=list(inspection.get("columns") or []),
+            sample_records=records,
+            texts=[claim_text or "", (experiment or {}).get("assay") or ""],
+        )
+        choice["mapping_validation"] = validation
+        evidence["input_choice"] = choice
+        evidence["deposit_metadata_association"] = associations_from_mapping(validation["mapping"], contrast)
+        name = matrix.get("filename") or "the deposited matrix"
+        if validation["status"] != "accepted":
+            return await ValidationDriverService._hold_deposit(
+                session,
+                study,
+                evidence,
+                f"bioAF downloaded and read {name}. Held before running: the proposed sample mapping is not "
+                f"supported by the evidence ({'; '.join(validation['reasons'])}). The proposal is kept with its "
+                "evidence, and Review and resume re-enters mapping with the same input.",
+                cause=SAMPLE_MAPPING_UNRESOLVED,
+                resource=name,
+            )
+        # 7.4 section 2.3, carried: after the choice, the input itself is re-checked against the selected
+        # contrast. Its samples' declared library strategy is the input's own evidence.
+        from app.services.contrast_selection import INCOMPATIBLE, contrast_compatibility
+        from app.services.literature.accession_manifest_service import dominant_library_strategy
+
+        mapped = {r.get("column") for r in validation["mapping"] if r.get("arm") in ("test", "reference")}
+        mapped_records = [
+            r for r in records if str(r.get("title") or "") in mapped or str(r.get("geo_accession") or "") in mapped
+        ]
+        strategy = dominant_library_strategy(mapped_records) if mapped_records else None
+        if strategy:
+            status, why = contrast_compatibility(contrast, pipeline_key=plan.pipeline_key, library_strategy=strategy)
+            if status == INCOMPATIBLE:
+                return await ValidationDriverService._hold_deposit(
+                    session,
+                    study,
+                    evidence,
+                    f"bioAF downloaded and read {name}. The chosen input cannot serve the selected contrast: {why} "
+                    f"(its samples are deposited as {strategy}).",
+                    cause=NO_COMPATIBLE_CONTRAST,
+                    resource=name,
+                )
+        rewritten, status, reason = design_from_mapping(design, validation["mapping"], contrast_index=selected)
+        if status != "ok":
+            return await ValidationDriverService._hold_deposit(
+                session,
+                study,
+                evidence,
+                f"bioAF downloaded and read {name}. {reason}",
+                cause=SAMPLE_MAPPING_UNRESOLVED,
+                resource=name,
+            )
+        plan.differential_design_json = rewritten
+        await session.flush()
+        return None
 
     @staticmethod
     async def _record_sample_manifest(evidence: dict, accession: str, *, fetcher=None) -> None:
@@ -2138,11 +2409,18 @@ class ValidationDriverService:
         universe = int(
             level3.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
         )
-        if level3.get("kind") == "interval":
-            conc = compare_interval_sets(paper_fs, our_fs, universe)
+        if level3.get("predicate"):
+            # change_7.5 section 3.4: filtered by the claim's direction, with the count beside the claim,
+            # and no concordance where no ground-truth set was identified.
+            from app.services.validation_level3_service import score_reproduction
+
+            evidence["level3_result"] = score_reproduction(level3, our_fs, universe=universe)
         else:
-            conc = compare_gene_sets(paper_fs, our_fs, universe)
-        evidence["level3_result"] = {"concordance": conc.to_dict(), "our_finding_set": our_fs.to_dict()}
+            if level3.get("kind") == "interval":
+                conc = compare_interval_sets(paper_fs, our_fs, universe)
+            else:
+                conc = compare_gene_sets(paper_fs, our_fs, universe)
+            evidence["level3_result"] = {"concordance": conc.to_dict(), "our_finding_set": our_fs.to_dict()}
         study.evidence_json = evidence
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
