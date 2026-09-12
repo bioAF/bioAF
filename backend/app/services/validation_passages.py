@@ -48,6 +48,35 @@ def _sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_END.split(_normalized(text)) if s.strip()]
 
 
+# Typographic spellings a model normalizes when it quotes: comparison signs, dashes and quote marks.
+_QUOTE_FOLDS = str.maketrans(
+    {
+        "\u2264": "<=",  # less-than or equal
+        "\u2265": ">=",  # greater-than or equal
+        "\u2212": "-",  # minus sign
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+    }
+)
+
+
+def _folded(text: str) -> str:
+    import unicodedata
+
+    return " ".join(unicodedata.normalize("NFKC", text or "").translate(_QUOTE_FOLDS).lower().split())
+
+
+def quote_in_text(quote: str, full_text: str) -> bool:
+    """Whether ``quote`` is the paper's own words: found in ``full_text``, ignoring case, whitespace
+    and typographic spelling. A quote is evidence only when it can be found where it claims to be."""
+    needle = _folded(quote)
+    return bool(needle) and needle in _folded(full_text)
+
+
 def claim_passage(full_text: str, claim_text: str | None) -> str | None:
     """The passage around a claim's own sentence, widened to sentence boundaries. None when the text
     does not contain the claim: a passage from elsewhere would be evidence about something else."""

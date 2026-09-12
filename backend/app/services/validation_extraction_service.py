@@ -36,6 +36,7 @@ from app.services.validation_issue_service import ValidationIssueService
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_claim_cutoffs import describe_cutoff
 from app.services.validation_classifier_service import (
     BINDING_FAILED,
     CONTROLLED_METRIC_KEYS,
@@ -53,17 +54,18 @@ _SCHEMA_HINT = (
     '"reference_condition": "", "test_samples": ["sample ids in the test group"], '
     '"reference_samples": ["sample ids in the reference group"], '
     '"assay": "the assay this contrast was measured on", '
-    '"finding_claim_index": "index into claims of the claim stating this contrast\'s headline finding, or null", '
-    '"thresholds": {"log2fc": null, "padj": null}}], '
-    '"thresholds": {"log2fc": null, "padj": null}}, '
+    '"finding_claim_index": "index into claims of the claim stating this contrast\'s headline finding, or null"}]}, '
     '"claims": [{"metric_key": "aligns to a QC metric, or \'\' when nothing measures it", '
     '"claim_text": "the paper\'s own sentence, quoted", "value": 0, "unit": "", "tolerance": null, '
     '"source_locator": "section/figure", "sample_subset": "which samples, e.g. whole embryo", '
     '"qc_stage": "as collected | post-QC | as analysed", "direction": "up | down | null, relative to the '
     'reference arm", "threshold": null, "threshold_kind": "padj | pvalue | abs_log2fc | null", '
     '"contrast": "the name of the contrast this claim reports on, or null", '
-    '"cutoffs": [{"kind": "padj | pvalue | abs_log2fc", "operator": "< | <= | > | >=", "value": 0}], '
+    '"cutoffs": [{"kind": "pvalue | padj | fdr | qvalue | abs_log2fc | fold_change", '
+    '"operator": "< | <= | > | >=", "value": 0}], '
     '"output_type": "count | percentage | gene_set_size | ratio"}], '
+    '"significance_ambiguities": [{"claim_index": 0, "readings": [{"kind": "pvalue | padj | fdr | qvalue", '
+    '"operator": "< | <=", "value": 0, "quote": "the paper\'s exact words for this reading"}]}], '
     '"data_availability": "deposited | none | restricted", '
     '"code_availability": [{"kind": "github|gitlab|zenodo|codeocean|supplementary|none", "url": "", '
     '"identifier": "e.g. a DOI", "stated_in": "methods | data availability | code availability", '
@@ -153,7 +155,8 @@ def _spec_lines(tier: str) -> str:
 
     One line per metric, pipe-delimited, because the model has to pick between 23 near neighbours and a
     bare key list gives it nothing to pick on. The aliases are the load-bearing column: they are the
-    paper's own wording, and they are what turns "8733 significant peaks" into `peak_count`.
+    paper's own wording, and they are what turns a sentence counting "significant peaks" into
+    `peak_count`.
     """
     lines = []
     for spec in CONTROLLED_METRIC_SPECS:
@@ -199,9 +202,9 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         f"{_metric_vocabulary_block()}\n\n"
         "Use the EXACT controlled key whenever the paper reports the quantity that key describes, however the "
         "paper words it, so the claim can be compared automatically. Match on what is measured, not on the "
-        "paper's phrasing: \"8733 significant peaks\" is peak_count. Report the claim on the key's own scale "
-        "and state the unit you read. Do not qualify a controlled key with the sample or condition it came "
-        "from (peak_count, never samd1_chip_peaks). If a claim genuinely measures something no controlled key "
+        'paper\'s phrasing: a sentence counting "significant peaks" is peak_count. Report the claim on the '
+        "key's own scale and state the unit you read. Do not qualify a controlled key with the sample or "
+        "condition it came from (peak_count, never condition_a_peaks). If a claim genuinely measures something no controlled key "
         "describes, or measures only a subset of one (peaks gained in a single condition is not peak_count), "
         "use a clear snake_case key of your own instead of forcing a wrong match. Do not invent values. Use "
         "null when unknown.\n\n"
@@ -218,24 +221,31 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "paper does not say.\n\n"
         "Also capture the paper's PRIMARY DIFFERENTIAL DESIGN in differential_design: the contrast(s) it "
         "tests (which condition is compared against which reference), the sample ids belonging to each "
-        "group, and the significance thresholds it used (|log2 fold-change| and adjusted p / FDR). This is "
-        "the finding to be reproduced, not the pipeline's parameters. Give each contrast the thresholds THAT "
-        "contrast was reported at, and name the assay it was measured on. A paper states its cutoffs per "
-        "finding, not once for itself: differential expression is usually reported at a |log2FC| cutoff "
-        "AND an adjusted p, while differential binding on windows or peaks is usually reported on the "
-        "adjusted p alone. Where a cutoff genuinely does not apply to a contrast, set it to null rather "
-        "than copying another contrast's number. If the paper truly states one pair for everything, "
-        "repeat it on each contrast. If the paper reports no differential "
-        "comparison (a descriptive/QC-only paper), set contrasts to [] and leave thresholds null. Never "
-        "fabricate a contrast or a threshold.\n\n"
+        "group, and the assay each contrast was measured on. This is the finding to be reproduced, not "
+        "the pipeline's parameters. A contrast carries no cutoffs of its own: its cutoffs are the ones its "
+        "claims state, below. If the paper reports no differential comparison (a descriptive/QC-only "
+        "paper), set contrasts to []. Never fabricate a contrast.\n\n"
+        # change_7.5 section 1.1: the measure as stated. The old wording named one convention as usual,
+        # and study 38's stated nominal P value came back as a blocker calling it ambiguous.
+        "Record every significance measure EXACTLY AS THE PAPER STATES IT, on the claim it governs: its "
+        "kind, its operator and its value. A P value is pvalue, an adjusted P value is padj, an FDR is "
+        "fdr and a q-value is qvalue. Each of these is the paper's own definition of its finding, and "
+        "none of them is more usual or more correct than another. Never infer a measure the text does not "
+        "state, never turn one kind into another, and never supply a cutoff the paper does not state.\n\n"
         # change_7.3 section 7: cutoffs belong to claims, and a set and its subset are two claims.
         'Give every claim its own cutoffs, one entry per cutoff: "padj < 0.05 and |log2FC| > 2" is two '
         "cutoffs. Name the contrast a claim reports on, and for each contrast give finding_claim_index, "
         "the claim that states its headline finding. A sentence that states a set and a subset of it "
-        '("194 genes were significant, 88 of which changed more than two-fold") makes TWO claims, each '
+        '("N genes were significant, M of which changed more than two-fold") makes TWO claims, each '
         "with its own value and cutoffs; never merge them. Likewise, when the paper says samples were "
         'excluded, the count before the exclusions is one claim with qc_stage "as collected" and the '
         'number analysed after them is another with qc_stage "as analysed".\n\n'
+        "A claim's significance is ambiguous ONLY when the paper itself supports more than one reading "
+        "for that same claim: for example, a results sentence gives the counts at P < 0.01 while the "
+        "methods say the same counts were taken at FDR < 0.01. Record that in significance_ambiguities: "
+        "the claim's index, and each reading with the paper's exact words as its quote. Never write a "
+        "blocker saying a stated measure is missing, ambiguous, nominal or unadjusted. A stated measure is "
+        "the paper's definition; a real ambiguity is shown with its quotes, or not recorded at all.\n\n"
         "Give each blocker a kind: sample_assignment when which sample belongs to which group is not "
         "stated, data_access when the data sits behind an access agreement, missing_detail for an "
         "unstated methods detail, no_accession when no data deposit is named, method_mismatch when the "
@@ -463,8 +473,12 @@ def _differential_design_or_none(design: dict) -> dict | None:
     return design if design.get("contrasts") else None
 
 
-def parse_extraction(response_text: str) -> dict:
-    """Pull the fenced JSON extraction and normalize it. Never raises; flags parse failure instead."""
+def parse_extraction(response_text: str, *, full_text: str | None = None) -> dict:
+    """Pull the fenced JSON extraction and normalize it. Never raises; flags parse failure instead.
+
+    ``full_text`` is the paper the model read. change_7.5 section 1.1: a significance ambiguity is kept
+    only when each of its quotes is found there, so without it none can be shown and none is kept.
+    """
     empty = {
         "accessions": [],
         "sample_structure": {},
@@ -477,6 +491,7 @@ def parse_extraction(response_text: str) -> dict:
         # `extract`'s `parsed.get("code_availability")` read None on every paper and the column
         # shipped empty. Found by step 13, which needs the answer to fill the checklist's code rows.
         "code_availability": [],
+        "significance_ambiguities": [],
         "blockers": [],
         "blocker_kinds": [],
         "parse_failure": True,
@@ -485,22 +500,92 @@ def parse_extraction(response_text: str) -> dict:
     if data is None:
         return empty
 
+    claims = [c for c in _as_list(data.get("claims")) if isinstance(c, dict)]
     blockers, blocker_kinds = _typed_blockers(data.get("blockers"))
+    blockers, blocker_kinds = _without_stated_significance_blockers(blockers, blocker_kinds, claims)
     return {
         "accessions": [str(a).strip() for a in _as_list(data.get("accessions")) if str(a).strip()],
         "sample_structure": _as_dict(data.get("sample_structure")),
         "method": _as_dict(data.get("method")),
         "differential_design": _normalize_differential_design(data.get("differential_design")),
-        "claims": [c for c in _as_list(data.get("claims")) if isinstance(c, dict)],
+        "claims": claims,
         "data_availability": str(data.get("data_availability") or "unknown"),
         # Normalized by `parse_code_availability` at the point of storage; kept raw here so a paper
         # that named nothing reads as `[]` ("we looked and it named none") rather than as a missing
         # key, which step 13 renders as UNKNOWN ("we never asked").
         "code_availability": [c for c in _as_list(data.get("code_availability")) if isinstance(c, dict)],
+        "significance_ambiguities": _shown_significance_ambiguities(
+            data.get("significance_ambiguities"), full_text, claim_count=len(claims)
+        ),
         "blockers": blockers,
         "blocker_kinds": blocker_kinds,
         "parse_failure": False,
     }
+
+
+# A blocker sentence that is about a statistical significance measure. Matched only to decide whether
+# the sentence contradicts a measure the paper states; never to read what the measure is.
+_SIGNIFICANCE_BLOCKER = re.compile(
+    r"\b(?:p[\s-]?values?|padj|p\.adj|adjusted\s+p|fdr|false\s+discovery|q[\s-]?values?|nominal|"
+    r"significance\s+(?:threshold|cutoff|cut-off|level|definition|measure|basis))\b|\bp\s*[<≤=]",
+    re.IGNORECASE,
+)
+
+
+def _without_stated_significance_blockers(
+    blockers: list[str], blocker_kinds: list[dict], claims: list[dict]
+) -> tuple[list[str], list[dict]]:
+    """Drop a blocker about significance when a claim states its significance measure.
+
+    change_7.5 section 1.1: study 38 stated its counts at P < 0.01 and the extraction wrote a blocker
+    calling that cutoff ambiguous. A stated measure is the paper's definition, and a real ambiguity is
+    recorded with its quotes in ``significance_ambiguities``. Where no claim states any measure, a
+    blocker saying none is stated contradicts nothing, and it stands.
+    """
+    from app.services.validation_claim_cutoffs import SIGNIFICANCE_KINDS, claim_cutoffs
+
+    stated = any(cut["kind"] in SIGNIFICANCE_KINDS for claim in claims for cut in claim_cutoffs(claim))
+    if not stated:
+        return blockers, blocker_kinds
+    dropped = [b for b in blockers if _SIGNIFICANCE_BLOCKER.search(b)]
+    if dropped:
+        logger.info("dropped %d blocker(s) about a significance measure a claim states: %s", len(dropped), dropped)
+    kept = [b for b in blockers if b not in dropped]
+    return kept, [k for k in blocker_kinds if k["text"] in kept]
+
+
+def _shown_significance_ambiguities(raw, full_text: str | None, *, claim_count: int) -> list[dict]:
+    """The ambiguities the paper's own text shows. Anything asserted and not shown is dropped.
+
+    change_7.5 section 1.1: an entry is kept only when it has at least two distinct readings, each a
+    well-formed significance cutoff whose quote is found in the paper. Otherwise the claim's stated
+    reading stands. Two spellings of one definition (an FDR and a q-value) are one reading.
+    """
+    from app.services.validation_claim_cutoffs import significance_cutoff
+    from app.services.validation_passages import quote_in_text
+
+    if not full_text:
+        return []
+    kept: list[dict] = []
+    for entry in _as_list(raw):
+        entry = _as_dict(entry)
+        index = entry.get("claim_index")
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < claim_count:
+            continue
+        readings: list[dict] = []
+        shown = True
+        for raw_reading in _as_list(entry.get("readings")):
+            reading = _as_dict(raw_reading)
+            cutoff = significance_cutoff(reading.get("kind"), reading.get("operator"), reading.get("value"))
+            quote = str(reading.get("quote") or "").strip()
+            if cutoff is None or not quote or not quote_in_text(quote, full_text):
+                shown = False
+                break
+            readings.append({**cutoff, "quote": quote})
+        distinct = {(r["kind"], r["operator"], r["value"]) for r in readings}
+        if shown and len(distinct) >= 2:
+            kept.append({"claim_index": index, "readings": readings})
+    return kept
 
 
 def _typed_blockers(raw) -> tuple[list[str], list[dict]]:
@@ -585,7 +670,10 @@ def build_binding_prompt(
         "- Never invent a key. bound_key must be one of the keys listed above, or null.\n"
         "- Every claim gets exactly one row, in the order given, and every row carries a reason.\n"
         "- confidence is your own certainty in THIS binding: 1.0 when the claim states the metric in so "
-        "many words, lower when you are reading intent from context."
+        "many words, lower when you are reading intent from context.\n"
+        "- Where a claim lists its stated cutoffs, they are the paper's own definition. Never change their "
+        "kind: a P value is not an adjusted P value. Leave threshold and threshold_kind null unless you are "
+        "restating one of them exactly."
     )
     if statements:
         system += (
@@ -613,6 +701,9 @@ def build_binding_prompt(
         passage = (c.get("claim_text") or "").strip()
         if passage:
             line += f"\n     the paper says: {passage}"
+        cutoffs = [cut for cut in c.get("cutoffs") or [] if isinstance(cut, dict)]
+        if cutoffs:
+            line += "\n     stated cutoffs: " + " and ".join(describe_cutoff(cut) for cut in cutoffs)
         # change_7.3 section 7: the passage around it, kept at read time, so the sentence arrives with
         # the context that says which samples and which stage it counts.
         context = (c.get("passage") or "").strip()
@@ -907,7 +998,7 @@ class ValidationExtractionService:
         if not reading.ok:
             # `blocked`: with no extraction there is no plan, so this one really did produce nothing.
             issues.append(reading.as_issue(impact="blocked"))
-        parsed = parse_extraction(reading.text)
+        parsed = parse_extraction(reading.text, full_text=full_text)
 
         method = parsed["method"]
         library_strategy = await scoped_library_strategy(study)
@@ -988,8 +1079,14 @@ class ValidationExtractionService:
             claim_cutoffs,
             contrast_index_for,
             derive_contrast_thresholds,
+            describe_ambiguity,
             threshold_disagreement,
         )
+
+        # change_7.5 section 1.1: a significance the paper's own text reads two ways, shown with both
+        # quotes. It rides on the claim so the target and the contrast it defines are both unresolved.
+        for ambiguity in parsed["significance_ambiguities"]:
+            parsed["claims"][ambiguity["claim_index"]]["significance_unresolved"] = describe_ambiguity(ambiguity)
 
         design_contrasts = parsed["differential_design"].get("contrasts") or []
         targets = []
@@ -1030,9 +1127,12 @@ class ValidationExtractionService:
             disagreement = threshold_disagreement(
                 _to_float(c.get("threshold")), c.get("threshold_kind"), claim_cutoffs(c)
             )
-            if disagreement:
-                targets[-1]["unresolved_reason"] = disagreement
-                issues.append(_cutoff_issue(disagreement))
+            for unresolved in (c.get("significance_unresolved"), disagreement):
+                if unresolved:
+                    targets[-1]["unresolved_reason"] = " ".join(
+                        r for r in (targets[-1].get("unresolved_reason"), unresolved) if r
+                    )
+                    issues.append(_cutoff_issue(unresolved))
             claims_to_bind.append(
                 {
                     "metric_key": metric_key,
@@ -1040,6 +1140,9 @@ class ValidationExtractionService:
                     "value": c.get("value"),
                     "unit": c.get("unit"),
                     "source_locator": c.get("source_locator"),
+                    # change_7.5 section 1.1: the binding call sees the cutoffs the paper stated, so it
+                    # never re-derives their kind without them.
+                    "cutoffs": claim_cutoffs(c) or None,
                 }
             )
 
