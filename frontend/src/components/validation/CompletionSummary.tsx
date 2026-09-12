@@ -17,6 +17,7 @@
  */
 
 import type { ReportSummary } from "@/lib/validationReport";
+import { TechnicalDetails } from "./TechnicalDetails";
 
 export interface Limitation {
   kind: string;
@@ -111,6 +112,7 @@ function ProjectedCompletion({ summary }: { summary: ReportSummary }) {
                 <td className="py-1.5 text-xs text-gray-500">
                   {limitation.detail}
                   {limitation.observation && <span className="block">Observed: {limitation.observation}</span>}
+                  <TechnicalDetails detail={limitation.technical_detail} />
                 </td>
               </tr>
             ))}

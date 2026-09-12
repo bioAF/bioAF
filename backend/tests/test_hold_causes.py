@@ -719,3 +719,43 @@ class TestNoCompatibleContrastStopsTheDepositRoute:
 
         assert _failed(study)["cause"] == "no_compatible_contrast"
         assert "nf-core/chipseq" in _failed(study)["reason"]
+
+
+# ---- change_7.4 section 1.1: the plain detail names the evidence; the technical detail is kept apart ----
+
+
+class TestALimitationCarriesItsTechnicalDetailApart:
+    @pytest.mark.asyncio
+    async def test_a_refused_download_names_the_cause_and_the_location_under_technical_detail(
+        self, session, admin_user
+    ):
+        study = await _study(session, admin_user, evidence=_chosen())
+
+        await ValidationDriverService._handle_acquiring_processed(
+            session, study, fetcher=_bytes_fetcher(raise_for=_status_error(403)), storage_adapter=_Storage()
+        )
+
+        limitation = next(x for x in study.evidence_json["completion"]["limitations"] if x["kind"] == "access_refused")
+        assert limitation["technical_detail"]["cause"] == "access_refused"
+        assert limitation["technical_detail"]["url"] == _BASE + "GSE1_counts.tsv.gz"
+
+    def test_the_projection_carries_it_to_every_surface(self):
+        from app.services.validation_report_summary import summarize
+
+        evidence = {
+            "completion": {
+                "limitations": [
+                    {
+                        "kind": "access_refused",
+                        "resource": "GSE1_counts.tsv.gz",
+                        "operation": "deposit",
+                        "detail": "GSE1_counts.tsv.gz could not be downloaded",
+                        "technical_detail": {"cause": "access_refused", "url": "https://x"},
+                    }
+                ]
+            }
+        }
+        [row] = summarize(study={"state": "classified"}, evidence=evidence, plan={}, targets=[], issues=[])[
+            "limitations"
+        ]
+        assert row["technical_detail"] == {"cause": "access_refused", "url": "https://x"}

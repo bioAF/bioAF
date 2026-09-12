@@ -23,6 +23,7 @@ import { ValidationStudyOutcome } from "./ValidationStudyOutcome";
 const groff = contract.groff_failed as unknown as ReportSummary;
 const legacy = contract.study_34_legacy as unknown as ReportSummary;
 const attempted = contract.attempted_no_verdict as unknown as ReportSummary;
+const mappingUnresolved = contract.mapping_unresolved as unknown as ReportSummary;
 
 describe("the headline follows the reproduction attempt (item 1)", () => {
   it("says reproduction was not attempted when nothing executed", () => {
@@ -311,5 +312,32 @@ describe("the studies list follows the attempt too (item 1)", () => {
   it("keeps Could Not Reproduce for an attempt with no verdict", () => {
     render(<ValidationStudyOutcome state="classified" confidence={null} classification="inconclusive" attempt="attempted" />);
     expect(screen.getByText("Could Not Reproduce")).toBeInTheDocument();
+  });
+});
+
+
+describe("an input acquired and read that could not be assigned (change_7.4 sections 1.1 and 1.3)", () => {
+  it("names the limitation for what failed, with the file in its detail", () => {
+    render(<CompletionSummary completion={null} summary={mappingUnresolved} />);
+    const row = screen.getByTestId("limitation-sample_mapping_unresolved");
+    expect(row).toHaveTextContent("Samples could not be assigned to the comparison");
+    expect(row).toHaveTextContent("GSE1_counts.tsv.gz");
+    expect(row).not.toHaveTextContent(/could not reach/i);
+  });
+
+  it("keeps the typed cause under a collapsed Technical details element", () => {
+    render(<CompletionSummary completion={null} summary={mappingUnresolved} />);
+    const row = screen.getByTestId("limitation-sample_mapping_unresolved");
+    const details = within(row).getByText("Technical details").closest("details") as HTMLElement;
+    expect(details).not.toHaveAttribute("open");
+    expect(within(details).getByText("sample_mapping_unresolved")).toBeInTheDocument();
+  });
+
+  it("says the input was acquired and usable, and not ready", () => {
+    render(<CompletionSummary completion={null} summary={mappingUnresolved} />);
+    expect(screen.getByTestId("fact-input_acquired")).toHaveTextContent("Yes");
+    expect(screen.getByTestId("fact-input_acquired")).toHaveTextContent("GSE1_counts.tsv.gz");
+    expect(screen.getByTestId("fact-input_usable")).toHaveTextContent("Yes");
+    expect(screen.getByTestId("fact-ready_for_analysis")).toHaveTextContent("No");
   });
 });

@@ -516,6 +516,9 @@ def _limitations(completion: dict, *, uninspected: bool) -> list[dict]:
                     "leg": limitation.get("operation"),
                     "detail": limitation.get("detail"),
                     "observation": limitation.get("observation"),
+                    # change_7.4 section 1.1: the typed cause and where it happened, for the collapsed
+                    # technical element under the plain sentence.
+                    "technical_detail": limitation.get("technical_detail"),
                     "governs": governs,
                 }
             )

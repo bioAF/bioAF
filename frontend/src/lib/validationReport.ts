@@ -15,6 +15,8 @@ export interface ReportLimitation {
   leg: string | null;
   detail: string | null;
   observation: string | null;
+  // change_7.4 section 1.1: the typed cause and where it happened, shown collapsed under the detail.
+  technical_detail?: TechnicalDetail | null;
   // False for a route leg that was not chosen: reported as context, never run.
   governs: boolean;
 }
