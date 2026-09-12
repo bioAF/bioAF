@@ -26,8 +26,8 @@ logger = logging.getLogger("bioaf.column_resolution")
 # The step in the user's language, for the issues section of the report.
 COLUMN_RESOLUTION_INTENT = "reading the columns of the paper's result table"
 
-# What each table kind needs before it can be normalized. `pval` is a fallback for `padj`, so it is
-# offered but never required.
+# What each table kind needs before it can be normalized. change_7.5 section 1.1: `pval` and `padj` are
+# two measures, neither a fallback for the other. The claim's own measure decides which is applied.
 ROLES: dict[str, tuple[str, ...]] = {
     "interval": ("chrom", "start", "end", "lfc", "padj", "pval"),
     "gene": ("id", "lfc", "padj", "pval"),
@@ -43,8 +43,8 @@ _ROLE_HELP = {
     "end": "the interval end coordinate",
     "id": "the gene identifier (symbol, Ensembl or Entrez)",
     "lfc": "the log2 fold change, signed, giving the direction of the change",
-    "padj": "the ADJUSTED p-value / FDR / q-value",
-    "pval": "the nominal p-value, only if there is no adjusted one",
+    "padj": "the adjusted p-value, FDR or q-value, if the table has one",
+    "pval": "the nominal (unadjusted) p-value, if the table has one",
     "sample_id": "the sample identifier, matching the matrix's column names",
     "condition": "the experimental group this sample belongs to (treated/control, genotype, ...)",
     "replicate": "the replicate number within a condition",
@@ -68,8 +68,10 @@ def build_column_prompt(header: list[str], *, kind: str) -> tuple[str, str]:
         "- Omit a role rather than guess. A wrong column is worse than a missing one, because the "
         "table is then read as saying something it does not.\n"
         "- Where a table carries several statistics side by side (a combined test and a per-window "
-        "best test, say), choose the primary one the analysis is reported on, and prefer the "
-        "ADJUSTED significance over the nominal p-value.\n"
+        "best test, say), choose the primary one the analysis is reported on.\n"
+        "- Name every significance column the table has, each in its own role: a nominal p-value is "
+        "pval, and an adjusted p-value, FDR or q-value is padj. Prefer neither; the paper's own "
+        "definition decides which one is applied.\n"
         "- Do not invent a column that is not in the header."
     )
     payload = "Header row of the deposited table:\n\n" + "\n".join(f"  {h}" for h in header)

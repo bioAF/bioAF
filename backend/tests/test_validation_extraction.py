@@ -1298,10 +1298,9 @@ def test_a_qc_only_paper_is_unchanged():
     assert design["thresholds"] == {"log2fc": None, "padj": None}
 
 
-def test_the_prompt_asks_for_thresholds_per_contrast():
+def test_the_prompt_asks_for_each_contrasts_assay_and_takes_its_cutoffs_from_its_claims():
+    """change_7.5 section 1.1 changed this test: the contrast's `thresholds {log2fc, padj}` slot left the
+    prompt, because it could hold only an adjusted P. A contrast's cutoffs come from its claims."""
     system, _ = build_extraction_prompt("body")
-    assert "thresholds" in system
-    # The schema hint must close the CONTRAST object on its own thresholds, or the model keeps
-    # answering with one pair for the paper. `}]` is the end of the contrast list.
-    assert '"thresholds": {"log2fc": null, "padj": null}}]' in system
+    assert '"thresholds": {"log2fc": null, "padj": null}' not in system
     assert '"assay": "the assay this contrast was measured on"' in system

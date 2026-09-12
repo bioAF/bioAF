@@ -84,8 +84,27 @@ def _is_set_claim(claim: dict) -> bool:
 
 
 _WORDS = {"padj": "adjusted P", "pvalue": "P", "abs_log2fc": "|log2FC|", "fold_change": "fold change"}
-_SIGNIFICANCE_KINDS = ("padj", "pvalue")
+SIGNIFICANCE_KINDS = ("padj", "pvalue")
+_SIGNIFICANCE_KINDS = SIGNIFICANCE_KINDS
 _EFFECT_KINDS = ("abs_log2fc", "fold_change")
+
+
+def significance_cutoff(kind, operator, value) -> dict | None:
+    """A significance cutoff (a P value or an adjusted one) in canonical form, or None when it is not
+    one: an FDR and a q-value are adjusted P values, and ``>`` never bounds a significance measure."""
+    cutoff = _cutoff(kind, operator, value)
+    if cutoff is None or cutoff["kind"] not in SIGNIFICANCE_KINDS or cutoff["operator"] not in ("<", "<="):
+        return None
+    return cutoff
+
+
+def describe_ambiguity(ambiguity: dict) -> str:
+    """change_7.5 section 1.1: a kept significance ambiguity, with each reading in its own words."""
+    readings = "; or ".join(f'{describe_cutoff(r)} ("{r.get("quote")}")' for r in ambiguity.get("readings") or [])
+    return (
+        f"The paper supports more than one reading of this claim's significance: {readings}. Its significance "
+        "is unresolved; neither reading is taken over the other."
+    )
 
 
 def describe_cutoff(cutoff: dict) -> str:
@@ -150,8 +169,10 @@ def derive_contrast_thresholds(contrasts: list[dict], claims: list[dict]) -> lis
         contrast["cutoffs"] = cutoffs
         contrast["thresholds_from_claim"] = position
         disagreement = threshold_disagreement(claim.get("threshold"), claim.get("threshold_kind"), cutoffs)
-        if disagreement:
-            contrast["thresholds_unresolved"] = disagreement
+        # change_7.5 section 1.1: a significance the paper's own text reads two ways is unresolved too.
+        unresolved = " ".join(r for r in (claim.get("significance_unresolved"), disagreement) if r)
+        if unresolved:
+            contrast["thresholds_unresolved"] = unresolved
     return contrasts
 
 
