@@ -11,6 +11,8 @@ acquisition, missing inputs, and attempted execution failure are different outco
 can be true at once, and every limitation has to name what it actually affects.
 """
 
+import pytest
+
 from app.services.validation_completion import completion_for
 
 _EGA_DEPOSIT = {
@@ -406,3 +408,43 @@ class TestMissingDataNeedsAnEstablishedAbsence:
         )
         assert len(outcome["checks_not_completed"]) == 1
         assert "Supplemental File S2" in outcome["checks_not_completed"][0]
+
+
+# change_7.4 section 1.1: what failed after retrieval, each named for what it is.
+_CAUSE_KINDS = (
+    "access_refused",
+    "resource_limit",
+    "input_unreadable",
+    "unsupported_processing",
+    "input_unidentified",
+    "sample_mapping_unresolved",
+    "design_incompatible",
+    "no_compatible_contrast",
+)
+
+
+class TestAFailureThatIsNotAnAbsenceNeverReadsAsOne:
+    @pytest.mark.parametrize("kind", _CAUSE_KINDS)
+    def test_each_is_a_limitation_kind(self, kind):
+        from app.services.validation_completion import LIMITATION_KINDS
+
+        assert kind in LIMITATION_KINDS
+
+    @pytest.mark.parametrize("kind", _CAUSE_KINDS)
+    def test_each_leaves_the_study_inconclusive(self, kind):
+        from app.services.validation_completion import classification_for
+
+        assert classification_for([{"kind": kind}]) == "inconclusive"
+
+    @pytest.mark.parametrize("kind", _CAUSE_KINDS)
+    def test_each_keeps_an_absence_elsewhere_from_being_concluded(self, kind):
+        """7.3 section 5: `missing_data` needs an established absence, and a leg that failed for
+        one of these reasons leaves the absence unestablished."""
+        from app.services.validation_completion import classification_for
+
+        assert classification_for([{"kind": kind}, {"kind": "missing_input"}]) == "inconclusive"
+
+    def test_controlled_access_still_names_the_bucket(self):
+        from app.services.validation_completion import classification_for
+
+        assert classification_for([{"kind": "controlled_access"}, {"kind": "access_refused"}]) == "access_restricted"

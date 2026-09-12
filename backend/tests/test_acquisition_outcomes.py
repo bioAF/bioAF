@@ -14,15 +14,28 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.validation_acquisition_outcome import (
+    ACCESS_REFUSED,
     AWAITING_INPUT,
     BACKOFF_SECONDS,
+    DESIGN_INCOMPATIBLE,
+    INPUT_UNIDENTIFIED,
+    INPUT_UNREADABLE,
     MAX_ATTEMPTS,
+    NO_COMPATIBLE_CONTRAST,
+    RESOURCE_LIMIT,
+    RETRIEVAL_NOT_FOUND,
+    RETRIEVAL_TRANSIENT,
+    SAMPLE_MAPPING_UNRESOLVED,
     TERMINAL,
     TRANSIENT,
+    UNSUPPORTED_PROCESSING,
     acquisition_accession,
     backoff_for,
     classify_hold,
     exhausted,
+    exhaustion_detail,
+    outcome_for,
+    retrieval_cause,
 )
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_route_policy import NO_ADAPTER, NO_INPUT, NOT_AUTHORIZED, UNDETERMINED
@@ -57,15 +70,21 @@ class TestTheThreeSituationsAreToldapart:
     def test_a_supported_archive_is_not_refused_for_its_archive(self):
         assert classify_hold("the request timed out", archive="geo").kind == TRANSIENT
 
-    def test_a_deposit_holding_nothing_usable_is_no_input(self):
+    def test_a_filename_classification_that_finds_nothing_selectable_is_unidentified_not_absent(self):
+        """change_7.4 section 1.1 reverses this: a decision from filenames alone never establishes
+        an absence. It was `no_input`, which classified the study `missing_data`."""
         outcome = classify_hold("GEO listed 9 supplementary file(s), none of which holds per-feature values")
         assert outcome.kind == TERMINAL
-        assert outcome.action == NO_INPUT
+        assert outcome.cause == INPUT_UNIDENTIFIED
+        assert outcome.action != NO_INPUT
 
-    def test_a_permission_failure_is_not_authorized(self):
+    def test_a_403_is_access_refused_never_not_authorized(self):
+        """change_7.4 section 1.1 reverses this: a refused automated request is not an archive's
+        controlled-access model, and a status code never establishes authorization."""
         outcome = classify_hold("403 Forbidden: this account is not authorized for that dataset")
         assert outcome.kind == TERMINAL
-        assert outcome.action == NOT_AUTHORIZED
+        assert outcome.cause == ACCESS_REFUSED
+        assert outcome.action != NOT_AUTHORIZED
 
     def test_a_person_choosing_is_a_visible_wait(self):
         assert classify_hold("a person must select a file at the gate").kind == AWAITING_INPUT
@@ -84,6 +103,135 @@ class TestRetriesAreBounded:
         assert exhausted(MAX_ATTEMPTS - 1) is False
 
 
+_NON_RETRIEVAL_CAUSES = (
+    ACCESS_REFUSED,
+    RESOURCE_LIMIT,
+    INPUT_UNREADABLE,
+    UNSUPPORTED_PROCESSING,
+    INPUT_UNIDENTIFIED,
+    SAMPLE_MAPPING_UNRESOLVED,
+    DESIGN_INCOMPATIBLE,
+    NO_COMPATIBLE_CONTRAST,
+    NO_INPUT,
+    NO_ADAPTER,
+    NOT_AUTHORIZED,
+)
+
+
+class TestTheCallerSaysWhatFailed:
+    """change_7.4 section 1.1: study 37's design rewrite found an empty arm, the wording matched no
+    signature, and it was retried three times and reported as "could not reach the deposit" about a
+    file bioAF had downloaded and read. The kind of failure is known where it happens, so it is
+    passed from there rather than inferred from the wording afterwards."""
+
+    @pytest.mark.parametrize("cause", (RETRIEVAL_TRANSIENT, RETRIEVAL_NOT_FOUND))
+    def test_only_a_failure_to_retrieve_is_retried(self, cause):
+        assert outcome_for(cause, "x").kind == TRANSIENT
+
+    @pytest.mark.parametrize("cause", _NON_RETRIEVAL_CAUSES)
+    def test_nothing_that_failed_after_retrieval_is_retried(self, cause):
+        assert outcome_for(cause, "x").kind == TERMINAL
+
+    def test_a_person_s_turn_is_a_wait(self):
+        assert outcome_for(AWAITING_INPUT, "x").kind == AWAITING_INPUT
+
+    @pytest.mark.parametrize(
+        "cause,kind",
+        [
+            (RETRIEVAL_TRANSIENT, "retrieval_failed"),
+            (RETRIEVAL_NOT_FOUND, "retrieval_failed"),
+            (ACCESS_REFUSED, "access_refused"),
+            (RESOURCE_LIMIT, "resource_limit"),
+            (INPUT_UNREADABLE, "input_unreadable"),
+            (UNSUPPORTED_PROCESSING, "unsupported_processing"),
+            (INPUT_UNIDENTIFIED, "input_unidentified"),
+            (SAMPLE_MAPPING_UNRESOLVED, "sample_mapping_unresolved"),
+            (DESIGN_INCOMPATIBLE, "design_incompatible"),
+            (NO_COMPATIBLE_CONTRAST, "no_compatible_contrast"),
+            (NO_INPUT, "missing_input"),
+            (NO_ADAPTER, "unsupported_acquisition"),
+            (NOT_AUTHORIZED, "controlled_access"),
+        ],
+    )
+    def test_each_cause_names_its_own_limitation(self, cause, kind):
+        assert outcome_for(cause, "x").limitation_kind == kind
+
+    def test_only_an_established_absence_becomes_a_missing_input(self):
+        """`no_input` is reserved for an absence established within a stated scope."""
+        others = [c for c in (RETRIEVAL_TRANSIENT, RETRIEVAL_NOT_FOUND, *_NON_RETRIEVAL_CAUSES) if c != NO_INPUT]
+        assert all(outcome_for(c, "x").limitation_kind != "missing_input" for c in others)
+
+    def test_the_cause_is_kept_on_the_outcome(self):
+        assert outcome_for(DESIGN_INCOMPATIBLE, "x").cause == DESIGN_INCOMPATIBLE
+
+    def test_an_archive_with_no_adapter_is_named(self):
+        outcome = outcome_for(NO_ADAPTER, "EGAS1 is deposited in EGA", archive="ega")
+        assert outcome.action == NO_ADAPTER
+        assert "EGA" in outcome.reason
+
+
+class TestTheExhaustionSentenceComesFromTheCause:
+    def test_could_not_reach_is_written_only_for_a_transient_failure(self):
+        reached = exhaustion_detail(RETRIEVAL_TRANSIENT, attempts=3, resource="the deposit", reason="timed out")
+        assert "could not reach" in reached
+        missing = exhaustion_detail(
+            RETRIEVAL_NOT_FOUND, attempts=3, resource="GSE1_counts.tsv.gz", location="https://x/GSE1_counts.tsv.gz"
+        )
+        assert "could not reach" not in missing
+
+    def test_a_404_names_the_location_and_asserts_no_absence(self):
+        detail = exhaustion_detail(
+            RETRIEVAL_NOT_FOUND, attempts=3, resource="GSE1_counts.tsv.gz", location="https://x/GSE1_counts.tsv.gz"
+        )
+        assert "not found at https://x/GSE1_counts.tsv.gz" in detail
+        assert "not established" in detail
+
+    def test_the_attempts_are_counted(self):
+        assert "3 attempts" in exhaustion_detail(RETRIEVAL_TRANSIENT, attempts=3, resource="GSE1", reason="x")
+
+
+def _status_error(code: int):
+    import httpx
+
+    request = httpx.Request("GET", "https://ftp.ncbi.nlm.nih.gov/geo/series/x")
+    return httpx.HTTPStatusError(f"{code}", request=request, response=httpx.Response(code, request=request))
+
+
+class TestARetrievalErrorIsReadForWhatItWas:
+    """Text classification survives only for the exception a retrieval call raised, and there
+    "unrecognised means transient" still holds: calling an outage an absence is a wrong and terminal
+    verdict."""
+
+    @pytest.mark.parametrize("code", [404, 410])
+    def test_not_found_at_that_location(self, code):
+        assert retrieval_cause(_status_error(code)) == RETRIEVAL_NOT_FOUND
+
+    @pytest.mark.parametrize("code", [401, 403, 407])
+    def test_a_refused_request(self, code):
+        assert retrieval_cause(_status_error(code)) == ACCESS_REFUSED
+
+    @pytest.mark.parametrize("code", [429, 500, 502, 503, 504])
+    def test_the_server_side_is_transient(self, code):
+        assert retrieval_cause(_status_error(code)) == RETRIEVAL_TRANSIENT
+
+    def test_a_timeout_is_transient(self):
+        import httpx
+
+        assert retrieval_cause(httpx.ReadTimeout("timed out")) == RETRIEVAL_TRANSIENT
+
+    def test_an_unrecognised_error_is_transient_not_an_absence(self):
+        assert retrieval_cause(RuntimeError("something nobody has seen before")) == RETRIEVAL_TRANSIENT
+
+    def test_a_status_in_the_text_is_read_when_no_response_is_attached(self):
+        assert retrieval_cause(RuntimeError("404 https://x/f.txt")) == RETRIEVAL_NOT_FOUND
+        assert retrieval_cause(RuntimeError("403 Forbidden")) == ACCESS_REFUSED
+
+    def test_a_file_over_the_limit_is_a_resource_limit(self):
+        from app.services.deposit_acquisition import DepositTooLargeError
+
+        assert retrieval_cause(DepositTooLargeError("over the 2.0 GB limit")) == RESOURCE_LIMIT
+
+
 class TestTheAccessionIsResolvedTheWayDiscoveryDoes:
     def test_a_study_requested_by_doi_uses_the_extracted_accession(self):
         """The empty-string defect. Both studies 29 and 33 died on it."""
@@ -92,7 +240,7 @@ class TestTheAccessionIsResolvedTheWayDiscoveryDoes:
         assert target["archive"] == "ega"
 
     def test_the_requested_accession_keeps_its_authority(self):
-        """"The paper also deposited this" is evidence about the paper, not an instruction to fetch
+        """ "The paper also deposited this" is evidence about the paper, not an instruction to fetch
         it instead of what was asked for."""
         target = acquisition_accession(
             [
@@ -242,18 +390,14 @@ class TestStoppingAndResumingNeverNeedTheDatabase:
         study = await _acquiring(session, admin_user)
         await session.commit()
         claim = await own.acquire(session, study.id, holder="driver")
-        await ValidationStudyService.cancel_acquisition(
-            session, study.id, admin_user.organization_id, admin_user.id
-        )
+        await ValidationStudyService.cancel_acquisition(session, study.id, admin_user.organization_id, admin_user.id)
         with pytest.raises(own.ClaimLost):
             await own.assert_held(session, claim)
 
     @pytest.mark.asyncio
     async def test_a_stopped_study_resumes_at_the_gate(self, session, admin_user):
         study = await _acquiring(session, admin_user)
-        await ValidationStudyService.cancel_acquisition(
-            session, study.id, admin_user.organization_id, admin_user.id
-        )
+        await ValidationStudyService.cancel_acquisition(session, study.id, admin_user.organization_id, admin_user.id)
         resumed = await ValidationStudyService.resume_study(
             session, study.id, admin_user.organization_id, admin_user.id, "the accession was corrected"
         )
