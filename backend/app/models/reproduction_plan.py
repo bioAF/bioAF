@@ -103,6 +103,17 @@ class ReproductionPlan(Base):
     # it, because every consumer of that list reads strings.
     blocker_kinds_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
+    # change_7.5 section 2.2: the experiments the paper reports, each with its own assay, conditions,
+    # reference (assembly and annotation, stated separately) and linked resources. NULL means the plan
+    # predates this and is read as one `legacy_unverified` experiment (`reported_experiments`).
+    reported_experiments_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # change_7.5 section 2.1: one typed record per resource the paper names or its repositories link,
+    # kept whether or not bioAF can use it. Discovery is separate from bioAF's ability to use it.
+    resources_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # change_7.5 section 2.6: the selected (claim, check) and everything chosen from it, as revisions.
+    # ``{"current": {...}, "history": [...]}``; a superseded revision is kept, never overwritten.
+    analysis_selection_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
     # Provenance of the AI extraction that produced this plan.
     extractor_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     extractor_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)

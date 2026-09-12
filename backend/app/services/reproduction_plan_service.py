@@ -173,6 +173,9 @@ class ReproductionPlanService:
         extractor_provider: str | None = None,
         library_strategy: str | None = None,
         code_availability: list | None = None,
+        reported_experiments: list | None = None,
+        resources: list | None = None,
+        analysis_selection: dict | None = None,
     ) -> ReproductionPlan:
         """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
         plan = ReproductionPlan(
@@ -195,6 +198,9 @@ class ReproductionPlanService:
             # [] when the extraction looked and the paper named no code; NULL only for a plan made
             # before the column existed.
             code_availability_json=code_availability if code_availability is not None else [],
+            reported_experiments_json=reported_experiments,
+            resources_json=resources,
+            analysis_selection_json=analysis_selection,
         )
         session.add(plan)
         await session.flush()
@@ -282,6 +288,11 @@ class ReproductionPlanService:
                 contrast_index=t.get("contrast_index") if isinstance(t.get("contrast_index"), int) else None,
                 cutoffs=t.get("cutoffs") or None,
                 unresolved_reason=t.get("unresolved_reason"),
+                # change_7.5 stage 2: the experiment, the binding's facts and the claim's four checks.
+                reported_experiment_id=_clamp(t.get("reported_experiment_id"), 32),
+                aggregation=_clamp(t.get("aggregation"), 32),
+                binding_facts=t.get("binding_facts") or None,
+                checks=t.get("checks") or None,
             )
             session.add(target)
             created.append(target)

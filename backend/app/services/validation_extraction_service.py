@@ -50,6 +50,17 @@ _SCHEMA_HINT = (
     '{"accessions": ["GEO/SRA/ENA ids, or empty"], '
     '"sample_structure": {"organism": "", "sample_count": 0, "library_layout": "", "chemistry": "", "conditions": []}, '
     '"method": {"assay": "e.g. bulk RNA-seq / scRNA-seq", "tools": [], "reference_build": "", "key_params": {}}, '
+    '"reported_experiments": [{"id": "e1", "assay": "the ONE assay this experiment used", '
+    '"description": "the paper\'s words for it", "conditions": [], "time_points": [], "organism": "", '
+    '"reference": {"assembly": "the genome assembly as stated, or empty", "assembly_quote": "the paper\'s words", '
+    '"annotation": "the annotation release as stated, or empty", "annotation_quote": "the paper\'s words"}, '
+    '"tools": [], "claim_indices": [0], "contrast_indices": [0], '
+    '"resources": ["accessions, sub-series or DOIs this experiment\'s data are deposited under"]}], '
+    '"resources": [{"identifier": "an accession, DOI, URL or supplement label", '
+    '"type": "sequencing_data | proteomics_data | structure | binding_assay | code | supplementary_file | other_data", '
+    '"role": "what the paper says it holds, in the paper\'s words", '
+    '"stated_in": "data availability | methods | figure legend | supplementary materials", '
+    '"quote": "the paper\'s words"}], '
     '"differential_design": {"contrasts": [{"name": "e.g. treated vs control", "test_condition": "", '
     '"reference_condition": "", "test_samples": ["sample ids in the test group"], '
     '"reference_samples": ["sample ids in the reference group"], '
@@ -213,6 +224,20 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         "call, and a post-trim read count is not a raw one. If the paper reports the other basis, say so in "
         'the unit ("consensus peaks", "reads after trimming") so the claim is shown as evidence '
         "rather than scored against a number it does not correspond to.\n\n"
+        # change_7.5 section 2.2: each experiment separately. One paper-level method for two assays
+        # chose the workflow of the first and refused the claims of the second.
+        "Describe EACH EXPERIMENT the paper reports separately in reported_experiments, with one assay "
+        "each: a paper that ran ChIP-seq and RNA-seq reports two experiments, never one experiment "
+        "naming both. Place every claim and every contrast in exactly one experiment, by its index in "
+        "claims and in differential_design.contrasts. Give each experiment its reference as the paper "
+        "states it for THAT experiment: the genome assembly and the annotation release separately, each "
+        "with the paper's own words as its quote; leave a part empty where the paper does not state it, "
+        "and never fill one in from the organism. List in its resources the accessions, sub-series or "
+        "DOIs the paper says hold that experiment's data.\n\n"
+        "List EVERY resource the paper names in resources, whether or not it is sequencing data: every "
+        "accession (GEO, SRA, ENA, EGA, ArrayExpress, PRIDE, MassIVE, PDB, EMDB), every repository or "
+        "DOI (GitHub, GitLab, Zenodo, figshare) and every supplementary file or table, each with what "
+        "the paper says it holds in the paper's own words and where the paper says it.\n\n"
         "For reference_build, give BOTH the genome assembly and the ANNOTATION the paper aligned "
         'against, exactly as the paper words it (e.g. "GRCh38 / GENCODE v32", "mm10 / Ensembl 102", '
         '"CellRanger refdata-gex-GRCh38-2020-A"). The assembly alone is not the reference: two papers '
@@ -472,6 +497,8 @@ def parse_extraction(response_text: str, *, full_text: str | None = None) -> dic
         # shipped empty. Found by step 13, which needs the answer to fill the checklist's code rows.
         "code_availability": [],
         "significance_ambiguities": [],
+        "reported_experiments": [],
+        "resources": [],
         "blockers": [],
         "blocker_kinds": [],
         "parse_failure": True,
@@ -497,6 +524,9 @@ def parse_extraction(response_text: str, *, full_text: str | None = None) -> dic
         "significance_ambiguities": _shown_significance_ambiguities(
             data.get("significance_ambiguities"), full_text, claim_count=len(claims)
         ),
+        # change_7.5 stage 2: validated in `extract`, where the claims and contrasts they index are known.
+        "reported_experiments": _as_list(data.get("reported_experiments")),
+        "resources": [r for r in _as_list(data.get("resources")) if isinstance(r, dict)],
         "blockers": blockers,
         "blocker_kinds": blocker_kinds,
         "parse_failure": False,
@@ -939,6 +969,36 @@ async def _select_contrast_for(
     )
 
 
+def _reported_experiments(parsed: dict, method: dict, design_contrasts: list[dict]):
+    """The reading's experiments, validated; or, when the reading described none, the paper's method
+    read as its one experiment.
+
+    A single-assay paper has one experiment whether or not the model listed it. A compound method
+    ("ChIP-seq and bulk RNA-seq") read that way is one experiment naming two assays, which is a
+    blocker, so a paper-level method never chooses a workflow for two assays.
+    """
+    from app.services.reported_experiments import normalize_reported_experiments
+
+    claim_count, contrast_count = len(parsed["claims"]), len(design_contrasts)
+    raw = parsed.get("reported_experiments") or []
+    if not raw and not parsed.get("parse_failure"):
+        raw = [
+            {
+                "id": "e1",
+                "assay": method.get("assay"),
+                "tools": method.get("tools"),
+                "reference": {"assembly": method.get("reference_build")},
+                "claim_indices": list(range(claim_count)),
+                "contrast_indices": list(range(contrast_count)),
+            }
+        ]
+        reading = normalize_reported_experiments(raw, claim_count=claim_count, contrast_count=contrast_count)
+        for experiment in reading.experiments:
+            experiment["status"] = "inferred_from_method"
+        return reading
+    return normalize_reported_experiments(raw, claim_count=claim_count, contrast_count=contrast_count)
+
+
 class ValidationExtractionService:
     @staticmethod
     async def extract(
@@ -1079,9 +1139,12 @@ class ValidationExtractionService:
             parsed["claims"][ambiguity["claim_index"]]["significance_unresolved"] = describe_ambiguity(ambiguity)
 
         design_contrasts = parsed["differential_design"].get("contrasts") or []
+        # change_7.5 section 2.2: the experiments, each claim and contrast linked to exactly one.
+        reading = _reported_experiments(parsed, method, design_contrasts)
+        blockers.extend(reading.blockers)
         targets = []
         claims_to_bind = []
-        for c in parsed["claims"]:
+        for position, c in enumerate(parsed["claims"]):
             metric_key = (c.get("metric_key") or "").strip()
             # A claim with no measurable metric is STILL one of the paper's claims. It used to be
             # dropped here, so Groff's digital-karyotype and TE-WE concordance findings never
@@ -1110,6 +1173,7 @@ class ValidationExtractionService:
                     "contrast_index": contrast_index_for(c, design_contrasts),
                     # Until the binding call answers, the alias table is what decides, exactly as before.
                     "bound_by": "alias_table",
+                    "reported_experiment_id": reading.claim_experiment.get(position),
                 }
             )
             # change_7.4 section 1.6: a scalar threshold that disagrees with the claim's own cutoffs
@@ -1180,6 +1244,8 @@ class ValidationExtractionService:
         # across every assay it ran; the plan runs one pipeline. The gate used to take contrasts[0],
         # so a paper listing its ChIP-seq contrast last handed a chipseq run an RNA-seq knockout.
         design = _differential_design_or_none(parsed["differential_design"])
+        for index, contrast in enumerate((design or {}).get("contrasts") or []):
+            contrast["reported_experiment_id"] = reading.contrast_experiment.get(index)
         if design and design.get("contrasts"):
             # change_7.3 section 7: a contrast's threshold comes from the claim that is its finding.
             # The pair the extractor attached to the contrast drove the ground truth, and on a contrast
@@ -1234,6 +1300,7 @@ class ValidationExtractionService:
             # Audited, so the deposit's own declaration is on the record even when it agreed with the
             # paper and left no other trace.
             library_strategy=library_strategy,
+            reported_experiments=reading.experiments,
         )
 
         # The kind of each blocker that survived into the plan, beside the sentences every other
