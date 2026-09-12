@@ -93,6 +93,30 @@ export interface ReportClaim {
     check_label: string | null;
     reason: string | null;
   } | null;
+  // change_7.5 sections 3.1, 4.1 and 4.3: the statistical definition in words, the claim checked
+  // against the authors' results, and the reanalysis scored for this claim.
+  predicate?: string | null;
+  consistency?: ClaimConsistency | null;
+  result?: {
+    tier: string;
+    verdict: string | null;
+    ground_truth: string | null;
+    count: { count: number; status: string; words: string; label: string } | null;
+  } | null;
+}
+
+export interface ClaimConsistency {
+  outcome: "agree" | "disagree" | "unresolved" | "not_checkable" | null;
+  label: string | null;
+  reason: string | null;
+  table: string | null;
+  source: string | null;
+  rows_tested: number | null;
+  rows_passing: number | null;
+  rows_missing: number | null;
+  count_range: number[] | null;
+  candidates: { interpretation: string | null; count: number | null }[];
+  assumptions: string[];
 }
 
 export interface ClaimCheck {

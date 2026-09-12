@@ -41,6 +41,13 @@ function CheckRow({ check }: { check: ClaimCheck }) {
   );
 }
 
+const CONSISTENCY_CLASS: Record<string, string> = {
+  agree: "font-medium text-emerald-700",
+  disagree: "font-medium text-rose-700",
+  unresolved: "text-amber-700",
+  not_checkable: "text-gray-600",
+};
+
 const DECIDED_BY: Record<string, string> = {
   model: "chosen by the model",
   only_candidate: "the only claim a run on this route can check",
@@ -115,6 +122,7 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                   {claim.contrast ? `; ${claim.contrast}` : ""}
                   {claim.cutoff ? `; ${claim.cutoff}` : ""}
                 </p>
+                {claim.predicate && <p className="text-xs text-gray-600">{claim.predicate}</p>}
                 {claim.selection && (
                   <p className="mt-1 text-xs">
                     <span className={claim.selection.status === "selected" ? "font-medium text-emerald-700" : "text-gray-600"}>
@@ -126,11 +134,45 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                     )}
                   </p>
                 )}
-                <ul className="mt-1 space-y-0.5">
+                <ul className="mt-1 space-y-0.5" data-testid="claim-checks">
                   {(claim.checks ?? []).map((check) => (
                     <CheckRow key={check.key} check={check} />
                   ))}
                 </ul>
+                {claim.consistency && (
+                  <div className="mt-1 text-xs">
+                    <span className={CONSISTENCY_CLASS[claim.consistency.outcome ?? ""] ?? "text-gray-700"}>
+                      {claim.consistency.label}
+                    </span>
+                    {claim.consistency.table && <span className="text-gray-500"> ({claim.consistency.table})</span>}
+                    {claim.consistency.rows_passing !== null && claim.consistency.rows_passing !== undefined && (
+                      <span className="text-gray-500">
+                        {" "}
+                        {claim.consistency.rows_passing} of {claim.consistency.rows_tested} rows pass
+                      </span>
+                    )}
+                    {claim.consistency.reason && <p className="text-gray-500">{claim.consistency.reason}</p>}
+                    {claim.consistency.candidates.length > 0 && (
+                      <ul className="ml-4 list-disc text-gray-500">
+                        {claim.consistency.candidates.map((candidate, i) => (
+                          <li key={i}>
+                            {candidate.interpretation}: {candidate.count ?? "not counted"}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                {claim.result && (
+                  <p className="mt-1 text-xs text-gray-700">
+                    {claim.result.tier}: {claim.result.verdict ?? "no concordance"}
+                    {claim.result.count && (
+                      <span className="text-gray-500">
+                        ; {claim.result.count.label}: {claim.result.count.words}
+                      </span>
+                    )}
+                  </p>
+                )}
               </li>
             ) : null,
           )}

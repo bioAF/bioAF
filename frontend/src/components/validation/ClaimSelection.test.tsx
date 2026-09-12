@@ -49,7 +49,8 @@ describe("ClaimSelection (sections 2.2, 2.5 and 2.6)", () => {
     const row = screen.getByTestId("claim-1");
     expect(within(row).getByText("257 genes were up")).toBeInTheDocument();
     expect(within(row).getByText("Selected for this run")).toBeInTheDocument();
-    const checks = within(row).getAllByRole("listitem");
+    // The four checks, not the consistency readings listed beneath them.
+    const checks = within(within(row).getByTestId("claim-checks")).getAllByRole("listitem");
     expect(checks).toHaveLength(4);
     expect(within(checks[1]).getByText("Consistency with the authors' results")).toBeInTheDocument();
     expect(within(checks[1]).getByText("Available")).toBeInTheDocument();
@@ -79,5 +80,23 @@ describe("ClaimSelection (sections 2.2, 2.5 and 2.6)", () => {
   it("renders nothing for a plan read before experiments existed", () => {
     const { container } = render(<ClaimSelection summary={legacy} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("each claim's predicate, consistency and reanalysis (sections 3.1, 4.1 and 4.3)", () => {
+  it("states the predicate, the consistency outcome with its readings, and the reanalysis beside the claim", () => {
+    render(<ClaimSelection summary={stage2} />);
+    const row = screen.getByTestId("claim-1");
+    expect(within(row).getByText(/P < 0.01, either direction, no fold-change requirement/)).toBeInTheDocument();
+    expect(within(row).getByText("Unresolved against the authors' results")).toBeInTheDocument();
+    expect(within(row).getByText(/the table is KO over WT: 257/)).toBeInTheDocument();
+    expect(within(row).getByText(/Deposited data/)).toBeInTheDocument();
+    expect(within(row).getByText(/250 against the claim's exactly 257/)).toBeInTheDocument();
+    expect(within(row).getByText(/different method/)).toBeInTheDocument();
+  });
+
+  it("shows no reanalysis on a claim it was not scored for", () => {
+    render(<ClaimSelection summary={stage2} />);
+    expect(within(screen.getByTestId("claim-2")).queryByText(/Deposited data/)).not.toBeInTheDocument();
   });
 });
