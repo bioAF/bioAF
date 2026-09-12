@@ -35,7 +35,15 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 
-from app.services.archive_discovery import NO, UNKNOWN, YES, describe_deposit, is_sample_accession
+from app.services.archive_discovery import (
+    NO,
+    UNKNOWN,
+    YES,
+    describe_deposit,
+    is_sample_accession,
+    needs_lookup,
+    not_looked_up,
+)
 
 logger = logging.getLogger("bioaf.validation_capabilities")
 
@@ -49,7 +57,9 @@ __all__ = ["NO", "NOT_ATTEMPTED", "UNKNOWN", "YES", "discover_capabilities"]
 NOT_ATTEMPTED = "not_attempted"
 
 # A paper naming a dozen deposits must not turn one read into two dozen HTTP calls. Three covers
-# every real paper seen so far; the rest are carried unnamed rather than described.
+# every real paper seen so far. change_7.5 section 1.5: the bound limits LOOKUPS, never visibility.
+# Study 37's three PDB structures were silently dropped by it; a deposit past the bound is listed and
+# marked "Not looked up", and an archive bioAF has no adapter for costs no lookup and spends none.
 _MAX_DEPOSITS = 3
 
 # A code source that lives in a repository rather than as a downloadable artifact. The split matters
@@ -214,7 +224,13 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
         if is_sample_accession(acc):
             continue
         seen.add(acc.upper())
-        wanted.append({"accession": acc, "provenance": (entry or {}).get("provenance") or "extracted"})
+        wanted.append(
+            {
+                "accession": acc,
+                "provenance": (entry or {}).get("provenance") or "extracted",
+                "archive": (entry or {}).get("archive"),
+            }
+        )
 
     requested = [e for e in wanted if e["provenance"] == "requested"]
     ordered = requested + [e for e in wanted if e["provenance"] != "requested"]
@@ -225,13 +241,26 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
     )
 
     described: list[dict] = []
-    for entry in ordered[:_MAX_DEPOSITS]:
+    lookups = 0
+    for entry in ordered:
+        scoped = entry["accession"] == scoped_accession
+        if needs_lookup(entry["accession"], entry.get("archive")):
+            if lookups >= _MAX_DEPOSITS:
+                from app.services.archive_discovery import classify_archive
+
+                archive = entry.get("archive") or classify_archive(entry["accession"])
+                described.append(
+                    not_looked_up(entry["accession"], archive, provenance=entry["provenance"], scoped=scoped)
+                )
+                continue
+            lookups += 1
         described.append(
             await describe_deposit(
                 entry["accession"],
                 provenance=entry["provenance"],
-                scoped=entry["accession"] == scoped_accession,
+                scoped=scoped,
                 fetcher=fetcher,
+                archive=entry.get("archive"),
             )
         )
     return described

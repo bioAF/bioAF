@@ -211,3 +211,51 @@ describe("CapabilityChecklist deposits (change_7.1 section 1)", () => {
     expect(within(row).getByText(/cannot look up/i)).toBeInTheDocument();
   });
 });
+
+// change_7.5 section 1.5: every resource the paper names is listed, an archive bioAF has no adapter
+// for is named as one, and a deposit past the lookup bound says it was not looked up.
+describe("CapabilityChecklist names every resource (change_7.5 section 1.5)", () => {
+  const unlooked = {
+    archive: "pride",
+    accession: "PXD000001",
+    provenance: "text_scan",
+    scoped: false,
+    exists: "unknown" as const,
+    access: "unknown" as const,
+    supported: "no" as const,
+    raw_data: "unknown" as const,
+    preprocessed_data: "unknown" as const,
+    sample_metadata: "unknown" as const,
+    evidence: null,
+    failure_reason: "bioAF has no adapter for PRIDE, so what PXD000001 holds is unknown",
+  };
+
+  it("names PRIDE and PDB as archives rather than as unrecognised ones", () => {
+    render(
+      <CapabilityChecklist
+        capabilities={caps({
+          deposits: [unlooked, { ...unlooked, archive: "pdb", accession: "6ABC", failure_reason: "bioAF has no adapter for PDB" }],
+        })}
+      />,
+    );
+    expect(within(screen.getByTestId("deposit-PXD000001")).getByText(/^\(PRIDE\)$/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("deposit-6ABC")).getByText(/^\(PDB\)$/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("deposit-PXD000001")).getByText(/no adapter for PRIDE/)).toBeInTheDocument();
+  });
+
+  it("says a resource the text scan found came from the paper", () => {
+    render(<CapabilityChecklist capabilities={caps({ deposits: [unlooked] })} />);
+    expect(within(screen.getByTestId("deposit-PXD000001")).getByText(/from the paper/i)).toBeInTheDocument();
+  });
+
+  it("lists a deposit past the lookup bound as not looked up", () => {
+    render(
+      <CapabilityChecklist
+        capabilities={caps({
+          deposits: [{ ...unlooked, archive: "geo", accession: "GSE5", failure_reason: "Not looked up" }],
+        })}
+      />,
+    );
+    expect(within(screen.getByTestId("deposit-GSE5")).getByText(/Not looked up/)).toBeInTheDocument();
+  });
+});

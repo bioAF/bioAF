@@ -39,6 +39,9 @@ INPUT_UNIDENTIFIED = "input_unidentified"
 SAMPLE_MAPPING_UNRESOLVED = "sample_mapping_unresolved"
 DESIGN_INCOMPATIBLE = "design_incompatible"
 NO_COMPATIBLE_CONTRAST = "no_compatible_contrast"
+# change_7.5 section 1.3: the paper's reference is one bioAF cannot supply, so an operation that depends
+# on a reference was refused. A limitation of bioAF, never an absence in the paper.
+REFERENCE_UNAVAILABLE = "reference_unavailable"
 _NOT_AN_ABSENCE = (
     ACCESS_REFUSED,
     RESOURCE_LIMIT,
@@ -48,6 +51,7 @@ _NOT_AN_ABSENCE = (
     SAMPLE_MAPPING_UNRESOLVED,
     DESIGN_INCOMPATIBLE,
     NO_COMPATIBLE_CONTRAST,
+    REFERENCE_UNAVAILABLE,
 )
 
 LIMITATION_KINDS = (
@@ -161,7 +165,9 @@ def completion_for(
         if s.get("kind") not in ("figure", "index")
     ]
 
-    processed, processed_reason = _processed_results(rows, results_tables, manifest_known=manifest_known)
+    processed, processed_reason = _processed_results(
+        rows, results_tables, manifest_known=manifest_known, deposits=deposits
+    )
 
     return {
         "classification": _classification(limitations),
@@ -346,9 +352,22 @@ def _attachment_limitations(rows: list[dict], *, manifest_known: bool) -> list[d
     return found
 
 
-def _processed_results(rows: list[dict], results_tables: list[dict], *, manifest_known: bool) -> tuple[str, str]:
+def _processed_results(
+    rows: list[dict], results_tables: list[dict], *, manifest_known: bool, deposits: list[dict] | None = None
+) -> tuple[str, str]:
+    """Whether the paper publishes processed results, and what establishes it.
+
+    change_7.5 section 1.5: the NO sentence was written when nothing had been inspected ("bioAF
+    inspected every attachment it found" over zero rows), and a deposit's own result tables were never
+    counted. NO now needs at least one inspected attachment, and a listed deposit result table is a YES.
+    """
     if results_tables:
         return YES, f"{results_tables[0].get('label')} is a published results table that bioAF inspected"
+    listed = [(d.get("accession"), t) for d in deposits or [] for t in d.get("result_tables") or []]
+    if listed:
+        accession, table = listed[0]
+        more = f" and {len(listed) - 1} more" if len(listed) > 1 else ""
+        return YES, f"{accession} lists {table}{more}, the authors' own differential results"
     uninspected = _uninspected(rows)
     if uninspected:
         return NOT_ESTABLISHED, (
@@ -357,7 +376,10 @@ def _processed_results(rows: list[dict], results_tables: list[dict], *, manifest
         )
     if not manifest_known and not rows:
         return NOT_ESTABLISHED, "bioAF has no list of this paper's attachments"
-    return NO, "bioAF inspected every attachment it found and none is a results table"
+    inspected = [r for r in _candidates(rows) if r.get("resolved")]
+    if not inspected:
+        return NOT_ESTABLISHED, "bioAF found no attachments to inspect"
+    return NO, f"bioAF inspected {len(inspected)} attachment(s) it found and none is a results table"
 
 
 # The three input facts, with the key each is recorded under and the key of its reason.

@@ -164,7 +164,9 @@ def _has_organism_source(evidence: dict) -> bool:
     return any(d.get("archive") == "geo" for d in deposits if isinstance(d, dict))
 
 
-def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
+def _named_accessions(
+    study: "ValidationStudy", plan, evidence: dict | None = None, *, for_discovery: bool = False
+) -> list[dict]:
     """Every deposit this paper names, with where each one came from.
 
     change_7.1 section 1: discovery was handed ``study.source_accession`` alone, so a study
@@ -175,15 +177,29 @@ def _named_accessions(study: "ValidationStudy", plan) -> list[dict]:
     The requested accession stays first and stays authoritative for what a run fetches. The
     extracted ones are reported beside it, because "the paper also deposited this" is evidence
     about the paper rather than an instruction to go and fetch it.
+
+    change_7.5 section 1.5: for DISCOVERY, the model's whole list (a requested accession narrows what
+    the plan fetches, not what the paper names) and the identifiers the text scan found are listed too;
+    the model's list alone decides nothing. What an acquisition may point at is unchanged: the
+    requested accession and the plan's.
     """
     named: list[dict] = []
     requested = (study.source_accession or "").strip()
     if requested:
         named.append({"accession": requested, "provenance": "requested"})
-    for extracted in getattr(plan, "accessions_json", None) or []:
+    evidence = evidence if evidence is not None else (study.evidence_json or {})
+    if not for_discovery:
+        evidence = {}
+    extracted_lists = (getattr(plan, "accessions_json", None) or [], evidence.get("extracted_accessions") or [])
+    for extracted in (a for listed in extracted_lists for a in listed):
         accession = str(extracted or "").strip()
         if accession:
             named.append({"accession": accession, "provenance": "extracted"})
+    for scanned in evidence.get("scanned_identifiers") or []:
+        if isinstance(scanned, dict) and scanned.get("archive") not in ("github", "gitlab"):
+            named.append(
+                {"accession": scanned["identifier"], "provenance": "text_scan", "archive": scanned.get("archive")}
+            )
     return named
 
 
@@ -526,6 +542,10 @@ class ValidationDriverService:
         evidence["supplements"] = supplements
         if pmcid:
             evidence["pmcid"] = pmcid
+        # change_7.5 section 1.5: what the text names, found deterministically while it is in hand.
+        from app.services.resource_identifiers import scan_identifiers
+
+        evidence["scanned_identifiers"] = scan_identifiers(full_text)
         # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
         # of the paper reached reconciliation before, so its own exclusion statement could never
         # correct a count, and a failed download left nothing at all to reconcile against.
@@ -601,7 +621,7 @@ class ValidationDriverService:
 
         try:
             capabilities = await discover_capabilities(
-                accessions=_named_accessions(study, plan),
+                accessions=_named_accessions(study, plan, for_discovery=True),
                 has_full_text=has_full_text,
                 code_availability=(plan.code_availability_json if plan else None),
                 fetcher=fetcher,
@@ -886,6 +906,10 @@ class ValidationDriverService:
             retry_at = (study.evidence_json or {}).get("acquire_retry_at")
             if retry_at and _now() < _parse_iso(retry_at):
                 return False
+            # change_7.5 section 1.3: reads are fetched only for an analysis that can run, and it can
+            # run only on a reference bioAF supplies. Hours of download are not spent first.
+            if await ValidationDriverService._refuse_without_reference(session, study):
+                return True
             return await ValidationDriverService._launch_fetchngs(session, study, claim=claim)
 
         run = await ValidationDriverService._load_run(session, study.data_run_id)
@@ -1218,10 +1242,18 @@ class ValidationDriverService:
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         design = (plan.differential_design_json if plan else None) or {}
+        # change_7.5 section 1.7 (finishing change_7.4 section 1.4): the selected contrast's samples
+        # only. The others are not what this matrix is being read for.
         design_samples: list[str] = []
-        for contrast in design.get("contrasts") or []:
-            design_samples.extend(contrast.get("test_samples") or [])
-            design_samples.extend(contrast.get("reference_samples") or [])
+        selected_index, _ = (
+            selected_contrast_for(design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy)
+            if plan is not None and design.get("contrasts")
+            else (None, None)
+        )
+        if selected_index is not None:
+            chosen = design["contrasts"][selected_index]
+            design_samples.extend(chosen.get("test_samples") or [])
+            design_samples.extend(chosen.get("reference_samples") or [])
 
         # Coverage is MEASURED here but does not gate: the design names GSM accessions and the
         # matrix names its own columns, and step 7's association is what bridges them. Gating on it
@@ -1386,6 +1418,10 @@ class ValidationDriverService:
             )
 
         entries = inventory.entries
+        # change_7.5 section 1.7: the repository's own sample records, written where the deposit is
+        # listed. Column association has read `evidence["sample_manifest"]` since plan_7 step 7 and
+        # nothing ever wrote it, so GEO's sample titles and GSMs reached it only in a unit test.
+        await ValidationDriverService._record_sample_manifest(evidence, accession, fetcher=fetcher)
         # `unusable_listing` names what IS deposited and why it cannot serve (GSE312719's nine
         # pre-cell-calling matrices), and says when the classifier could not place the files at all.
         unusable = unusable_listing(entries, accession)
@@ -1455,6 +1491,25 @@ class ValidationDriverService:
 
         study.evidence_json = dict(evidence)
         return True
+
+    @staticmethod
+    async def _record_sample_manifest(evidence: dict, accession: str, *, fetcher=None) -> None:
+        """Land the deposit's per-sample records on ``evidence["sample_manifest"]``. Never raises.
+
+        An unreachable manifest leaves nothing written and says why, so association falls back to the
+        sources below it exactly as it did before.
+        """
+        from app.services.literature.accession_manifest_service import AccessionManifestService
+
+        try:
+            manifest = await AccessionManifestService.fetch_manifest(accession, fetcher=fetcher)
+        except Exception as exc:  # noqa: BLE001 - the service never raises; association must not fail on it
+            logger.info("sample manifest for %s could not be read: %s", accession, exc)
+            return
+        if manifest.samples:
+            evidence["sample_manifest"] = manifest.samples
+        elif manifest.unavailable_reason:
+            evidence["sample_manifest_unavailable"] = manifest.unavailable_reason
 
     @staticmethod
     async def _no_compatible_contrast(session: AsyncSession, study: ValidationStudy) -> str | None:
@@ -1654,6 +1709,9 @@ class ValidationDriverService:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         if plan is None or not plan.pipeline_key:
             return await ValidationDriverService._fail(session, study, "no pipeline in the approved plan")
+        # change_7.5 section 1.3: no validation launch runs on a pipeline's seeded genome.
+        if await ValidationDriverService._refuse_without_reference(session, study, plan=plan):
+            return True
 
         # Imported here for the same reason `_launch` does: `pipeline_run_service` is a heavy leaf
         # of the service graph and a module-level import ties this driver's import order to it.
@@ -1701,6 +1759,30 @@ class ValidationDriverService:
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "running"
         )
+        return True
+
+    @staticmethod
+    async def _refuse_without_reference(session: AsyncSession, study: ValidationStudy, *, plan=None) -> bool:
+        """Conclude a raw-reads study whose reference bioAF cannot supply. False when it can.
+
+        change_7.5 section 1.3: with no genome, a launch kept the pipeline's seeded parameters, and
+        nf-core/rnaseq is seeded with GRCh38, so a mouse paper would have aligned to human. Reanalysis
+        from raw reads, and the QC metrics a run computes, depend on the reference; nothing on this
+        route runs without one, and nothing substitutes a default or another assembly.
+        """
+        from app.services.validation_assessment import conclude_without_execution
+        from app.services.validation_reference import USABLE, paper_reference, reference_limitation
+
+        if plan is None:
+            plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # A plan written before `reference_build` existed carries only the launch token.
+        stated = (plan.reference_build or plan.reference_genome) if plan else None
+        reference = paper_reference(stated, plan.pipeline_key if plan else None)
+        if reference["status"] == USABLE:
+            return False
+        limitation = reference_limitation(reference, operation=study.intended_route or "pipeline")
+        logger.info("validation study %d: refused a reference-dependent run: %s", study.id, limitation["detail"])
+        await conclude_without_execution(session, study, limitation["detail"], limitation=limitation)
         return True
 
     @staticmethod

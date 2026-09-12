@@ -75,6 +75,9 @@ class ManifestResult:
 
     samples: list[dict] = field(default_factory=list)
     unavailable_reason: str | None = None
+    # The series' SRA study or BioProject, from ``!Series_relation``. change_7.5 section 1.5: raw-read
+    # availability is asked of it, so every run of the series is counted.
+    series_sra: str | None = None
 
 
 def geo_series_matrix_url(accession: str) -> str | None:
@@ -181,6 +184,7 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
     (SRA study preferred), used to resolve run accessions. Samples are COLUMNS in a series matrix.
     """
     titles: list[str] = []
+    geo_accessions: list[str] = []
     conditions_lines: list[list[str]] = []
     sra_relation: list[str] = []
     biosample_relation: list[str] = []
@@ -190,6 +194,9 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
         line = raw.rstrip("\r\n")
         if line.startswith("!Sample_title\t"):
             titles = _series_matrix_values(line)
+        elif line.startswith("!Sample_geo_accession\t"):
+            # change_7.5 section 1.7: the GSM is the identifier a paper's design names, and it was skipped.
+            geo_accessions = _series_matrix_values(line)
         elif line.startswith("!Sample_characteristics_ch1\t"):
             conditions_lines.append(_series_matrix_values(line))
         elif line.startswith("!Sample_relation\t"):
@@ -222,6 +229,7 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
         samples.append(
             {
                 "title": title,
+                "geo_accession": geo_accessions[i] if i < len(geo_accessions) else "",
                 "condition": condition,
                 "experiment_accession": _first_match(_SRX_RE, sra_relation[i]) if i < len(sra_relation) else "",
                 "sample_accession": _first_match(_SAM_RE, biosample_relation[i]) if i < len(biosample_relation) else "",
@@ -385,7 +393,7 @@ class AccessionManifestService:
             if missing
             else None
         )
-        return ManifestResult(samples=samples, unavailable_reason=partial)
+        return ManifestResult(samples=samples, unavailable_reason=partial, series_sra=series_sra)
 
     @staticmethod
     async def _fetch_platform_matrices(accession: str, fetch: Fetcher) -> tuple[list[str] | None, int, str | None]:

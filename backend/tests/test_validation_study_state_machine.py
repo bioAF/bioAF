@@ -44,7 +44,9 @@ def test_invalid_transitions_are_rejected():
     assert not can_transition("requested", "running")
     assert not can_transition("reading", "setup")
     assert not can_transition("comparing", "reading")
-    assert not can_transition("setup", "classified")
+    # change_7.5 section 1.3 changed this line (flagged): `setup -> classified` is now an edge, taken
+    # when the analysis would need a reference bioAF cannot supply. It asserted that edge was invalid.
+    assert not can_transition("setup", "comparing")
 
 
 def test_a_closed_verdict_is_not_reopened_by_the_driver():

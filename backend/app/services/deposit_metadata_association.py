@@ -169,10 +169,11 @@ def associate_columns(
     by_meta = {r["sample_id"]: r for r in (metadata_rows or []) if r.get("sample_id")}
 
     # Match the series matrix on TITLE first (what a depositor names a column after) and fall back to
-    # the accession, which occasionally IS the column name.
+    # the accession, which occasionally IS the column name. change_7.5 section 1.7: the GSM too, which
+    # is what a paper's design names.
     by_manifest: dict[str, dict] = {}
     for m in manifest or []:
-        for key in (m.get("title"), m.get("experiment_accession"), m.get("sample_accession")):
+        for key in (m.get("title"), m.get("geo_accession"), m.get("experiment_accession"), m.get("sample_accession")):
             if key:
                 by_manifest.setdefault(str(key), m)
 
@@ -197,16 +198,25 @@ def associate_columns(
             continue
 
         man = by_manifest.get(col)
-        if man and man.get("condition"):
+        # change_7.5 section 1.7: an exact identifier match is authoritative, whether or not the
+        # repository records a condition: the column IS that sample, named by its title or its GSM.
+        if man:
+            accessions = [
+                str(a)
+                for a in (man.get("geo_accession"), man.get("experiment_accession"), man.get("sample_accession"))
+                if a
+            ]
             rows.append(
                 {
                     "column": col,
-                    "sample_accession": man.get("experiment_accession") or man.get("sample_accession"),
-                    "condition": man.get("condition"),
+                    "sample_accession": accessions[0] if accessions else None,
+                    "accessions": accessions,
+                    "condition": man.get("condition") or None,
                     "replicate": None,
                     "batch": None,
                     "source": "series_matrix",
-                    "reason": "stated by the depositor in the GEO series matrix",
+                    "reason": "the column is this sample in the GEO series matrix, matched exactly on its "
+                    + ("accession" if col in accessions else "title"),
                     "confidence": 1.0,
                 }
             )
@@ -286,8 +296,8 @@ def rewrite_design_to_columns(
             continue
         # A pick that names the column itself is the plainest identity there is.
         by_pick.setdefault(str(col).strip().lower(), []).append(col)
-        if a.get("sample_accession"):
-            by_pick.setdefault(str(a["sample_accession"]).strip().lower(), []).append(col)
+        for accession in {a.get("sample_accession"), *(a.get("accessions") or [])} - {None, ""}:
+            by_pick.setdefault(str(accession).strip().lower(), []).append(col)
         if a.get("condition"):
             by_condition.setdefault(str(a["condition"]).strip().lower(), []).append(col)
 

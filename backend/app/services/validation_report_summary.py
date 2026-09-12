@@ -40,6 +40,8 @@ LIMITATION_LABELS = {
     "sample_mapping_unresolved": "Samples could not be assigned to the comparison",
     "design_incompatible": "Acquired input does not contain the compared conditions",
     "no_compatible_contrast": "No comparison this route can analyze",
+    # change_7.5 section 1.3, pending the owner's sign-off.
+    "reference_unavailable": "Stated reference not available to bioAF",
 }
 # A missing input the evidence has not established is not a missing input. Worded as what it is.
 _UNESTABLISHED_ABSENCE_LABEL = "Not established"
@@ -112,8 +114,12 @@ HEADLINE_LABELS = {
 _VERDICT_CLASSIFICATIONS = ("validated", "partially_reproduced", "not_validated")
 
 PROVISIONAL_NOTE = "from the paper text only; not checked against the attachments"
+# change_7.5 section 1.4, pending the owner's sign-off: a declined QC binding decides the QC check and
+# nothing else. "The claim cannot be compared" was said of claims whose author tables could check them.
+NO_SUPPORTED_METRIC_LABEL = "No QC metric measures this claim"
 NO_SUPPORTED_METRIC_EXPLANATION = (
-    "bioAF has no metric that measures this claim, so the mapping was declined and the claim cannot be compared."
+    "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. "
+    "This does not decide its other checks."
 )
 
 _NUMBER_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six", 7: "Seven", 8: "Eight", 9: "Nine"}
@@ -678,7 +684,11 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                 "The model's answer could not be read, so this claim is not mapped to a metric.",
             )
         elif decided_by == "model":
-            status, label, explanation = "no_supported_metric", "No supported metric", NO_SUPPORTED_METRIC_EXPLANATION
+            status, label, explanation = (
+                "no_supported_metric",
+                NO_SUPPORTED_METRIC_LABEL,
+                NO_SUPPORTED_METRIC_EXPLANATION,
+            )
         else:
             status, label, explanation = "unmapped", "Not mapped", "No mapping decision was recorded for this claim."
         index = target.get("contrast_index")

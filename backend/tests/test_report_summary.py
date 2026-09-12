@@ -201,10 +201,12 @@ class TestAStudyRecordedBeforeTheLedgerReadsCorrectly:
         assert self._summary()["consistency"]["label"] == "Consistency not checked"
 
     def test_its_declined_claims_read_as_no_supported_metric(self):
+        # change_7.5 section 1.4 changed this assertion (flagged): the declined wording is scoped to
+        # the QC check.
         claims = self._summary()["claims"]
         declined = [c for c in claims if c["mapping"]["status"] == "no_supported_metric"]
         assert len(declined) == 4
-        assert "bioAF has no metric that measures this claim" in declined[0]["mapping"]["explanation"]
+        assert "bioAF computes no QC metric that measures this claim" in declined[0]["mapping"]["explanation"]
 
     def test_mapped_is_not_tested(self):
         counts = self._summary()["claim_counts"]

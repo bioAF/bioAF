@@ -106,6 +106,15 @@ const ARCHIVE_LABEL: Record<string, string> = {
   ega: "EGA",
   sra: "SRA",
   arrayexpress: "ArrayExpress",
+  // change_7.5 section 1.5: archives bioAF recognises and has no adapter for.
+  pride: "PRIDE",
+  massive: "MassIVE",
+  pdb: "PDB",
+  emdb: "EMDB",
+  zenodo: "Zenodo",
+  figshare: "figshare",
+  github: "GitHub",
+  gitlab: "GitLab",
   other: "Archive",
 };
 
@@ -178,7 +187,7 @@ export function CapabilityChecklist({
             <tr key={deposit.accession} data-testid={`deposit-${deposit.accession}`}>
               <td className="py-1.5 pr-4 text-gray-700">
                 Deposit <span className="text-xs text-gray-500">({ARCHIVE_LABEL[deposit.archive] ?? deposit.archive})</span>
-                {deposit.provenance === "extracted" && (
+                {(deposit.provenance === "extracted" || deposit.provenance === "text_scan") && (
                   <span className="ml-1 text-xs text-gray-500">from the paper</span>
                 )}
               </td>

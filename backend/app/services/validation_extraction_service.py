@@ -241,8 +241,8 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         'excluded, the count before the exclusions is one claim with qc_stage "as collected" and the '
         'number analysed after them is another with qc_stage "as analysed".\n\n'
         "A claim's significance is ambiguous ONLY when the paper itself supports more than one reading "
-        "for that same claim: for example, a results sentence gives the counts at P < 0.01 while the "
-        "methods say the same counts were taken at FDR < 0.01. Record that in significance_ambiguities: "
+        "for that same claim: for example, a results sentence gives the counts at P < 0.001 while the "
+        "methods say the same counts were taken at FDR < 0.05. Record that in significance_ambiguities: "
         "the claim's index, and each reading with the paper's exact words as its quote. Never write a "
         "blocker saying a stated measure is missing, ambiguous, nominal or unadjusted. A stated measure is "
         "the paper's definition; a real ambiguity is shown with its quotes, or not recorded at all.\n\n"
@@ -280,33 +280,14 @@ def _to_float(value) -> float | None:
 
 # The model reports a free-form reference build ("GRCh38 / Gencode 29", "hg19", "mm10"), but
 # plan.reference_genome must be a controlled-vocabulary token or launch_run 422s at the setup gate and
-# errors the study. Map common aliases to the canonical assembly token; an unrecognized build resolves
-# to None (the launch picks a default) rather than a value guaranteed to fail validation.
-#
-# Only the CURRENT assembly of each organism is recognized, and deliberately: Zv9 is not GRCz11 and
-# Rnor_6.0 is not mRatBN7.2, so folding an older spelling onto the current token would align against
-# a genome the paper never used and report the difference as biology. An unrecognized build resolves
-# to None and the plan carries a blocker saying so.
-_REFERENCE_GENOME_ALIASES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("grch38", "hg38"), "GRCh38"),
-    (("grch37", "hg19"), "GRCh37"),
-    (("grcm39", "mm39"), "GRCm39"),
-    (("grcm38", "mm10"), "GRCm38"),
-    (("t2t", "chm13"), "T2T-CHM13"),
-    (("grcz11", "danrer11"), "GRCz11"),
-    (("mratbn7", "rn7"), "mRatBN7.2"),
-    # BDGP6 is the assembly FAMILY: Ensembl publishes point releases (BDGP6.32, BDGP6.46) that share
-    # a coordinate system and differ in annotation. The token names the family and the launch pins
-    # one release, exactly as GRCh38 pins Ensembl 112; `reference_build` keeps the paper's own words
-    # beside it so an annotation-driven divergence can still be attributed.
-    (("bdgp6", "dm6"), "BDGP6"),
-    (("wbcel235", "ce11"), "WBcel235"),
-    (("tair10",), "TAIR10"),
-)
+# errors the study. change_7.5 section 1.3: the tables live in `validation_reference`, matched as whole
+# tokens, and an older assembly (mm9, hg18, Zv9) is recognised as the assembly it is. It never resolves
+# to the current token, and a paper naming one gets no launch token at all: nothing substitutes the
+# nearest current assembly.
 
 
 def _builds_named_in(raw) -> list[str]:
-    """Every assembly ``raw`` names, in the order the PAPER names them.
+    """Every CURRENT assembly ``raw`` names, in the order the PAPER names them.
 
     Scanning the alias table in declaration order made bioAF's own row ordering decide the answer.
     A real paper (10.1038/s41598-023-33729-4) writes "Human hg19, UCSC (RNA-seq annotation); hg38
@@ -317,21 +298,20 @@ def _builds_named_in(raw) -> list[str]:
     the build it primarily worked in before the ones it mentions in passing. Two spellings of one
     assembly ("GRCh38 (hg38)") collapse to a single entry, so they are never a disagreement.
     """
-    text = str(raw or "").lower()
-    if not text.strip():
-        return []
-    found: list[tuple[int, str]] = []
-    for needles, token in _REFERENCE_GENOME_ALIASES:
-        positions = [text.index(n) for n in needles if n in text]
-        if positions:
-            found.append((min(positions), token))
-    return [token for _at, token in sorted(found)]
+    from app.services.validation_reference import assemblies_named
+
+    return [a["assembly"] for a in assemblies_named(raw) if not a["historical"]]
 
 
 def _normalize_reference_genome(raw) -> str | None:
-    """The assembly the paper names FIRST, or None when it names none bioAF recognizes."""
-    builds = _builds_named_in(raw)
-    return builds[0] if builds else None
+    """The assembly the paper names FIRST, or None when it names none bioAF recognizes as current, or
+    names an older assembly anywhere (one reference per paper, never a substitution)."""
+    from app.services.validation_reference import assemblies_named
+
+    named = assemblies_named(raw)
+    if not named or any(a["historical"] for a in named):
+        return None
+    return named[0]["assembly"]
 
 
 def reference_genome_alternatives(raw) -> list[str]:
@@ -1031,6 +1011,9 @@ class ValidationExtractionService:
         if parsed["parse_failure"]:
             blockers.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]
+        # change_7.5 section 1.5: every accession the model read, kept for discovery. A requested
+        # accession narrows what the plan fetches below; it does not change what the paper names.
+        study.evidence_json = {**(study.evidence_json or {}), "extracted_accessions": list(accessions)}
 
         # A requester who named the study's accession has already scoped it, so that is the dataset
         # to reproduce. The extractor's list is a reading of the paper's prose, and prose does not
@@ -1058,17 +1041,24 @@ class ValidationExtractionService:
 
         raw_genome = method.get("reference_build")
         named_builds = _builds_named_in(raw_genome)
-        reference_genome = named_builds[0] if named_builds else None
-        if raw_genome and reference_genome is None:
-            blockers.append(
-                f"could not map the paper's reference genome '{raw_genome}' to a known assembly; "
-                "the analysis run will use a default"
-            )
+        # change_7.5 section 1.3: the reference is recorded as it is. There is no default: an
+        # operation that depends on a reference is refused when the paper's is not one bioAF supplies.
+        from app.services.validation_reference import USABLE, paper_reference, reference_blocker
+
+        reference = paper_reference(_str_or_none(raw_genome), mapping.pipeline_key)
+        reference_genome = _normalize_reference_genome(raw_genome) if reference["status"] == USABLE else None
+        if reference["status"] != USABLE and _normalize_reference_genome(raw_genome) is not None:
+            # Recognised, and not one bioAF supplies (T2T-CHM13): the token is kept, as before, so a
+            # pinned launch still refuses rather than aligning against its seed.
+            reference_genome = _normalize_reference_genome(raw_genome)
+        blocker = reference_blocker(reference)
+        if blocker:
+            blockers.append(blocker)
         # A paper that ran several assays names a build per assay, and only one of them can be what
         # this run aligns against. Say which was taken and which were not, because the choice is
         # made from word order in a methods section and a scientist can see in one glance whether
         # it is the build their own dataset used.
-        if len(named_builds) > 1:
+        if reference["status"] == USABLE and len(named_builds) > 1:
             blockers.append(
                 f"The paper names more than one reference genome ({', '.join(named_builds)}). "
                 f"{named_builds[0]} was taken, because the paper names it first. Confirm it is the build "
