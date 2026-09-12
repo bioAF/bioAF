@@ -517,19 +517,30 @@ class ReproductionPlanService:
         design_json = plan.differential_design_json or {}
         selected = (design_json.get("selected_contrast") or {}).get("contrast_index")
         contrasts = design_json.get("contrasts") or []
-        contrast_thresholds = None
-        if isinstance(selected, int) and 0 <= selected < len(contrasts):
-            contrast_thresholds = contrasts[selected].get("thresholds")
-        from_contrast = bool(contrast_thresholds)
-        design_thresholds = contrast_thresholds if from_contrast else (design_json.get("thresholds") or {})
-        lfc = lfc_threshold if lfc_threshold is not None else design_thresholds.get("log2fc")
-        padj = padj_threshold if padj_threshold is not None else design_thresholds.get("padj")
-        # A null on the CONTRAST is the model answering the question it was asked: this cutoff does
-        # not apply to this finding, which is the usual case for windowed differential binding. That
-        # is 0.0 (significance alone), not the 1.0 default meant for "nobody stated one".
-        default_lfc = 0.0 if from_contrast else 1.0
-        lfc = float(lfc) if lfc is not None else default_lfc
-        padj = float(padj) if padj is not None else 0.05
+        contrast = (
+            contrasts[selected]
+            if isinstance(selected, int) and not isinstance(selected, bool) and 0 <= selected < len(contrasts)
+            else {}
+        )
+        # change_7.4 section 1.6: a cutoff the caller states is used as stated; anything else comes
+        # from the contrast's statistical definition, and nothing is ever defaulted. A null fold change
+        # on the CONTRAST is the model answering the question it was asked (this cutoff does not apply
+        # to this finding), which is significance alone; a significance cutoff nobody stated is a
+        # refusal, never 0.05, and a raw P value is never read as an adjusted one.
+        if lfc_threshold is not None and padj_threshold is not None:
+            lfc, padj = float(lfc_threshold), float(padj_threshold)
+        else:
+            from app.services.validation_claim_cutoffs import analysis_cutoffs
+
+            cutoffs = analysis_cutoffs(contrast, design_json)
+            if cutoffs["refusal"]:
+                raise HTTPException(
+                    400,
+                    f"The paper's result table cannot be read yet: {cutoffs['refusal']}. State the comparison's "
+                    "significance cutoff in the differential design, then confirm the table again.",
+                )
+            lfc = float(lfc_threshold) if lfc_threshold is not None else cutoffs["lfc_threshold"]
+            padj = float(padj_threshold) if padj_threshold is not None else cutoffs["padj_threshold"]
 
         def _normalize(cmap: dict | None):
             if kind == "interval":

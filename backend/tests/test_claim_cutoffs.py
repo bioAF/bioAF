@@ -172,3 +172,180 @@ class TestTheResultsTableIsMeasuredAtEveryClaimedFoldChange:
             ],
         )
         assert await claimed_thresholds(session, study) == [1.5]
+
+
+# ---- change_7.4 section 1.6: one statistical definition, carried whole, never defaulted ----
+
+_P_ONLY = {
+    "claim_text": "We identified 87 significantly (P < 0.005) down-regulated genes",
+    "value": 87,
+    "output_type": "gene_set_size",
+    "contrast": "knockout vs wild type liver",
+    "threshold": 0.005,
+    "threshold_kind": "pvalue",
+    "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.005}],
+}
+_FOLD = {
+    "claim_text": "63 genes changed more than threefold (FDR <= 0.1)",
+    "value": 63,
+    "output_type": "gene_set_size",
+    "contrast": "treated vs vehicle kidney",
+    "cutoffs": [
+        {"kind": "padj", "operator": "<=", "value": 0.1},
+        {"kind": "fold_change", "operator": ">", "value": 3},
+    ],
+}
+
+
+class TestEveryCutoffKindSurvivesDerivation:
+    """Study 37's claim said P < 0.01 and the contrast came out `{"padj": None, "log2fc": None}`:
+    `derive_contrast_thresholds` kept only two kinds and dropped the rest."""
+
+    def test_a_p_value_cutoff_and_its_operator_reach_the_contrast(self):
+        [contrast, _] = derive_contrast_thresholds([dict(c) for c in _CONTRASTS], [_P_ONLY])
+        assert contrast["cutoffs"] == [{"kind": "pvalue", "operator": "<", "value": 0.005}]
+
+    def test_a_fold_change_cutoff_and_its_operator_reach_the_contrast(self):
+        [_, contrast] = derive_contrast_thresholds([dict(c) for c in _CONTRASTS], [_FOLD])
+        assert {"kind": "fold_change", "operator": ">", "value": 3.0} in contrast["cutoffs"]
+        assert {"kind": "padj", "operator": "<=", "value": 0.1} in contrast["cutoffs"]
+
+
+class TestAThresholdThatDisagreesWithItsCutoffsIsUnresolved:
+    """Study 37's binding said `padj 0.01` and the same claim's cutoffs said `P < 0.01`. Neither may
+    overwrite the other."""
+
+    def test_the_disagreement_is_named(self):
+        from app.services.validation_claim_cutoffs import threshold_disagreement
+
+        reason = threshold_disagreement(0.01, "padj", [{"kind": "pvalue", "operator": "<", "value": 0.01}])
+        assert reason
+        assert "adjusted" in reason and "P" in reason
+
+    def test_an_agreeing_threshold_is_not_a_disagreement(self):
+        from app.services.validation_claim_cutoffs import threshold_disagreement
+
+        assert threshold_disagreement(0.01, "pvalue", [{"kind": "pvalue", "operator": "<", "value": 0.01}]) is None
+        assert (
+            threshold_disagreement(
+                1.0,
+                "abs_log2fc",
+                [
+                    {"kind": "pvalue", "operator": "<", "value": 0.01},
+                    {"kind": "abs_log2fc", "operator": ">", "value": 1},
+                ],
+            )
+            is None
+        )
+
+    def test_the_contrast_it_defines_is_unresolved(self):
+        claim = {**_P_ONLY, "threshold": 0.005, "threshold_kind": "padj"}
+        [contrast, _] = derive_contrast_thresholds([dict(c) for c in _CONTRASTS], [claim])
+        assert contrast["thresholds_unresolved"]
+
+
+class TestTheAnalysisCutoffsAreNeverDefaulted:
+    def _cutoffs(self, contrast, design=None):
+        from app.services.validation_claim_cutoffs import analysis_cutoffs
+
+        return analysis_cutoffs(contrast, design or {})
+
+    def test_a_claim_s_padj_cutoff_with_no_effect_cutoff_states_no_effect_requirement(self):
+        out = self._cutoffs({"cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}]})
+        assert out["refusal"] is None
+        assert out["padj_threshold"] == 0.05
+        assert out["lfc_threshold"] == 0.0
+        assert "no fold-change requirement" in out["statement"]
+
+    def test_a_fold_change_is_evaluated_on_the_log2_scale(self):
+        out = self._cutoffs({"cutoffs": _FOLD["cutoffs"]})
+        assert out["refusal"] is None
+        assert out["lfc_threshold"] == pytest.approx(1.5849625, rel=1e-6)
+
+    def test_a_raw_p_value_is_refused_until_the_route_can_apply_it(self):
+        out = self._cutoffs({"cutoffs": _P_ONLY["cutoffs"]})
+        assert out["padj_threshold"] is None
+        assert "P value" in out["refusal"]
+
+    def test_a_missing_significance_cutoff_is_refused(self):
+        out = self._cutoffs(
+            {"thresholds": {"padj": None, "log2fc": 1.0}}, {"thresholds": {"padj": None, "log2fc": 1.0}}
+        )
+        assert out["refusal"]
+        assert out["padj_threshold"] is None
+
+    def test_an_unresolved_threshold_is_refused(self):
+        out = self._cutoffs({"cutoffs": _P_ONLY["cutoffs"], "thresholds_unresolved": "they disagree"})
+        assert "they disagree" in out["refusal"]
+
+    def test_an_unstated_effect_requirement_is_refused_rather_than_filled(self):
+        """Only the paper-level pair, with its fold change left null: nothing says there is no
+        requirement, so bioAF does not supply one."""
+        out = self._cutoffs({}, {"thresholds": {"padj": 0.05, "log2fc": None}})
+        assert out["refusal"]
+        assert "fold" in out["refusal"]
+
+    def test_a_contrast_s_own_null_fold_change_means_it_does_not_apply(self):
+        """The extraction contract: a contrast sets a cutoff to null where it does not apply."""
+        out = self._cutoffs({"thresholds": {"padj": 0.05, "log2fc": None}})
+        assert out["refusal"] is None
+        assert out["lfc_threshold"] == 0.0
+
+
+class TestTheVocabulariesAgree:
+    def test_the_binding_prompt_offers_a_p_value(self):
+        from app.services.validation_extraction_service import build_binding_prompt
+
+        system, _ = build_binding_prompt([{"metric_key": "x", "claim_text": "y"}])
+        assert '"threshold_kind": "padj | pvalue | abs_log2fc | null"' in system
+
+    def test_the_extraction_schema_offers_a_p_value_for_a_claim_s_threshold(self):
+        from app.services.validation_extraction_service import build_extraction_prompt
+
+        system, _ = build_extraction_prompt("text")
+        assert '"threshold_kind": "padj | pvalue | abs_log2fc | null"' in system
+
+
+_DISAGREEING_PAPER = """```json
+{"accessions": ["GSE1"],
+ "method": {"assay": "bulk RNA-seq", "tools": ["DESeq2"], "reference_build": "GRCm38"},
+ "differential_design": {"contrasts": [
+   {"name": "knockout vs wild type liver", "assay": "bulk RNA-seq", "finding_claim_index": 0,
+    "thresholds": {"log2fc": null, "padj": null}}],
+  "thresholds": {"log2fc": null, "padj": null}},
+ "claims": [{"metric_key": "", "claim_text": "We identified 87 significantly (P < 0.005) down-regulated genes",
+   "value": 87, "unit": "genes", "output_type": "gene_set_size", "contrast": "knockout vs wild type liver",
+   "threshold": 0.005, "threshold_kind": "padj",
+   "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.005}]}],
+ "data_availability": "deposited", "blockers": []}
+```"""
+
+
+class TestADisagreementIsRecordedNotResolvedBySilence:
+    @pytest.mark.asyncio
+    async def test_the_extraction_marks_the_claim_unresolved_and_records_an_issue(
+        self, session, admin_user, monkeypatch
+    ):
+        from app.services import validation_extraction_service as ext
+        from app.services.validation_issue_service import ValidationIssueService
+        from app.services.validation_study_service import ValidationStudyService
+        from tests.test_validation_extraction import _patch_llm
+
+        study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+        await session.flush()
+        _patch_llm(monkeypatch, _DISAGREEING_PAPER)
+
+        from app.services.reproduction_plan_service import ReproductionPlanService
+
+        await ext.ValidationExtractionService.extract(session, study, "TEXT", admin_user.organization_id, admin_user.id)
+        await session.flush()
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+
+        [target] = plan.comparison_targets
+        assert target.unresolved_reason and "disagrees" in target.unresolved_reason
+        # Neither reading overwrote the other.
+        assert target.threshold_kind == "padj"
+        assert target.cutoffs == [{"kind": "pvalue", "operator": "<", "value": 0.005}]
+        issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
+        assert any("disagrees" in (i.get("message") or "") for i in issues)
+        assert plan.differential_design_json["contrasts"][0]["thresholds_unresolved"]

@@ -331,3 +331,19 @@ async def test_a_null_selection_stops_the_deposit_differential(session, deposit_
 
     assert decision.inputs is None
     assert decision.reason_code == "no_compatible_contrast"
+
+
+@pytest.mark.asyncio
+async def test_the_deposit_route_refuses_a_threshold_it_cannot_apply(session, deposit_study, admin_user):
+    """change_7.4 section 1.6: the deposit route defaulted to log2FC 1.0 and adjusted P 0.05."""
+    plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [{**_DESIGN["contrasts"][0], "cutoffs": [{"kind": "pvalue", "operator": "<", "value": 0.01}]}],
+        "selected_contrast": {"contrast_index": 0},
+    }
+    await session.flush()
+
+    decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "threshold_unresolved"

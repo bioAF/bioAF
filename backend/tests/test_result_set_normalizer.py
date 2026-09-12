@@ -211,7 +211,9 @@ def test_a_real_geo_mirna_table_parses_despite_its_punctuation():
     the lowercased header, so `log2(Fold_change)` and `p-value` both missed and the whole table came
     back with zero significant entities and a note nobody would have read as "bioAF cannot read
     this format"."""
-    fs = normalize_gene_table(_GEO_MIRNA_TSV, lfc_threshold=1.0, padj_threshold=0.05)
+    # change_7.4 section 1.6 (flagged test change): the table's only significance column is a raw P
+    # value, so it is read against a P-value cutoff; an adjusted cutoff is never applied to it.
+    fs = normalize_gene_table(_GEO_MIRNA_TSV, lfc_threshold=1.0, padj_threshold=0.05, significance_kind="pvalue")
     assert fs.namespace == "mirbase"
     assert fs.n_tested == 5
     assert fs.directions() == {
@@ -221,12 +223,14 @@ def test_a_real_geo_mirna_table_parses_despite_its_punctuation():
     }
 
 
-def test_a_table_with_only_a_raw_p_value_says_so():
-    """Small-RNA studies routinely deposit an unadjusted p-value. Using it is the right call, since
-    the alternative is refusing every table in the subfield, but the verdict has to carry the
-    caveat rather than imply an FDR that was never computed."""
+def test_a_table_with_only_a_raw_p_value_is_not_checkable_against_an_adjusted_cutoff():
+    """change_7.4 section 1.6 (flagged test change): this asserted the raw P value was used in place
+    of the adjusted one, with a caveat. A P value and an adjusted P value are different definitions,
+    and comparing one against the other's cutoff is a substitution. The table is not checkable
+    against that cutoff, and says why."""
     fs = normalize_gene_table(_GEO_MIRNA_TSV, lfc_threshold=1.0, padj_threshold=0.05)
-    assert any("raw p-value" in n for n in fs.parse_notes), fs.parse_notes
+    assert fs.entities == []
+    assert any("adjusted P" in n for n in fs.parse_notes), fs.parse_notes
 
 
 def test_punctuation_normalization_does_not_blur_distinct_columns():
@@ -419,3 +423,32 @@ def test_a_column_map_works_for_gene_tables_too():
         column_map={"id": "res.gene_symbol", "lfc": "res.log2FoldChange", "padj": "res.padj"},
     )
     assert {e.id for e in fs.entities} == {"TP53", "MYC"}
+
+
+# ---- change_7.4 section 1.6: the significance column by kind, never substituted ----
+
+_BOTH_P = "gene,log2FoldChange,pvalue,padj\nA,2.0,0.001,0.2\nB,-2.0,0.02,0.03\nC,2.0,0.5,0.9\n"
+
+
+def test_a_p_value_cutoff_reads_the_p_value_column():
+    fs = normalize_gene_table(_BOTH_P, lfc_threshold=1.0, padj_threshold=0.01, significance_kind="pvalue")
+    assert [e.id for e in fs.entities] == ["A"]
+
+
+def test_an_adjusted_cutoff_reads_the_adjusted_column():
+    fs = normalize_gene_table(_BOTH_P, lfc_threshold=1.0, padj_threshold=0.05)
+    assert [e.id for e in fs.entities] == ["B"]
+
+
+def test_a_p_value_cutoff_on_a_table_with_no_p_value_column_is_not_checkable():
+    only_adjusted = "gene,log2FoldChange,padj\nA,2.0,0.001\n"
+    fs = normalize_gene_table(only_adjusted, lfc_threshold=1.0, padj_threshold=0.01, significance_kind="pvalue")
+    assert fs.entities == []
+    assert any("P-value column" in n for n in fs.parse_notes), fs.parse_notes
+
+
+def test_an_interval_table_is_not_substituted_either():
+    raw_p_only = "chrom,start,end,log2FoldChange,pvalue\nchr1,1,100,2.0,0.001\n"
+    fs = normalize_interval_table(raw_p_only, lfc_threshold=1.0, padj_threshold=0.05)
+    assert fs.entities == []
+    assert any("adjusted P" in n for n in fs.parse_notes), fs.parse_notes

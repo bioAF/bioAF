@@ -321,6 +321,16 @@ def _parse_iso(value: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _technical_detail(cause: str | None, location: str | None, *, attempts: int | None = None) -> dict | None:
+    """What an administrator needs beside a limitation's plain sentence, kept out of the sentence.
+
+    change_7.3 decision 8 and change_7.4 section 1.1: the report states the failure plainly; the
+    typed cause, the location and the attempt count sit under a collapsed element.
+    """
+    detail = {"cause": cause, "url": location, "attempts": attempts}
+    return {k: v for k, v in detail.items() if v is not None} or None
+
+
 def _record_readiness(evidence: dict, value: str, reason: str | None, *, cause: str | None = None) -> None:
     """Record whether the selected analysis can run on the acquired input, where that is decided.
 
@@ -1607,6 +1617,7 @@ class ValidationDriverService:
                         reason=outcome.reason,
                         location=location,
                     ),
+                    "technical_detail": _technical_detail(outcome.cause, location, attempts=attempts),
                 },
             )
             return True
@@ -1632,6 +1643,7 @@ class ValidationDriverService:
                 "resource": resource or "this paper's deposits",
                 "operation": study.intended_route or "deposit",
                 "detail": outcome.reason,
+                "technical_detail": _technical_detail(outcome.cause, location),
             },
         )
         return True
@@ -1922,12 +1934,18 @@ class ValidationDriverService:
                 "the differential reproduction notebook completed but produced no output file",
             )
 
+        if params.get("lfc_threshold") is None or params.get("padj_threshold") is None:
+            # change_7.4 section 1.6: the bundle carries the cutoffs it was built with; one that
+            # carries none is never scored at a default.
+            return await ValidationDriverService._degrade_to_level2(
+                session, study, evidence, "the reproduction's statistical cutoff was not recorded with it"
+            )
         our_fs = await ValidationDriverService._extract_reproduced_set(
             session,
             cs,
             level3.get("kind", "gene"),
-            lfc_threshold=float(params.get("lfc_threshold", 1.0)),
-            padj_threshold=float(params.get("padj_threshold", 0.05)),
+            lfc_threshold=float(params["lfc_threshold"]),
+            padj_threshold=float(params["padj_threshold"]),
         )
         paper_fs = FindingSet.from_dict(level3.get("paper_finding_set") or {})
         universe = int(
@@ -2415,10 +2433,27 @@ class ValidationDriverService:
             # whole reason that arm exists: without it the study still produces nothing.
             target = level3 or await ValidationDriverService._finding_target_from_plan(session, study)
             params = target.get("parameters") or {}
+            if params.get("lfc_threshold") is None or params.get("padj_threshold") is None:
+                # change_7.4 section 1.6: no cutoff is supplied. A table the paper's definition cannot
+                # be applied to is an output bioAF could not compare, and the reason is recorded.
+                return await ValidationDriverService._land_code_outcome(
+                    session,
+                    study,
+                    evidence,
+                    record=record,
+                    observation=build_observation(
+                        outcome=RAN_OUTPUT_UNCOMPARABLE,
+                        exit_code=exit_code,
+                        transcript_uri=getattr(cs, "gcs_output_prefix", None),
+                        transcript_tail=transcript,
+                        unmatched=adapted.get("unmatched"),
+                    ),
+                    reason=target.get("threshold_refusal") or "the comparison's statistical cutoff is not established",
+                )
             our_fs = (normalize_interval_table if target.get("kind") == "interval" else normalize_gene_table)(
                 adapted["table_text"],
-                lfc_threshold=float(params.get("lfc_threshold", 1.0)),
-                padj_threshold=float(params.get("padj_threshold", 0.05)),
+                lfc_threshold=float(params["lfc_threshold"]),
+                padj_threshold=float(params["padj_threshold"]),
             )
             paper_fs = FindingSet.from_dict(target.get("paper_finding_set") or {})
             universe = int(
@@ -2478,18 +2513,33 @@ class ValidationDriverService:
         it. Returns an empty target when the paper confirmed no set, and the comparison then scores
         nothing rather than scoring against an absence.
         """
+        from app.services.validation_claim_cutoffs import resolve_analysis_thresholds
+
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         claim = (plan.finding_claim_json if plan else None) or {}
         design = (plan.differential_design_json if plan else None) or {}
-        thresholds = claim.get("thresholds") or design.get("thresholds") or {}
-        return {
+        selected, _ = selected_contrast_for(
+            design,
+            pipeline_key=plan.pipeline_key if plan else None,
+            library_strategy=plan.library_strategy if plan else None,
+        )
+        contrast = (design.get("contrasts") or [])[selected] if selected is not None else None
+        # change_7.4 section 1.6: the cutoffs the paper's set is defined at, never a default. Where
+        # they cannot be applied the target says why, and the comparison is not scored.
+        cutoffs = resolve_analysis_thresholds(claim, design, contrast)
+        target = {
             "kind": claim.get("kind") or "gene",
             "paper_finding_set": claim.get("finding_set") or {},
-            "parameters": {
-                "lfc_threshold": thresholds.get("log2fc") if thresholds.get("log2fc") is not None else 1.0,
-                "padj_threshold": thresholds.get("padj") if thresholds.get("padj") is not None else 0.05,
-            },
+            "parameters": {},
         }
+        if cutoffs["refusal"]:
+            target["threshold_refusal"] = cutoffs["refusal"]
+        else:
+            target["parameters"] = {
+                "lfc_threshold": cutoffs["lfc_threshold"],
+                "padj_threshold": cutoffs["padj_threshold"],
+            }
+        return target
 
     @staticmethod
     def _default_entry_point(resolution: dict) -> str | None:

@@ -1076,3 +1076,76 @@ async def test_the_samplesheet_answers_come_from_the_selected_contrast():
     values = sample_values_from_design(_TWO_CONTRASTS, samples, contract)
     assert values.get("1", {}).get("group") == "dex"
     assert "9" not in values
+
+
+# ---- change_7.4 section 1.6: no default threshold; refuse what the route cannot implement ----
+
+_NO_THRESHOLDS_CLAIM = {k: v for k, v in _CLAIM.items() if k != "thresholds"}
+
+
+def _with_contrast(**contrast_fields):
+    return {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
+        "contrasts": [{**_DESIGN["contrasts"][0], **contrast_fields}],
+    }
+
+
+class TestThresholdsAreNeverDefaulted:
+    @pytest.mark.asyncio
+    async def test_a_raw_p_value_definition_is_refused_before_anything_runs(
+        self, session, admin_user, analysis_run, de_template
+    ):
+        """Study 37's claims were P < 0.01. The templates apply an adjusted P, and running one in
+        place of the other would reproduce a different definition."""
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = _with_contrast(cutoffs=[{"kind": "pvalue", "operator": "<", "value": 0.01}])
+        study, plan = await _study_with_plan(
+            session, admin_user, analysis_run, design=design, claim=_NO_THRESHOLDS_CLAIM
+        )
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.inputs is None
+        assert decision.reason_code == "threshold_unresolved"
+        assert "P value" in decision.reason
+
+    @pytest.mark.asyncio
+    async def test_no_significance_cutoff_is_supplied_when_none_is_stated(
+        self, session, admin_user, analysis_run, de_template
+    ):
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = {k: v for k, v in _with_contrast().items()}
+        study, plan = await _study_with_plan(
+            session, admin_user, analysis_run, design=design, claim=_NO_THRESHOLDS_CLAIM
+        )
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.reason_code == "threshold_unresolved"
+
+    @pytest.mark.asyncio
+    async def test_a_significance_only_claim_runs_with_no_fold_change_requirement(
+        self, session, admin_user, analysis_run, de_template
+    ):
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = _with_contrast(cutoffs=[{"kind": "padj", "operator": "<", "value": 0.05}])
+        study, plan = await _study_with_plan(
+            session, admin_user, analysis_run, design=design, claim=_NO_THRESHOLDS_CLAIM
+        )
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.inputs is not None, decision.reason
+        assert decision.inputs["parameters"]["padj_threshold"] == 0.05
+        assert decision.inputs["parameters"]["lfc_threshold"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_the_generated_arm_s_target_carries_no_default_either(self, session, admin_user, analysis_run):
+        design = _with_contrast(cutoffs=[{"kind": "pvalue", "operator": "<", "value": 0.01}])
+        study, _ = await _study_with_plan(session, admin_user, analysis_run, design=design, claim=_NO_THRESHOLDS_CLAIM)
+
+        target = await ValidationDriverService._finding_target_from_plan(session, study)
+
+        assert "lfc_threshold" not in target["parameters"]
+        assert "padj_threshold" not in target["parameters"]
+        assert "P value" in target["threshold_refusal"]
