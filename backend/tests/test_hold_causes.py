@@ -548,6 +548,7 @@ class TestAResumedStudyReDerivesItsCause:
                 "deposit_unusable": "the model found nothing in this deposit worth reproducing from",
                 "deposit_selection": {"declined": True, "matrix_files": [], "reason": "nothing usable"},
                 "deposit_failed": {"reason": "x", "kind": "terminal", "action": "no_input"},
+                "analysis_readiness": {"value": "no", "reason": "x"},
             },
         )
         study.classification = "missing_data"
@@ -560,6 +561,8 @@ class TestAResumedStudyReDerivesItsCause:
         assert "deposit_unusable" not in resumed.evidence_json
         assert "deposit_failed" not in resumed.evidence_json
         assert "deposit_selection" not in resumed.evidence_json
+        # Readiness was decided for the attempt that stopped; the next attempt decides it again.
+        assert "analysis_readiness" not in resumed.evidence_json
 
 
 # ---- change_7.4 section 1.2: the retry wait holds in every state that can raise a transient hold ----
@@ -627,3 +630,39 @@ class TestTheRetryWaitHoldsWhereverATransientHoldCanArise:
         study = await _study(session, admin_user, state="inspecting_deposit", evidence=_acquired(**_pending()))
 
         assert is_advancing(study) is True
+
+
+# ---- change_7.4 section 1.3: readiness is recorded where it is decided ----
+
+
+class TestReadinessIsRecordedWhereItIsDecided:
+    @pytest.mark.asyncio
+    async def test_study_37_concludes_acquired_usable_and_not_ready(self, session, admin_user):
+        study = await _study(session, admin_user, state="inspecting_deposit", evidence=_acquired())
+        await _plan(session, study, admin_user, design=_DESIGN)
+
+        other = "\tfoo_1\tfoo_2\tbar_1\tbar_2\nG1\t1.5\t2.5\t3.5\t4.5\nG2\t5.5\t6.5\t7.5\t8.5\n"
+        await ValidationDriverService._handle_inspecting_deposit(
+            session, study, storage_adapter=_Storage({"s3://x/m.tsv": other})
+        )
+
+        completion = study.evidence_json["completion"]
+        assert completion["input_acquired"] == "yes"
+        assert completion["input_usable"] == "yes"
+        assert completion["ready_for_analysis"] == "no"
+        assert study.evidence_json["analysis_readiness"]["cause"] == "sample_mapping_unresolved"
+
+    @pytest.mark.asyncio
+    async def test_an_analysis_that_cannot_be_configured_is_not_ready_and_says_why(self, session, admin_user):
+        design = {**_DESIGN, "contrasts": [{**_DESIGN["contrasts"][0], "test_samples": [], "reference_samples": []}]}
+        design["contrasts"][0].update(test_condition="KO", reference_condition="WT")
+        study = await _study(session, admin_user, state="inspecting_deposit", evidence=_acquired())
+        await _plan(session, study, admin_user, design=design)
+
+        await ValidationDriverService._handle_inspecting_deposit(
+            session, study, storage_adapter=_Storage({"s3://x/m.tsv": _MATRIX.decode()})
+        )
+
+        readiness = study.evidence_json["analysis_readiness"]
+        assert readiness["value"] == "no"
+        assert readiness["reason"]

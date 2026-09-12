@@ -425,7 +425,8 @@ class TestTheOutcomeDescribesTheRealObstacle:
         completion = study.evidence_json["completion"]
         # change_7.3 section 4 (flagged test change): both facts are tri-state now.
         assert completion["processed_results_available"] == "yes"
-        assert completion["reproduction_input_available"] == "no"
+        # change_7.4 section 1.3 (flagged test change): the input fact reads the acquisition record.
+        assert completion["input_acquired"] == "no"
 
     @pytest.mark.asyncio
     async def test_the_completed_checks_are_named(self, session, admin_user, _groff_world):

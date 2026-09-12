@@ -161,7 +161,9 @@ def summarize(
     claims, counts = _claims(targets, plan, evidence)
     reconciliation = _reconciliation(evidence)
     headline = _headline(study, attempt)
-    facts = _facts(evidence, artifacts, attempt, counts)
+    completion_facts = _completion_facts(completion, evidence, study, uninspected=uninspected)
+    acquired = any(f["key"] == "input_acquired" and f["value"] == "yes" for f in completion_facts)
+    facts = _facts(evidence, artifacts, attempt, counts, acquired=acquired)
 
     return {
         "version": 1,
@@ -183,7 +185,7 @@ def summarize(
         "reconciliation": reconciliation,
         "consistency": _consistency(evidence),
         "checks": _checks(evidence, reconciliation),
-        "completion_facts": _completion_facts(completion, uninspected=uninspected),
+        "completion_facts": completion_facts,
         "checks_completed": [str(c) for c in completion.get("checks_completed") or []],
         # Grouped from the artifacts, so a study recorded before the ledger (eight lines, one copied
         # failure each) reads as the one failure it was.
@@ -523,24 +525,58 @@ def _tristate(value, *, uninspected: bool) -> str:
     return value if value in TRISTATE_LABELS else "not_established"
 
 
-def _completion_facts(completion: dict, *, uninspected: bool) -> list[dict]:
+# change_7.4 section 1.3. The plan's proposed labels, pending the owner's sign-off item by item.
+INPUT_FACT_LABELS = {
+    "input_acquired": "Analysis input acquired",
+    "input_usable": "Analysis input usable",
+    "ready_for_analysis": "Ready for analysis",
+}
+
+
+def _input_facts(completion: dict, evidence: dict, study: dict) -> dict:
+    """The three input facts as recorded, or, for a completion recorded before they existed, read
+    from the same acquisition record the completion now reads. A legacy record said "acquired none"
+    beside a file bioAF had downloaded (study 37), and no surface may repeat that."""
+    from app.services.validation_completion import analysis_input_facts
+
+    if "input_acquired" in completion:
+        return completion
+    return analysis_input_facts(
+        evidence,
+        evidence.get("supplements") or [],
+        ((evidence.get("capabilities") or {}).get("deposits")) or [],
+        data_run_id=study.get("data_run_id"),
+    )
+
+
+def _completion_facts(completion: dict, evidence: dict, study: dict, *, uninspected: bool) -> list[dict]:
     if not completion:
         return []
     legacy = "recorded before bioAF distinguished an established absence from one it could not establish"
-    facts = []
-    for key, label, reason_key in (
-        ("processed_results_available", "Processed results published", "processed_results_reason"),
-        ("reproduction_input_available", "Reproduction input acquired by bioAF", "reproduction_input_reason"),
-    ):
-        raw = completion.get(key)
-        value = _tristate(raw, uninspected=uninspected)
+    raw = completion.get("processed_results_available")
+    value = _tristate(raw, uninspected=uninspected)
+    facts = [
+        {
+            "key": "processed_results_available",
+            "label": "Processed results published",
+            "value": value,
+            "value_label": TRISTATE_LABELS[value],
+            "reason": completion.get("processed_results_reason")
+            or (legacy if isinstance(raw, bool) and value != "yes" else None),
+        }
+    ]
+    recorded = _input_facts(completion, evidence, study)
+    from app.services.validation_completion import INPUT_FACT_KEYS
+
+    for key, reason_key in INPUT_FACT_KEYS:
+        value = recorded.get(key) if recorded.get(key) in TRISTATE_LABELS else "not_established"
         facts.append(
             {
                 "key": key,
-                "label": label,
+                "label": INPUT_FACT_LABELS[key],
                 "value": value,
                 "value_label": TRISTATE_LABELS[value],
-                "reason": completion.get(reason_key) or (legacy if isinstance(raw, bool) and value != "yes" else None),
+                "reason": recorded.get(reason_key),
             }
         )
     return facts
@@ -768,7 +804,7 @@ def _comparisons(attempt: dict, counts: dict) -> dict:
 # ---- facts and the summary sentences -------------------------------------------------------------------
 
 
-def _facts(evidence: dict, artifacts: list[dict], attempt: dict, counts: dict) -> dict:
+def _facts(evidence: dict, artifacts: list[dict], attempt: dict, counts: dict, *, acquired: bool = False) -> dict:
     caps = evidence.get("capabilities") or {}
     raw = caps.get("raw_data") or {}
     deposits = [d for d in caps.get("deposits") or [] if isinstance(d, dict)]
@@ -792,7 +828,9 @@ def _facts(evidence: dict, artifacts: list[dict], attempt: dict, counts: dict) -
             "failed": sum(1 for a in attachments if a["retrieval"]["status"] == "failed"),
             "not_attempted": sum(1 for a in attachments if a["retrieval"]["status"] == "not_attempted"),
         },
-        "inputs_acquired": bool(attempt["acquired"]),
+        # The same acquisition record the completion facts read, so the summary sentence and the
+        # "Analysis input acquired" row can never disagree.
+        "inputs_acquired": bool(attempt["acquired"]) or acquired,
         "claims_tested": counts["tested"],
     }
 

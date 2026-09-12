@@ -55,6 +55,7 @@ from app.services.validation_acquisition_outcome import (
     INPUT_UNREADABLE,
     MAX_ATTEMPTS,
     NO_ADAPTER,
+    READINESS_CAUSES,
     RESOURCE_LIMIT,
     RETRIEVAL_TRANSIENT,
     acquisition_accession,
@@ -315,6 +316,27 @@ def _now() -> datetime:
 def _parse_iso(value: str) -> datetime:
     dt = datetime.fromisoformat(value)
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _record_readiness(evidence: dict, value: str, reason: str | None, *, cause: str | None = None) -> None:
+    """Record whether the selected analysis can run on the acquired input, where that is decided.
+
+    change_7.4 section 1.3: acquired, usable and ready for analysis are three separate facts, and
+    the report reads this one rather than inferring it from wherever the study stopped.
+    """
+    evidence["analysis_readiness"] = {"value": value, "reason": reason, "cause": cause, "at": _now().isoformat()}
+
+
+def _readiness_statement(inputs: dict) -> str:
+    """What made the input ready, in the reader's words: the contrast, its arms and the test."""
+    params = inputs.get("parameters") or {}
+    test = [s for s in str(params.get("test_samples") or "").split(",") if s]
+    reference = [s for s in str(params.get("reference_samples") or "").split(",") if s]
+    method = {"deseq2": "DESeq2", "limma_trend": "limma-trend"}.get(inputs.get("method") or "", "the analysis")
+    return (
+        f"{inputs.get('contrast') or 'the selected contrast'}: {len(test)} test and {len(reference)} reference "
+        f"sample(s) assigned, and {method} parameters built"
+    )
 
 
 def _waiting_to_retry(study: ValidationStudy) -> bool:
@@ -1252,8 +1274,10 @@ class ValidationDriverService:
         decision = await resolve_level3_from_deposit(session, study, plan, evidence=evidence)
         if decision.inputs:
             evidence["level3"] = decision.inputs
+            _record_readiness(evidence, "yes", _readiness_statement(decision.inputs))
         else:
             evidence["level3_skipped"] = {"reason": decision.reason, "reason_code": decision.reason_code}
+            _record_readiness(evidence, "no", decision.reason, cause=decision.reason_code)
 
         evidence.pop("deposit_failed", None)
         study.evidence_json = evidence
@@ -1547,6 +1571,10 @@ class ValidationDriverService:
             return True
 
         # Terminal, and it says which one it is.
+        if outcome.cause in READINESS_CAUSES:
+            # change_7.4 section 1.3: the input was acquired and read; what failed is whether the
+            # selected analysis can run on it, and that is its own recorded fact.
+            _record_readiness(evidence, "no", outcome.reason, cause=outcome.cause)
         study.evidence_json = dict(evidence)
         logger.info(
             "validation study %d: acquisition refused (%s): %s",
@@ -1715,11 +1743,13 @@ class ValidationDriverService:
             decision = await resolve_level3(session, study, plan)
             if decision.inputs:
                 evidence["level3"] = decision.inputs
+                _record_readiness(evidence, "yes", _readiness_statement(decision.inputs))
             elif decision.reason_code not in _LEVEL3_NEVER_CONFIGURED:
                 # The human confirmed a ground-truth set and something else stopped the finding step.
                 # Record which, so an `inconclusive` can say a configured Level-3 did not run instead
                 # of leaving the only account of it in a server log.
                 evidence["level3_skipped"] = {"reason": decision.reason, "reason_code": decision.reason_code}
+                _record_readiness(evidence, "no", decision.reason, cause=decision.reason_code)
 
         study.evidence_json = evidence
 

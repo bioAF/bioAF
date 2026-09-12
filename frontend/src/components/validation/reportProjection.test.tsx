@@ -115,8 +115,22 @@ describe("what could and could not be established (items 4 and 12)", () => {
   });
 
   it("names the acquisition fact for what it is", () => {
+    // change_7.4 section 1.3 (flagged test change): acquisition is one of three facts now.
     render(<CompletionSummary completion={null} summary={groff} />);
-    expect(screen.getByText("Reproduction input acquired by bioAF")).toBeInTheDocument();
+    expect(screen.getByText("Analysis input acquired")).toBeInTheDocument();
+  });
+
+  it("separates acquired, usable and ready for analysis (change_7.4 section 1.3)", () => {
+    render(<CompletionSummary completion={null} summary={groff} />);
+    for (const key of ["input_acquired", "input_usable", "ready_for_analysis"]) {
+      const fact = groff.completion_facts.find((f) => f.key === key);
+      expect(fact).toBeDefined();
+      const row = screen.getByTestId(`fact-${key}`);
+      expect(row).toHaveTextContent(fact!.label);
+      expect(row).toHaveTextContent(fact!.value_label);
+    }
+    expect(screen.getByText("Analysis input usable")).toBeInTheDocument();
+    expect(screen.getByText("Ready for analysis")).toBeInTheDocument();
   });
 
   it("labels a retrieval failure as this attempt's, not as a missing input", () => {

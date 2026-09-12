@@ -1,0 +1,1128 @@
+{
+ "_about": "Study 37 (SAMD1, 10.1126/sciadv.abf2229, GEO GSE144396) as persisted on the demo at build 8d22a56e, exported 2026-09-11. Bounded: no paper text, no passages, no people. A regression fixture of bioAF's defects, never a specification.",
+ "evidence": {
+  "acquisition_attempts": 3,
+  "assessment": {
+   "at": "2026-09-11T15:49:10.512479+00:00",
+   "basis": "paper_text",
+   "contradiction_pass": {
+    "checked": true,
+    "pairs": [
+     "samples_described_enough against the plan's blockers about per-sample group assignments"
+    ],
+    "reason": null
+   },
+   "contradictions": [],
+   "reconciled": true,
+   "reconciliation": {
+    "basis": "paper_text",
+    "reason": "the evidence is unchanged since the last reconciliation, so it was not asked again",
+    "status": "performed"
+   },
+   "revisions": 0,
+   "supplements_inspected": 0,
+   "supplements_unresolved": 0,
+   "unresolved_contradictions": []
+  },
+  "capabilities": {
+   "code_artifact": {
+    "evidence": null,
+    "failure_reason": null,
+    "value": "no"
+   },
+   "code_repository": {
+    "evidence": null,
+    "failure_reason": null,
+    "value": "no"
+   },
+   "code_sources": [],
+   "deposit_exists": {
+    "evidence": "GSE144396: GEO published a series record for GSE144396 describing 55 sample(s)",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "deposits": [
+    {
+     "access": "public",
+     "accession": "GSE144396",
+     "archive": "geo",
+     "evidence": "GEO published a series record for GSE144396 describing 55 sample(s); ENA publishes FASTQ files for 1 of 1 run(s); 3 of 61 deposited file(s) could serve as a reproduction input",
+     "evidence_by_key": {
+      "exists": "GEO published a series record for GSE144396 describing 55 sample(s)",
+      "preprocessed_data": "3 of 61 deposited file(s) could serve as a reproduction input",
+      "raw_data": "ENA publishes FASTQ files for 1 of 1 run(s)",
+      "sample_metadata": "GEO published a series record for GSE144396 describing 55 sample(s)"
+     },
+     "exists": "yes",
+     "failure_reason": null,
+     "preprocessed_data": "yes",
+     "provenance": "extracted",
+     "raw_data": "yes",
+     "registered_samples": 55,
+     "sample_metadata": "yes",
+     "scoped": false,
+     "supported": "yes"
+    },
+    {
+     "access": "unknown",
+     "accession": "PXD016781",
+     "archive": "other",
+     "evidence": null,
+     "evidence_by_key": {},
+     "exists": "unknown",
+     "failure_reason": "bioAF cannot look up deposits in an archive bioAF does not recognise, so what PXD016781 holds is unknown",
+     "preprocessed_data": "unknown",
+     "provenance": "extracted",
+     "raw_data": "unknown",
+     "registered_samples": null,
+     "sample_metadata": "unknown",
+     "scoped": false,
+     "supported": "no"
+    },
+    {
+     "access": "unknown",
+     "accession": "STI20A",
+     "archive": "other",
+     "evidence": null,
+     "evidence_by_key": {},
+     "exists": "unknown",
+     "failure_reason": "bioAF cannot look up deposits in an archive bioAF does not recognise, so what STI20A holds is unknown",
+     "preprocessed_data": "unknown",
+     "provenance": "extracted",
+     "raw_data": "unknown",
+     "registered_samples": null,
+     "sample_metadata": "unknown",
+     "scoped": false,
+     "supported": "no"
+    }
+   ],
+   "paper_readable": {
+    "evidence": "bioAF holds the paper's full text",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "preprocessed_data": {
+    "available_reason": "bioAF can acquire it from GSE144396 (GEO)",
+    "available_to_bioaf": "yes",
+    "evidence": "GSE144396: 3 of 61 deposited file(s) could serve as a reproduction input",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "raw_data": {
+    "available_reason": "bioAF can acquire it from GSE144396 (GEO)",
+    "available_to_bioaf": "yes",
+    "evidence": "GSE144396: ENA publishes FASTQ files for 1 of 1 run(s)",
+    "failure_reason": null,
+    "value": "yes"
+   },
+   "sample_metadata": {
+    "available_reason": "bioAF can acquire it from GSE144396 (GEO)",
+    "available_to_bioaf": "yes",
+    "evidence": "GSE144396: GEO published a series record for GSE144396 describing 55 sample(s)",
+    "failure_reason": null,
+    "value": "yes"
+   }
+  },
+  "completion": {
+   "checks_completed": [],
+   "checks_not_completed": [],
+   "classification": "inconclusive",
+   "limitations": [
+    {
+     "detail": "bioAF could not reach the deposit after 3 attempts, so whether it holds usable data was never established (Held before running: no column of the deposited matrix could be matched to SAMD1 KO; SAMD1 KO day 7 differentiation; WT day 7 differentiation. An arm with no samples is not a smaller experiment.)",
+     "kind": "failed_discovery",
+     "operation": "deposit",
+     "resource": "this paper's deposits"
+    }
+   ],
+   "other_legs": [],
+   "processed_results_available": "no",
+   "processed_results_reason": "bioAF inspected every attachment it found and none is a results table",
+   "reason": "bioAF could not reach the deposit after 3 attempts, so whether it holds usable data was never established (Held before running: no column of the deposited matrix could be matched to SAMD1 KO; SAMD1 KO day 7 differentiation; WT day 7 differentiation. An arm with no samples is not a smaller experiment.)",
+   "reproduction_input_available": "no",
+   "reproduction_input_reason": "no attachment bioAF inspected holds a sample-level input, and it acquired none"
+  },
+  "deposit": {
+   "fetched_at": "2026-09-11T15:47:38.901798+00:00",
+   "files": [
+    {
+     "artifact_type": "deposited_matrix",
+     "bytes": 1124487,
+     "file_id": 16379,
+     "filename": "GSE144396_RNA-Seq_NormalizedCounts.txt.gz",
+     "format": "text",
+     "md5": "64d39e669ca197e0a79dd9f0cc4fba96",
+     "storage_uri": "gs://bioaf-results-bioaf-co-4bd459/validation-deposits/study-37/GSE144396_RNA-Seq_NormalizedCounts.txt.gz",
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_RNA-Seq_NormalizedCounts.txt.gz"
+    }
+   ]
+  },
+  "deposit_failed": {
+   "action": "undetermined",
+   "at": "2026-09-11T15:49:10.496974+00:00",
+   "kind": "transient",
+   "reason": "Held before running: no column of the deposited matrix could be matched to SAMD1 KO; SAMD1 KO day 7 differentiation; WT day 7 differentiation. An arm with no samples is not a smaller experiment."
+  },
+  "deposit_inspection": {
+   "columns": [
+    "WT-1",
+    "WT-2",
+    "WT-3",
+    "WT-4",
+    "KO Cl5 repl1",
+    "KO Cl5 repl2",
+    "KO Cl16",
+    "KO Cl33"
+   ],
+   "design_samples_found": 0,
+   "design_samples_missing": [
+    "SAMD1 KO clones (RNA-seq)",
+    "WT mouse ES cells (RNA-seq)",
+    "SAMD1 KO differentiated cells (day 7)",
+    "WT differentiated cells (day 7)"
+   ],
+   "id_column": "",
+   "id_namespace": "symbol",
+   "library_size_ratio": 1.075433,
+   "library_sizes": {
+    "KO Cl16": 50675758.216952,
+    "KO Cl33": 50712696.329854,
+    "KO Cl5 repl1": 49352474.91913,
+    "KO Cl5 repl2": 50497103.419087,
+    "WT-1": 47155587.640654,
+    "WT-2": 48074917.047732,
+    "WT-3": 48722830.602643,
+    "WT-4": 48714522.813
+   },
+   "looks_transposed": false,
+   "n_columns": 8,
+   "n_rows": 41307,
+   "unusable_reason": null,
+   "usable": true,
+   "value_type_claimed": "normalized_other",
+   "value_type_disagrees": false,
+   "value_type_observed": "normalized_other",
+   "zero_columns": [],
+   "zero_row_fraction": 0.24789987169244923
+  },
+  "deposit_inventory": {
+   "accession": "GSE144396",
+   "entries": [
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287309_SAMD1-WT-repl1-mm10.bw",
+     "gsm": "GSM4287309",
+     "level": "sample",
+     "size_bytes": 152402271,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287309/suppl/GSM4287309_SAMD1-WT-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287309_SAMD1-WT-repl1-mm9.bw",
+     "gsm": "GSM4287309",
+     "level": "sample",
+     "size_bytes": 134820048,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287309/suppl/GSM4287309_SAMD1-WT-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287310_SAMD1-SAMD1KO-repl1-mm10.bw",
+     "gsm": "GSM4287310",
+     "level": "sample",
+     "size_bytes": 122171099,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287310/suppl/GSM4287310_SAMD1-SAMD1KO-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287310_SAMD1-SAMD1KO-repl1-mm9.bw",
+     "gsm": "GSM4287310",
+     "level": "sample",
+     "size_bytes": 111067195,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287310/suppl/GSM4287310_SAMD1-SAMD1KO-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287311_SAMD1-WT-repl2-mm10.bw",
+     "gsm": "GSM4287311",
+     "level": "sample",
+     "size_bytes": 140949786,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287311/suppl/GSM4287311_SAMD1-WT-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287311_SAMD1-WT-repl2-mm9.bw",
+     "gsm": "GSM4287311",
+     "level": "sample",
+     "size_bytes": 128280260,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287311/suppl/GSM4287311_SAMD1-WT-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287312_SAMD1-SAMD1KO-repl2-mm10.bw",
+     "gsm": "GSM4287312",
+     "level": "sample",
+     "size_bytes": 139159462,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287312/suppl/GSM4287312_SAMD1-SAMD1KO-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287312_SAMD1-SAMD1KO-repl2-mm9.bw",
+     "gsm": "GSM4287312",
+     "level": "sample",
+     "size_bytes": 123249095,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287312/suppl/GSM4287312_SAMD1-SAMD1KO-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287313_IgG-WT-mm10.bw",
+     "gsm": "GSM4287313",
+     "level": "sample",
+     "size_bytes": 143826447,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287313/suppl/GSM4287313_IgG-WT-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287313_IgG-WT-mm9.bw",
+     "gsm": "GSM4287313",
+     "level": "sample",
+     "size_bytes": 141707472,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287313/suppl/GSM4287313_IgG-WT-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287314_IgG-SAMD1KO-mm10.bw",
+     "gsm": "GSM4287314",
+     "level": "sample",
+     "size_bytes": 138296345,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287314/suppl/GSM4287314_IgG-SAMD1KO-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287314_IgG-SAMD1KO-mm9.bw",
+     "gsm": "GSM4287314",
+     "level": "sample",
+     "size_bytes": 139021289,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287314/suppl/GSM4287314_IgG-SAMD1KO-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287315_H3K4me2-WT-repl1-mm10.bw",
+     "gsm": "GSM4287315",
+     "level": "sample",
+     "size_bytes": 142831722,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287315/suppl/GSM4287315_H3K4me2-WT-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287315_H3K4me2-WT-repl1-mm9.bw",
+     "gsm": "GSM4287315",
+     "level": "sample",
+     "size_bytes": 143184610,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287315/suppl/GSM4287315_H3K4me2-WT-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287316_H3K4me2-SAMD1KO-repl1-mm10.bw",
+     "gsm": "GSM4287316",
+     "level": "sample",
+     "size_bytes": 147959146,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287316/suppl/GSM4287316_H3K4me2-SAMD1KO-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287316_H3K4me2-SAMD1KO-repl1-mm9.bw",
+     "gsm": "GSM4287316",
+     "level": "sample",
+     "size_bytes": 144284582,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287316/suppl/GSM4287316_H3K4me2-SAMD1KO-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287317_H3K4me2-WT-repl2-mm10.bw",
+     "gsm": "GSM4287317",
+     "level": "sample",
+     "size_bytes": 121103164,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287317/suppl/GSM4287317_H3K4me2-WT-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287317_H3K4me2-WT-repl2-mm9.bw",
+     "gsm": "GSM4287317",
+     "level": "sample",
+     "size_bytes": 122672335,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287317/suppl/GSM4287317_H3K4me2-WT-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287318_H3K4me2-SAMD1KO-repl2-mm10.bw",
+     "gsm": "GSM4287318",
+     "level": "sample",
+     "size_bytes": 144567290,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287318/suppl/GSM4287318_H3K4me2-SAMD1KO-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287318_H3K4me2-SAMD1KO-repl2-mm9.bw",
+     "gsm": "GSM4287318",
+     "level": "sample",
+     "size_bytes": 143658240,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287318/suppl/GSM4287318_H3K4me2-SAMD1KO-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287319_H3K4me3-WT-repl1-mm10.bw",
+     "gsm": "GSM4287319",
+     "level": "sample",
+     "size_bytes": 152986378,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287319/suppl/GSM4287319_H3K4me3-WT-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287319_H3K4me3-WT-repl1-mm9.bw",
+     "gsm": "GSM4287319",
+     "level": "sample",
+     "size_bytes": 149201670,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287319/suppl/GSM4287319_H3K4me3-WT-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287320_H3K4me3-SAMD1KO-repl1-mm10.bw",
+     "gsm": "GSM4287320",
+     "level": "sample",
+     "size_bytes": 165406181,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287320/suppl/GSM4287320_H3K4me3-SAMD1KO-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287320_H3K4me3-SAMD1KO-repl1-mm9.bw",
+     "gsm": "GSM4287320",
+     "level": "sample",
+     "size_bytes": 163549986,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287320/suppl/GSM4287320_H3K4me3-SAMD1KO-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287321_H3K4me3-WT-repl2-mm10.bw",
+     "gsm": "GSM4287321",
+     "level": "sample",
+     "size_bytes": 115758576,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287321/suppl/GSM4287321_H3K4me3-WT-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287321_H3K4me3-WT-repl2-mm9.bw",
+     "gsm": "GSM4287321",
+     "level": "sample",
+     "size_bytes": 117656527,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287321/suppl/GSM4287321_H3K4me3-WT-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287322_H3K4me3-SAMD1KO-repl2-mm10.bw",
+     "gsm": "GSM4287322",
+     "level": "sample",
+     "size_bytes": 152416636,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287322/suppl/GSM4287322_H3K4me3-SAMD1KO-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287322_H3K4me3-SAMD1KO-repl2-mm9.bw",
+     "gsm": "GSM4287322",
+     "level": "sample",
+     "size_bytes": 149824805,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287322/suppl/GSM4287322_H3K4me3-SAMD1KO-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287323_H3K27me3-WT-mm10.bw",
+     "gsm": "GSM4287323",
+     "level": "sample",
+     "size_bytes": 171406833,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287323/suppl/GSM4287323_H3K27me3-WT-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287323_H3K27me3-WT-mm9.bw",
+     "gsm": "GSM4287323",
+     "level": "sample",
+     "size_bytes": 168215817,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287323/suppl/GSM4287323_H3K27me3-WT-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287324_H3K27me3-SAMD1KO-mm10.bw",
+     "gsm": "GSM4287324",
+     "level": "sample",
+     "size_bytes": 181589092,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287324/suppl/GSM4287324_H3K27me3-SAMD1KO-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287324_H3K27me3-SAMD1KO-mm9.bw",
+     "gsm": "GSM4287324",
+     "level": "sample",
+     "size_bytes": 175633329,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287324/suppl/GSM4287324_H3K27me3-SAMD1KO-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287325_H3K27ac-WT-mm10.bw",
+     "gsm": "GSM4287325",
+     "level": "sample",
+     "size_bytes": 147591206,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287325/suppl/GSM4287325_H3K27ac-WT-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287325_H3K27ac-WT-mm9.bw",
+     "gsm": "GSM4287325",
+     "level": "sample",
+     "size_bytes": 141090468,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287325/suppl/GSM4287325_H3K27ac-WT-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287326_H3K27ac-SAMD1KO-mm10.bw",
+     "gsm": "GSM4287326",
+     "level": "sample",
+     "size_bytes": 163119911,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287326/suppl/GSM4287326_H3K27ac-SAMD1KO-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287326_H3K27ac-SAMD1KO-mm9.bw",
+     "gsm": "GSM4287326",
+     "level": "sample",
+     "size_bytes": 159053242,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287326/suppl/GSM4287326_H3K27ac-SAMD1KO-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287327_KDM1A-WT-repl1-mm10.bw",
+     "gsm": "GSM4287327",
+     "level": "sample",
+     "size_bytes": 127798966,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287327/suppl/GSM4287327_KDM1A-WT-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287327_KDM1A-WT-repl1-mm9.bw",
+     "gsm": "GSM4287327",
+     "level": "sample",
+     "size_bytes": 126210073,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287327/suppl/GSM4287327_KDM1A-WT-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287328_KDM1A-SAMD1KO-repl1-mm10.bw",
+     "gsm": "GSM4287328",
+     "level": "sample",
+     "size_bytes": 125130901,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287328/suppl/GSM4287328_KDM1A-SAMD1KO-repl1-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287328_KDM1A-SAMD1KO-repl1-mm9.bw",
+     "gsm": "GSM4287328",
+     "level": "sample",
+     "size_bytes": 118964074,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287328/suppl/GSM4287328_KDM1A-SAMD1KO-repl1-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287329_KDM1A-WT-repl2-mm10.bw",
+     "gsm": "GSM4287329",
+     "level": "sample",
+     "size_bytes": 138918903,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287329/suppl/GSM4287329_KDM1A-WT-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287329_KDM1A-WT-repl2-mm9.bw",
+     "gsm": "GSM4287329",
+     "level": "sample",
+     "size_bytes": 134576078,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287329/suppl/GSM4287329_KDM1A-WT-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287330_KDM1A-SAMD1KO-repl2-mm10.bw",
+     "gsm": "GSM4287330",
+     "level": "sample",
+     "size_bytes": 134351862,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287330/suppl/GSM4287330_KDM1A-SAMD1KO-repl2-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287330_KDM1A-SAMD1KO-repl2-mm9.bw",
+     "gsm": "GSM4287330",
+     "level": "sample",
+     "size_bytes": 135221417,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287330/suppl/GSM4287330_KDM1A-SAMD1KO-repl2-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287331_L3MBTL3-NT-WT-mm10.bw",
+     "gsm": "GSM4287331",
+     "level": "sample",
+     "size_bytes": 125812966,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287331/suppl/GSM4287331_L3MBTL3-NT-WT-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287331_L3MBTL3-NT-WT-mm9.bw",
+     "gsm": "GSM4287331",
+     "level": "sample",
+     "size_bytes": 119692444,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287331/suppl/GSM4287331_L3MBTL3-NT-WT-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287332_L3MBTL3-NT-SAMD1KO-mm10.bw",
+     "gsm": "GSM4287332",
+     "level": "sample",
+     "size_bytes": 137393561,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287332/suppl/GSM4287332_L3MBTL3-NT-SAMD1KO-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287332_L3MBTL3-NT-SAMD1KO-mm9.bw",
+     "gsm": "GSM4287332",
+     "level": "sample",
+     "size_bytes": 134993371,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287332/suppl/GSM4287332_L3MBTL3-NT-SAMD1KO-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287333_L3MBTL3-CT-WT-mm10.bw",
+     "gsm": "GSM4287333",
+     "level": "sample",
+     "size_bytes": 157021828,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287333/suppl/GSM4287333_L3MBTL3-CT-WT-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287333_L3MBTL3-CT-WT-mm9.bw",
+     "gsm": "GSM4287333",
+     "level": "sample",
+     "size_bytes": 154283644,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287333/suppl/GSM4287333_L3MBTL3-CT-WT-mm9.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287334_L3MBTL3-CT-SAMD1KO-mm10.bw",
+     "gsm": "GSM4287334",
+     "level": "sample",
+     "size_bytes": 134620852,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287334/suppl/GSM4287334_L3MBTL3-CT-SAMD1KO-mm10.bw"
+    },
+    {
+     "classification": "coverage",
+     "deposited_type": "BW",
+     "filename": "GSM4287334_L3MBTL3-CT-SAMD1KO-mm9.bw",
+     "gsm": "GSM4287334",
+     "level": "sample",
+     "size_bytes": 132029927,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM4287nnn/GSM4287334/suppl/GSM4287334_L3MBTL3-CT-SAMD1KO-mm9.bw"
+    },
+    {
+     "classification": "de_table",
+     "deposited_type": null,
+     "filename": "GSE144396_DeSeq2-Differentiation-SAMD1KOvsWT.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_DeSeq2-Differentiation-SAMD1KOvsWT.txt.gz"
+    },
+    {
+     "classification": "de_table",
+     "deposited_type": null,
+     "filename": "GSE144396_DeSeq2-KDM1AKOvsWT.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_DeSeq2-KDM1AKOvsWT.txt.gz"
+    },
+    {
+     "classification": "de_table",
+     "deposited_type": null,
+     "filename": "GSE144396_DeSeq2-L3MBTL3KOvsWT.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_DeSeq2-L3MBTL3KOvsWT.txt.gz"
+    },
+    {
+     "classification": "matrix_normalized",
+     "deposited_type": null,
+     "filename": "GSE144396_NormalizedCounts-Differentiation.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_NormalizedCounts-Differentiation.txt.gz"
+    },
+    {
+     "classification": "matrix_normalized",
+     "deposited_type": null,
+     "filename": "GSE144396_NormalizedCounts-WT-KDM1AKO-L3MBTL3KO.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_NormalizedCounts-WT-KDM1AKO-L3MBTL3KO.txt.gz"
+    },
+    {
+     "classification": "raw",
+     "deposited_type": null,
+     "filename": "GSE144396_RAW.tar",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_RAW.tar"
+    },
+    {
+     "classification": "de_table",
+     "deposited_type": null,
+     "filename": "GSE144396_RNA-Seq_DeSeq2.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_RNA-Seq_DeSeq2.txt.gz"
+    },
+    {
+     "classification": "matrix_normalized",
+     "deposited_type": null,
+     "filename": "GSE144396_RNA-Seq_NormalizedCounts.txt.gz",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/GSE144396_RNA-Seq_NormalizedCounts.txt.gz"
+    },
+    {
+     "classification": "raw",
+     "deposited_type": null,
+     "filename": "filelist.txt",
+     "gsm": null,
+     "level": "series",
+     "size_bytes": null,
+     "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/filelist.txt"
+    }
+   ],
+   "listed_at": "2026-09-11T15:47:33.733115+00:00",
+   "source": "filelist+directory",
+   "triplets": []
+  },
+  "deposit_metadata_association": [
+   {
+    "batch": null,
+    "column": "WT-1",
+    "condition": "WT",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'WT-1' reads as condition 'WT', replicate 1",
+    "replicate": "1",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "WT-2",
+    "condition": "WT",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'WT-2' reads as condition 'WT', replicate 2",
+    "replicate": "2",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "WT-3",
+    "condition": "WT",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'WT-3' reads as condition 'WT', replicate 3",
+    "replicate": "3",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "WT-4",
+    "condition": "WT",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'WT-4' reads as condition 'WT', replicate 4",
+    "replicate": "4",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "KO Cl5 repl1",
+    "condition": "KO Cl5 repl",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'KO Cl5 repl1' reads as condition 'KO Cl5 repl', replicate 1",
+    "replicate": "1",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "KO Cl5 repl2",
+    "condition": "KO Cl5 repl",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'KO Cl5 repl2' reads as condition 'KO Cl5 repl', replicate 2",
+    "replicate": "2",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "KO Cl16",
+    "condition": "KO Cl",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'KO Cl16' reads as condition 'KO Cl', replicate 16",
+    "replicate": "16",
+    "sample_accession": null,
+    "source": "column_name"
+   },
+   {
+    "batch": null,
+    "column": "KO Cl33",
+    "condition": "KO Cl",
+    "confidence": 0.55,
+    "reason": "grouped from the column name: 'KO Cl33' reads as condition 'KO Cl', replicate 33",
+    "replicate": "33",
+    "sample_accession": null,
+    "source": "column_name"
+   }
+  ],
+  "deposit_selection": {
+   "confidence": 0.4,
+   "decided_by": "model",
+   "declined": false,
+   "matrix_files": [
+    "GSE144396_RNA-Seq_NormalizedCounts.txt.gz"
+   ],
+   "metadata_file": null,
+   "model": "claude-opus-4-8",
+   "primary_matrix": "GSE144396_RNA-Seq_NormalizedCounts.txt.gz",
+   "reason": "The ChIP-seq deposit only carries bigwig coverage tracks and DE result tables; the RNA-Seq normalized counts matrix is the only per-feature quantification matrix suitable as a differential-analysis input.",
+   "value_type": "normalized_other"
+  },
+  "discovery_unresolved": {
+   "at": "2026-09-11T15:49:10.497010+00:00",
+   "attempts": 3,
+   "reason": "Held before running: no column of the deposited matrix could be matched to SAMD1 KO; SAMD1 KO day 7 differentiation; WT day 7 differentiation. An arm with no samples is not a smaller experiment.",
+   "resume": "a further attempt needs explicit resumption or new evidence"
+  },
+  "pmcid": "PMC8115922",
+  "route": "deposit",
+  "supplements": []
+ },
+ "reproduction_plan": {
+  "accessions": [
+   "GSE144396",
+   "PXD016781",
+   "STI20A",
+   "6LUI",
+   "6LUJ",
+   "6LUK"
+  ],
+  "blockers": [
+   "Number of RNA-seq/ChIP-seq samples per condition and per-sample GEO accession assignments are not enumerated in the text; sample-to-group mapping is only partially described (e.g., three SAMD1 KO clones for RNA-seq, four biological replicates for undifferentiated RNA-seq).",
+   "Sequencing read counts, alignment rates, and other QC-floor metrics are not reported in the paper.",
+   "No code repository or analysis scripts are provided; only tool names and versions are listed.",
+   "could not map the paper's reference genome 'mm9 (ChIP-seq alignment); GenCode.M23 mouse transcriptome (RNA-seq alignment)' to a known assembly; the analysis run will use a default"
+  ],
+  "comparison_targets": [
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "Up-regulated DE genes are a per-condition subset, not a controlled QC metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "This experiment identified 524 significantly (P < 0.01) down-regulated and 257 up-regulated genes",
+    "claimed_value": 257.0,
+    "contrast_index": 0,
+    "cutoffs": [
+     {
+      "kind": "pvalue",
+      "operator": "<",
+      "value": 0.01
+     }
+    ],
+    "direction": "up",
+    "measurement_basis": "sample",
+    "metric_key": null,
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "up-regulated genes",
+    "source_locator": "Results, Fig. 3C",
+    "threshold": 0.01,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes",
+    "unresolved_reason": null
+   },
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "Twofold-misregulated genes are a DE subset, not a controlled metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "including more than 1500 genes that are more than twofold misregulated",
+    "claimed_value": 1500.0,
+    "contrast_index": 1,
+    "cutoffs": [
+     {
+      "kind": "pvalue",
+      "operator": "<",
+      "value": 0.01
+     },
+     {
+      "kind": "abs_log2fc",
+      "operator": ">",
+      "value": 1.0
+     }
+    ],
+    "direction": null,
+    "measurement_basis": "sample",
+    "metric_key": null,
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": ">2-fold misregulated genes",
+    "source_locator": "Results, Fig. 7D",
+    "threshold": 1.0,
+    "threshold_kind": "abs_log2fc",
+    "tolerance": null,
+    "unit": "genes",
+    "unresolved_reason": null
+   },
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "576 significant peaks called with the N-terminal antibody, a per-sample peak call.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "peak_count",
+    "claim_text": "The N-terminal antibody led to more significant peaks (n = 576) and was used for this initial analysis",
+    "claimed_value": 576.0,
+    "contrast_index": null,
+    "cutoffs": null,
+    "direction": null,
+    "measurement_basis": "sample",
+    "metric_key": null,
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "N-terminal antibody ChIP-seq",
+    "source_locator": "Results (SAMD1 modulates chromatin landscape)",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "peaks",
+    "unresolved_reason": null
+   },
+   {
+    "binding_confidence": 0.97,
+    "binding_reason": "8733 significant ChIP-seq peaks called for SAMD1, a per-sample headline peak number.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": "peak_count",
+    "claim_text": "using chromatin immunoprecipitation sequencing (ChIP-seq), we identified 8733 significant peaks and discovered that they strongly (>90%) overlap with nonmethylated CGIs but not with methylated CGIs",
+    "claimed_value": 8733.0,
+    "contrast_index": null,
+    "cutoffs": null,
+    "direction": null,
+    "measurement_basis": "sample",
+    "metric_key": "peak_count",
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "SAMD1 ChIP-seq WT cells",
+    "source_locator": "Results, Fig. 1G",
+    "threshold": null,
+    "threshold_kind": null,
+    "tolerance": null,
+    "unit": "peaks",
+    "unresolved_reason": null
+   },
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "Differentially down-regulated genes are a per-condition subset, not total genes detected or any controlled metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "This experiment identified 524 significantly (P < 0.01) down-regulated and 257 up-regulated genes",
+    "claimed_value": 524.0,
+    "contrast_index": 0,
+    "cutoffs": [
+     {
+      "kind": "pvalue",
+      "operator": "<",
+      "value": 0.01
+     }
+    ],
+    "direction": "down",
+    "measurement_basis": "sample",
+    "metric_key": null,
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "down-regulated genes",
+    "source_locator": "Results, Fig. 3C",
+    "threshold": 0.01,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes",
+    "unresolved_reason": null
+   },
+   {
+    "binding_confidence": 0.9,
+    "binding_reason": "Significantly changed genes are DE counts, not total_genes_detected or any controlled metric.",
+    "bound_by": "model",
+    "bound_by_model": "claude-opus-4-8",
+    "bound_key": null,
+    "claim_text": "We identified more than 5000 genes of which the expression changes significantly (P < 0.01)",
+    "claimed_value": 5000.0,
+    "contrast_index": 1,
+    "cutoffs": [
+     {
+      "kind": "pvalue",
+      "operator": "<",
+      "value": 0.01
+     }
+    ],
+    "direction": null,
+    "measurement_basis": "sample",
+    "metric_key": null,
+    "output_type": "count",
+    "qc_stage": "as analysed",
+    "sample_subset": "significantly changed genes at differentiation",
+    "source_locator": "Results, Fig. 7D",
+    "threshold": 0.01,
+    "threshold_kind": "padj",
+    "tolerance": null,
+    "unit": "genes",
+    "unresolved_reason": null
+   }
+  ],
+  "differential_design": {
+   "contrasts": [
+    {
+     "assay": "bulk RNA-seq",
+     "finding_claim_index": 1,
+     "name": "SAMD1 KO vs WT (undifferentiated ES cells)",
+     "reference_condition": "WT",
+     "reference_samples": [
+      "WT mouse ES cells (RNA-seq)"
+     ],
+     "subjects": {},
+     "test_condition": "SAMD1 KO",
+     "test_samples": [
+      "SAMD1 KO clones (RNA-seq)"
+     ],
+     "thresholds": {
+      "log2fc": null,
+      "padj": null
+     },
+     "thresholds_from_claim": 1
+    },
+    {
+     "assay": "bulk RNA-seq",
+     "finding_claim_index": 3,
+     "name": "SAMD1 KO vs WT (day 7 differentiation)",
+     "reference_condition": "WT day 7 differentiation",
+     "reference_samples": [
+      "WT differentiated cells (day 7)"
+     ],
+     "subjects": {},
+     "test_condition": "SAMD1 KO day 7 differentiation",
+     "test_samples": [
+      "SAMD1 KO differentiated cells (day 7)"
+     ],
+     "thresholds": {
+      "log2fc": null,
+      "padj": null
+     },
+     "thresholds_from_claim": 3
+    }
+   ],
+   "selected_contrast": {
+    "confidence": 0.9,
+    "contrast_index": null,
+    "decided_by": "model",
+    "model": "claude-opus-4-8",
+    "reason": "Both paper contrasts are bulk RNA-seq expression comparisons, but this run is a ChIP-seq pipeline, so neither expression contrast can be reproduced here."
+   },
+   "thresholds": {
+    "log2fc": null,
+    "padj": 0.01
+   }
+  },
+  "extractor_model": "claude-opus-4-8",
+  "extractor_provider": "anthropic",
+  "finding_claim": null,
+  "id": 38,
+  "mapping_confidence": "partial",
+  "mapping_notes": "Mapped assay 'ChIP-seq and bulk RNA-seq' (tools: Bowtie, SAMtools, deepTools/bamCoverage, MACS2, HOMER, RNA STAR 2.7.2b, FeatureCounts 1.6.4, DESeq2, GSEA, GREAT, Cytoscape/EnrichmentMap, DAVID) to nf-core/chipseq 2.1.0. The original toolchain differs from nf-core, so exact metric reproduction is not guaranteed.",
+  "parameters": {},
+  "pipeline_key": "nf-core/chipseq",
+  "pipeline_version": "2.1.0",
+  "reference_build": "mm9 (ChIP-seq alignment); GenCode.M23 mouse transcriptome (RNA-seq alignment)",
+  "reference_genome": null
+ },
+ "study": {
+  "classification": "inconclusive",
+  "failure_reason": "bioAF could not reach the deposit after 3 attempts, so whether it holds usable data was never established (Held before running: no column of the deposited matrix could be matched to SAMD1 KO; SAMD1 KO day 7 differentiation; WT day 7 differentiation. An arm with no samples is not a smaller experiment.)",
+  "id": 37,
+  "intended_route": "deposit",
+  "source_accession": null,
+  "source_doi": "10.1126/sciadv.abf2229",
+  "state": "classified"
+ }
+}

@@ -99,7 +99,8 @@ class TestEveryLimitationNamesWhatItAffects:
         )
         # change_7.3 section 4 (flagged test change): both facts are tri-state now.
         assert outcome["processed_results_available"] == "yes"
-        assert outcome["reproduction_input_available"] == "no"
+        # change_7.4 section 1.3 (flagged test change): the input fact reads the acquisition record.
+        assert outcome["input_acquired"] == "no"
 
     def test_more_than_one_limitation_survives(self):
         """Section 7: preserve multiple simultaneous limitations rather than forcing every
@@ -278,12 +279,16 @@ class TestTheCompletionFactsAreTriState:
         assert outcome["processed_results_available"] == "no"
 
     def test_reproduction_input_is_not_established_while_an_attachment_is_uninspected(self):
+        """change_7.4 section 1.3 (flagged test change): acquisition is what bioAF did, so it is "no";
+        whether an uninspected attachment is usable is the part that is not established."""
         outcome = completion_for(
             route="deposit",
             capabilities={"deposits": [_EGA_DEPOSIT], "preprocessed_data": {"value": "no"}},
             supplements=[_attachment("Supplemental File S1", resolved=False)],
         )
-        assert outcome["reproduction_input_available"] == "not_established"
+        assert outcome["input_acquired"] == "no"
+        assert "not inspected" in outcome["input_acquired_reason"]
+        assert outcome["input_usable"] == "not_established"
 
     def test_reproduction_input_is_yes_for_a_retrieved_matrix(self):
         outcome = completion_for(
@@ -291,7 +296,8 @@ class TestTheCompletionFactsAreTriState:
             capabilities={"deposits": [_GEO_NO_MATRIX], "preprocessed_data": {"value": "no"}},
             supplements=[_attachment("Supplemental Table S2", resolved=True, role="expression_matrix")],
         )
-        assert outcome["reproduction_input_available"] == "yes"
+        # change_7.4 section 1.3 (flagged test change): the same fact, read from the acquisition record.
+        assert outcome["input_acquired"] == "yes"
 
     def test_a_paper_whose_attachments_were_never_listed_is_not_established(self):
         """A pasted body carries no manifest: nobody looked, which is not "the paper attached none"."""
@@ -448,3 +454,87 @@ class TestAFailureThatIsNotAnAbsenceNeverReadsAsOne:
         from app.services.validation_completion import classification_for
 
         assert classification_for([{"kind": "controlled_access"}, {"kind": "access_refused"}]) == "access_restricted"
+
+
+# ---- change_7.4 section 1.3: acquired, usable and ready are three recorded facts ----
+
+
+def _deposit_evidence(**extra):
+    return {
+        "deposit_inventory": {"accession": "GSE144396"},
+        "deposit": {
+            "files": [
+                {
+                    "filename": "GSE144396_RNA-Seq_NormalizedCounts.txt.gz",
+                    "artifact_type": "deposited_matrix",
+                    "url": "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE144nnn/GSE144396/suppl/x",
+                }
+            ]
+        },
+        **extra,
+    }
+
+
+_USABLE = {"usable": True, "n_columns": 8, "value_type_observed": "normalized_other", "unusable_reason": None}
+
+
+def _facts(evidence, **kwargs):
+    return completion_for(
+        route="deposit",
+        capabilities={"deposits": [_GEO_NO_MATRIX], "preprocessed_data": {"value": "yes"}},
+        supplements=[],
+        acquisition=evidence,
+        **kwargs,
+    )
+
+
+class TestTheThreeInputFacts:
+    def test_an_acquired_deposit_file_is_acquired_and_named_with_its_source(self):
+        """Study 37 downloaded this file and its report said bioAF acquired none."""
+        outcome = _facts(_deposit_evidence())
+        assert outcome["input_acquired"] == "yes"
+        assert "GSE144396_RNA-Seq_NormalizedCounts.txt.gz" in outcome["input_acquired_reason"]
+        assert "GSE144396" in outcome["input_acquired_reason"]
+
+    def test_usable_comes_from_the_inspection(self):
+        assert _facts(_deposit_evidence(deposit_inspection=_USABLE))["input_usable"] == "yes"
+        unusable = {"usable": False, "unusable_reason": "the deposited matrix appears to be transposed"}
+        outcome = _facts(_deposit_evidence(deposit_inspection=unusable))
+        assert outcome["input_usable"] == "no"
+        assert "transposed" in outcome["input_usable_reason"]
+
+    def test_an_input_nobody_inspected_is_not_established_as_usable(self):
+        assert _facts(_deposit_evidence())["input_usable"] == "not_established"
+
+    def test_ready_comes_from_the_recorded_readiness(self):
+        readiness = {"value": "no", "reason": "the columns could not be assigned to SAMD1 KO and WT"}
+        outcome = _facts(_deposit_evidence(deposit_inspection=_USABLE, analysis_readiness=readiness))
+        assert outcome["ready_for_analysis"] == "no"
+        assert "could not be assigned" in outcome["ready_for_analysis_reason"]
+
+    def test_study_37_reads_as_acquired_usable_and_not_ready(self):
+        readiness = {"value": "no", "reason": "no column could be matched to SAMD1 KO"}
+        outcome = _facts(_deposit_evidence(deposit_inspection=_USABLE, analysis_readiness=readiness))
+        assert (outcome["input_acquired"], outcome["input_usable"], outcome["ready_for_analysis"]) == (
+            "yes",
+            "yes",
+            "no",
+        )
+
+    def test_nothing_acquired_is_not_ready(self):
+        outcome = _facts({})
+        assert outcome["input_acquired"] == "no"
+        assert outcome["input_usable"] == "not_established"
+        assert outcome["ready_for_analysis"] == "no"
+
+    def test_fetched_raw_reads_are_acquired(self):
+        outcome = completion_for(
+            route="pipeline",
+            capabilities={"deposits": [_GEO_NO_MATRIX], "raw_data": {"value": "yes"}},
+            supplements=[],
+            acquisition={},
+            data_run_id=7,
+            fetched_samples=12,
+        )
+        assert outcome["input_acquired"] == "yes"
+        assert "12" in outcome["input_acquired_reason"]

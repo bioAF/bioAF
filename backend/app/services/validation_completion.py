@@ -107,6 +107,9 @@ def completion_for(
     supplements: list[dict] | None,
     extra_limitations: list[dict] | None = None,
     manifest_known: bool = True,
+    acquisition: dict | None = None,
+    data_run_id: int | None = None,
+    fetched_samples: int | None = None,
 ) -> dict:
     """The terminal outcome for a study whose route(s) cannot run.
 
@@ -120,6 +123,10 @@ def completion_for(
 
     ``manifest_known`` is False when nothing listed the paper's attachments (a pasted body carries
     no manifest), so an empty inventory cannot be read as "the paper attached nothing".
+
+    change_7.4 section 1.3: ``acquisition`` is the study's evidence, read for its acquisition record
+    (``deposit``), its inspection (``deposit_inspection``) and its readiness
+    (``analysis_readiness``). ``data_run_id`` and ``fetched_samples`` are the raw-reads route's.
     """
     deposits = [d for d in (capabilities.get("deposits") or []) if isinstance(d, dict)]
     rows = [s for s in (supplements or []) if isinstance(s, dict)]
@@ -155,20 +162,25 @@ def completion_for(
     ]
 
     processed, processed_reason = _processed_results(rows, results_tables, manifest_known=manifest_known)
-    acquired, acquired_reason = _reproduction_input(rows, deposits, manifest_known=manifest_known)
 
     return {
         "classification": _classification(limitations),
         "reason": " ".join(limitation["detail"] for limitation in limitations) or "no route could be taken",
         "limitations": limitations,
         "other_legs": other_legs,
-        # Two different facts, and collapsing them is what produced a no-processed-results
-        # conclusion about a paper that published a results table. Each is yes, no or
-        # not_established, with the reason beside it.
+        # Different facts, and collapsing them is what produced a no-processed-results conclusion
+        # about a paper that published a results table. Each carries its reason beside it.
         "processed_results_available": processed,
         "processed_results_reason": processed_reason,
-        "reproduction_input_available": acquired,
-        "reproduction_input_reason": acquired_reason,
+        # change_7.4 section 1.3: acquired, usable and ready for analysis are three recorded facts.
+        **analysis_input_facts(
+            acquisition or {},
+            rows,
+            deposits,
+            data_run_id=data_run_id,
+            fetched_samples=fetched_samples,
+            manifest_known=manifest_known,
+        ),
         "checks_completed": checks_completed,
         "checks_not_completed": _checks_not_completed(rows),
     }
@@ -348,19 +360,93 @@ def _processed_results(rows: list[dict], results_tables: list[dict], *, manifest
     return NO, "bioAF inspected every attachment it found and none is a results table"
 
 
-def _reproduction_input(rows: list[dict], deposits: list[dict], *, manifest_known: bool) -> tuple[str, str]:
-    """Whether bioAF acquired a sample-level input. Acquisition is what this fact describes."""
-    matrices = [r for r in rows if r.get("resolved") and r.get("role") == "expression_matrix"]
+# The three input facts, with the key each is recorded under and the key of its reason.
+INPUT_FACT_KEYS = (
+    ("input_acquired", "input_acquired_reason"),
+    ("input_usable", "input_usable_reason"),
+    ("ready_for_analysis", "ready_for_analysis_reason"),
+)
+
+
+def analysis_input_facts(
+    evidence: dict,
+    supplements: list[dict] | None = None,
+    deposits: list[dict] | None = None,
+    *,
+    data_run_id: int | None = None,
+    fetched_samples: int | None = None,
+    manifest_known: bool = True,
+) -> dict:
+    """Acquired, usable and ready for analysis: three facts, each from the record that establishes it.
+
+    change_7.4 section 1.3: study 37 downloaded and read `GSE144396_RNA-Seq_NormalizedCounts.txt.gz`
+    and its report said bioAF "acquired none", because the one input fact read the paper's
+    attachments and never the acquisition record. Acquisition comes from what bioAF acquired, and
+    says what and from where. Usability comes from inspection, and is not established when
+    inspection did not run. Readiness comes from the checks that decide whether the selected
+    analysis can run on the input, recorded as ``analysis_readiness`` where they are made.
+    """
+    rows = [s for s in supplements or [] if isinstance(s, dict)]
+    acquired, acquired_reason, input_name = _acquired(
+        evidence,
+        rows,
+        deposits or [],
+        data_run_id=data_run_id,
+        fetched_samples=fetched_samples,
+        manifest_known=manifest_known,
+    )
+    usable, usable_reason = _usable(
+        evidence, rows, input_name, data_run_id=data_run_id, fetched_samples=fetched_samples
+    )
+    ready, ready_reason = _ready(evidence, acquired, usable)
+    return {
+        "input_acquired": acquired,
+        "input_acquired_reason": acquired_reason,
+        "input_usable": usable,
+        "input_usable_reason": usable_reason,
+        "ready_for_analysis": ready,
+        "ready_for_analysis_reason": ready_reason,
+    }
+
+
+def _deposited_matrices(evidence: dict) -> list[dict]:
+    files = (evidence.get("deposit") or {}).get("files") or []
+    return [f for f in files if isinstance(f, dict) and f.get("artifact_type") == "deposited_matrix"]
+
+
+def _acquired(
+    evidence: dict,
+    rows: list[dict],
+    deposits: list[dict],
+    *,
+    data_run_id: int | None,
+    fetched_samples: int | None,
+    manifest_known: bool,
+) -> tuple[str, str, str | None]:
+    """Whether bioAF acquired an analysis input, what it was and where from. A fact about what bioAF
+    did, so it is yes or no; what was not inspected is said in the reason."""
+    matrices = _deposited_matrices(evidence)
     if matrices:
-        return YES, f"bioAF retrieved {matrices[0].get('label')}, a sample-level matrix"
+        names = ", ".join(str(m.get("filename")) for m in matrices)
+        source = (evidence.get("deposit_inventory") or {}).get("accession")
+        return YES, f"bioAF acquired {names}" + (f" from {source}" if source else ""), str(matrices[0].get("filename"))
+    if data_run_id:
+        counted = f" for {fetched_samples} sample(s)" if fetched_samples else ""
+        return YES, f"bioAF fetched raw sequencing reads{counted}", None
+    attached = [r for r in rows if r.get("resolved") and r.get("role") == "expression_matrix"]
+    if attached:
+        label = attached[0].get("label")
+        return YES, f"bioAF retrieved {label}, a sample-level matrix attached to the paper", str(label)
+
+    reason = "bioAF acquired no analysis input in this attempt"
     uninspected = _uninspected(rows)
     if uninspected:
-        return NOT_ESTABLISHED, (
-            f"{len(uninspected)} of the paper's attachment(s) were not inspected, so whether the paper attaches a "
-            "usable input is not established; bioAF acquired none in this attempt"
+        reason += (
+            f"; {len(uninspected)} of the paper's attachment(s) were not inspected, so whether the paper attaches "
+            "one is not established"
         )
-    if not manifest_known and not rows:
-        return NOT_ESTABLISHED, "bioAF has no list of this paper's attachments; it acquired no input in this attempt"
+    elif not manifest_known and not rows:
+        reason += "; bioAF has no list of this paper's attachments"
     unreachable = [
         d
         for d in deposits
@@ -368,8 +454,45 @@ def _reproduction_input(rows: list[dict], deposits: list[dict], *, manifest_know
     ]
     if unreachable:
         names = ", ".join(str(d.get("accession")) for d in unreachable)
-        return NO, f"{names} holds a published input that bioAF cannot acquire, and no attachment holds one"
-    return NO, "no attachment bioAF inspected holds a sample-level input, and it acquired none"
+        reason += f"; {names} holds a published input that bioAF cannot acquire"
+    return NO, reason, None
+
+
+def _usable(
+    evidence: dict, rows: list[dict], input_name: str | None, *, data_run_id: int | None, fetched_samples: int | None
+) -> tuple[str, str]:
+    """Whether the acquired input could be used: its values identified and its columns parsed."""
+    if _deposited_matrices(evidence):
+        inspection = evidence.get("deposit_inspection") or {}
+        if not inspection:
+            return NOT_ESTABLISHED, f"bioAF acquired {input_name} and did not inspect it"
+        if inspection.get("usable"):
+            return YES, (
+                f"bioAF read {input_name}: {inspection.get('n_columns')} sample columns, values identified as "
+                f"{inspection.get('value_type_observed')}"
+            )
+        return NO, f"{input_name}: {inspection.get('unusable_reason') or 'the acquired input could not be used'}"
+    if data_run_id:
+        if fetched_samples:
+            return YES, f"{fetched_samples} fetched sample(s) carry sequencing files"
+        if fetched_samples == 0:
+            return NO, "the fetched data held no sample with sequencing files"
+        return NOT_ESTABLISHED, "bioAF did not check the fetched reads"
+    if input_name:
+        return YES, f"bioAF read {input_name} and identified it as a sample-level matrix"
+    return NOT_ESTABLISHED, "no analysis input was acquired, so none was inspected"
+
+
+def _ready(evidence: dict, acquired: str, usable: str) -> tuple[str, str]:
+    """Whether the selected analysis can run on the input, as recorded where that was decided."""
+    readiness = evidence.get("analysis_readiness") or {}
+    if readiness.get("value") in (YES, NO, NOT_ESTABLISHED):
+        return readiness["value"], str(readiness.get("reason") or "")
+    if acquired == NO:
+        return NO, "no analysis input was acquired"
+    if usable == NO:
+        return NO, "the acquired input is not usable"
+    return NOT_ESTABLISHED, "bioAF did not reach the checks that decide whether the selected analysis can run"
 
 
 def _checks_not_completed(rows: list[dict]) -> list[str]:

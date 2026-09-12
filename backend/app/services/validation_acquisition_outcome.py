@@ -69,6 +69,8 @@ NO_COMPATIBLE_CONTRAST = completion.NO_COMPATIBLE_CONTRAST
 # `not_authorized` for an archive's declared access model; neither is ever read from a status code.
 
 RETRIEVAL_CAUSES = (RETRIEVAL_TRANSIENT, RETRIEVAL_NOT_FOUND)
+# The causes that decide the input is not ready for the selected analysis (change_7.4 section 1.3).
+READINESS_CAUSES = (SAMPLE_MAPPING_UNRESOLVED, DESIGN_INCOMPATIBLE, NO_COMPATIBLE_CONTRAST)
 
 # What each cause is reported as when it ends the attempt.
 _LIMITATION_FOR_CAUSE = {
