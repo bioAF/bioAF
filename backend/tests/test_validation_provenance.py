@@ -333,6 +333,7 @@ def _report_with_level3():
             "reproduction_plan": {
                 "pipeline_key": "nf-core/rnaseq",
                 "differential_design": {
+                    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
                     "contrasts": [
                         {"name": "dex vs untreated", "test_samples": ["SRX1"], "reference_samples": ["SRX2"]}
                     ],

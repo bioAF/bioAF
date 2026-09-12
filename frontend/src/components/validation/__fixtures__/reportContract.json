@@ -611,6 +611,7 @@
         "basis": "paper_text",
         "name": "aneuploid vs euploid WE (RNA karyotype)",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05
@@ -620,6 +621,7 @@
         "basis": "paper_text",
         "name": "XX vs XY WE (sex chromosome)",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": 2.0,
           "padj": 0.05
@@ -629,6 +631,7 @@
         "basis": "paper_text",
         "name": "good vs poor morphology (Gardner AA vs CC) WE",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05
@@ -638,6 +641,7 @@
         "basis": "paper_text",
         "name": "high vs low morphokinetic quality WE",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05
@@ -1244,6 +1248,7 @@
         "basis": "paper_text",
         "name": "aneuploid vs euploid WE (RNA karyotype)",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05
@@ -1253,6 +1258,7 @@
         "basis": "paper_text",
         "name": "XX vs XY WE (sex chromosome)",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": 2.0,
           "padj": 0.05
@@ -1262,6 +1268,7 @@
         "basis": "paper_text",
         "name": "good vs poor morphology (Gardner AA vs CC) WE",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05
@@ -1271,6 +1278,7 @@
         "basis": "paper_text",
         "name": "high vs low morphokinetic quality WE",
         "provisional": true,
+        "status": "unassessed",
         "thresholds": {
           "log2fc": null,
           "padj": 0.05

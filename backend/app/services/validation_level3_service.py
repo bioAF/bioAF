@@ -250,6 +250,45 @@ def _decline(study_id: int, code: str, reason: str) -> Level3Decision:
     return Level3Decision(inputs=None, reason=reason, reason_code=code)
 
 
+def _selected_contrast(study_id: int, plan, design: dict) -> tuple[dict | None, Level3Decision | None]:
+    """The contrast this run executes, or the refusal that says why there is none.
+
+    change_7.4 sections 1.4 and 1.5: both builders executed ``contrasts[0]`` whatever had been
+    selected. The selection record is the only source, and a null or incompatible selection stops the
+    differential analysis rather than falling back to a position.
+    """
+    from app.services.contrast_selection import NO_COMPATIBLE_CONTRAST, selected_contrast_for
+
+    index, why = selected_contrast_for(
+        design, pipeline_key=plan.pipeline_key, library_strategy=getattr(plan, "library_strategy", None)
+    )
+    if index is None:
+        return None, _decline(
+            study_id, NO_COMPATIBLE_CONTRAST, f"no differential analysis can run on this route: {why}"
+        )
+    return design["contrasts"][index], None
+
+
+# A declared pairing that does not label every sample. Distinct from an unpaired contrast.
+_PAIRING_LOST = object()
+_PAIRING_LOST_REASON = (
+    "the contrast declares a paired design, and not every sample carries its pair label, so it was not run: "
+    "running it unpaired would be a different analysis"
+)
+
+
+def _block_labels(contrast: dict):
+    """The block labels aligned to the notebook's sample order (test then reference), None for an
+    unpaired contrast, or ``_PAIRING_LOST`` when a declared pairing does not cover every sample."""
+    subjects = contrast.get("subjects") or {}
+    if not subjects:
+        return None
+    ordered = list(contrast.get("test_samples") or []) + list(contrast.get("reference_samples") or [])
+    if not ordered or not all(s in subjects for s in ordered):
+        return _PAIRING_LOST
+    return ",".join(subjects[s] for s in ordered)
+
+
 async def build_level3_inputs(
     session: AsyncSession, study: ValidationStudy, plan: ReproductionPlan | None
 ) -> dict | None:
@@ -282,6 +321,9 @@ async def resolve_level3(
     contrasts = design.get("contrasts") or []
     if not contrasts:
         return _decline(study.id, "no_contrast", "the reproduction plan declares no differential contrast to reproduce")
+    primary, refusal = _selected_contrast(study.id, plan, design)
+    if refusal is not None:
+        return refusal
 
     # Re-check the replicate floor HERE, at the point of use, not only at the C1 gate. The gate is
     # bypassed two ways: `create_plan` writes the LLM's draft design straight onto the plan (so a design
@@ -289,7 +331,7 @@ async def resolve_level3(
     # the fetch, dropping picks that were not fetched -- a 3-vs-3 ratified at C1 becomes 1-vs-3 when two
     # samples are embargoed, and the `samples_mismatch` override returns to `setup` with no re-check.
     # This is the check that actually protects the run.
-    replicate_errors = validate_replicates({"contrasts": contrasts[:1]})
+    replicate_errors = validate_replicates({"contrasts": [primary]})
     if replicate_errors:
         return _decline(study.id, "too_few_replicates", " ".join(replicate_errors))
 
@@ -330,7 +372,6 @@ async def resolve_level3(
     name_cache = await _resolve_input_file_context(session, {f.id: f for f in files})
     paths = [f"/data/{_build_relative_path(f, name_cache)}" for f in files]
 
-    primary = contrasts[0]
     thresholds = claim.get("thresholds") or design.get("thresholds") or {}
     lfc = thresholds.get("log2fc")
     padj = thresholds.get("padj")
@@ -354,12 +395,14 @@ async def resolve_level3(
 
     # Matched-pairs / blocked design (ADR-069 item #2): flatten the per-sample subject map to a comma
     # list ALIGNED to the notebook's sample order (test then reference) so the DE template can build
-    # `design = ~ block + condition`. Emit it only when every sample is labeled (the C1 gate guarantees
-    # a balanced pairing when present); a partial/absent map degrades honestly to the unpaired design.
-    subjects = primary.get("subjects") or {}
-    ordered_samples = list(test_samples) + list(reference_samples)
-    if subjects and ordered_samples and all(s in subjects for s in ordered_samples):
-        parameters["block_labels"] = ",".join(subjects[s] for s in ordered_samples)
+    # `design = ~ block + condition`. change_7.4 section 1.4: a contrast that declares a pairing and
+    # cannot label every sample is refused. Omitting the labels ran a paired design unpaired, and
+    # nothing recorded it.
+    blocks = _block_labels(primary)
+    if blocks is _PAIRING_LOST:
+        return _decline(study.id, "pairing_not_carried", _PAIRING_LOST_REASON)
+    if blocks:
+        parameters["block_labels"] = blocks
 
     return Level3Decision(
         inputs={
@@ -507,8 +550,11 @@ async def resolve_level3_from_deposit(
     contrasts = design.get("contrasts") or []
     if not contrasts:
         return _decline(study.id, "no_contrast", "the reproduction plan declares no differential contrast to reproduce")
+    primary, refusal = _selected_contrast(study.id, plan, design)
+    if refusal is not None:
+        return refusal
 
-    replicate_errors = validate_replicates({"contrasts": contrasts[:1]})
+    replicate_errors = validate_replicates({"contrasts": [primary]})
     if replicate_errors:
         return _decline(study.id, "too_few_replicates", " ".join(replicate_errors))
 
@@ -538,7 +584,6 @@ async def resolve_level3_from_deposit(
             "registered, so the reproduction could not be run here",
         )
 
-    primary = contrasts[0]
     thresholds = claim.get("thresholds") or design.get("thresholds") or {}
     lfc = thresholds.get("log2fc")
     padj = thresholds.get("padj")
@@ -566,10 +611,11 @@ async def resolve_level3_from_deposit(
         # Logging a log compresses real differences into nothing and yields a quiet null result.
         parameters["already_logged"] = "true" if inspection.get("value_type_observed") == "log_transformed" else "false"
 
-    subjects = primary.get("subjects") or {}
-    ordered = list(test_samples) + list(reference_samples)
-    if subjects and ordered and all(s in subjects for s in ordered):
-        parameters["block_labels"] = ",".join(subjects[s] for s in ordered)
+    blocks = _block_labels(primary)
+    if blocks is _PAIRING_LOST:
+        return _decline(study.id, "pairing_not_carried", _PAIRING_LOST_REASON)
+    if blocks:
+        parameters["block_labels"] = blocks
 
     return Level3Decision(
         inputs={

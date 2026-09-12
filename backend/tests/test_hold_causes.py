@@ -666,3 +666,56 @@ class TestReadinessIsRecordedWhereItIsDecided:
         readiness = study.evidence_json["analysis_readiness"]
         assert readiness["value"] == "no"
         assert readiness["reason"]
+
+
+# ---- change_7.4 section 1.5: no compatible contrast stops the deposit route's acquisition ----
+
+
+class TestNoCompatibleContrastStopsTheDepositRoute:
+    @pytest.mark.asyncio
+    async def test_it_concludes_before_listing_the_deposit(self, session, admin_user):
+        """Study 37 downloaded an RNA-seq matrix for a ChIP-seq run whose selector had already said
+        no contrast fits."""
+        listed: list[str] = []
+
+        async def listing(url):
+            listed.append(url)
+            return _DIR_LISTING
+
+        study = await _study(session, admin_user)
+        design = {
+            **_DESIGN,
+            "selected_contrast": {
+                "contrast_index": None,
+                "reason": "both contrasts are RNA-seq",
+                "decided_by": "model",
+            },
+        }
+        await ReproductionPlanService.create_plan(
+            session, study, admin_user.id, pipeline_key="nf-core/chipseq", differential_design=design
+        )
+        await session.flush()
+
+        await ValidationDriverService._handle_acquiring_processed(session, study, inventory_fetcher=listing)
+
+        assert listed == []
+        assert _failed(study)["cause"] == "no_compatible_contrast"
+        assert "both contrasts are RNA-seq" in _failed(study)["reason"]
+        assert "no_compatible_contrast" in _limitation_kinds(study)
+        assert study.evidence_json["completion"]["ready_for_analysis"] == "no"
+
+    @pytest.mark.asyncio
+    async def test_a_selected_contrast_measured_on_another_assay_is_refused_too(self, session, admin_user):
+        """A selection the check refuses is refused where it is used, whoever recorded it."""
+        study = await _study(session, admin_user)
+        await ReproductionPlanService.create_plan(
+            session, study, admin_user.id, pipeline_key="nf-core/chipseq", differential_design=_DESIGN
+        )
+        await session.flush()
+
+        await ValidationDriverService._handle_acquiring_processed(
+            session, study, inventory_fetcher=_listing(_DIR_LISTING)
+        )
+
+        assert _failed(study)["cause"] == "no_compatible_contrast"
+        assert "nf-core/chipseq" in _failed(study)["reason"]

@@ -45,6 +45,7 @@ _CUTANDRUN = parse_contract(
 )
 
 _PAIRED_DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "stimulated vs resting",
@@ -78,7 +79,10 @@ def test_replicate_numbers_within_the_arm_not_across_the_sheet():
 
 
 def test_a_design_with_no_condition_names_still_names_the_arms():
-    design = {"contrasts": [{"name": "KO vs WT", "test_samples": ["S1"], "reference_samples": ["S2"], "subjects": {}}]}
+    design = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
+        "contrasts": [{"name": "KO vs WT", "test_samples": ["S1"], "reference_samples": ["S2"], "subjects": {}}],
+    }
     values = sample_values_from_design(design, _samples("S1", "S2"), _CUTANDRUN)
 
     assert values["1"]["group"] == "test"
@@ -89,6 +93,7 @@ def test_a_condition_the_column_cannot_spell_is_respelled_not_dropped():
     """Schemas constrain these columns: cutandrun's group takes no spaces. A condition named the way
     a paper words it would otherwise block the launch on a pattern the scientist never typed."""
     design = {
+        "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
         "contrasts": [
             {
                 "test_condition": "LPS-stimulated (4h)",
@@ -97,7 +102,7 @@ def test_a_condition_the_column_cannot_spell_is_respelled_not_dropped():
                 "reference_samples": ["S2"],
                 "subjects": {},
             }
-        ]
+        ],
     }
     values = sample_values_from_design(design, _samples("S1", "S2"), _CUTANDRUN)
 

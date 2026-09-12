@@ -178,6 +178,7 @@ def test_a_column_with_no_metadata_anywhere_is_still_returned_unresolved():
 # ---- rewriting the design onto the matrix's columns ----
 
 _DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "KD vs control",
@@ -200,7 +201,7 @@ def test_the_design_is_rewritten_onto_matrix_columns():
         {"column": "H2AS40-KD_1", "condition": "H2AS40-KD", "sample_accession": "GSM8447570", "source": "x"},
         {"column": "H2AS40-KD_2", "condition": "H2AS40-KD", "sample_accession": "GSM8447571", "source": "x"},
     ]
-    out, status, reason = rewrite_design_to_columns(_DESIGN, associations)
+    out, status, reason = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "ok"
     assert reason is None
     c = out["contrasts"][0]
@@ -216,7 +217,7 @@ def test_the_design_is_matched_on_condition_when_accessions_are_absent():
         {"column": "Control-KD_1", "condition": "Control-KD", "sample_accession": None, "source": "column_name"},
         {"column": "H2AS40-KD_1", "condition": "H2AS40-KD", "sample_accession": None, "source": "column_name"},
     ]
-    out, status, _ = rewrite_design_to_columns(_DESIGN, associations)
+    out, status, _ = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "ok"
     assert out["contrasts"][0]["test_samples"] == ["H2AS40-KD_1"]
     assert out["contrasts"][0]["reference_samples"] == ["Control-KD_1"]
@@ -228,7 +229,7 @@ def test_a_design_that_maps_no_columns_holds_rather_than_running_a_partial_contr
     associations = [
         {"column": "totally_other_1", "condition": "something else", "sample_accession": None, "source": "column_name"}
     ]
-    out, status, reason = rewrite_design_to_columns(_DESIGN, associations)
+    out, status, reason = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "mismatch"
     assert reason and "arm" in reason.lower()
 
@@ -237,13 +238,13 @@ def test_an_empty_arm_is_a_mismatch_even_when_the_other_arm_resolves():
     associations = [
         {"column": "Control-KD_1", "condition": "Control-KD", "sample_accession": None, "source": "column_name"},
     ]
-    _, status, reason = rewrite_design_to_columns(_DESIGN, associations)
+    _, status, reason = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "mismatch"
     assert "H2AS40-KD" in reason
 
 
 def test_a_design_with_no_contrasts_is_left_alone():
-    out, status, _ = rewrite_design_to_columns({}, [])
+    out, status, _ = rewrite_design_to_columns({}, [], contrast_index=0)
     assert status == "ok"
     assert out == {}
 
@@ -254,7 +255,7 @@ def test_condition_matching_ignores_case(case):
         {"column": "c1", "condition": case, "sample_accession": None, "source": "column_name"},
         {"column": "t1", "condition": "H2AS40-KD", "sample_accession": None, "source": "column_name"},
     ]
-    out, status, _ = rewrite_design_to_columns(_DESIGN, associations)
+    out, status, _ = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "ok"
     assert out["contrasts"][0]["reference_samples"] == ["c1"]
 
@@ -379,3 +380,160 @@ async def test_a_matrix_whose_columns_match_no_arm_holds(session, admin_user):
     # change_7.4 sections 1.1 and 1.4: an empty arm is never retried; it concludes before compute.
     assert study.state == "classified"
     assert "arm" in study.evidence_json["deposit_failed"]["reason"].lower()
+
+
+# ---- change_7.4 section 1.4: only the selected contrast, and a declared pairing survives ----
+
+_TWO = {
+    "contrasts": [
+        # A second experiment's contrast, listed first. Its conditions are not in this matrix at all,
+        # and it is not the selected one, so it must not hold the run.
+        {"name": "day 7", "test_condition": "KO day 7", "reference_condition": "WT day 7"},
+        _DESIGN["contrasts"][0],
+    ],
+    "thresholds": _DESIGN["thresholds"],
+    "selected_contrast": {"contrast_index": 1},
+}
+
+_BY_ACCESSION = [
+    {"column": "Control-KD_1", "condition": "Control-KD", "sample_accession": "GSM8447568", "source": "metadata_file"},
+    {"column": "Control-KD_2", "condition": "Control-KD", "sample_accession": "GSM8447569", "source": "metadata_file"},
+    {"column": "H2AS40-KD_1", "condition": "H2AS40-KD", "sample_accession": "GSM8447570", "source": "metadata_file"},
+    {"column": "H2AS40-KD_2", "condition": "H2AS40-KD", "sample_accession": "GSM8447571", "source": "metadata_file"},
+]
+
+
+def test_only_the_selected_contrast_is_validated_and_rewritten():
+    out, status, _ = rewrite_design_to_columns(_TWO, _BY_ACCESSION, contrast_index=1)
+    assert status == "ok"
+    assert out["contrasts"][1]["test_samples"] == ["H2AS40-KD_1", "H2AS40-KD_2"]
+    # The other contrast stays in the plan untouched.
+    assert out["contrasts"][0] == _TWO["contrasts"][0]
+
+
+def test_a_declared_pairing_is_carried_onto_the_column_names():
+    """The 2026-09-11 reproduction: the rewrite replaced the sample ids with column names and left
+    `subjects` keyed by the old ids, so the parameter builder found no label and ran unpaired."""
+    paired = {
+        **_DESIGN,
+        "contrasts": [
+            {
+                **_DESIGN["contrasts"][0],
+                "subjects": {"GSM8447568": "d1", "GSM8447569": "d2", "GSM8447570": "d1", "GSM8447571": "d2"},
+            }
+        ],
+    }
+    out, status, _ = rewrite_design_to_columns(paired, _BY_ACCESSION, contrast_index=0)
+    assert status == "ok"
+    assert out["contrasts"][0]["subjects"] == {
+        "Control-KD_1": "d1",
+        "Control-KD_2": "d2",
+        "H2AS40-KD_1": "d1",
+        "H2AS40-KD_2": "d2",
+    }
+
+
+def test_a_pairing_that_cannot_be_carried_stops_rather_than_running_unpaired():
+    """Columns matched by condition cannot say which donor each one is."""
+    paired = {
+        **_DESIGN,
+        "contrasts": [
+            {
+                **_DESIGN["contrasts"][0],
+                "subjects": {"GSM8447568": "d1", "GSM8447569": "d2", "GSM8447570": "d1", "GSM8447571": "d2"},
+            }
+        ],
+    }
+    by_condition = [dict(a, sample_accession=None) for a in _BY_ACCESSION]
+    _, status, reason = rewrite_design_to_columns(paired, by_condition, contrast_index=0)
+    assert status == "pairing_lost"
+    assert "pair" in reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_the_parameter_builder_receives_the_carried_pairing(session, admin_user):
+    """Through the driver: metadata places each column by accession, the rewrite carries the donor
+    labels, and the analysis parameters get `block_labels`."""
+    from app.models.file import File
+    from app.models.template_notebook import TemplateNotebook
+
+    session.add(
+        TemplateNotebook(
+            organization_id=admin_user.organization_id,
+            name="DESeq2 headless",
+            category="differential_expression",
+            notebook_path="notebooks/de_bulk_deseq2.ipynb",
+            parameters_json={},
+            is_builtin=True,
+        )
+    )
+    matrix_file = File(
+        organization_id=admin_user.organization_id,
+        filename="m.tsv",
+        storage_uri="s3://x/m.tsv",
+        file_type="table",
+        source_type="external_deposit",
+        artifact_type="deposited_matrix",
+        uploader_user_id=admin_user.id,
+    )
+    session.add(matrix_file)
+    await session.flush()
+    study = ValidationStudy(
+        organization_id=admin_user.organization_id,
+        requested_by_user_id=admin_user.id,
+        source_accession="GSE274331",
+        state="inspecting_deposit",
+        evidence_json={
+            "route": "deposit",
+            "deposit_selection": {"primary_matrix": "m.tsv", "matrix_files": ["m.tsv"], "value_type": "counts"},
+            "deposit": {
+                "files": [
+                    {
+                        "file_id": matrix_file.id,
+                        "filename": "m.tsv",
+                        "storage_uri": "s3://x/m.tsv",
+                        "artifact_type": "deposited_matrix",
+                    },
+                    {
+                        "file_id": 0,
+                        "filename": "meta.tsv",
+                        "storage_uri": "s3://x/meta.tsv",
+                        "artifact_type": "deposited_metadata",
+                    },
+                ]
+            },
+        },
+    )
+    session.add(study)
+    await session.flush()
+    design = {
+        **_DESIGN,
+        "contrasts": [
+            {
+                **_DESIGN["contrasts"][0],
+                "subjects": {"GSM8447568": "d1", "GSM8447569": "d2", "GSM8447570": "d1", "GSM8447571": "d2"},
+            }
+        ],
+        "selected_contrast": {"contrast_index": 0, "decided_by": "human"},
+    }
+    plan = await ReproductionPlanService.create_plan(
+        session, study, admin_user.id, pipeline_key="nf-core/rnaseq", differential_design=design
+    )
+    plan.finding_claim_json = {
+        "kind": "gene",
+        "confirmed": True,
+        "finding_set": {"kind": "gene", "entities": [{"id": "x"}]},
+    }
+    await session.flush()
+    metadata = (
+        "sample\tgeo_accession\tcondition\n"
+        "Control-KD_1\tGSM8447568\tControl-KD\nControl-KD_2\tGSM8447569\tControl-KD\n"
+        "H2AS40-KD_1\tGSM8447570\tH2AS40-KD\nH2AS40-KD_2\tGSM8447571\tH2AS40-KD\n"
+    )
+
+    await ValidationDriverService._handle_inspecting_deposit(
+        session, study, storage_adapter=_FakeStorage({"s3://x/m.tsv": _MATRIX, "s3://x/meta.tsv": metadata})
+    )
+
+    assert study.state == "reproducing", study.evidence_json.get("deposit_failed")
+    assert study.evidence_json["level3"]["parameters"]["block_labels"] == "d1,d2,d1,d2"

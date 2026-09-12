@@ -1307,7 +1307,15 @@ def _append_level3_concordance(parts: list[str], plan: dict[str, Any], evidence:
 
     design = (plan.get("differential_design") or {}) if isinstance(plan, dict) else {}
     contrasts = design.get("contrasts") or []
-    primary = contrasts[0] if contrasts and isinstance(contrasts[0], dict) else {}
+    # change_7.4 section 1.4: the contrast shown is the one that ran (named on the level-3 bundle),
+    # else the selected one, and never simply the first listed.
+    ran = (evidence.get("level3") or {}).get("contrast") if isinstance(evidence, dict) else None
+    index = (design.get("selected_contrast") or {}).get("contrast_index")
+    primary = next((c for c in contrasts if isinstance(c, dict) and ran and c.get("name") == ran), None) or (
+        contrasts[index]
+        if isinstance(index, int) and not isinstance(index, bool) and 0 <= index < len(contrasts)
+        else {}
+    )
     contrast = primary.get("name")
     thresholds = design.get("thresholds") or {}
     frac = conc.get("directional_overlap_frac")

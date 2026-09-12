@@ -38,9 +38,18 @@ _SUBJECT_COLUMNS: tuple[str, ...] = ("patient", "case_id")
 
 
 def _primary_contrast(design) -> dict | None:
-    """The contrast this study reproduces, which is the first one, as Level-3 also reads it."""
+    """The contrast this study reproduces: the selected one, as Level-3 also reads it.
+
+    change_7.4 section 1.4: this read ``contrasts[0]``, so the samplesheet's design columns could
+    describe a contrast nobody selected. With no selection there is nothing to answer from.
+    """
     contrasts = (design or {}).get("contrasts") or []
-    return contrasts[0] if isinstance(contrasts, list) and contrasts and isinstance(contrasts[0], dict) else None
+    index = ((design or {}).get("selected_contrast") or {}).get("contrast_index")
+    if isinstance(index, bool) or not isinstance(index, int) or not isinstance(contrasts, list):
+        return None
+    if not 0 <= index < len(contrasts) or not isinstance(contrasts[index], dict):
+        return None
+    return contrasts[index]
 
 
 def _answer(row: dict[str, str], contract, columns: tuple[str, ...], value: str) -> None:

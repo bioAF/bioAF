@@ -429,6 +429,33 @@ def match_route(assay: str) -> tuple[AssayRoute, bool] | None:
     return None
 
 
+def pipelines_named_by(assay: str | None) -> list[str]:
+    """Every declared route's pipeline that ``assay`` names, diagnostically where it names any.
+
+    change_7.4 section 1.5: ``map_method`` answers the FIRST route in declaration order, so
+    "ChIP-seq and bulk RNA-seq" and "bulk RNA-seq and ChIP-seq" both map to nf-core/chipseq. Checking a
+    contrast's assay against a workflow needs every route the string names, so a compound assay is
+    seen as naming two rather than silently read as the first. The markers are the same markers.
+    """
+    text = (assay or "").lower()
+    if not text.strip():
+        return []
+    named = [r.pipeline_key for r in _ROUTES if any(marker_matches(m, text) for m in r.markers)]
+    if not named:
+        named = [r.pipeline_key for r in _ROUTES if any(marker_matches(m, text) for m in r.contextual_markers)]
+    return list(dict.fromkeys(named))
+
+
+def same_route_family(a: str | None, b: str | None) -> bool:
+    """Whether two pipelines read the same kind of data: the same pipeline, or two that one declared
+    library strategy says may both consume it (ChIP-Seq runs feed chipseq and cutandrun alike)."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return any(a in route.compatible and b in route.compatible for route in _LIBRARY_STRATEGY_ROUTES)
+
+
 def _match_route(assay: str) -> AssayRoute | None:
     """The route ``assay`` names on any evidence, diagnostic or contextual, or None."""
     match = match_route(assay)

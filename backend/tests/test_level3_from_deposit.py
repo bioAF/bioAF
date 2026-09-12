@@ -21,6 +21,7 @@ from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_level3_service import resolve_level3_from_deposit, template_for_value_type
 
 _DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "KD vs control",
@@ -293,3 +294,40 @@ async def test_the_inspection_step_builds_the_level3_bundle(session, admin_user,
     assert level3["method"] == "limma_trend"
     assert level3["source"] == "deposit"
     assert level3["template_id"] == limma_template.id
+
+
+# ---- change_7.4 section 1.4: the selected contrast executes, never contrasts[0] ----
+
+
+@pytest.mark.asyncio
+async def test_the_selected_contrast_executes_and_the_other_is_not_validated(session, deposit_study, admin_user):
+    plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        "contrasts": [
+            {"name": "unrunnable first contrast", "test_samples": ["x"], "reference_samples": []},
+            _DESIGN["contrasts"][0],
+        ],
+        "thresholds": _DESIGN["thresholds"],
+        "selected_contrast": {"contrast_index": 1, "decided_by": "model"},
+    }
+    await session.flush()
+
+    decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+
+    assert decision.inputs is not None, decision.reason
+    assert decision.inputs["contrast"] == "KD vs control"
+
+
+@pytest.mark.asyncio
+async def test_a_null_selection_stops_the_deposit_differential(session, deposit_study, admin_user):
+    plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
+    plan.differential_design_json = {
+        **_DESIGN,
+        "selected_contrast": {"contrast_index": None, "reason": "measured on another assay"},
+    }
+    await session.flush()
+
+    decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+
+    assert decision.inputs is None
+    assert decision.reason_code == "no_compatible_contrast"

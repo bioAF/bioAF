@@ -19,6 +19,7 @@ from app.services.validation_level3_service import build_level3_inputs, resolve_
 from app.services.validation_study_service import ValidationStudyService
 
 _DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "dex vs untreated",
@@ -132,6 +133,7 @@ async def test_build_level3_inputs_assembles_full_gene_bundle(session, admin_use
 
 
 _PAIRED_DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "mucoderm vs tcs",
@@ -187,6 +189,7 @@ async def da_template(session, admin_user):
 
 
 _INTERVAL_DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [{"name": "KO vs WT", "test_samples": ["S1", "S2"], "reference_samples": ["S3", "S4"]}],
     "thresholds": {"log2fc": 1.0, "padj": 0.05},
 }
@@ -324,6 +327,7 @@ async def test_extracting_persists_level3_bundle_and_routes_to_reproducing(
 
 
 _UNDERPOWERED_DESIGN = {
+    "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
             "name": "dex vs untreated",
@@ -986,3 +990,89 @@ async def test_peak_matrix_resolves_past_the_featurecounts_summary_sidecar(sessi
     level3 = await build_level3_inputs(session, study, plan)
     assert level3 is not None, "the summary sidecar must not make the real matrix ambiguous"
     assert level3["input_file_ids"] == [matrix.id]
+
+
+# ---- change_7.4 section 1.4: the selected contrast executes, never contrasts[0] ----
+
+_TWO_CONTRASTS = {
+    "contrasts": [
+        # Listed first and deliberately unrunnable (one sample per arm). It is not the selected one,
+        # so it must neither run nor be validated.
+        {"name": "other assay", "test_samples": ["SRX9"], "reference_samples": ["SRX8"]},
+        {
+            "name": "dex vs untreated",
+            "test_condition": "dex",
+            "reference_condition": "untreated",
+            "test_samples": ["SRX1", "SRX2"],
+            "reference_samples": ["SRX3", "SRX4"],
+        },
+    ],
+    "thresholds": {"log2fc": 1.0, "padj": 0.05},
+    "selected_contrast": {"contrast_index": 1, "decided_by": "model", "reason": "the dex contrast"},
+}
+
+
+class TestTheSelectedContrastIsWhatRuns:
+    @pytest.mark.asyncio
+    async def test_the_selected_contrast_executes_not_the_first(self, session, admin_user, analysis_run, de_template):
+        await _count_matrix_file(session, admin_user, analysis_run)
+        study, plan = await _study_with_plan(session, admin_user, analysis_run, design=_TWO_CONTRASTS)
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.inputs is not None, decision.reason
+        assert decision.inputs["contrast"] == "dex vs untreated"
+        assert decision.inputs["parameters"]["test_samples"] == "SRX1,SRX2"
+
+    @pytest.mark.asyncio
+    async def test_a_null_selection_stops_the_differential(self, session, admin_user, analysis_run, de_template):
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = {**_TWO_CONTRASTS, "selected_contrast": {"contrast_index": None, "reason": "no dex contrast here"}}
+        study, plan = await _study_with_plan(session, admin_user, analysis_run, design=design)
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.inputs is None
+        assert decision.reason_code == "no_compatible_contrast"
+        assert "no dex contrast here" in decision.reason
+
+    @pytest.mark.asyncio
+    async def test_no_selection_record_stops_it_too(self, session, admin_user, analysis_run, de_template):
+        """Nothing picks a contrast by position."""
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = {k: v for k, v in _TWO_CONTRASTS.items() if k != "selected_contrast"}
+        study, plan = await _study_with_plan(session, admin_user, analysis_run, design=design)
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.reason_code == "no_compatible_contrast"
+
+    @pytest.mark.asyncio
+    async def test_a_declared_pairing_that_cannot_be_carried_is_refused_not_run_unpaired(
+        self, session, admin_user, analysis_run, de_template
+    ):
+        await _count_matrix_file(session, admin_user, analysis_run)
+        design = {
+            **_PAIRED_DESIGN,
+            "contrasts": [{**_PAIRED_DESIGN["contrasts"][0], "subjects": {"SRX1": "donorA", "SRX3": "donorA"}}],
+        }
+        study, plan = await _study_with_plan(session, admin_user, analysis_run, design=design)
+
+        decision = await resolve_level3(session, study, plan)
+
+        assert decision.inputs is None
+        assert decision.reason_code == "pairing_not_carried"
+
+
+@pytest.mark.asyncio
+async def test_the_samplesheet_answers_come_from_the_selected_contrast():
+    """The pipeline's design columns come from the contrast this run reproduces, not the first."""
+    from types import SimpleNamespace
+
+    from app.services.validation_sample_values import sample_values_from_design
+
+    contract = SimpleNamespace(is_empty=False, columns=("group",), patterns={}, enum_for=lambda column: None)
+    samples = [SimpleNamespace(id=1, external_id="SRX1"), SimpleNamespace(id=9, external_id="SRX9")]
+    values = sample_values_from_design(_TWO_CONTRASTS, samples, contract)
+    assert values.get("1", {}).get("group") == "dex"
+    assert "9" not in values
