@@ -317,6 +317,17 @@ def _parse_iso(value: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _waiting_to_retry(study: ValidationStudy) -> bool:
+    """Whether a transient acquisition failure is still waiting out its backoff.
+
+    change_7.4 section 1.2: one guard, run before every state that can raise a transient hold.
+    Only `_handle_acquiring_processed` checked it, so a transient hold raised during inspection
+    retried on every 30-second tick and spent the whole bound in about a minute.
+    """
+    retry_at = (study.evidence_json or {}).get("acquisition_retry_at")
+    return bool(retry_at) and _now() < _parse_iso(retry_at)
+
+
 def _early_exit_classification(plan: ReproductionPlan) -> str | None:
     """Reading-stage early exit, or None to proceed to plan_ready.
 
@@ -833,6 +844,8 @@ class ValidationDriverService:
     async def _handle_acquiring_data(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         """Launch fetchngs (first visit), or on its completion run D2 and advance to setup (or, if the
         fetched data is not usable, early-exit to missing_data per spec-02/spec-03)."""
+        if _waiting_to_retry(study):
+            return False
         if study.data_run_id is None:
             # A scheduled transient-failure retry waits out its backoff before relaunching fetchngs.
             retry_at = (study.evidence_json or {}).get("acquire_retry_at")
@@ -964,13 +977,11 @@ class ValidationDriverService:
         A study still gets an experiment, so a deposit-route study looks like every other one in the
         UI and its files hang off the same place.
         """
-        evidence = dict(study.evidence_json or {})
-
         # change_7.2 section 3: a transient failure waits out its backoff. Never a fixed 30-second
         # interval, and never unbounded.
-        retry_at = evidence.get("acquisition_retry_at")
-        if retry_at and _now() < _parse_iso(retry_at):
+        if _waiting_to_retry(study):
             return False
+        evidence = dict(study.evidence_json or {})
 
         # The driver ticks repeatedly; re-downloading each time would hammer NCBI and duplicate the
         # File rows.
@@ -1131,6 +1142,8 @@ class ValidationDriverService:
         """
         from app.services.deposit_inspection import inspect_matrix
 
+        if _waiting_to_retry(study):
+            return False
         evidence = dict(study.evidence_json or {})
         deposit = evidence.get("deposit") or {}
         matrices = [f for f in deposit.get("files") or [] if f.get("artifact_type") == "deposited_matrix"]

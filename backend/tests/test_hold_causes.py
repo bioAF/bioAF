@@ -560,3 +560,70 @@ class TestAResumedStudyReDerivesItsCause:
         assert "deposit_unusable" not in resumed.evidence_json
         assert "deposit_failed" not in resumed.evidence_json
         assert "deposit_selection" not in resumed.evidence_json
+
+
+# ---- change_7.4 section 1.2: the retry wait holds in every state that can raise a transient hold ----
+
+
+def _pending(**extra):
+    from datetime import datetime, timedelta, timezone
+
+    return {"acquisition_retry_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(), **extra}
+
+
+class TestTheRetryWaitHoldsWhereverATransientHoldCanArise:
+    @pytest.mark.asyncio
+    async def test_inspection_waits_out_its_backoff(self, session, admin_user):
+        """Only `_handle_acquiring_processed` checked the wait, so a transient hold raised during
+        inspection retried on every 30-second tick."""
+        study = await _study(session, admin_user, state="inspecting_deposit", evidence=_acquired())
+        await ValidationDriverService._handle_inspecting_deposit(
+            session, study, storage_adapter=_Storage(fail_reads=True)
+        )
+        assert study.evidence_json["acquisition_attempts"] == 1
+
+        reads: list[str] = []
+
+        class _Counting(_Storage):
+            async def read_text(self, uri, *, encoding="utf-8"):
+                reads.append(uri)
+                raise ConnectionError("still down")
+
+        advanced = await ValidationDriverService._handle_inspecting_deposit(session, study, storage_adapter=_Counting())
+
+        assert advanced is False
+        assert reads == []
+        assert study.evidence_json["acquisition_attempts"] == 1
+
+    @pytest.mark.asyncio
+    async def test_the_tick_waits_too(self, session, admin_user):
+        study = await _study(
+            session, admin_user, state="inspecting_deposit", evidence=_acquired(**_pending(assessment={"at": "x"}))
+        )
+
+        changed = await ValidationDriverService._advance_one(session, study)
+
+        assert changed is False
+        assert study.state == "inspecting_deposit"
+        # Nothing was attempted: no read, so no hold and no attempt counted.
+        assert "deposit_failed" not in study.evidence_json
+        assert "acquisition_attempts" not in study.evidence_json
+
+    @pytest.mark.asyncio
+    async def test_the_raw_read_acquisition_waits_too(self, session, admin_user, monkeypatch):
+        async def must_not_launch(*args, **kwargs):
+            raise AssertionError("launched during a retry wait")
+
+        monkeypatch.setattr(ValidationDriverService, "_launch_fetchngs", staticmethod(must_not_launch))
+        study = await _study(session, admin_user, state="acquiring_data", evidence=_pending())
+
+        assert await ValidationDriverService._handle_acquiring_data(session, study) is False
+
+    @pytest.mark.asyncio
+    async def test_a_study_waiting_to_retry_is_still_advancing(self, session, admin_user):
+        """The page keeps polling during the wait: bioAF will move the study on by itself."""
+        from app.services.validation_driver_service import is_advancing
+
+        study = await _study(session, admin_user, state="inspecting_deposit", evidence=_acquired(**_pending()))
+
+        assert is_advancing(study) is True
