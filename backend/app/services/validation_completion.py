@@ -28,7 +28,36 @@ FAILED_DISCOVERY = "failed_discovery"
 # THIS attempt, and it forbids concluding that the thing is absent.
 RETRIEVAL_FAILED = "retrieval_failed"
 
-LIMITATION_KINDS = (CONTROLLED_ACCESS, UNSUPPORTED_ACQUISITION, MISSING_INPUT, FAILED_DISCOVERY, RETRIEVAL_FAILED)
+# change_7.4 section 1.1: what failed, named where it failed. Study 37 downloaded and read its matrix,
+# could not place its columns, and was reported as "could not reach the deposit". None of these is an
+# established absence, so none of them can produce `missing_data`.
+ACCESS_REFUSED = "access_refused"
+RESOURCE_LIMIT = "resource_limit"
+INPUT_UNREADABLE = "input_unreadable"
+UNSUPPORTED_PROCESSING = "unsupported_processing"
+INPUT_UNIDENTIFIED = "input_unidentified"
+SAMPLE_MAPPING_UNRESOLVED = "sample_mapping_unresolved"
+DESIGN_INCOMPATIBLE = "design_incompatible"
+NO_COMPATIBLE_CONTRAST = "no_compatible_contrast"
+_NOT_AN_ABSENCE = (
+    ACCESS_REFUSED,
+    RESOURCE_LIMIT,
+    INPUT_UNREADABLE,
+    UNSUPPORTED_PROCESSING,
+    INPUT_UNIDENTIFIED,
+    SAMPLE_MAPPING_UNRESOLVED,
+    DESIGN_INCOMPATIBLE,
+    NO_COMPATIBLE_CONTRAST,
+)
+
+LIMITATION_KINDS = (
+    CONTROLLED_ACCESS,
+    UNSUPPORTED_ACQUISITION,
+    MISSING_INPUT,
+    FAILED_DISCOVERY,
+    RETRIEVAL_FAILED,
+    *_NOT_AN_ABSENCE,
+)
 
 # What each blockage means for the terminal verdict. `inconclusive` is deliberate for a discovery or
 # retrieval failure: nothing was established, so nothing about the paper may be concluded.
@@ -38,6 +67,7 @@ _CLASSIFICATION_FOR = {
     MISSING_INPUT: "missing_data",
     FAILED_DISCOVERY: "inconclusive",
     RETRIEVAL_FAILED: "inconclusive",
+    **{kind: "inconclusive" for kind in _NOT_AN_ABSENCE},
 }
 
 # The tri-state for the two completion facts. `not_established` is what a failed download yields;
@@ -394,7 +424,7 @@ def _classification(limitations: list[dict]) -> str:
     for kind in (CONTROLLED_ACCESS, UNSUPPORTED_ACQUISITION):
         if kind in kinds:
             return _CLASSIFICATION_FOR[kind]
-    if kinds & {RETRIEVAL_FAILED, FAILED_DISCOVERY}:
+    if kinds & {RETRIEVAL_FAILED, FAILED_DISCOVERY, *_NOT_AN_ABSENCE}:
         return "inconclusive"
     if MISSING_INPUT in kinds:
         return "missing_data"
