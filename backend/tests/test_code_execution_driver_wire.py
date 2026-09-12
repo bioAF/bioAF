@@ -36,6 +36,9 @@ _LEVEL3 = {
     "method": "deseq2",
     "input_file_ids": [],
     "paper_finding_set": {"kind": "gene", "namespace": "symbol", "entities": [], "n_sig": 0},
+    # change_7.4 section 1.6 (flagged, setup only): a bundle carries the cutoffs it was built with, and
+    # one that carries none is no longer compared at a default.
+    "parameters": {"lfc_threshold": 1.0, "padj_threshold": 0.05},
 }
 
 _RESOLVED_CODE = {
@@ -514,6 +517,29 @@ class TestTheCodeArmsOutputIsActuallyCompared:
 
         assert study.evidence_json["code_execution"]["outcome"] == "ran_output_agrees"
         assert study.evidence_json["level3_result"]["concordance"]["verdict"] == "agree"
+
+    @pytest.mark.asyncio
+    async def test_a_bundle_with_no_cutoff_is_not_compared_at_a_default(
+        self, session, admin_user, monkeypatch, untrusted_ready
+    ):
+        """change_7.4 section 1.6: the code arm read a missing cutoff as log2FC 1.0 and adjusted P 0.05.
+        It records the output as one bioAF could not compare, and why, instead."""
+        table = "gene,log2FoldChange,padj\nA,2.0,0.001\nB,-2.1,0.002\n"
+        self._patch_poll(monkeypatch, table)
+        level3 = {k: v for k, v in self._level3().items() if k != "parameters"}
+        study = await _study_at_reproducing(
+            session,
+            admin_user,
+            {
+                "level3": level3,
+                "code_resolution": _RESOLVED_CODE,
+                "code_execution": {"attempt": 1, "method": "authors_code", "session_id": 901, "source": {}},
+            },
+        )
+        await ValidationDriverService._handle_reproducing(session, study)
+
+        assert study.evidence_json["code_execution"]["outcome"] == "ran_output_uncomparable"
+        assert "level3_result" not in study.evidence_json
 
     @pytest.mark.asyncio
     async def test_a_table_that_does_not_is_a_divergence_not_an_agreement(
