@@ -75,7 +75,14 @@ def _fake_fetcher(pages: dict):
 async def test_fetch_geo_candidates_returns_parsed_de_table():
     base = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSEnnn/GSE1/suppl/"
     pages = {base: _DIR_HTML, base + "GSE1_DEG_results.csv": _DE_CSV}
-    cands = await GroundTruthFetchService.fetch_geo_candidates("GSE1", kind="gene", fetcher=_fake_fetcher(pages))
+    # change_7.5 section 1.2 changed this test's setup: a candidate is counted only at a stated
+    # definition, so the test states the one the count used to default to.
+    from app.services.validation_claim_cutoffs import analysis_cutoffs
+
+    stated = analysis_cutoffs({"thresholds": {"padj": 0.05, "log2fc": 1.0}}, {})
+    cands = await GroundTruthFetchService.fetch_geo_candidates(
+        "GSE1", kind="gene", cutoffs=stated, fetcher=_fake_fetcher(pages)
+    )
 
     assert len(cands) == 1
     c = cands[0]

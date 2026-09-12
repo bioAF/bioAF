@@ -398,11 +398,14 @@ class TestCorrectStructuredInputSurvivesTheRealCode:
         _no_default_anywhere(plan.differential_design_json)
 
     @pytest.mark.asyncio
-    async def test_the_parameter_builder_refuses_the_p_value_rather_than_substituting(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_the_parameter_builder_carries_the_p_value_unchanged(self, session, admin_user, monkeypatch):
         """Past the mapping (as if a person had assigned the columns), the definition reaches the
-        analysis parameters unchanged and is refused, never replaced with an adjusted P."""
+        analysis parameters unchanged, never replaced with an adjusted P.
+
+        change_7.5 section 1.2 changed this test: it asserted the P value was refused, because the
+        templates wrote only an adjusted P. They write the raw P value now, so it is carried."""
+        from app.models.file import File
+        from app.models.template_notebook import TemplateNotebook
         from app.services.validation_level3_service import resolve_level3_from_deposit
 
         study, plan = await _read(
@@ -418,13 +421,39 @@ class TestCorrectStructuredInputSurvivesTheRealCode:
             "confirmed": True,
             "finding_set": {"kind": "gene", "entities": [{"id": "g"}]},
         }
+        matrix = File(
+            organization_id=admin_user.organization_id,
+            filename=_MATRIX,
+            storage_uri="s3://x/m.tsv",
+            file_type="table",
+            source_type="external_deposit",
+            artifact_type="deposited_matrix",
+            uploader_user_id=admin_user.id,
+        )
+        session.add_all(
+            [
+                matrix,
+                TemplateNotebook(
+                    organization_id=admin_user.organization_id,
+                    name="limma",
+                    category="differential_expression",
+                    notebook_path="notebooks/de_normalized_limma.ipynb",
+                    parameters_json={},
+                    is_builtin=True,
+                ),
+            ]
+        )
         await session.flush()
+        evidence = {
+            "deposit": {"files": [{"file_id": matrix.id, "artifact_type": "deposited_matrix"}]},
+            "deposit_inspection": {"value_type_observed": "normalized_other", "id_column": ""},
+        }
 
-        decision = await resolve_level3_from_deposit(session, study, plan, evidence={})
+        decision = await resolve_level3_from_deposit(session, study, plan, evidence=evidence)
 
-        assert decision.inputs is None
-        assert decision.reason_code == "threshold_unresolved"
-        assert "P < 0.01" in decision.reason
+        assert decision.inputs is not None, decision.reason
+        assert decision.inputs["cutoffs"]["significance"] == {"kind": "pvalue", "operator": "<", "value": 0.01}
+        assert decision.inputs["cutoff_statement"].startswith("P < 0.01")
 
     @pytest.mark.asyncio
     async def test_the_author_table_is_read_at_the_paper_s_own_definition(self):

@@ -77,7 +77,7 @@ async def _plan_response(
         parameters=plan.parameters_json,
         tools=plan.tools_json,
         code_availability=plan.code_availability_json,
-        differential_design=plan.differential_design_json,
+        differential_design=_with_stated_cutoffs(plan.differential_design_json),
         finding_claim=plan.finding_claim_json,
         reference_genome=plan.reference_genome,
         reference_build=plan.reference_build,
@@ -117,6 +117,25 @@ async def _plan_response(
             contrasts=((plan.differential_design_json or {}).get("contrasts") or []),
         ),
     )
+
+
+def _with_stated_cutoffs(design: dict | None) -> dict | None:
+    """The design as the gate reads it, each contrast carrying its stated cutoff in words.
+
+    Computed, not stored. change_7.5 section 1.2: the gate showed only the legacy pair, which cannot
+    hold a P value, so a contrast stated at "P < 0.01" showed two blank inputs.
+    """
+    from app.services.validation_claim_cutoffs import contrast_cutoff_words
+
+    if not isinstance(design, dict):
+        return design
+    return {
+        **design,
+        "contrasts": [
+            {**c, "stated_cutoff": contrast_cutoff_words(c, design)} if isinstance(c, dict) else c
+            for c in design.get("contrasts") or []
+        ],
+    }
 
 
 def _registry_name(pipeline_key: str | None) -> str | None:
@@ -541,9 +560,18 @@ async def finding_set_candidates(
     plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
     if plan is None:
         raise HTTPException(404, "No reproduction plan for this study.")
+    # change_7.5 section 1.2: a candidate is counted at the selected contrast's stated definition, or
+    # not counted at all. The count shown beside a candidate was taken at bioAF's own defaults.
+    from app.services.contrast_selection import selected_contrast_for
+    from app.services.validation_claim_cutoffs import analysis_cutoffs
+
+    design = plan.differential_design_json or {}
+    index, _ = selected_contrast_for(design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy)
+    contrast = (design.get("contrasts") or [])[index] if index is not None else {}
+    cutoffs = analysis_cutoffs(contrast, design)
     candidates: list[dict] = []
     for accession in plan.accessions_json or []:
-        candidates.extend(await GroundTruthFetchService.fetch_geo_candidates(accession, kind=kind))
+        candidates.extend(await GroundTruthFetchService.fetch_geo_candidates(accession, kind=kind, cutoffs=cutoffs))
     return {"candidates": candidates}
 
 

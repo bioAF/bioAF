@@ -448,7 +448,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
         "mapping": {
           "bound_key": null,
@@ -471,7 +471,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
         "mapping": {
           "bound_key": null,
@@ -494,7 +494,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
         "mapping": {
           "bound_key": null,
@@ -517,7 +517,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
         "mapping": {
           "bound_key": null,
@@ -609,43 +609,31 @@
     "contrasts": [
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "aneuploid vs euploid WE (RNA karyotype)",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05 and |log2FC| 2",
         "name": "XX vs XY WE (sex chromosome)",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": 2.0,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "good vs poor morphology (Gardner AA vs CC) WE",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "high vs low morphokinetic quality WE",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       }
     ],
     "facts": {
@@ -1213,7 +1201,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
         "mapping": {
           "bound_key": null,
@@ -1236,7 +1224,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
         "mapping": {
           "bound_key": null,
@@ -1259,7 +1247,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
         "mapping": {
           "bound_key": null,
@@ -1282,7 +1270,7 @@
       {
         "basis": "paper_text",
         "contrast": null,
-        "cutoff": "0.05 (padj)",
+        "cutoff": "adjusted P 0.05",
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
         "mapping": {
           "bound_key": null,
@@ -1369,43 +1357,31 @@
     "contrasts": [
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "aneuploid vs euploid WE (RNA karyotype)",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05 and |log2FC| 2",
         "name": "XX vs XY WE (sex chromosome)",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": 2.0,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "good vs poor morphology (Gardner AA vs CC) WE",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       },
       {
         "basis": "paper_text",
+        "cutoff": "adjusted P 0.05",
         "name": "high vs low morphokinetic quality WE",
         "provisional": true,
-        "status": "unassessed",
-        "thresholds": {
-          "log2fc": null,
-          "padj": 0.05
-        }
+        "status": "unassessed"
       }
     ],
     "facts": {

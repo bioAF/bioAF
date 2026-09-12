@@ -1092,11 +1092,10 @@ def _with_contrast(**contrast_fields):
 
 class TestThresholdsAreNeverDefaulted:
     @pytest.mark.asyncio
-    async def test_a_raw_p_value_definition_is_refused_before_anything_runs(
-        self, session, admin_user, analysis_run, de_template
-    ):
-        """Study 37's claims were P < 0.01. The templates apply an adjusted P, and running one in
-        place of the other would reproduce a different definition."""
+    async def test_a_raw_p_value_definition_runs_as_a_p_value(self, session, admin_user, analysis_run, de_template):
+        """Study 37's claims were P < 0.01. change_7.5 section 1.2 changed this test: it asserted the
+        definition was refused, because the templates wrote only an adjusted P. They write the raw P
+        value now, so the definition is carried with its kind and operator, never read as adjusted."""
         await _count_matrix_file(session, admin_user, analysis_run)
         design = _with_contrast(cutoffs=[{"kind": "pvalue", "operator": "<", "value": 0.01}])
         study, plan = await _study_with_plan(
@@ -1105,9 +1104,8 @@ class TestThresholdsAreNeverDefaulted:
 
         decision = await resolve_level3(session, study, plan)
 
-        assert decision.inputs is None
-        assert decision.reason_code == "threshold_unresolved"
-        assert "P value" in decision.reason
+        assert decision.inputs is not None, decision.reason
+        assert decision.inputs["cutoffs"]["significance"] == {"kind": "pvalue", "operator": "<", "value": 0.01}
 
     @pytest.mark.asyncio
     async def test_no_significance_cutoff_is_supplied_when_none_is_stated(
@@ -1141,11 +1139,16 @@ class TestThresholdsAreNeverDefaulted:
 
     @pytest.mark.asyncio
     async def test_the_generated_arm_s_target_carries_no_default_either(self, session, admin_user, analysis_run):
-        design = _with_contrast(cutoffs=[{"kind": "pvalue", "operator": "<", "value": 0.01}])
+        """change_7.5 section 1.2 changed this test's example: a raw P value is applicable now, so the
+        definition with nothing to apply is one the paper reads two ways."""
+        design = _with_contrast(
+            cutoffs=[{"kind": "pvalue", "operator": "<", "value": 0.01}],
+        )
+        design["contrasts"][0]["thresholds_unresolved"] = "the paper reads this claim's significance two ways"
         study, _ = await _study_with_plan(session, admin_user, analysis_run, design=design, claim=_NO_THRESHOLDS_CLAIM)
 
         target = await ValidationDriverService._finding_target_from_plan(session, study)
 
         assert "lfc_threshold" not in target["parameters"]
         assert "padj_threshold" not in target["parameters"]
-        assert "P value" in target["threshold_refusal"]
+        assert "two ways" in target["threshold_refusal"]

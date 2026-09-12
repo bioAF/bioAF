@@ -1934,19 +1934,31 @@ class ValidationDriverService:
                 "the differential reproduction notebook completed but produced no output file",
             )
 
-        if params.get("lfc_threshold") is None or params.get("padj_threshold") is None:
-            # change_7.4 section 1.6: the bundle carries the cutoffs it was built with; one that
-            # carries none is never scored at a default.
+        from app.services.result_set_normalizer import missing_measure
+        from app.services.validation_claim_cutoffs import normalizer_arguments
+
+        # change_7.4 section 1.6: the bundle carries the cutoffs it was built with; one that carries
+        # none is never scored at a default. change_7.5 section 1.2: with their kind and operators, so
+        # a claim stated at P < 0.01 is filtered at P < 0.01. A bundle written before that carries the
+        # legacy pair, read the way it was always applied.
+        applied = normalizer_arguments(level3.get("cutoffs"), legacy=params)
+        if applied is None:
             return await ValidationDriverService._degrade_to_level2(
                 session, study, evidence, "the reproduction's statistical cutoff was not recorded with it"
             )
         our_fs = await ValidationDriverService._extract_reproduced_set(
-            session,
-            cs,
-            level3.get("kind", "gene"),
-            lfc_threshold=float(params["lfc_threshold"]),
-            padj_threshold=float(params["padj_threshold"]),
+            session, cs, level3.get("kind", "gene"), **applied
         )
+        # A table the stated definition cannot be applied to is not an empty result: scoring it would
+        # report the paper's whole set as missed.
+        missing = missing_measure(our_fs)
+        if missing:
+            return await ValidationDriverService._degrade_to_level2(
+                session,
+                study,
+                evidence,
+                f"the reproduction's result table could not be read at the stated cutoff: {missing}",
+            )
         paper_fs = FindingSet.from_dict(level3.get("paper_finding_set") or {})
         universe = int(
             level3.get("universe") or our_fs.n_tested or max(len(paper_fs.entities), len(our_fs.entities), 1)
@@ -2433,7 +2445,10 @@ class ValidationDriverService:
             # whole reason that arm exists: without it the study still produces nothing.
             target = level3 or await ValidationDriverService._finding_target_from_plan(session, study)
             params = target.get("parameters") or {}
-            if params.get("lfc_threshold") is None or params.get("padj_threshold") is None:
+            from app.services.validation_claim_cutoffs import normalizer_arguments
+
+            applied = normalizer_arguments(target.get("cutoffs"), legacy=params)
+            if applied is None:
                 # change_7.4 section 1.6: no cutoff is supplied. A table the paper's definition cannot
                 # be applied to is an output bioAF could not compare, and the reason is recorded.
                 return await ValidationDriverService._land_code_outcome(
@@ -2451,9 +2466,7 @@ class ValidationDriverService:
                     reason=target.get("threshold_refusal") or "the comparison's statistical cutoff is not established",
                 )
             our_fs = (normalize_interval_table if target.get("kind") == "interval" else normalize_gene_table)(
-                adapted["table_text"],
-                lfc_threshold=float(params["lfc_threshold"]),
-                padj_threshold=float(params["padj_threshold"]),
+                adapted["table_text"], **applied
             )
             paper_fs = FindingSet.from_dict(target.get("paper_finding_set") or {})
             universe = int(
@@ -2535,10 +2548,13 @@ class ValidationDriverService:
         if cutoffs["refusal"]:
             target["threshold_refusal"] = cutoffs["refusal"]
         else:
+            from app.services.validation_claim_cutoffs import recorded_cutoffs
+
             target["parameters"] = {
                 "lfc_threshold": cutoffs["lfc_threshold"],
                 "padj_threshold": cutoffs["padj_threshold"],
             }
+            target["cutoffs"] = recorded_cutoffs(cutoffs)
         return target
 
     @staticmethod
@@ -2636,10 +2652,17 @@ class ValidationDriverService:
             # set is normalized with the plan's thresholds). method_comparable: our reproduction uses
             # DESeq2, the standard count-based DE/DA method for the supported RNA/ATAC/ChIP substrates,
             # so it is comparable by construction (a future refinement could compare the paper's exact tool).
+            # change_7.5 section 1.2: the reproduction applied the paper's definition when its bundle
+            # records the cutoffs it was filtered at, which are only ever the stated ones. The paper-
+            # level pair was the test before, and a plan whose claims state their own cutoffs has none.
+            applied = (evidence.get("level3") or {}).get("cutoffs") or {}
+            params = (evidence.get("level3") or {}).get("parameters") or {}
             design = (plan.differential_design_json if plan else None) or {}
             th = design.get("thresholds") or {}
             differential_attribution = {
-                "thresholds_matched": th.get("log2fc") is not None and th.get("padj") is not None,
+                "thresholds_matched": isinstance(applied.get("significance"), dict)
+                or (params.get("lfc_threshold") is not None and params.get("padj_threshold") is not None)
+                or (th.get("log2fc") is not None and th.get("padj") is not None),
                 "method_comparable": True,
             }
         result = classify_study(
@@ -2963,19 +2986,32 @@ class ValidationDriverService:
         kind: str,
         lfc_threshold: float = 1.0,
         padj_threshold: float = 0.05,
+        significance_kind: str = "padj",
+        significance_operator: str = "<=",
+        effect_operator: str = ">=",
     ) -> FindingSet:
         """Read the normalized result table the differential notebook wrote (a registered output
         File) and normalize it into OUR FindingSet. Applies the paper's captured thresholds (passed
         from the plan) so our set is defined by the same cutoffs as the paper's set (E3': a threshold
         mismatch is an our-side effect, not a real divergence). Live seam (reads object storage);
-        mocked in unit tests."""
+        mocked in unit tests.
+
+        change_7.5 section 1.2: the measure and the operators are the stated ones. Every production
+        caller passes all five; the defaults are the legacy pair's reading."""
         text = await ValidationDriverService._read_reproduction_output(session, cs)
         if not text:
             ns = "interval" if kind == "interval" else "unknown"
             return FindingSet(kind=kind, namespace=ns, parse_notes=["no reproduction output found"])
+        applied = {
+            "lfc_threshold": lfc_threshold,
+            "padj_threshold": padj_threshold,
+            "significance_kind": significance_kind,
+            "significance_operator": significance_operator,
+            "effect_operator": effect_operator,
+        }
         if kind == "interval":
-            return normalize_interval_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
-        return normalize_gene_table(text, lfc_threshold=lfc_threshold, padj_threshold=padj_threshold)
+            return normalize_interval_table(text, **applied)
+        return normalize_gene_table(text, **applied)
 
     @staticmethod
     async def _read_reproduction_output(session: AsyncSession, cs) -> str | None:

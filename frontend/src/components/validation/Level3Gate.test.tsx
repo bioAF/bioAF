@@ -459,3 +459,51 @@ test("sends the index the person moved to when they override the choice", async 
     expect(call?.[1].selected_contrast_index).toBe(0);
   });
 });
+
+// change_7.5 section 1.2: the gate shows the stated cutoff in words. The two legacy inputs stay (no
+// control is removed); they cannot hold a P value, so on their own they showed "P < 0.01" as blanks.
+const P_DESIGN = {
+  contrasts: [
+    {
+      name: "KO vs WT",
+      test_samples: ["KO_1"],
+      reference_samples: ["WT_1"],
+      thresholds: { log2fc: null, padj: null },
+      stated_cutoff: "P < 0.01",
+    },
+  ],
+  thresholds: { log2fc: null, padj: null },
+};
+
+test("shows the contrast's stated cutoff in words beside the threshold inputs", async () => {
+  render(<Level3Gate studyId={1} design={P_DESIGN} claim={null} onChanged={jest.fn()} />);
+  expect(screen.getByText("Stated cutoff: P < 0.01")).toBeInTheDocument();
+  expect(screen.getByLabelText("log2FC threshold")).toBeInTheDocument();
+  expect(screen.getByLabelText("padj threshold")).toBeInTheDocument();
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+});
+
+test("a contrast that states no cutoff shows none", async () => {
+  render(<Level3Gate studyId={1} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  expect(screen.queryByText(/Stated cutoff:/)).not.toBeInTheDocument();
+  await waitFor(() => expect(mockGet).toHaveBeenCalled());
+});
+
+test("a candidate the stated cutoff could not count is offered without a count", async () => {
+  mockGet.mockResolvedValue({
+    candidates: [
+      {
+        filename: "GSE1_DEG.csv",
+        source: "geo_supplementary",
+        n_sig: null,
+        not_counted_because: "the comparison's significance cutoff is not stated",
+        table_text: "gene,log2FoldChange,padj\nA1BG,2.5,0.001",
+      },
+    ],
+  });
+  render(<Level3Gate studyId={7} design={DESIGN} claim={null} onChanged={jest.fn()} />);
+  await userEvent.click(screen.getByRole("button", { name: /auto-fetch/i }));
+  await waitFor(() => expect(screen.getByText(/pre-filled from GSE1_DEG.csv/)).toBeInTheDocument());
+  expect(screen.queryByText(/null significant/)).not.toBeInTheDocument();
+  expect(screen.getByText(/pre-filled from GSE1_DEG.csv\. Review, then confirm\./)).toBeInTheDocument();
+});

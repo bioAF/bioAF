@@ -341,3 +341,43 @@ describe("an input acquired and read that could not be assigned (change_7.4 sect
     expect(screen.getByTestId("fact-ready_for_analysis")).toHaveTextContent("No");
   });
 });
+
+describe("the stated cutoff, in one vocabulary (change_7.5 section 1.2)", () => {
+  it("renders a claim's cutoff in the projection's words", () => {
+    const claim = groff.claims.find((c) => c.cutoff);
+    expect(claim?.cutoff).toBe("adjusted P 0.05");
+    render(
+      <AiDecisionList
+        decisions={[
+          {
+            metric_key: claim?.mapping.metric_key ?? null,
+            bound_key: null,
+            resolved: false,
+            reason: claim?.mapping.reason ?? null,
+            confidence: null,
+            model: null,
+            decided_by: "model",
+            low_confidence: false,
+            claim_text: claim?.description ?? "",
+            claimed_value: claim?.value ?? null,
+            unit: claim?.unit ?? null,
+            population: claim?.population ?? null,
+            contrast: claim?.contrast ?? null,
+            cutoff: claim?.cutoff ?? null,
+            mapping_status: claim?.mapping.status ?? "",
+            mapping_label: claim?.mapping.label ?? "",
+            mapping_explanation: claim?.mapping.explanation ?? null,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/adjusted P 0\.05/)).toBeInTheDocument();
+  });
+
+  it("states each contrast's cutoff in words, never as the legacy pair", () => {
+    for (const contrast of groff.contrasts) {
+      expect(contrast).not.toHaveProperty("thresholds");
+      expect(contrast).toHaveProperty("cutoff");
+    }
+  });
+});

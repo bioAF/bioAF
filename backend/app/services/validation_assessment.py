@@ -167,17 +167,40 @@ async def claimed_thresholds(session: AsyncSession, study) -> list[float]:
         .all()
     )
     wanted = {
-        float(t.threshold)
+        log2
         for t in rows
-        if t.threshold is not None and (t.threshold_kind or "").lower() in ("abs_log2fc", "log2fc", "fold_change")
+        if t.threshold is not None and (log2 := _as_log2_cutoff(t.threshold_kind, t.threshold)) is not None
     }
     # change_7.3 section 7: a claim's cutoffs are structure now, and a two-part cutoff carries its
     # fold change there rather than in the one scalar.
     for t in rows:
         for cutoff in t.cutoffs or []:
-            if isinstance(cutoff, dict) and cutoff.get("kind") == "abs_log2fc" and cutoff.get("value") is not None:
-                wanted.add(float(cutoff["value"]))
+            if (
+                isinstance(cutoff, dict)
+                and (log2 := _as_log2_cutoff(cutoff.get("kind"), cutoff.get("value"))) is not None
+            ):
+                wanted.add(log2)
     return sorted(wanted)
+
+
+def _as_log2_cutoff(kind, value) -> float | None:
+    """A fold-change cutoff on the |log2FC| scale the table is measured on, or None for anything else.
+
+    change_7.5 section 1.2: a linear fold change was read as log2, so "twofold" was measured as
+    |log2FC| > 2, which is fourfold. A linear fold change of x is |log2FC| > log2(x).
+    """
+    import math
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    kind = str(kind or "").lower()
+    if kind in ("abs_log2fc", "log2fc"):
+        return number
+    if kind == "fold_change" and number > 1:
+        return math.log2(number)
+    return None
 
 
 async def resolve_study_supplements(session: AsyncSession, study, evidence: dict) -> list[dict]:
