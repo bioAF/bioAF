@@ -40,6 +40,28 @@ _CORRECT_EXTRACTION = {
     "accessions": ["GSE144396"],
     "sample_structure": {"organism": "Mus musculus"},
     "method": {"assay": "ChIP-seq and bulk RNA-seq", "tools": ["DESeq2", "MACS2"], "reference_build": "mm9"},
+    # change_7.5 section 2.2: a correct reading lists the paper's two experiments separately, each with
+    # its own claims, contrasts and reference.
+    "reported_experiments": [
+        {
+            "id": "e1",
+            "assay": "ChIP-seq",
+            "tools": ["MACS2"],
+            "claim_indices": [3],
+            "contrast_indices": [],
+            "resources": ["GSE144396"],
+            "reference": {"assembly": "mm9", "assembly_quote": "aligned to the mouse genome (mm9)"},
+        },
+        {
+            "id": "e2",
+            "assay": "bulk RNA-seq",
+            "tools": ["DESeq2"],
+            "claim_indices": [0, 1, 2],
+            "contrast_indices": [0, 1],
+            "resources": ["GSE144396"],
+            "reference": {"annotation": "GENCODE M23", "annotation_quote": "quantified against GENCODE M23"},
+        },
+    ],
     "differential_design": {
         "contrasts": [
             {
@@ -323,15 +345,30 @@ class TestCorrectStructuredInputSurvivesTheRealCode:
         _no_default_anywhere(plan.differential_design_json)
 
     @pytest.mark.asyncio
-    async def test_the_chipseq_workflow_selects_no_contrast_and_says_why(self, session, admin_user, monkeypatch):
-        """No selection stub: the check settles it without a model."""
+    async def test_an_rna_seq_claim_is_selected_and_the_workflow_follows_it(self, session, admin_user, monkeypatch):
+        """No selection stub.
+
+        change_7.5 section 2.6 changed this test (flagged): it asserted the stage 1 outcome, where the
+        paper-level method chose nf-core/chipseq and both RNA-seq contrasts were refused. The workflow
+        now follows the selected claim's experiment."""
         _, plan = await _read(session, admin_user, monkeypatch)
 
-        assert plan.pipeline_key == "nf-core/chipseq"
-        selection = plan.differential_design_json["selected_contrast"]
-        assert selection["contrast_index"] is None
-        assert selection["outcome"] == "no_compatible_contrast"
-        assert "nf-core/chipseq" in selection["reason"]
+        current = plan.analysis_selection_json["current"]
+        assert current["reported_experiment_id"] == "e2"
+        assert current["check"] == "processed_reanalysis"
+        assert plan.pipeline_key == "nf-core/rnaseq"
+        experiments = {e["id"]: e for e in plan.reported_experiments_json}
+        # Each experiment's own reference: ChIP-seq on mm9 and RNA-seq on GENCODE M23, both unavailable
+        # to their raw-read routes, and neither defaulted.
+        assert experiments["e1"]["reference"]["assembly"]["status"] == "unavailable"
+        assert experiments["e2"]["reference"]["annotation"]["status"] == "unavailable"
+        targets = sorted(plan.comparison_targets, key=lambda t: t.id)
+        assert [t.checks["raw_reanalysis"]["requirement"] for t in targets[:3]] == ["reference"] * 3
+        # The peak count's binding stated no aggregation, so it never bound (section 2.4).
+        assert targets[3].bound_key is None
+        assert targets[3].checks["qc_metric"]["requirement"] == "qc_binding"
+        assert all(t.cutoffs == _P_001 for t in targets[:3])
+        _no_default_anywhere(plan.differential_design_json)
 
     @pytest.mark.asyncio
     async def test_on_an_expression_workflow_the_selected_contrast_reaches_every_boundary(

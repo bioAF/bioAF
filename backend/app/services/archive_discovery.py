@@ -82,6 +82,9 @@ _EGA_METADATA = "https://metadata.ega-archive.org"
 # have download paths (the deposit route and fetchngs); EGA does not, at any access level.
 _ACQUIRABLE = (GEO, SRA)
 
+# change_7.5 section 2.1: the sample titles a deposit's digest carries, bounded.
+_MAX_DIGEST_SAMPLES = 24
+
 # A study can register more deposits than a read-time budget can describe. Five covers every real
 # paper seen so far and bounds the call count; the rest are named without being described.
 _MAX_EGA_DATASETS = 5
@@ -363,6 +366,7 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
 
     inventory = await list_deposit(acc, fetcher=fetcher)
     result_tables: list[str] = []
+    kinds: dict[str, int] = {}
     if inventory.unavailable_reason:
         # An unlistable directory is a discovery failure. It says nothing about whether the record
         # exists, which is why that question was answered from the series matrix instead.
@@ -381,6 +385,9 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         # change_7.5 section 1.5: the authors' own result tables are processed results the paper
         # published, and were never counted as such.
         result_tables = [e.filename for e in inventory.entries if e.classification in ("de_table", "da_table")]
+        # change_7.5 section 2.1: a bounded digest of what the deposit holds, by kind of file.
+        for entry in inventory.entries:
+            kinds[entry.classification] = kinds.get(entry.classification, 0) + 1
 
     return _deposit(
         acc,
@@ -396,6 +403,14 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         registered_samples=len(manifest.samples) or None,
         failure_reason=failure_reason,
         result_tables=result_tables,
+        listing={
+            "kinds": kinds,
+            "library_strategies": sorted(
+                {str(s.get("library_strategy") or "").strip() for s in manifest.samples} - {""}
+            ),
+            "subseries": list(getattr(manifest, "subseries", []) or []),
+            "sample_titles": [str(s.get("title") or "") for s in manifest.samples[:_MAX_DIGEST_SAMPLES]],
+        },
     )
 
 

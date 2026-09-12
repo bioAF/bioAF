@@ -34,6 +34,7 @@
       "unresolved": []
     },
     "contrasts": [],
+    "experiments": [],
     "facts": {
       "attachments": {
         "failed": 0,
@@ -64,11 +65,14 @@
       "reason": null,
       "status": null
     },
+    "resources": [],
     "resume": {
       "label": "Review and resume",
       "requirements": []
     },
     "retrieval_failures": [],
+    "selection": null,
+    "selection_history": [],
     "summary": [
       "Reproduction was attempted and reached no verdict.",
       "Whether raw data are deposited could not be established.",
@@ -78,6 +82,17 @@
     "version": 1
   },
   "enums": {
+    "claim_check": {
+      "author_results": "Consistency with the authors' results",
+      "processed_reanalysis": "Reanalysis of processed data",
+      "qc_metric": "QC metric comparison",
+      "raw_reanalysis": "Reanalysis from raw reads"
+    },
+    "claim_check_status": {
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "unresolved": "Unresolved"
+    },
     "headline": {
       "could_not_reproduce": "Could Not Reproduce",
       "reproduction_not_attempted": "Reproduction not attempted"
@@ -107,6 +122,25 @@
       "unsupported_acquisition": "Acquisition not supported",
       "unsupported_processing": "bioAF cannot yet analyze this kind of file"
     },
+    "reference_status": {
+      "unavailable": "Unavailable",
+      "unresolved": "Unresolved",
+      "unstated": "Not stated",
+      "usable": "Usable"
+    },
+    "resource_ability": {
+      "analyzable": "Analyzable by bioAF",
+      "retrievable": "Retrievable by bioAF"
+    },
+    "resource_type": {
+      "binding_assay": "Binding assay data",
+      "code": "Code",
+      "other_data": "Other data",
+      "proteomics_data": "Proteomics data",
+      "sequencing_data": "Sequencing data",
+      "structure": "Protein structure",
+      "supplementary_file": "Supplementary file"
+    },
     "retrieval_outcome": {
       "forbidden": "the server refused the request",
       "not_found": "the server answered that it was not found",
@@ -128,6 +162,10 @@
       "sample_metadata": "Sample metadata",
       "supporting_input": "Supporting input",
       "unknown": "Retrieved; role not established"
+    },
+    "selection": {
+      "selected": "Selected for this run",
+      "unassessed": "Not assessed in this run"
     },
     "tristate": {
       "no": "No",
@@ -356,9 +394,11 @@
     "claims": [
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_samples",
           "confidence": 0.9,
@@ -372,6 +412,7 @@
         },
         "population": "whole embryo and TE biopsy",
         "provisional": true,
+        "selection": null,
         "stage": "post-QC",
         "unit": "RNA-seq samples (35 WE + 19 TE)",
         "unresolved_reason": null,
@@ -379,9 +420,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_sequences",
           "confidence": 0.7,
@@ -395,6 +438,7 @@
         },
         "population": "all RNA-seq libraries",
         "provisional": true,
+        "selection": null,
         "stage": "as collected",
         "unit": "reads per library (average)",
         "unresolved_reason": null,
@@ -402,9 +446,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_genes_detected",
           "confidence": 0.85,
@@ -418,6 +464,7 @@
         },
         "population": "whole embryo",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)",
         "unresolved_reason": null,
@@ -425,9 +472,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "TE samples expressed 6086 transcripts",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_genes_detected",
           "confidence": 0.85,
@@ -441,6 +490,7 @@
         },
         "population": "TE biopsy",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)",
         "unresolved_reason": null,
@@ -448,9 +498,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -464,6 +516,7 @@
         },
         "population": "whole embryo XX vs XY",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -471,9 +524,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -487,6 +542,7 @@
         },
         "population": "whole embryo aneuploid vs euploid",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -494,9 +550,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -510,6 +568,7 @@
         },
         "population": "whole embryo AA vs CC morphology",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -517,9 +576,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -533,6 +594,7 @@
         },
         "population": "whole embryo high vs low morphokinetic quality",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -637,6 +699,7 @@
         "status": "unassessed"
       }
     ],
+    "experiments": [],
     "facts": {
       "attachments": {
         "failed": 4,
@@ -700,6 +763,7 @@
       "reason": "r",
       "status": "performed"
     },
+    "resources": [],
     "resume": {
       "label": "Review and resume",
       "requirements": [
@@ -728,6 +792,8 @@
         }
       }
     ],
+    "selection": null,
+    "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
       "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",
@@ -800,6 +866,7 @@
       "unresolved": []
     },
     "contrasts": [],
+    "experiments": [],
     "facts": {
       "attachments": {
         "failed": 0,
@@ -843,11 +910,14 @@
       "reason": null,
       "status": null
     },
+    "resources": [],
     "resume": {
       "label": "Review and resume",
       "requirements": []
     },
     "retrieval_failures": [],
+    "selection": null,
+    "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
       "Whether raw data are deposited could not be established.",
@@ -918,6 +988,7 @@
       "unresolved": []
     },
     "contrasts": [],
+    "experiments": [],
     "facts": {
       "attachments": {
         "failed": 0,
@@ -959,13 +1030,411 @@
       "reason": null,
       "status": null
     },
+    "resources": [],
     "resume": {
       "label": "Review and resume",
       "requirements": []
     },
     "retrieval_failures": [],
+    "selection": null,
+    "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "stage2_selection": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 3
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "a value for one sample is not a mean over all of them",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "contrast": null,
+        "cutoff": null,
+        "description": "we called 8000 peaks",
+        "experiment": {
+          "assay": "ChIP-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "no_supported_metric"
+        },
+        "population": null,
+        "provisional": true,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; QC metric comparison: a value for one sample",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 8000
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "the authors published t.txt.gz",
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the paper states GENCODE M23",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "257 genes were up",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e2"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "no_supported_metric"
+        },
+        "population": null,
+        "provisional": true,
+        "selection": {
+          "check_label": "Reanalysis of processed data",
+          "label": "Selected for this run",
+          "reason": "the authors' table can be compared",
+          "status": "selected"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 257
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "the authors published t.txt.gz",
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the paper states GENCODE M23",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "524 genes were down",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e2"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "no_supported_metric"
+        },
+        "population": null,
+        "provisional": true,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 524
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "P < 0.01",
+        "name": "KO vs WT",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [
+      {
+        "assay": "ChIP-seq",
+        "id": "e1",
+        "reference": [
+          {
+            "established_from": null,
+            "part": "assembly",
+            "reason": "bioAF cannot supply mm9",
+            "resolved": null,
+            "stated": "mm9",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": "the paper does not state its annotation",
+            "resolved": null,
+            "stated": null,
+            "status": "unstated",
+            "status_label": "Not stated"
+          }
+        ],
+        "status": null,
+        "workflow": "nf-core/chipseq"
+      },
+      {
+        "assay": "bulk RNA-seq",
+        "id": "e2",
+        "reference": [
+          {
+            "established_from": "annotation release",
+            "part": "assembly",
+            "reason": null,
+            "resolved": "GRCm38",
+            "stated": null,
+            "status": "usable",
+            "status_label": "Usable"
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": "bioAF supplies Ensembl 102",
+            "resolved": null,
+            "stated": "GENCODE M23",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "status": null,
+        "workflow": "nf-core/rnaseq"
+      }
+    ],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "in_progress",
+      "label": null
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [
+      {
+        "analyzable": "yes",
+        "analyzable_label": "Yes",
+        "archive": "geo",
+        "found_by": [
+          "text_scan",
+          "model"
+        ],
+        "id": "r1",
+        "identifier": "GSE555001",
+        "limitation": null,
+        "linked_by": "paper",
+        "reported_experiment_ids": [
+          "e2"
+        ],
+        "retrievable": "yes",
+        "retrievable_label": "Yes",
+        "role": null,
+        "stated_in": null,
+        "type": "sequencing_data",
+        "type_label": "Sequencing data"
+      },
+      {
+        "analyzable": "no",
+        "analyzable_label": "No",
+        "archive": "pride",
+        "found_by": [
+          "model"
+        ],
+        "id": "r2",
+        "identifier": "PXD099001",
+        "limitation": "bioAF has no PRIDE adapter, and no check reads proteomics data",
+        "linked_by": null,
+        "reported_experiment_ids": [],
+        "retrievable": "no",
+        "retrievable_label": "No",
+        "role": "the proteome",
+        "stated_in": null,
+        "type": "proteomics_data",
+        "type_label": "Proteomics data"
+      }
+    ],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "selection": {
+      "check": "processed_reanalysis",
+      "check_label": "Reanalysis of processed data",
+      "claim_index": 1,
+      "confidence": 0.8,
+      "decided_by": "model",
+      "experiment_id": "e2",
+      "reason": "the authors' table can be compared",
+      "revision": 2,
+      "superseded_revisions": 1,
+      "workflow": "nf-core/rnaseq"
+    },
+    "selection_history": [
+      {
+        "artifacts": [
+          "level3"
+        ],
+        "at": "2026-09-12T00:00:00+00:00",
+        "invalidated_by": [
+          "claim"
+        ],
+        "label": "Computed for an earlier selection (revision 1)",
+        "revision": 1
+      }
+    ],
+    "summary": [
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
@@ -1225,9 +1694,11 @@
     "claims": [
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_samples",
           "confidence": 0.9,
@@ -1241,6 +1712,7 @@
         },
         "population": "whole embryo and TE biopsy",
         "provisional": true,
+        "selection": null,
         "stage": "post-QC",
         "unit": "RNA-seq samples (35 WE + 19 TE)",
         "unresolved_reason": null,
@@ -1248,9 +1720,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_sequences",
           "confidence": 0.7,
@@ -1264,6 +1738,7 @@
         },
         "population": "all RNA-seq libraries",
         "provisional": true,
+        "selection": null,
         "stage": "as collected",
         "unit": "reads per library (average)",
         "unresolved_reason": null,
@@ -1271,9 +1746,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_genes_detected",
           "confidence": 0.85,
@@ -1287,6 +1764,7 @@
         },
         "population": "whole embryo",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)",
         "unresolved_reason": null,
@@ -1294,9 +1772,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": null,
         "description": "TE samples expressed 6086 transcripts",
+        "experiment": null,
         "mapping": {
           "bound_key": "total_genes_detected",
           "confidence": 0.85,
@@ -1310,6 +1790,7 @@
         },
         "population": "TE biopsy",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)",
         "unresolved_reason": null,
@@ -1317,9 +1798,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -1333,6 +1816,7 @@
         },
         "population": "whole embryo XX vs XY",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -1340,9 +1824,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -1356,6 +1842,7 @@
         },
         "population": "whole embryo aneuploid vs euploid",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -1363,9 +1850,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -1379,6 +1868,7 @@
         },
         "population": "whole embryo AA vs CC morphology",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -1386,9 +1876,11 @@
       },
       {
         "basis": "paper_text",
+        "checks": [],
         "contrast": null,
         "cutoff": "adjusted P 0.05",
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+        "experiment": null,
         "mapping": {
           "bound_key": null,
           "confidence": 0.97,
@@ -1402,6 +1894,7 @@
         },
         "population": "whole embryo high vs low morphokinetic quality",
         "provisional": true,
+        "selection": null,
         "stage": "as analysed",
         "unit": "genes",
         "unresolved_reason": null,
@@ -1501,6 +1994,7 @@
         "status": "unassessed"
       }
     ],
+    "experiments": [],
     "facts": {
       "attachments": {
         "failed": 4,
@@ -1544,6 +2038,7 @@
       "reason": "no attachments were inspected",
       "status": "not_performed"
     },
+    "resources": [],
     "resume": {
       "label": "Review and resume",
       "requirements": [
@@ -1565,6 +2060,8 @@
         }
       }
     ],
+    "selection": null,
+    "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
       "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",

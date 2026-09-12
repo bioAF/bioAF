@@ -252,3 +252,36 @@ def test_the_extraction_prompt_asks_for_each_experiment_separately():
     system, _ = ext.build_extraction_prompt("")
     assert '"reported_experiments"' in system
     assert "one assay" in system.lower()
+
+
+def test_a_compound_method_read_as_one_experiment_says_the_workflow_came_from_the_method():
+    """A reading that listed no experiments is the pre-stage-2 shape: its one experiment is the paper's
+    method, mapped as before, and the blocker says so rather than claiming it is not analyzed."""
+    from app.services.validation_extraction_service import _reported_experiments
+
+    parsed = {"claims": [{"claim_text": "x"}], "reported_experiments": []}
+    reading = _reported_experiments(parsed, {"assay": "ChIP-seq and bulk RNA-seq"}, [])
+    [blocker] = reading.blockers
+    assert "did not separate" in blocker
+    assert "not analyzed" not in blocker
+
+
+@pytest.mark.asyncio
+async def test_an_extracted_experiment_naming_two_assays_gets_no_workflow(session, admin_user, monkeypatch):
+    extraction = {
+        **_EXTRACTION,
+        "reported_experiments": [
+            {"id": "e1", "assay": "ChIP-seq and bulk RNA-seq", "claim_indices": [0], "contrast_indices": []},
+            {"id": "e2", "assay": "bulk RNA-seq", "claim_indices": [1], "contrast_indices": [0]},
+        ],
+    }
+    _patch(monkeypatch, extraction)
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await session.flush()
+    plan = await ext.ValidationExtractionService.extract(
+        session, study, "text", admin_user.organization_id, admin_user.id
+    )
+    by_id = {e["id"]: e for e in plan.reported_experiments_json}
+    assert by_id["e1"]["workflow"] is None
+    assert by_id["e2"]["workflow"] == "nf-core/rnaseq"
+    assert plan.pipeline_key == "nf-core/rnaseq"

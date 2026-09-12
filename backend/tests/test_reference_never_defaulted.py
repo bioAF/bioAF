@@ -307,3 +307,44 @@ def test_a_run_that_aligned_reads_without_a_recognised_reference_still_names_it(
 def test_reference_unavailable_is_its_own_limitation_and_never_an_absence():
     assert LIMITATION_LABELS["reference_unavailable"] == "Stated reference not available to bioAF"
     assert classification_for([{"kind": "reference_unavailable"}]) == "inconclusive"
+
+
+# ---- change_7.5 section 2.3: the selected experiment's own reference decides ----
+
+
+@pytest.mark.asyncio
+async def test_a_raw_reads_run_is_refused_on_the_selected_experiments_annotation(session, admin_user, monkeypatch):
+    monkeypatch.setattr(PipelineRunService, "launch_run", _NoLaunch())
+    # The paper-level reading names a usable assembly; the experiment the run is for states GENCODE M23,
+    # which bioAF does not supply for GRCm38 and never swaps for Ensembl 102.
+    study = await _raw_reads_study(
+        session, admin_user, state="acquiring_data", reference_build="GRCm38", reference_genome="GRCm38"
+    )
+    plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    plan.reported_experiments_json = [
+        {
+            "id": "e2",
+            "assay": "bulk RNA-seq",
+            "status": "extracted",
+            "workflow": "nf-core/rnaseq",
+            "reference": {
+                "assembly": {"stated": "GRCm38", "status": "usable", "resolved": "GRCm38"},
+                "annotation": {
+                    "stated": "GENCODE M23",
+                    "status": "unavailable",
+                    "reason": "the paper states GENCODE M23; bioAF supplies Ensembl 102 for GRCm38, and never swaps one release for another",
+                },
+            },
+        }
+    ]
+    plan.analysis_selection_json = {"current": {"reported_experiment_id": "e2", "check": "raw_reanalysis"}}
+    await session.flush()
+
+    await ValidationDriverService._handle_acquiring_data(session, study)
+
+    assert study.state == "classified"
+    [limitation] = [
+        lim for lim in study.evidence_json["completion"]["limitations"] if lim["kind"] == "reference_unavailable"
+    ]
+    assert "GENCODE M23" in limitation["detail"]
+    assert limitation["resource"] == "GENCODE M23"

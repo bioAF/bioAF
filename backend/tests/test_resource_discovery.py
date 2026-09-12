@@ -388,3 +388,52 @@ async def test_a_subset_query_says_it_was_a_subset():
 
     deposit = await describe_geo_deposit("GSE555001", fetcher=_fetch)
     assert "only the first sample's experiment" in deposit["evidence_by_key"]["raw_data"]
+
+
+@pytest.mark.asyncio
+async def test_discovery_runs_before_the_plan_so_its_inventory_holds_what_was_found(session, admin_user, monkeypatch):
+    """change_7.5 section 2.6: the checks and the selection read the deposits, so discovery runs inside
+    the read, before the plan is written, and runs once."""
+    from types import SimpleNamespace
+
+    from app.services import validation_extraction_service as ext
+    from app.services.validation_driver_service import ValidationDriverService
+    from app.services.validation_study_service import ValidationStudyService
+
+    extraction = (
+        '```json\n{"accessions": ["GSE555001"], "method": {"assay": "bulk RNA-seq", "reference_build": "GRCh38"}, '
+        '"claims": [], "data_availability": "deposited", "blockers": []}\n```'
+    )
+
+    async def fake_get_active(sess, org_id):
+        return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
+
+    class _C:
+        async def submit(self, prompt, payload, model, api_key, attachments=None):
+            return extraction
+
+    monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)
+    monkeypatch.setattr(ext, "get_client", lambda p: _C())
+    geo = _Geo()
+    monkeypatch.setattr("app.services.literature.accession_manifest_service._http_fetch_text", geo)
+    monkeypatch.setattr("app.services.literature.deposit_inventory_service._http_fetch_text", geo)
+    calls = []
+    real = ValidationDriverService._discover_capabilities
+
+    async def _counted(*args, **kwargs):
+        calls.append(1)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(ValidationDriverService, "_discover_capabilities", staticmethod(_counted))
+
+    study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
+    await ValidationDriverService.read_and_plan(
+        session, study, "Data are in GEO (GSE555001) and PRIDE (PXD099001).", admin_user.organization_id, admin_user.id
+    )
+    from app.services.reproduction_plan_service import ReproductionPlanService
+
+    plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    rows = {r["identifier"]: r for r in plan.resources_json}
+    assert rows["PXD099001"]["looked_up"] is True
+    assert rows["GSE555001"]["looked_up"] is True
+    assert len(calls) == 1

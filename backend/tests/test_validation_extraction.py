@@ -45,6 +45,15 @@ def _fake_client(response):
     return _C()
 
 
+# change_7.5 section 2.4: a binding lands only when the claim's population, aggregation and denominator
+# match what the metric computes. These are the facts an alignment rate over every sample states.
+_MAPPED_FACTS = {
+    "population": {"value": "every sample", "scope": "all_samples", "quote": "across all samples"},
+    "aggregation": {"value": "per_sample", "quote": "on average"},
+    "denominator": {"value": "trimmed_reads", "quote": "of reads"},
+}
+
+
 def _fake_bind(*rows):
     """Stand in for the binding call with a fixed set of decisions, one per claim index."""
 
@@ -1003,7 +1012,10 @@ async def test_bind_claims_on_no_claims_makes_no_call():
 @pytest.mark.asyncio
 async def test_a_target_records_who_bound_it_and_why(session, admin_user, monkeypatch):
     """An AI decision that cannot be attributed is a defect. The target carries what was chosen, why,
-    how sure the model was, and which model made the call."""
+    how sure the model was, and which model made the call.
+
+    change_7.5 section 2.4 changed this test (flagged): the decision now states its population,
+    aggregation and denominator, because a binding lands only when they match the metric."""
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.flush()
     _patch_llm(monkeypatch, _GOOD)
@@ -1016,6 +1028,7 @@ async def test_a_target_records_who_bound_it_and_why(session, admin_user, monkey
                 "bound_key": "reads_mapped_genome",
                 "reason": "the paper's alignment rate",
                 "confidence": 0.92,
+                "facts": _MAPPED_FACTS,
             },
             {
                 "claim_index": 1,
@@ -1105,6 +1118,7 @@ def _decision(index, key=None, reason="r", confidence=0.9, declined=None):
         "reason": reason,
         "confidence": confidence,
         "declined": (key is None) if declined is None else declined,
+        "facts": _MAPPED_FACTS,
     }
 
 
@@ -1218,7 +1232,10 @@ async def test_a_plan_that_bound_something_is_not_rebound(session, admin_user, m
 @pytest.mark.asyncio
 async def test_a_second_pass_that_binds_is_the_one_recorded(session, admin_user, monkeypatch):
     """The retry exists to be believed when it succeeds: its answer is what the plan carries, and no
-    binding-failure blocker is recorded."""
+    binding-failure blocker is recorded.
+
+    change_7.5 section 2.4 changed this test (flagged): `_decision` now carries the facts a binding
+    needs to land."""
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.flush()
     _patch_llm(monkeypatch, _GOOD)

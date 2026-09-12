@@ -78,6 +78,9 @@ class ManifestResult:
     # The series' SRA study or BioProject, from ``!Series_relation``. change_7.5 section 1.5: raw-read
     # availability is asked of it, so every run of the series is counted.
     series_sra: str | None = None
+    # change_7.5 section 2.1: the SubSeries a SuperSeries groups (``SuperSeries of: GSE...``), so a
+    # deposit holding several experiments can be scoped to the one a claim was measured in.
+    subseries: list[str] = field(default_factory=list)
 
 
 def geo_series_matrix_url(accession: str) -> str | None:
@@ -241,6 +244,22 @@ def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
     return samples, series_sra
 
 
+_SUBSERIES_RE = re.compile(r"SuperSeries of:\s*(GSE\d+)", re.IGNORECASE)
+
+
+def parse_subseries(text: str) -> list[str]:
+    """The SubSeries a GEO SuperSeries groups, from its ``!Series_relation`` lines (pure)."""
+    found: list[str] = []
+    for raw in (text or "").splitlines():
+        if not raw.startswith("!Series_relation\t"):
+            continue
+        for value in _series_matrix_values(raw.rstrip("\r\n")):
+            match = _SUBSERIES_RE.search(value)
+            if match and match.group(1).upper() not in found:
+                found.append(match.group(1).upper())
+    return found
+
+
 def dominant_library_strategy(samples: list[dict]) -> str | None:
     """The one ``library_strategy`` an accession's samples agree on, or None.
 
@@ -355,10 +374,12 @@ class AccessionManifestService:
 
         samples: list[dict] = []
         series_sra: str | None = None
+        subseries: list[str] = []
         for text in texts:
             parsed, sra = parse_series_matrix(text)
             samples.extend(parsed)
             series_sra = series_sra or sra
+            subseries.extend(s for s in parse_subseries(text) if s not in subseries)
         if not samples:
             return ManifestResult(unavailable_reason=f"GEO series matrix for {accession} listed no samples.")
 
@@ -393,7 +414,7 @@ class AccessionManifestService:
             if missing
             else None
         )
-        return ManifestResult(samples=samples, unavailable_reason=partial, series_sra=series_sra)
+        return ManifestResult(samples=samples, unavailable_reason=partial, series_sra=series_sra, subseries=subseries)
 
     @staticmethod
     async def _fetch_platform_matrices(accession: str, fetch: Fetcher) -> tuple[list[str] | None, int, str | None]:

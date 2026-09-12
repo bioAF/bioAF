@@ -203,6 +203,48 @@ def _named_accessions(
     return named
 
 
+def _plan_experiment(plan) -> dict | None:
+    """change_7.5 section 2.6: the extracted experiment this plan's run is for (the selected one, else
+    the one whose workflow the plan runs), or None for a legacy plan or an inferred single experiment."""
+    if plan is None:
+        return None
+    from app.services.reported_experiments import experiment_by_id
+
+    current = (getattr(plan, "analysis_selection_json", None) or {}).get("current") or {}
+    experiment = experiment_by_id(plan, current.get("reported_experiment_id")) if current else None
+    if experiment is None:
+        experiment = next(
+            (
+                e
+                for e in getattr(plan, "reported_experiments_json", None) or []
+                if isinstance(e, dict) and e.get("workflow") == plan.pipeline_key
+            ),
+            None,
+        )
+    if not experiment or experiment.get("status") != "extracted":
+        return None
+    if not isinstance((experiment.get("reference") or {}).get("assembly"), dict):
+        return None
+    return experiment
+
+
+async def _selected_claim_text(session: AsyncSession, plan) -> str | None:
+    """The paper's own sentence for the selected claim, or None."""
+    from app.models.comparison_target import ComparisonTarget
+
+    index = ((getattr(plan, "analysis_selection_json", None) or {}).get("current") or {}).get("claim_index")
+    if not isinstance(index, int) or plan is None:
+        return None
+    rows = (
+        await session.execute(
+            select(ComparisonTarget.claim_text)
+            .where(ComparisonTarget.reproduction_plan_id == plan.id)
+            .order_by(ComparisonTarget.id)
+        )
+    ).scalars().all()
+    return rows[index] if 0 <= index < len(rows) else None
+
+
 def _driver_owns(study: "ValidationStudy") -> bool:
     """Whether this loop may advance the study on this tick.
 
@@ -217,7 +259,7 @@ def _driver_owns(study: "ValidationStudy") -> bool:
 
 # The holds a person resolves. The driver owns these states but will not move the study on until
 # somebody acts, so the page must not read them as bioAF working.
-_PERSON_HOLDS = ("route_blocked", "awaiting_choice", "awaiting_adoption")
+_PERSON_HOLDS = ("route_blocked", "awaiting_choice", "awaiting_adoption", "awaiting_renewed_selection")
 
 
 def is_advancing(study: "ValidationStudy") -> bool:
@@ -518,6 +560,7 @@ class ValidationDriverService:
         # there means "nobody looked" rather than "the paper published none".
         supplements: list[dict] = []
         pmcid = ""
+        sections = None
         if not full_text:
             result = await FullTextFetchService.fetch(doi=study.source_doi)
             if result is None:
@@ -529,6 +572,8 @@ class ValidationDriverService:
             supplements = result.supplements
             # Kept so the supplement bundle can be fetched later without resolving the DOI again.
             pmcid = result.external_id or ""
+            # change_7.5 section 2.4: the methods and captions, addressable, for binding. Not persisted.
+            sections = getattr(result, "sections", None)
 
         # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
         # stage is a pass-through.
@@ -536,20 +581,16 @@ class ValidationDriverService:
         study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
         record_stage(study, "reading")
 
-        plan = await ValidationExtractionService.extract(session, study, full_text, org_id, user_id)
+        # change_7.5 sections 1.5 and 2.6: what the text names and what the article attaches are on the
+        # record BEFORE the extraction, because discovery, the resource inventory and the checks all
+        # read them before any claim is selected.
+        from app.services.resource_identifiers import scan_identifiers
 
         evidence = dict(study.evidence_json or {})
         evidence["supplements"] = supplements
         if pmcid:
             evidence["pmcid"] = pmcid
-        # change_7.5 section 1.5: what the text names, found deterministically while it is in hand.
-        from app.services.resource_identifiers import scan_identifiers
-
         evidence["scanned_identifiers"] = scan_identifiers(full_text)
-        # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
-        # of the paper reached reconciliation before, so its own exclusion statement could never
-        # correct a count, and a failed download left nothing at all to reconcile against.
-        evidence["paper_passages"] = await ValidationDriverService._paper_passages(session, plan, full_text)
         study.evidence_json = evidence
         await session.flush()
 
@@ -557,7 +598,23 @@ class ValidationDriverService:
         # modal offers what is available rather than three equal-looking options. Runs here rather
         # than in the driver because the gate is pre-approval: answers produced after approval
         # cannot inform the decision to approve. Two HTTP calls, no model, no compute.
-        await ValidationDriverService._discover_capabilities(session, study, plan, has_full_text=bool(full_text))
+        # change_7.5 section 2.6: inside the extraction, before the selection, which reads it.
+        async def _discover(plan_like):
+            return await ValidationDriverService._discover_capabilities(
+                session, study, plan_like, has_full_text=bool(full_text)
+            )
+
+        plan = await ValidationExtractionService.extract(
+            session, study, full_text, org_id, user_id, sections=sections, discover=_discover
+        )
+
+        evidence = dict(study.evidence_json or {})
+        # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
+        # of the paper reached reconciliation before, so its own exclusion statement could never
+        # correct a count, and a failed download left nothing at all to reconcile against.
+        evidence["paper_passages"] = await ValidationDriverService._paper_passages(session, plan, full_text)
+        study.evidence_json = evidence
+        await session.flush()
 
         # plan_7 step 14: the cheap checks, beside step 13 and for the same reason. The gate is
         # pre-approval, so an answer produced after approval cannot inform the decision to approve.
@@ -826,8 +883,22 @@ class ValidationDriverService:
         # The steps that take this tick's claim: the read races two writers, and the two launches
         # dispatch external work that a database fence cannot recall.
         if study.state in ("requested", "acquiring_data", "setup"):
-            return await handler(session, study, claim=claim)
-        return await handler(session, study)
+            advanced = await handler(session, study, claim=claim)
+        else:
+            advanced = await handler(session, study)
+        # change_7.5 section 2.6: what this tick computed records the selection revision it was
+        # computed for, and anything computed for an earlier revision leaves for history.
+        await ValidationDriverService._sync_revisions(session, study)
+        return advanced
+
+    @staticmethod
+    async def _sync_revisions(session: AsyncSession, study: ValidationStudy) -> None:
+        from app.services.validation_revisions import sync_revisions
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        if plan is not None and (plan.analysis_selection_json or {}).get("current"):
+            sync_revisions(study, plan)
+            await session.flush()
 
     @staticmethod
     async def _handle_requested(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
@@ -857,6 +928,8 @@ class ValidationDriverService:
         evidence = dict(study.evidence_json or {})
         if evidence.get("route_blocked"):
             return False  # already held and explained; re-deciding every 30s would just churn
+        if evidence.get("awaiting_renewed_selection"):
+            return False  # change_7.5 section 2.2: a person renews the selection at the gate first
 
         decision = await ValidationStudyService.route_decision_for(session, study, route)
         if decision.authorizes_execution:
@@ -1463,6 +1536,9 @@ class ValidationDriverService:
 
         claim = (plan.finding_claim_json if plan else None) or {}
         issues: list[dict] = []
+        # change_7.5 section 2.6: told the selected claim's experiment and the claim, not a paper-level
+        # mapping. A plan with no extracted experiment keeps the old sentence.
+        experiment = _plan_experiment(plan)
         chosen = await select_deposit(
             entries,
             pipeline_key=plan.pipeline_key if plan else None,
@@ -1471,6 +1547,8 @@ class ValidationDriverService:
             model=cfg.model,
             api_key=cfg.api_key,
             on_issue=issues.append,
+            experiment=experiment,
+            claim=await _selected_claim_text(session, plan) if experiment else None,
         )
         await ValidationIssueService.record(session, study, issues)
         if chosen is None:
@@ -1775,6 +1853,21 @@ class ValidationDriverService:
 
         if plan is None:
             plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # change_7.5 section 2.3: the experiment the run is for decides, with its own two parts. A plan
+        # read before experiments existed, or whose one experiment was inferred from the paper's
+        # method, is decided by the paper-level reading as in stage 1.
+        experiment = _plan_experiment(plan)
+        if experiment is not None:
+            from app.services.validation_reference import experiment_reference_limitation
+
+            limitation = experiment_reference_limitation(
+                experiment, pipeline_key=plan.pipeline_key, operation=study.intended_route or "pipeline"
+            )
+            if limitation is None:
+                return False
+            logger.info("validation study %d: refused a reference-dependent run: %s", study.id, limitation["detail"])
+            await conclude_without_execution(session, study, limitation["detail"], limitation=limitation)
+            return True
         # A plan written before `reference_build` existed carries only the launch token.
         stated = (plan.reference_build or plan.reference_genome) if plan else None
         reference = paper_reference(stated, plan.pipeline_key if plan else None)

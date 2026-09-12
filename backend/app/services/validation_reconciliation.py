@@ -194,7 +194,14 @@ async def reconcile(
         logger.warning("reconciliation failed for study %s: %s", study.id, exc)
         return not_performed("bioAF hit an internal error while reconciling the plan", error_class=type(exc).__name__)
 
-    revisions = _apply(targets, decisions)
+    from app.services.reported_experiments import experiment_by_id
+
+    revisions = _apply(
+        targets,
+        decisions,
+        workflow_for=lambda t: (experiment_by_id(plan, t.reported_experiment_id) or {}).get("workflow")
+        or plan.pipeline_key,
+    )
     _mark_cutoff_disagreements(targets, on_issue)
     if decisions and all(d.get("bound_by") == BINDING_FAILED for d in decisions):
         # The model could not answer. Each claim is marked unresolved by `_apply`; the provisional
@@ -237,12 +244,18 @@ def _mark_cutoff_disagreements(targets: list, on_issue=None) -> None:
                 on_issue(_cutoff_issue(disagreement))
 
 
-def _apply(targets: list, decisions: list[dict]) -> list[dict]:
+def _apply(targets: list, decisions: list[dict], *, workflow_for=None) -> list[dict]:
     """Land each decision on its target, recording what changed and why.
 
     A decision that says nothing about a field leaves that field alone: reconciliation refines the
     provisional reading, it does not blank it.
+
+    change_7.5 section 2.4: the binding writes through the same merge and match as extraction. A
+    stated population, aggregation or denominator is never overwritten by `not_stated`, and a key binds
+    only while the merged facts match what the metric computes on the claim's workflow.
     """
+    from app.services.validation_binding import settle_binding
+
     revisions: list[dict] = []
     by_index = {d.get("claim_index"): d for d in decisions if isinstance(d, dict)}
 
@@ -276,6 +289,22 @@ def _apply(targets: list, decisions: list[dict]) -> list[dict]:
             target.binding_reason = decision["reason"]
         if decision.get("confidence") is not None:
             target.binding_confidence = decision["confidence"]
+
+        if not bound_by and decision.get("facts") is not None:
+            settled = settle_binding(
+                target.bound_key,
+                decision["facts"],
+                workflow=workflow_for(target) if workflow_for else None,
+                earlier=getattr(target, "binding_facts", None),
+            )
+            if settled["bound_key"] != target.bound_key:
+                target.bound_key = settled["bound_key"]
+                target.bound_by = "model"
+                changed = True
+            if settled["reason"]:
+                target.binding_reason = f"not compared: {settled['reason']} ({decision.get('reason') or 'reconciled'})"
+            target.binding_facts = settled["binding_facts"]
+            target.aggregation = settled["aggregation"]
 
         if changed:
             after = {field: getattr(target, field, None) for field in _CONTEXT_FIELDS}

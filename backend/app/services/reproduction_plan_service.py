@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.models.comparison_target import ComparisonTarget
 from app.models.reproduction_plan import ReproductionPlan
 from app.models.validation_study import ValidationStudy
+from app.services.validation_binding import AGGREGATIONS
 from app.services.validation_measurement_basis import basis_of
 from app.services.audit_service import log_action
 from app.services.pipeline_mapper import declared_route_version, deposit_conflict, is_library_strategy_conflict
@@ -148,6 +149,76 @@ def _carry_stated_cutoffs(saved: dict, original: dict) -> None:
         chosen.append({"kind": "abs_log2fc", "operator": ">=", "value": float(posted["log2fc"])})
     saved["cutoffs"] = chosen
     saved["cutoffs_decided_by"] = "human"
+
+
+async def _revise_selection_for_contrast(session: AsyncSession, study, plan, contrast_index: int) -> None:
+    """A person's contrast at the gate as a revision of ``plan.analysis_selection_json``: the claim on
+    that contrast (the one a candidate names first), its check, its experiment and that experiment's
+    workflow. What depended on the earlier revision is invalidated."""
+    from app.services.reported_experiments import experiment_by_id
+    from app.services.validation_revisions import current_revision, invalidate, revise
+
+    from app.services.reported_experiments import legacy_needs_renewed_selection
+
+    record = plan.analysis_selection_json
+    if legacy_needs_renewed_selection(plan):
+        # A plan read before experiments existed: the person's contrast IS the renewed selection.
+        plan.analysis_selection_json, _ = revise(
+            record,
+            {"contrast_index": contrast_index, "workflow": plan.pipeline_key},
+            decided_by="human",
+            reason="renewed at the C1 gate for a plan read before experiments existed",
+        )
+        evidence = dict(study.evidence_json or {})
+        evidence.pop("awaiting_renewed_selection", None)
+        study.evidence_json = evidence
+        return
+    if not record or not record.get("current"):
+        return
+    rows = (
+        await session.execute(
+            select(ComparisonTarget)
+            .where(ComparisonTarget.reproduction_plan_id == plan.id)
+            .order_by(ComparisonTarget.id)
+        )
+    ).scalars().all()
+    on_contrast = [i for i, t in enumerate(rows) if t.contrast_index == contrast_index]
+    if not on_contrast:
+        return
+    candidates = [c for c in record.get("candidates") or [] if c.get("claim_index") in on_contrast]
+    current = record["current"]
+    claim_index = candidates[0]["claim_index"] if candidates else on_contrast[0]
+    checks = [c["check"] for c in candidates if c.get("claim_index") == claim_index]
+    check = current.get("check") if current.get("check") in checks else (checks[0] if checks else current.get("check"))
+    experiment = experiment_by_id(plan, rows[claim_index].reported_experiment_id) or {}
+    workflow = experiment.get("workflow") or plan.pipeline_key
+    before = current_revision(plan)
+    revised, changed = revise(
+        record,
+        {
+            "claim_index": claim_index,
+            "contrast_index": contrast_index,
+            "check": check,
+            "reported_experiment_id": experiment.get("id") or current.get("reported_experiment_id"),
+            "workflow": workflow,
+        },
+        decided_by="human",
+        reason="chosen at the C1 gate",
+    )
+    if not changed:
+        return
+    revised["unassessed"] = [
+        u for u in revised.get("unassessed") or [] if u.get("claim_index") != claim_index
+    ] + (
+        [{"claim_index": current.get("claim_index"), "reason": "not selected for this run; a person chose another claim at the gate"}]
+        if current.get("claim_index") != claim_index
+        else []
+    )
+    plan.analysis_selection_json = revised
+    if workflow and workflow != plan.pipeline_key:
+        plan.pipeline_key = workflow
+        plan.pipeline_version = experiment.get("workflow_version") or plan.pipeline_version
+    invalidate(study, plan, changed, revision=before)
 
 
 class ReproductionPlanService:
@@ -290,7 +361,8 @@ class ReproductionPlanService:
                 unresolved_reason=t.get("unresolved_reason"),
                 # change_7.5 stage 2: the experiment, the binding's facts and the claim's four checks.
                 reported_experiment_id=_clamp(t.get("reported_experiment_id"), 32),
-                aggregation=_clamp(t.get("aggregation"), 32),
+                # change_7.5 section 2.4: validated on write; a value outside the vocabulary is not one.
+                aggregation=t.get("aggregation") if t.get("aggregation") in AGGREGATIONS else None,
                 binding_facts=t.get("binding_facts") or None,
                 checks=t.get("checks") or None,
             )
@@ -499,6 +571,12 @@ class ReproductionPlanService:
                     ),
                 }
             updated["selected_contrast"] = carried
+            # change_7.5 section 2.6: the contrast a person chose names a claim, and the selection
+            # follows it as a new revision (the gate's contrast chooser is where a claim is chosen).
+            from app.services.reported_experiments import legacy_needs_renewed_selection
+
+            if isinstance(source_index, int) and (not kept or legacy_needs_renewed_selection(plan)):
+                await _revise_selection_for_contrast(session, study, plan, source_index)
         plan.differential_design_json = updated
         await session.flush()
         await log_action(
