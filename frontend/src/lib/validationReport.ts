@@ -84,6 +84,70 @@ export interface ReportClaim {
     reason: string | null;
     decided_by: string;
   };
+  // change_7.5 sections 2.2, 2.5 and 2.6. Empty or null on a plan read before experiments existed.
+  experiment?: { id: string; assay: string | null } | null;
+  checks?: ClaimCheck[];
+  selection?: {
+    status: "selected" | "unassessed";
+    label: string;
+    check_label: string | null;
+    reason: string | null;
+  } | null;
+}
+
+export interface ClaimCheck {
+  key: string;
+  label: string;
+  status: "available" | "unavailable" | "unresolved" | null;
+  status_label: string | null;
+  reason: string | null;
+}
+
+export interface ReportResource {
+  id: string | null;
+  identifier: string | null;
+  type: string | null;
+  type_label: string;
+  archive: string | null;
+  role: string | null;
+  stated_in: string | null;
+  found_by: string[];
+  reported_experiment_ids: string[];
+  linked_by: string | null;
+  retrievable: string | null;
+  retrievable_label: string | null;
+  analyzable: string | null;
+  analyzable_label: string | null;
+  limitation: string | null;
+}
+
+export interface ReportExperiment {
+  id: string | null;
+  assay: string | null;
+  workflow: string | null;
+  status: string | null;
+  reference: {
+    part: "assembly" | "annotation";
+    stated: string | null;
+    resolved: string | null;
+    status: string | null;
+    status_label: string | null;
+    reason: string | null;
+    established_from: string | null;
+  }[];
+}
+
+export interface ReportSelection {
+  revision: number | null;
+  claim_index: number | null;
+  check: string | null;
+  check_label: string | null;
+  workflow: string | null;
+  experiment_id: string | null;
+  decided_by: string | null;
+  reason: string | null;
+  confidence: number | null;
+  superseded_revisions: number;
 }
 
 export interface CompletionFact {
@@ -107,6 +171,11 @@ export interface ReportSummary {
   index_pages: number;
   code_sources: ReportCodeSource[];
   capability_rows: CapabilityRow[];
+  // change_7.5 stage 2. Absent from a report written before it.
+  resources?: ReportResource[];
+  experiments?: ReportExperiment[];
+  selection?: ReportSelection | null;
+  selection_history?: { revision: number | null; artifacts: string[]; invalidated_by: string[]; at: string | null; label: string }[];
   claims: ReportClaim[];
   claim_counts: { total: number; mapped: number; tested: number; label: string };
   blockers: { text: string; kind: string | null; basis: string; provisional: boolean }[];
