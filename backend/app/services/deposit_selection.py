@@ -138,10 +138,19 @@ def unusable_listing(inventory: list[DepositEntry], accession: str) -> tuple[str
 
 
 def build_selection_prompt(
-    inventory: list[DepositEntry], *, pipeline_key: str | None, kind: str | None
+    inventory: list[DepositEntry],
+    *,
+    pipeline_key: str | None,
+    kind: str | None,
+    experiment: dict | None = None,
+    claim: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Return (system, payload) asking which deposited file to reproduce from, or (None, None) when
-    there is nothing to ask."""
+    there is nothing to ask.
+
+    change_7.5 section 2.6: the selection is told the selected claim's experiment and the claim itself.
+    "The paper's assay maps to" was a paper-level mapping, and a two-assay paper's deposit holds files
+    for both; only a plan with no experiments falls back to it."""
     if not inventory:
         return None, None
 
@@ -184,8 +193,16 @@ def build_selection_prompt(
         where = f"sample {e.gsm}" if e.gsm else "series"
         lines.append(f"  {e.filename}\n      classification={e.classification}  {where}  {_size_hint(e.size_bytes)}")
     context = []
-    if pipeline_key:
+    if experiment:
+        context.append(
+            f"The claim being checked was measured in the paper's experiment {experiment.get('id')}: "
+            f"{experiment.get('assay') or 'assay not stated'}"
+            f"{'; this analysis runs ' + pipeline_key if pipeline_key else ''}. Choose that experiment's files."
+        )
+    elif pipeline_key:
         context.append(f"The paper's assay maps to {pipeline_key}.")
+    if claim:
+        context.append(f"The paper's claim: {claim}")
     if kind:
         context.append(f"The finding to reproduce is a '{kind}' finding.")
     payload = (
@@ -281,6 +298,8 @@ async def select_deposit(
     model: str,
     api_key: str | None,
     on_issue=None,
+    experiment: dict | None = None,
+    claim: str | None = None,
 ) -> dict | None:
     """Which deposited file to reproduce from, or None when there is nothing to ask or the ask failed.
 
@@ -292,7 +311,9 @@ async def select_deposit(
     if not selectable(inventory):
         return None
 
-    system, payload = build_selection_prompt(inventory, pipeline_key=pipeline_key, kind=kind)
+    system, payload = build_selection_prompt(
+        inventory, pipeline_key=pipeline_key, kind=kind, experiment=experiment, claim=claim
+    )
     if not system:
         return None
 

@@ -46,6 +46,35 @@ LIMITATION_LABELS = {
 # A missing input the evidence has not established is not a missing input. Worded as what it is.
 _UNESTABLISHED_ABSENCE_LABEL = "Not established"
 
+# change_7.5 section 2.1, pending the owner's sign-off item by item.
+RESOURCE_TYPE_LABELS = {
+    "sequencing_data": "Sequencing data",
+    "proteomics_data": "Proteomics data",
+    "structure": "Protein structure",
+    "binding_assay": "Binding assay data",
+    "code": "Code",
+    "supplementary_file": "Supplementary file",
+    "other_data": "Other data",
+}
+RESOURCE_ABILITY_LABELS = {"retrievable": "Retrievable by bioAF", "analyzable": "Analyzable by bioAF"}
+
+# change_7.5 sections 2.5 and 2.6, pending the owner's sign-off item by item (open question 4).
+CLAIM_CHECK_LABELS = {
+    "qc_metric": "QC metric comparison",
+    "author_results": "Consistency with the authors' results",
+    "processed_reanalysis": "Reanalysis of processed data",
+    "raw_reanalysis": "Reanalysis from raw reads",
+}
+CLAIM_CHECK_STATUS_LABELS = {"available": "Available", "unavailable": "Unavailable", "unresolved": "Unresolved"}
+REFERENCE_STATUS_LABELS = {
+    "usable": "Usable",
+    "unavailable": "Unavailable",
+    "unresolved": "Unresolved",
+    "unstated": "Not stated",
+}
+SELECTED_LABEL = "Selected for this run"
+UNASSESSED_LABEL = "Not assessed in this run"
+
 ROLE_LABELS = {
     "sample_metadata": "Sample metadata",
     "expression_matrix": "Expression matrix",
@@ -129,6 +158,12 @@ def enum_labels() -> dict[str, dict[str, str]]:
     """Every vocabulary a report renders, for the cross-stack contract test."""
     return {
         "limitation_kind": dict(LIMITATION_LABELS),
+        "resource_type": dict(RESOURCE_TYPE_LABELS),
+        "resource_ability": dict(RESOURCE_ABILITY_LABELS),
+        "claim_check": dict(CLAIM_CHECK_LABELS),
+        "claim_check_status": dict(CLAIM_CHECK_STATUS_LABELS),
+        "reference_status": dict(REFERENCE_STATUS_LABELS),
+        "selection": {"selected": SELECTED_LABEL, "unassessed": UNASSESSED_LABEL},
         "role": dict(ROLE_LABELS),
         "retrieval_status": dict(RETRIEVAL_LABELS),
         "retrieval_outcome": dict(RETRIEVAL_OUTCOME_LABELS),
@@ -184,6 +219,10 @@ def summarize(
         "index_pages": index_pages,
         "code_sources": _code_sources(evidence),
         "capability_rows": _capability_rows(evidence),
+        "resources": _resources(plan),
+        "experiments": _experiments(plan),
+        "selection": _selection(plan),
+        "selection_history": _selection_history(evidence),
         "claims": claims,
         "claim_counts": counts,
         "blockers": _blockers(plan, evidence),
@@ -199,6 +238,160 @@ def summarize(
         "comparisons": _comparisons(attempt, counts),
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
+    }
+
+
+def _resources(plan: dict) -> list[dict]:
+    """change_7.5 section 2.1: one row per resource the paper names, with what bioAF can do with it."""
+    rows = []
+    for resource in plan.get("resources") or []:
+        if not isinstance(resource, dict):
+            continue
+        bioaf = resource.get("bioaf") or {}
+        rows.append(
+            {
+                "id": resource.get("id"),
+                "identifier": resource.get("identifier"),
+                "type": resource.get("type"),
+                "type_label": RESOURCE_TYPE_LABELS.get(resource.get("type"), RESOURCE_TYPE_LABELS["other_data"]),
+                "archive": resource.get("archive"),
+                "role": resource.get("role"),
+                "stated_in": resource.get("stated_in"),
+                "found_by": list(resource.get("found_by") or []),
+                "reported_experiment_ids": list(resource.get("reported_experiment_ids") or []),
+                "linked_by": resource.get("linked_by"),
+                "retrievable": bioaf.get("retrievable"),
+                "retrievable_label": TRISTATE_LABELS.get(bioaf.get("retrievable"), bioaf.get("retrievable")),
+                "analyzable": bioaf.get("analyzable"),
+                "analyzable_label": TRISTATE_LABELS.get(bioaf.get("analyzable"), bioaf.get("analyzable")),
+                "limitation": bioaf.get("limitation"),
+            }
+        )
+    return rows
+
+
+def _experiments(plan: dict) -> list[dict]:
+    """change_7.5 sections 2.2 and 2.3: each experiment, its workflow and its reference, per part."""
+    rows = []
+    for experiment in plan.get("reported_experiments") or []:
+        if not isinstance(experiment, dict):
+            continue
+        reference = experiment.get("reference") or {}
+        parts = []
+        for part in ("assembly", "annotation"):
+            value = reference.get(part) or {}
+            status = value.get("status")
+            parts.append(
+                {
+                    "part": part,
+                    "stated": value.get("stated"),
+                    "resolved": value.get("resolved"),
+                    "status": status,
+                    "status_label": REFERENCE_STATUS_LABELS.get(status, status),
+                    "reason": value.get("reason") or value.get("assumption"),
+                    "established_from": value.get("established_from"),
+                }
+            )
+        rows.append(
+            {
+                "id": experiment.get("id"),
+                "assay": experiment.get("assay"),
+                "workflow": experiment.get("workflow"),
+                "status": experiment.get("status"),
+                "reference": parts,
+            }
+        )
+    return rows
+
+
+def _selection(plan: dict) -> dict | None:
+    """change_7.5 section 2.6: the claim and check this run selected, its revision and who decided."""
+    record = plan.get("analysis_selection") or {}
+    current = record.get("current")
+    if not isinstance(current, dict):
+        refusal = record.get("refusal") if isinstance(record, dict) else None
+        if record and (refusal or "current" in record):
+            return {
+                "revision": None,
+                "claim_index": None,
+                "check": None,
+                "check_label": None,
+                "workflow": None,
+                "experiment_id": None,
+                "decided_by": None,
+                "reason": (refusal or {}).get("reason") or "no claim can be checked on the requested route",
+                "confidence": None,
+                "superseded_revisions": len(record.get("history") or []),
+            }
+        return None
+    return {
+        "revision": current.get("revision"),
+        "claim_index": current.get("claim_index"),
+        "check": current.get("check"),
+        "check_label": CLAIM_CHECK_LABELS.get(current.get("check")),
+        "workflow": current.get("workflow"),
+        "experiment_id": current.get("reported_experiment_id"),
+        "decided_by": current.get("decided_by"),
+        "reason": current.get("reason"),
+        "confidence": current.get("confidence"),
+        "superseded_revisions": len(record.get("history") or []),
+    }
+
+
+def _selection_history(evidence: dict) -> list[dict]:
+    """Artifacts computed for an earlier selection: history, never current."""
+    rows = []
+    for entry in evidence.get("selection_history") or []:
+        if not isinstance(entry, dict):
+            continue
+        revision = entry.get("revision")
+        rows.append(
+            {
+                "revision": revision,
+                "artifacts": sorted((entry.get("artifacts") or {}).keys()),
+                "invalidated_by": list(entry.get("invalidated_by") or []),
+                "at": entry.get("at"),
+                "label": f"Computed for an earlier selection (revision {revision})",
+            }
+        )
+    return rows
+
+
+def _claim_checks(target: dict) -> list[dict]:
+    checks = target.get("checks") or {}
+    return [
+        {
+            "key": key,
+            "label": label,
+            "status": (checks.get(key) or {}).get("status"),
+            "status_label": CLAIM_CHECK_STATUS_LABELS.get((checks.get(key) or {}).get("status")),
+            "reason": (checks.get(key) or {}).get("reason"),
+        }
+        for key, label in CLAIM_CHECK_LABELS.items()
+        if key in checks
+    ]
+
+
+def _claim_selection(index: int, plan: dict) -> dict | None:
+    record = plan.get("analysis_selection") or {}
+    if not record:
+        return None
+    current = record.get("current") or {}
+    if current.get("claim_index") == index:
+        return {
+            "status": "selected",
+            "label": SELECTED_LABEL,
+            "check_label": CLAIM_CHECK_LABELS.get(current.get("check")),
+            "reason": current.get("reason"),
+        }
+    unassessed = next(
+        (u for u in record.get("unassessed") or [] if isinstance(u, dict) and u.get("claim_index") == index), None
+    )
+    return {
+        "status": "unassessed",
+        "label": UNASSESSED_LABEL,
+        "check_label": None,
+        "reason": (unassessed or {}).get("reason") or "not selected for this run",
     }
 
 
@@ -669,7 +862,8 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
     tested = _tested_count(evidence)
     claims = []
     mapped = 0
-    for target in targets:
+    experiments = {e.get("id"): e for e in plan.get("reported_experiments") or [] if isinstance(e, dict)}
+    for position, target in enumerate(targets):
         bound = target.get("bound_key")
         decided_by = target.get("bound_by") or "alias_table"
         if bound:
@@ -717,6 +911,14 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                     "reason": target.get("binding_reason"),
                     "decided_by": decided_by,
                 },
+                # change_7.5 sections 2.2, 2.5 and 2.6.
+                "experiment": (
+                    {"id": target["reported_experiment_id"], "assay": experiments[target["reported_experiment_id"]].get("assay")}
+                    if target.get("reported_experiment_id") in experiments
+                    else None
+                ),
+                "checks": _claim_checks(target),
+                "selection": _claim_selection(position, plan),
             }
         )
     counts = {"total": len(claims), "mapped": mapped, "tested": tested, "label": _counts_label(mapped, tested)}
@@ -933,6 +1135,10 @@ async def report_summary_for(session, study, org_id: int) -> dict:
             "blocker_kinds": plan.blocker_kinds_json,
             "differential_design": plan.differential_design_json,
             "finding_claim": plan.finding_claim_json,
+            # change_7.5 stage 2.
+            "resources": plan.resources_json,
+            "reported_experiments": plan.reported_experiments_json,
+            "analysis_selection": plan.analysis_selection_json,
         }
     return summarize(
         study={
@@ -971,4 +1177,9 @@ def target_dict(t) -> dict:
         "binding_confidence": t.binding_confidence,
         "bound_by_model": t.bound_by_model,
         "bound_by": t.bound_by,
+        # change_7.5 stage 2.
+        "reported_experiment_id": t.reported_experiment_id,
+        "aggregation": t.aggregation,
+        "binding_facts": t.binding_facts,
+        "checks": t.checks,
     }

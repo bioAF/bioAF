@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import re
+from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,7 @@ from app.services.validation_issue_service import ValidationIssueService
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
+from app.services.validation_binding import computation_words
 from app.services.validation_claim_cutoffs import describe_cutoff
 from app.services.validation_classifier_service import (
     BINDING_FAILED,
@@ -178,9 +180,17 @@ def _spec_lines(tier: str) -> str:
         # measured on. Without it the model binds a consensus peak count to a per-sample one, which
         # is a wrong answer that looks like a right one.
         basis = f" | computed here as: {spec.basis}" if spec.basis else ""
+        # change_7.5 section 2.4: the computation as it runs, so population, aggregation and
+        # denominator can be read against it.
+        computed = f" | bioAF computes: {computation_words(spec.key)}"
+        overrides = "; ".join(
+            f"on {name}: {computation_words(spec.key, name)}" for name, *_ in spec.by_workflow
+        )
+        if overrides:
+            computed += f" ({overrides})"
         lines.append(
             f"  {spec.key} | {_SCALE_HINT.get(spec.scale, spec.scale)} | {spec.tier} | "
-            f"{spec.meaning}{basis} | also written as: {aliases}"
+            f"{spec.meaning}{basis}{computed} | also written as: {aliases}"
         )
     return "\n".join(lines)
 
@@ -661,7 +671,13 @@ def build_binding_prompt(
         '"direction": "up | down | null, relative to the reference arm", '
         '"threshold": null, "threshold_kind": "padj | pvalue | abs_log2fc | null", '
         '"output_type": "count | percentage | gene_set_size | ratio | null", '
-        '"measurement_basis": "cell | sample | library | subject | cohort | null"}]}\n\n'
+        '"measurement_basis": "cell | sample | library | subject | cohort | null", '
+        '"population": {"value": "the measured population in the paper\'s words", '
+        '"scope": "all_samples | subset | one_sample | not_stated", "quote": "the paper\'s words"}, '
+        '"aggregation": {"value": "per_sample | per_group | merged_replicates | consensus | per_experiment | not_stated", '
+        '"quote": "the paper\'s words"}, '
+        '"denominator": {"value": "sequenced_reads | trimmed_reads | mapped_reads | bases | cells | barcodes | reads_in_cells | samples | none | other | null", '
+        '"quote": "the paper\'s words"}}]}\n\n'
         # change_7.3 section 7: the context fields were only ever volunteered. A reconciliation call
         # that can correct "54 samples, post-QC" to "as collected" has to be ASKED for qc_stage.
         "The context fields say what the number actually is. Fill each one the evidence settles and "
@@ -683,7 +699,16 @@ def build_binding_prompt(
         "many words, lower when you are reading intent from context.\n"
         "- Where a claim lists its stated cutoffs, they are the paper's own definition. Never change their "
         "kind: a P value is not an adjusted P value. Leave threshold and threshold_kind null unless you are "
-        "restating one of them exactly."
+        "restating one of them exactly.\n"
+        # change_7.5 section 2.4: the facts that decide whether a binding can be compared at all.
+        "- For EVERY claim, state three facts from the paper's own words, each with its quote: the "
+        "population it measures (and whether that is all of the experiment's samples, a subset, or one "
+        "sample), its aggregation (per_sample for a value per sample or averaged over the samples, "
+        "per_group, merged_replicates, consensus, per_experiment for one number describing the whole "
+        "experiment), and for a proportion its denominator. Use not_stated where the paper does not say. "
+        "An aligner's mapping rate is of trimmed_reads (the reads the aligner received) unless the paper "
+        "says it is of the reads as sequenced; a GC content is of bases. "
+        "A binding is compared only when these match what bioAF computes, which each metric's line says."
     )
     if statements:
         system += (
@@ -719,6 +744,15 @@ def build_binding_prompt(
         context = (c.get("passage") or "").strip()
         if context and context != passage:
             line += f"\n     in context: {context}"
+        # change_7.5 section 2.4: the legend, the methods and the experiment the claim was measured in.
+        extra = c.get("context") or {}
+        if extra.get("passage") and extra["passage"] not in (passage, context):
+            line += f"\n     in context: {extra['passage']}"
+        for label in ("legend", "experiment", "resources"):
+            if extra.get(label):
+                line += f"\n     {label}: {extra[label]}"
+        for paragraph in extra.get("methods") or []:
+            line += f"\n     methods: {paragraph}"
         lines.append(line)
     payload = "Claims to bind:\n\n" + "\n".join(lines)
     if statements:
@@ -788,6 +822,10 @@ def parse_binding(response_text: str) -> list[dict]:
             value = item.get(field)
             if value is not None:
                 row[field] = value
+        # change_7.5 section 2.4: the three facts, validated against their vocabularies.
+        from app.services.validation_binding import parse_binding_facts
+
+        row["facts"] = parse_binding_facts(item)
         rows.append(row)
     return rows
 
@@ -995,8 +1033,54 @@ def _reported_experiments(parsed: dict, method: dict, design_contrasts: list[dic
         reading = normalize_reported_experiments(raw, claim_count=claim_count, contrast_count=contrast_count)
         for experiment in reading.experiments:
             experiment["status"] = "inferred_from_method"
+            if experiment.get("assay_ambiguous"):
+                # The pre-stage-2 shape: the workflow is still mapped from the method's words, as it
+                # was, and the stage 1 check refuses a contrast measured on the other assay.
+                reading.blockers = [
+                    f"The paper's method names more than one assay ({experiment['assay']}) and the reading did "
+                    "not separate its experiments, so the workflow was mapped from the method's words. Confirm "
+                    "it is the assay this dataset holds before approving."
+                ]
         return reading
     return normalize_reported_experiments(raw, claim_count=claim_count, contrast_count=contrast_count)
+
+
+def _experiment_library_strategies(experiments: list[dict], strategy: str | None, requested: str) -> dict:
+    """The deposit's declared library strategy, by the experiment it speaks for: the paper's sole
+    experiment, or the one experiment that names the requested accession. A multi-assay paper's
+    requested dataset never decides the workflow of an experiment it does not hold."""
+    if not strategy or not experiments:
+        return {}
+    if len(experiments) == 1:
+        return {experiments[0]["id"]: strategy}
+    naming = [
+        e for e in experiments if requested and requested.upper() in {str(r).upper() for r in e.get("resources") or []}
+    ]
+    return {naming[0]["id"]: strategy} if len(naming) == 1 else {}
+
+
+def _fallback_experiment(experiments: list[dict], targets: list[dict]) -> dict | None:
+    """With nothing selected, the experiment the plan still records a workflow for: the one with a
+    workflow that owns the most claims, in the paper's order on a tie. Never a paper-level method."""
+    with_workflow = [e for e in experiments if e.get("workflow")] or experiments
+    if not with_workflow:
+        return None
+    owned = {e["id"]: sum(1 for t in targets if t.get("reported_experiment_id") == e["id"]) for e in with_workflow}
+    return max(with_workflow, key=lambda e: (owned[e["id"]], -with_workflow.index(e)))
+
+
+async def _org_reference_datasets(session: AsyncSession, org_id: int) -> list:
+    """The organisation's active Reference Datasets, which a workflow can be supplied with."""
+    from sqlalchemy import select
+
+    from app.models.reference_dataset import ReferenceDataset
+
+    rows = await session.execute(
+        select(ReferenceDataset).where(
+            ReferenceDataset.organization_id == org_id, ReferenceDataset.status == "active"
+        )
+    )
+    return list(rows.scalars().all())
 
 
 class ValidationExtractionService:
@@ -1007,12 +1091,20 @@ class ValidationExtractionService:
         full_text: str,
         org_id: int,
         user_id: int,
+        *,
+        sections: dict | None = None,
+        discover=None,
     ) -> ReproductionPlan:
         """Extract a ReproductionPlan (+ ComparisonTargets) for ``study`` from ``full_text``.
 
-        Uses the org's active LLM provider. The method is mapped to an nf-core pipeline (B3) and any
-        gaps (no accession, unmappable method, parse failure) are recorded as plan blockers rather
-        than raised, so the C1 gate can show them.
+        Uses the org's active LLM provider. Any gaps (no accession, unmappable method, parse failure)
+        are recorded as plan blockers rather than raised, so the C1 gate can show them.
+
+        change_7.5 stage 2: reading, then experiments, then each experiment's workflow and reference,
+        then the claims and their cutoffs, then discovery (``discover(plan_like) -> capabilities``,
+        before any selection), the resource inventory, binding with context, the four checks per
+        claim, and last the selection of one claim and check, whose experiment gives the plan its
+        workflow. ``sections`` is the paper's addressable methods and captions, when the text had them.
         """
         # plan_6 step 6: validation runs on its own model when the org named one. The paper is a
         # whole document and the vocabulary is 23 near neighbours; that is a different demand from
@@ -1042,35 +1134,86 @@ class ValidationExtractionService:
 
         method = parsed["method"]
         library_strategy = await scoped_library_strategy(study)
-        # Declared routes first, corrected by what the scoped accession says its data is; anything
-        # else is matched against the pipelines this instance can actually run, so a lab that
-        # installed the right pipeline is not told its paper is unreproducible. A fallback match is
-        # capped at Level-2 by having no _WIRING entry.
-        mapping = await resolve_pipeline_for_assay(
-            session,
-            org_id,
-            method.get("assay"),
-            method.get("tools"),
-            method.get("reference_build"),
-            # What the scoped deposit declares itself to be. It outranks the paper's prose where the
-            # two disagree, which is the only reason a multi-assay paper can reach the right pipeline.
-            library_strategy=library_strategy,
+        requested = (study.source_accession or "").strip()
+
+        from app.services.validation_claim_cutoffs import (
+            claim_cutoffs,
+            contrast_index_for,
+            derive_contrast_thresholds,
+            describe_ambiguity,
+            threshold_disagreement,
+        )
+        from app.services.validation_reference import (
+            USABLE,
+            experiment_reference,
+            experiment_reference_blocker,
+            paper_reference,
+            reference_blocker,
+            supplied_references,
         )
 
-        blockers = list(parsed["blockers"]) + list(mapping.blockers)
+        # change_7.5 section 1.1: a significance the paper's own text reads two ways, shown with both
+        # quotes. It rides on the claim so the target and the contrast it defines are both unresolved.
+        for ambiguity in parsed["significance_ambiguities"]:
+            parsed["claims"][ambiguity["claim_index"]]["significance_unresolved"] = describe_ambiguity(ambiguity)
 
-        # The deposit could not be honoured: `resolve_pipeline_for_assay` can only offer a pipeline
-        # this instance is able to run, so where the right one is neither installed nor in the
-        # registry cache the paper's prose route stands and would read the wrong data. Record it as a
-        # blocker rather than as a classification: the study is still reproducible, this instance
-        # just cannot do it yet, and the C1 gate is where a human decides what to do about that.
-        conflict = library_strategy_conflict(mapping.pipeline_key, library_strategy)
-        if conflict:
-            blockers.append(conflict)
+        design_contrasts = parsed["differential_design"].get("contrasts") or []
+        # change_7.5 section 2.2: the experiments, each claim and contrast linked to exactly one.
+        reading = _reported_experiments(parsed, method, design_contrasts)
+        experiments = reading.experiments
+        experiment_by_id = {e["id"]: e for e in experiments}
 
+        # change_7.5 section 2.6: each experiment's workflow comes from its own assay, never from one
+        # paper-level method. The mapper is unchanged. Declared routes first, corrected by what the
+        # experiment's own dataset says its data is; anything else is matched against the pipelines
+        # this instance can actually run, and a fallback match is capped at Level-2 by having no
+        # _WIRING entry.
+        strategies = _experiment_library_strategies(experiments, library_strategy, requested)
+        mappings = {}
+        for experiment in experiments:
+            if experiment.get("assay_ambiguous") and experiment.get("status") != "inferred_from_method":
+                # One extracted experiment naming two assays is two experiments; it is not analyzed
+                # until the reading separates them, and no workflow is guessed for it.
+                experiment["workflow"] = experiment["workflow_version"] = None
+                continue
+            mappings[experiment["id"]] = await resolve_pipeline_for_assay(
+                session,
+                org_id,
+                experiment.get("assay"),
+                experiment.get("tools") or method.get("tools"),
+                ((experiment.get("reference") or {}).get("assembly") or {}).get("stated"),
+                library_strategy=strategies.get(experiment["id"]),
+            )
+            experiment["workflow"] = mappings[experiment["id"]].pipeline_key
+            experiment["workflow_version"] = mappings[experiment["id"]].pipeline_version
+        paper_mapping = None
+        if not experiments:
+            # No reading at all (a parse failure): the paper's method is all there is.
+            paper_mapping = await resolve_pipeline_for_assay(
+                session,
+                org_id,
+                method.get("assay"),
+                method.get("tools"),
+                method.get("reference_build"),
+                library_strategy=library_strategy,
+            )
+
+        # change_7.5 section 2.3: each experiment's reference, per part, resolved against what its own
+        # workflow can use (bioAF's launch table and the organisation's Reference Datasets).
+        datasets = await _org_reference_datasets(session, org_id)
+        for experiment in experiments:
+            experiment["reference"] = experiment_reference(
+                experiment,
+                pipeline_key=experiment["workflow"],
+                supplied=supplied_references(experiment["workflow"], reference_datasets=datasets),
+            )
+
+        blockers: list[str] = list(parsed["blockers"])
+        later: list[str] = []
         if parsed["parse_failure"]:
-            blockers.append("could not parse a structured extraction from the model response")
+            later.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]
+        extracted_accessions = list(accessions)
         # change_7.5 section 1.5: every accession the model read, kept for discovery. A requested
         # accession narrows what the plan fetches below; it does not change what the paper names.
         study.evidence_json = {**(study.evidence_json or {}), "extracted_accessions": list(accessions)}
@@ -1084,63 +1227,20 @@ class ValidationExtractionService:
         #
         # The requested accession wins even when the model did not return it, because the paper is
         # often not open access and the requester can know what the extracted text does not say.
-        requested = (study.source_accession or "").strip()
         if requested:
             dropped = [a for a in accessions if a.strip().upper() != requested.upper()]
             accessions = [requested]
             if dropped:
-                blockers.append(
+                later.append(
                     f"The paper also names {', '.join(dropped)}, which is not the accession this "
                     f"study was requested for ({requested}). Only {requested} will be fetched."
                 )
 
         if (parsed["data_availability"] == "none" or not accessions) and not any(
-            "accession" in b.lower() for b in blockers
+            "accession" in b.lower() for b in blockers + later
         ):
-            blockers.append("no data accession found in the paper")
+            later.append("no data accession found in the paper")
 
-        raw_genome = method.get("reference_build")
-        named_builds = _builds_named_in(raw_genome)
-        # change_7.5 section 1.3: the reference is recorded as it is. There is no default: an
-        # operation that depends on a reference is refused when the paper's is not one bioAF supplies.
-        from app.services.validation_reference import USABLE, paper_reference, reference_blocker
-
-        reference = paper_reference(_str_or_none(raw_genome), mapping.pipeline_key)
-        reference_genome = _normalize_reference_genome(raw_genome) if reference["status"] == USABLE else None
-        if reference["status"] != USABLE and _normalize_reference_genome(raw_genome) is not None:
-            # Recognised, and not one bioAF supplies (T2T-CHM13): the token is kept, as before, so a
-            # pinned launch still refuses rather than aligning against its seed.
-            reference_genome = _normalize_reference_genome(raw_genome)
-        blocker = reference_blocker(reference)
-        if blocker:
-            blockers.append(blocker)
-        # A paper that ran several assays names a build per assay, and only one of them can be what
-        # this run aligns against. Say which was taken and which were not, because the choice is
-        # made from word order in a methods section and a scientist can see in one glance whether
-        # it is the build their own dataset used.
-        if reference["status"] == USABLE and len(named_builds) > 1:
-            blockers.append(
-                f"The paper names more than one reference genome ({', '.join(named_builds)}). "
-                f"{named_builds[0]} was taken, because the paper names it first. Confirm it is the build "
-                f"this dataset was aligned to before approving."
-            )
-
-        from app.services.validation_claim_cutoffs import (
-            claim_cutoffs,
-            contrast_index_for,
-            derive_contrast_thresholds,
-            describe_ambiguity,
-            threshold_disagreement,
-        )
-
-        # change_7.5 section 1.1: a significance the paper's own text reads two ways, shown with both
-        # quotes. It rides on the claim so the target and the contrast it defines are both unresolved.
-        for ambiguity in parsed["significance_ambiguities"]:
-            parsed["claims"][ambiguity["claim_index"]]["significance_unresolved"] = describe_ambiguity(ambiguity)
-
-        design_contrasts = parsed["differential_design"].get("contrasts") or []
-        # change_7.5 section 2.2: the experiments, each claim and contrast linked to exactly one.
-        reading = _reported_experiments(parsed, method, design_contrasts)
         blockers.extend(reading.blockers)
         targets = []
         claims_to_bind = []
@@ -1200,6 +1300,64 @@ class ValidationExtractionService:
                 }
             )
 
+        # Which of the paper's contrasts THIS run could reproduce. A paper reports one per finding
+        # across every assay it ran; the plan runs one pipeline.
+        design = _differential_design_or_none(parsed["differential_design"])
+        for index, contrast in enumerate((design or {}).get("contrasts") or []):
+            contrast["reported_experiment_id"] = reading.contrast_experiment.get(index)
+        if design and design.get("contrasts"):
+            # change_7.3 section 7: a contrast's threshold comes from the claim that is its finding.
+            # The pair the extractor attached to the contrast drove the ground truth, and on a contrast
+            # with a set and a stricter subset it was the subset's.
+            design["contrasts"] = derive_contrast_thresholds(design["contrasts"], parsed["claims"])
+        contrasts = (design or {}).get("contrasts") or []
+
+        # change_7.5 section 1.5: what the paper's repositories hold, established before any selection
+        # so the checks can read it. Two HTTP calls, no model, no compute.
+        code_availability = parse_code_availability(parsed.get("code_availability"))
+        capabilities: dict = {}
+        if discover is not None:
+            capabilities = await discover(
+                SimpleNamespace(accessions_json=accessions, code_availability_json=code_availability)
+            ) or {}
+        deposits = [d for d in capabilities.get("deposits") or [] if isinstance(d, dict)]
+        supplements = [s for s in (study.evidence_json or {}).get("supplements") or [] if isinstance(s, dict)]
+
+        # change_7.5 section 2.1: every resource the paper names or its repositories link, typed and
+        # linked to the experiments it serves.
+        from app.services.resource_identifiers import scan_identifiers
+        from app.services.resource_inventory import build_resource_inventory
+
+        resources = build_resource_inventory(
+            scanned=(study.evidence_json or {}).get("scanned_identifiers") or scan_identifiers(full_text or ""),
+            model_resources=parsed.get("resources"),
+            extracted_accessions=extracted_accessions,
+            supplements=supplements,
+            deposits=deposits,
+            experiments=experiments,
+        )
+
+        # change_7.5 section 2.4: each claim is bound with its passage, the legend its locator names, the
+        # methods for its experiment's assay, the experiment and that experiment's resources. Bounded
+        # per claim and in total.
+        from app.services.validation_binding import binding_context, bound_contexts, settle_binding
+        from app.services.validation_passages import claim_passage
+
+        contexts = bound_contexts(
+            [
+                binding_context(
+                    claim,
+                    passage=claim_passage(full_text or "", claim.get("claim_text")),
+                    sections=sections,
+                    experiment=experiment_by_id.get(target.get("reported_experiment_id")),
+                    resources=resources,
+                )
+                for claim, target in zip(claims_to_bind, targets)
+            ]
+        )
+        for claim, context in zip(claims_to_bind, contexts):
+            claim["context"] = context
+
         # plan_6 step 2/3: ask the model which controlled metric each claim measures, and record the
         # answer with its reason. This is an improvement on the alias table, not a dependency of the
         # extraction: a provider failure here must not cost the plan, because the claims are still the
@@ -1235,35 +1393,162 @@ class ValidationExtractionService:
                 # `binding_failed`, and the comparison treats the two differently.
                 bound_by=decision.get("bound_by") or "model",
             )
+            if decision.get("bound_by"):
+                continue
+            # change_7.5 section 2.4: bind only when the claim's population, aggregation and
+            # denominator match what the metric computes on this claim's experiment's workflow. A
+            # mismatch keeps the model's key as proposed, with the reason, and binds nothing.
+            experiment = experiment_by_id.get(target.get("reported_experiment_id")) or {}
+            settled = settle_binding(decision["bound_key"], decision.get("facts"), workflow=experiment.get("workflow"))
+            target.update(
+                bound_key=settled["bound_key"],
+                binding_facts=settled["binding_facts"],
+                aggregation=settled["aggregation"],
+            )
+            if settled["reason"]:
+                target["binding_reason"] = (
+                    f"not compared: {settled['reason']} (the model proposed "
+                    f"{settled['binding_facts']['proposed_key']}: {decision['reason']})"
+                )
 
         binding_blocker = binding_failure_blocker(decisions)
         if binding_blocker:
-            blockers.append(binding_blocker)
+            later.append(binding_blocker)
 
-        # Which of the paper's contrasts THIS run could reproduce. A paper reports one per finding
-        # across every assay it ran; the plan runs one pipeline. The gate used to take contrasts[0],
-        # so a paper listing its ChIP-seq contrast last handed a chipseq run an RNA-seq knockout.
-        design = _differential_design_or_none(parsed["differential_design"])
-        for index, contrast in enumerate((design or {}).get("contrasts") or []):
-            contrast["reported_experiment_id"] = reading.contrast_experiment.get(index)
-        if design and design.get("contrasts"):
-            # change_7.3 section 7: a contrast's threshold comes from the claim that is its finding.
-            # The pair the extractor attached to the contrast drove the ground truth, and on a contrast
-            # with a set and a stricter subset it was the subset's.
-            design["contrasts"] = derive_contrast_thresholds(design["contrasts"], parsed["claims"])
-            selection = await _select_contrast_for(
-                session,
-                study,
-                design["contrasts"],
-                mapping.pipeline_key,
-                method.get("assay"),
-                cfg,
-                client,
-                on_issue=issues.append,
+        # change_7.5 section 2.5: each claim against the four checks, each on its own.
+        from app.services.validation_checks import evaluate_checks
+
+        for target in targets:
+            index = target.get("contrast_index")
+            target["checks"] = evaluate_checks(
+                target,
+                experiment=experiment_by_id.get(target.get("reported_experiment_id")),
+                resources=resources,
+                deposits=deposits,
+                supplements=supplements,
+                contrast=contrasts[index] if isinstance(index, int) and 0 <= index < len(contrasts) else None,
+            )
+
+        # change_7.5 section 2.6: the claim and its check are selected together, and only then the
+        # workflow, from the selected claim's experiment.
+        from app.services.contrast_selection import NO_COMPATIBLE_CONTRAST
+        from app.services.validation_selection import select_analysis
+
+        org = await session.get(Organization, study.organization_id)
+        autonomous = ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) == AUTONOMY_AUTONOMOUS
+        selection = await select_analysis(
+            targets,
+            [t["checks"] for t in targets],
+            experiments=experiments,
+            contrasts=contrasts,
+            route=study.intended_route or "both",
+            autonomous=autonomous,
+            client=client,
+            model=cfg.model,
+            api_key=cfg.api_key,
+            library_strategies=strategies,
+            on_issue=issues.append,
+        )
+        current = selection.get("current")
+        plan_experiment = experiment_by_id.get((current or {}).get("reported_experiment_id")) or _fallback_experiment(
+            experiments, targets
+        )
+        mapping = mappings.get((plan_experiment or {}).get("id")) or paper_mapping
+        if mapping is None:
+            mapping = await resolve_pipeline_for_assay(
+                session, org_id, method.get("assay"), method.get("tools"), method.get("reference_build"),
                 library_strategy=library_strategy,
             )
-            if selection is not None:
-                design["selected_contrast"] = selection
+        plan_strategy = strategies.get((plan_experiment or {}).get("id")) if experiments else library_strategy
+
+        # The deposit could not be honoured: `resolve_pipeline_for_assay` can only offer a pipeline
+        # this instance is able to run, so where the right one is neither installed nor in the
+        # registry cache the paper's prose route stands and would read the wrong data. Record it as a
+        # blocker rather than as a classification: the study is still reproducible, this instance
+        # just cannot do it yet, and the C1 gate is where a human decides what to do about that.
+        blockers.extend(mapping.blockers)
+        conflict = library_strategy_conflict(mapping.pipeline_key, plan_strategy)
+        if conflict:
+            blockers.append(conflict)
+        blockers.extend(later)
+
+        # change_7.5 sections 1.3 and 2.3: the reference is recorded as it is, per experiment. There is
+        # no default: an operation that depends on a reference is refused when it is not usable.
+        inferred = bool(plan_experiment) and plan_experiment.get("status") == "inferred_from_method"
+        if plan_experiment is None or inferred:
+            raw_genome = method.get("reference_build")
+            named_builds = _builds_named_in(raw_genome)
+            reference = paper_reference(_str_or_none(raw_genome), mapping.pipeline_key)
+            reference_build = _str_or_none(raw_genome)
+            reference_genome = _normalize_reference_genome(raw_genome) if reference["status"] == USABLE else None
+            if reference["status"] != USABLE and _normalize_reference_genome(raw_genome) is not None:
+                # Recognised, and not one bioAF supplies (T2T-CHM13): the token is kept, as before, so
+                # a pinned launch still refuses rather than aligning against its seed.
+                reference_genome = _normalize_reference_genome(raw_genome)
+            blocker = reference_blocker(reference)
+            if blocker:
+                blockers.append(blocker)
+            # A paper that ran several assays names a build per assay, and only one of them can be
+            # what this run aligns against. Say which was taken and which were not.
+            if reference["status"] == USABLE and len(named_builds) > 1:
+                blockers.append(
+                    f"The paper names more than one reference genome ({', '.join(named_builds)}). "
+                    f"{named_builds[0]} was taken, because the paper names it first. Confirm it is the build "
+                    f"this dataset was aligned to before approving."
+                )
+        else:
+            parts = plan_experiment.get("reference") or {}
+            stated = [
+                (parts.get(part) or {}).get("stated") for part in ("assembly", "annotation")
+            ]
+            reference_build = "; ".join(s for s in stated if s) or None
+            assembly = parts.get("assembly") or {}
+            reference_genome = (
+                assembly.get("resolved")
+                if assembly.get("status") == USABLE
+                else _normalize_reference_genome(assembly.get("stated"))
+            )
+            blocker = experiment_reference_blocker(plan_experiment)
+            if blocker:
+                blockers.append(blocker)
+
+        if design and contrasts:
+            refusal = selection.get("refusal")
+            if refusal:
+                # The stage 1 check refused the selected claim's contrast on its own workflow.
+                design["selected_contrast"] = {
+                    "contrast_index": None,
+                    "reason": f"the selected claim's contrast cannot be analyzed: {refusal['reason']}",
+                    "confidence": 1.0,
+                    "decided_by": "compatibility_check",
+                    "model": None,
+                    "outcome": NO_COMPATIBLE_CONTRAST,
+                }
+            elif current and current.get("contrast_index") is not None and current.get("decided_by") != "proposal":
+                # The contrast follows the selected claim; nothing is asked twice.
+                design["selected_contrast"] = {
+                    "contrast_index": current["contrast_index"],
+                    "reason": f"the selected claim reports on this contrast: {current.get('reason')}",
+                    "confidence": current.get("confidence"),
+                    "decided_by": "claim_selection",
+                    "model": current.get("model"),
+                }
+            else:
+                # A proposal waits for a person, and a selected claim with no contrast leaves the
+                # contrasts to the selector exactly as before, on the selected workflow.
+                selected = await _select_contrast_for(
+                    session,
+                    study,
+                    contrasts,
+                    mapping.pipeline_key,
+                    (plan_experiment or {}).get("assay") or method.get("assay"),
+                    cfg,
+                    client,
+                    on_issue=issues.append,
+                    library_strategy=plan_strategy,
+                )
+                if selected is not None:
+                    design["selected_contrast"] = selected
 
         plan = await ReproductionPlanService.create_plan(
             session,
@@ -1284,14 +1569,14 @@ class ValidationExtractionService:
             # cause (CellRanger vs STARsolo) instead of merely reported.
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
             # Where the authors said their own analysis code lives. Shown at the C1 gate, never run.
-            code_availability=parse_code_availability(parsed.get("code_availability")),
+            code_availability=code_availability,
             reference_genome=reference_genome,
             # The controlled token collapses "GRCh38 / Gencode 29" and "GRCh38 / Ensembl 112" onto
             # one value, and the ANNOTATION is the half that decides which genes exist and what they
             # are called. Keep the paper's own words beside it: a DEG concordance can diverge purely
             # because two correct gene sets came from different annotation releases, and that is an
             # attribution a verdict should be able to make rather than blame on the science.
-            reference_build=_str_or_none(raw_genome),
+            reference_build=reference_build,
             mapping_confidence=mapping.mapping_confidence,
             mapping_notes=mapping.mapping_notes,
             blockers=blockers,
@@ -1300,7 +1585,9 @@ class ValidationExtractionService:
             # Audited, so the deposit's own declaration is on the record even when it agreed with the
             # paper and left no other trace.
             library_strategy=library_strategy,
-            reported_experiments=reading.experiments,
+            reported_experiments=experiments,
+            resources=resources,
+            analysis_selection=selection,
         )
 
         # The kind of each blocker that survived into the plan, beside the sentences every other

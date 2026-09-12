@@ -68,10 +68,23 @@ async def _contract() -> dict:
         targets=[],
         issues=[],
     )
+    from tests.test_report_claim_checks import EVIDENCE as STAGE2_EVIDENCE
+    from tests.test_report_claim_checks import PLAN as STAGE2_PLAN
+    from tests.test_report_claim_checks import TARGETS as STAGE2_TARGETS
+
+    # change_7.5 stage 2: experiments, resources, each claim's four checks and the selection.
+    stage2 = summarize(
+        study={"state": "plan_ready"},
+        evidence=STAGE2_EVIDENCE,
+        plan={**STAGE2_PLAN, "resources": _stage2_resources()},
+        targets=STAGE2_TARGETS,
+        issues=[],
+    )
     return json.loads(
         json.dumps(
             {
                 "enums": enum_labels(),
+                "stage2_selection": stage2,
                 "groff_failed": groff,
                 "study_34_legacy": legacy,
                 "attempted_no_verdict": attempted,
@@ -79,6 +92,23 @@ async def _contract() -> dict:
                 "reference_unavailable": reference_unavailable,
             }
         )
+    )
+
+
+def _stage2_resources() -> list[dict]:
+    """A deposit bioAF reads and a proteomics deposit it has no adapter for, as the inventory builds them."""
+    from app.services.resource_inventory import build_resource_inventory
+
+    return build_resource_inventory(
+        scanned=[{"identifier": "GSE555001", "archive": "geo"}],
+        model_resources=[{"identifier": "PXD099001", "type": "proteomics_data", "role": "the proteome"}],
+        extracted_accessions=["GSE555001"],
+        supplements=[],
+        deposits=[
+            {"accession": "GSE555001", "archive": "geo", "exists": "yes", "access": "public", "supported": "yes",
+             "raw_data": "yes", "preprocessed_data": "yes"}
+        ],
+        experiments=[{"id": "e2", "assay": "bulk RNA-seq", "resources": ["GSE555001"]}],
     )
 
 

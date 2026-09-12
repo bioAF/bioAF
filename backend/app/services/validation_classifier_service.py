@@ -64,6 +64,24 @@ class MetricSpec:
     # pipeline ran and the data is usable, not that any reported finding held up (spec-06). Default is
     # qc_floor so an unmarked metric can never earn validated on its own (conservative against overclaim).
     tier: str = "qc_floor"
+    # change_7.5 section 2.4: what bioAF actually computes, stated as it runs (read from the QC
+    # templates, 2026-09-12). ``population`` is which samples the one compared number covers,
+    # ``aggregation`` how their values are combined (mean_over_samples, mean_over_files,
+    # count_over_run, first_sample), and ``denominator`` what a proportion is of (``none`` for a count).
+    # ``by_workflow`` overrides the three for a workflow whose template computes the key differently,
+    # as ``((workflow, population, aggregation, denominator), ...)``. A claim binds only when its own
+    # population, aggregation and denominator match these.
+    population: str = ""
+    aggregation: str = ""
+    denominator: str = "none"
+    by_workflow: tuple[tuple[str, str, str, str], ...] = field(default_factory=tuple)
+
+    def computation(self, workflow: str | None = None) -> tuple[str, str, str]:
+        """``(population, aggregation, denominator)`` for ``workflow``."""
+        for name, population, aggregation, denominator in self.by_workflow:
+            if name == workflow:
+                return population, aggregation, denominator
+        return self.population, self.aggregation, self.denominator
 
 
 # The controlled vocabulary is the union of the QC templates' metric keys (bulk_rnaseq + scrnaseq;
@@ -294,7 +312,7 @@ _SPECS: tuple[MetricSpec, ...] = (
             "significant_peaks",
         ),
         tier="finding",
-        meaning="significant peaks called for ONE sample (the paper's headline peak number)",
+        meaning="significant peaks called in a sample (the paper's headline peak number)",
         basis="per-sample MACS2 peak calls",
         # A consensus/merged/IDR set across replicates is a different number computed a different way,
         # and study 5 reported exactly that under the exact key `peak_count` (2026-09-02).
@@ -502,6 +520,84 @@ def _slug(text) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower())
     return s.strip("_")
 
+
+# change_7.5 section 2.4: each metric's computation as the QC templates run it. Across samples the only
+# operation any template uses is an unweighted mean; the single-cell cell and depth keys come from the
+# run's first listed sample alone and are never combined across samples.
+_ALL_SAMPLES = "every sample in the run"
+_ALL_FILES = "every raw FastQC file (each mate and lane) in the run"
+_FIRST_SAMPLE = "the run's first listed sample"
+_LIBRARIES = "every library in the run, input controls included"
+_IP_SAMPLES = "every IP sample in the run (input controls excluded)"
+_COMPUTED: dict[str, tuple[str, str, str, tuple[tuple[str, str, str, str], ...]]] = {
+    "reads_mapped_genome": (
+        _ALL_SAMPLES,
+        "mean_over_samples",
+        "trimmed_reads",
+        (
+            ("nf-core/scrnaseq", _FIRST_SAMPLE, "first_sample", "sequenced_reads"),
+            ("nf-core/chipseq", _LIBRARIES, "mean_over_samples", "trimmed_reads"),
+            ("nf-core/atacseq", _LIBRARIES, "mean_over_samples", "trimmed_reads"),
+        ),
+    ),
+    "reads_mapped_genome_unique": (
+        _ALL_SAMPLES,
+        "mean_over_samples",
+        "trimmed_reads",
+        (("nf-core/scrnaseq", _FIRST_SAMPLE, "first_sample", "sequenced_reads"),),
+    ),
+    "total_sequences": (_ALL_SAMPLES + " (input controls included for ChIP-seq)", "mean_over_samples", "none", ()),
+    "avg_sequence_length": (_ALL_FILES, "mean_over_files", "none", ()),
+    "percent_gc": (_ALL_FILES, "mean_over_files", "bases", ()),
+    "percent_duplicates": (
+        _ALL_FILES,
+        "mean_over_files",
+        "sequenced_reads",
+        (
+            ("nf-core/chipseq", _LIBRARIES, "mean_over_samples", "mapped_reads"),
+            ("nf-core/atacseq", _LIBRARIES, "mean_over_samples", "mapped_reads"),
+        ),
+    ),
+    "total_samples": ("the samples the run's QC reports (pre-merge libraries for ChIP-seq and ATAC-seq)", "count_over_run", "none", ()),
+    "cell_count": (_FIRST_SAMPLE, "first_sample", "none", ()),
+    "total_genes_detected": (_FIRST_SAMPLE, "first_sample", "none", ()),
+    "median_genes_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "mean_genes_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "median_umi_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "mean_umi_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "median_reads_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "mean_reads_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
+    "saturation": (_FIRST_SAMPLE, "first_sample", "other", ()),
+    "valid_barcodes": (_FIRST_SAMPLE, "first_sample", "sequenced_reads", ()),
+    "mito_pct_median": (_FIRST_SAMPLE + " (its cells)", "first_sample", "other", ()),
+    "peak_count": (
+        _IP_SAMPLES,
+        "mean_over_samples",
+        "none",
+        (("nf-core/atacseq", "every merged-library sample in the run", "mean_over_samples", "none"),),
+    ),
+    "frip": (
+        _IP_SAMPLES,
+        "mean_over_samples",
+        "mapped_reads",
+        (("nf-core/atacseq", _ALL_SAMPLES, "mean_over_samples", "mapped_reads"),),
+    ),
+    "nsc": (_LIBRARIES, "mean_over_samples", "none", ()),
+    "rsc": (_LIBRARIES, "mean_over_samples", "none", ()),
+    "tss_enrichment": ("every sample with a TSS enrichment section", "mean_over_samples", "none", ()),
+}
+
+
+def _declared(spec: MetricSpec) -> MetricSpec:
+    from dataclasses import replace
+
+    population, aggregation, denominator, by_workflow = _COMPUTED.get(
+        spec.key, (_ALL_SAMPLES, "mean_over_samples", "none", ())
+    )
+    return replace(spec, population=population, aggregation=aggregation, denominator=denominator, by_workflow=by_workflow)
+
+
+_SPECS = tuple(_declared(spec) for spec in _SPECS)
 
 _SPEC_BY_KEY: dict[str, MetricSpec] = {}
 _KEY_LOOKUP: dict[str, str] = {}

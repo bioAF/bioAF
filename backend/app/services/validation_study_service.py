@@ -107,6 +107,12 @@ async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None
     return row is not None
 
 
+RENEWED_SELECTION_REQUIRED = (
+    "This plan was read before bioAF separated a paper's experiments, and its contrasts span more than "
+    "one assay. Choose the contrast this run checks at the gate before it resumes."
+)
+
+
 class ValidationStudyService:
     @staticmethod
     async def create_study(
@@ -454,6 +460,8 @@ class ValidationStudyService:
                 400,
                 f"Cannot approve a plan from '{study.state}'; the study must be in 'plan_ready'.",
             )
+        if (study.evidence_json or {}).get("awaiting_renewed_selection"):
+            raise HTTPException(400, RENEWED_SELECTION_REQUIRED)
 
         # change_7.2 section 1: ONE policy, shared with the driver's entrance, answering four
         # independent questions. Study 33 was approved by hand onto a route that could never be
@@ -806,6 +814,17 @@ class ValidationStudyService:
             evidence.pop(key, None)
         if (evidence.get("deposit_selection") or {}).get("declined"):
             evidence.pop("deposit_selection", None)
+        # change_7.5 section 2.2: a plan read before experiments existed whose contrasts span two assays
+        # resumes only after a person renews the selection at the gate; nothing acquires or launches
+        # for it until then.
+        from app.services.reported_experiments import legacy_needs_renewed_selection
+
+        plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+        if plan is not None and legacy_needs_renewed_selection(plan):
+            evidence["awaiting_renewed_selection"] = {
+                "reason": RENEWED_SELECTION_REQUIRED,
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
         evidence["resumed"] = {
             "at": datetime.now(timezone.utc).isoformat(),
             "by_user_id": user_id,
@@ -813,6 +832,12 @@ class ValidationStudyService:
             "from_state": study.state,
         }
         study.evidence_json = evidence
+        # change_7.5 section 2.6: "Review and resume" invalidates by revision. Whatever was computed
+        # for an earlier selection leaves for history and is never reused.
+        if plan is not None:
+            from app.services.validation_revisions import sync_revisions
+
+            sync_revisions(study, plan)
         await session.flush()
 
         resumed = await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")

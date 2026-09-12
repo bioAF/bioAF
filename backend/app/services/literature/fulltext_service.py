@@ -43,6 +43,10 @@ class FullTextResult:
     # elements; flattening to text and discarding the markup threw both away, and the supplements
     # were then never looked for anywhere else.
     supplements: list[dict] = field(default_factory=list)
+    # change_7.5 section 2.4: the methods paragraphs and the figure and table captions, addressable,
+    # so a claim is bound with the legend it cites and the methods of its experiment. Kept for the
+    # read only; the full text is never persisted.
+    sections: dict = field(default_factory=lambda: {"methods": [], "captions": {}})
 
 
 def _jats_to_text(xml_text: str) -> str:
@@ -76,6 +80,53 @@ def _jats_to_text(xml_text: str) -> str:
 def _local_name(tag: str) -> str:
     """An element's name without its namespace."""
     return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def _flat(node) -> str:
+    return _WHITESPACE_RE.sub(" ", " ".join(t.strip() for t in node.itertext() if t and t.strip())).strip()
+
+
+_METHODS_TITLE = re.compile(r"\b(?:methods?|materials)\b", re.IGNORECASE)
+_CAPTION_LABEL = re.compile(r"^\s*(?P<kind>fig(?:ure)?|table)\.?\s*(?P<n>S?\d+)", re.IGNORECASE)
+
+
+def _jats_sections(xml_text: str) -> dict:
+    """The methods paragraphs and the figure and table captions of a JATS article, addressable.
+
+    ``{"methods": [paragraph, ...], "captions": {"figure 1": "...", "table 2": "..."}}``. A methods
+    section is one whose ``sec-type`` or title says so; its nested sections' paragraphs are its own.
+    Never raises: unparseable markup has no sections.
+    """
+    empty: dict = {"methods": [], "captions": {}}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return empty
+    methods: list[str] = []
+    for sec in root.iter():
+        if _local_name(sec.tag) != "sec":
+            continue
+        sec_type = next((v for k, v in sec.attrib.items() if k.endswith("sec-type")), "") or ""
+        title = next((c for c in sec if _local_name(c.tag) == "title"), None)
+        title_text = _flat(title) if title is not None else ""
+        if not (_METHODS_TITLE.search(sec_type) or _METHODS_TITLE.search(title_text)):
+            continue
+        for para in sec.iter():
+            if _local_name(para.tag) == "p":
+                text = _flat(para)
+                if text and text not in methods:
+                    methods.append(text)
+    captions: dict[str, str] = {}
+    for node in root.iter():
+        if _local_name(node.tag) not in ("fig", "table-wrap"):
+            continue
+        label = next((c for c in node if _local_name(c.tag) == "label"), None)
+        caption = next((c for c in node if _local_name(c.tag) == "caption"), None)
+        match = _CAPTION_LABEL.match(_flat(label)) if label is not None else None
+        if match and caption is not None:
+            kind = "table" if match.group("kind").lower().startswith("t") else "figure"
+            captions.setdefault(f"{kind} {match.group('n').lower()}", _flat(caption))
+    return {"methods": methods, "captions": captions}
 
 
 async def _resolve_open_access_id(
@@ -141,4 +192,5 @@ class FullTextFetchService:
             source="europepmc",
             external_id=ext_id,
             supplements=parse_jats_supplements(xml_text),
+            sections=_jats_sections(xml_text),
         )
