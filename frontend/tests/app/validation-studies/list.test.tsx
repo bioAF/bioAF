@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 
 describe("ValidationStudiesListPage", () => {
-  it("lists studies with their outcome and links each to its detail page", async () => {
+  it("lists studies with their lifecycle state and links each to its detail page", async () => {
     mockGet.mockResolvedValue([
       { id: 7, state: "classified", classification: "validated", confidence: 100, source_doi: "10.1/x", created_at: "2026-07-06T00:00:00Z" },
       { id: 8, state: "running", classification: null, confidence: null, source_accession: "GSE9", created_at: "2026-07-07T00:00:00Z" },
@@ -31,7 +31,9 @@ describe("ValidationStudiesListPage", () => {
 
     render(<ValidationStudiesListPage />);
 
-    await waitFor(() => expect(screen.getByText("Fully Validated")).toBeInTheDocument());
+    // plan_8 section 7 replaced the Outcome column (and its "Fully Validated" badge) with the Validation
+    // Scorecard; the lifecycle state keeps its own column.
+    await waitFor(() => expect(screen.getByText("Classified")).toBeInTheDocument());
     // The running study shows its stage, not a validation verdict.
     expect(screen.getByText("Running analysis")).toBeInTheDocument();
     expect(screen.queryByText("Could Not Reproduce")).not.toBeInTheDocument();
