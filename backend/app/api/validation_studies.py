@@ -19,7 +19,7 @@ from app.models.literature import LiteraturePaper
 from app.models.pipeline_catalog_entry import PipelineCatalogEntry
 from app.models.validation_study import ValidationStudy, classification_confidence
 from app.services.validation_autonomy import decision_list
-from app.services.validation_report_summary import report_summary_for, target_dict
+from app.services.validation_report_summary import compact_scorecards_for, report_summary_for, target_dict
 from app.services.validation_reproduction_attempt import reproduction_attempt
 from app.schemas.validation_study import (
     ApproveRequest,
@@ -270,6 +270,8 @@ async def list_studies(
     org_id = int(current_user["org_id"])
     studies = await ValidationStudyService.list_studies(session, org_id)
     titles = await _paper_titles(session, studies, org_id)
+    # plan_8 section 7: the compact Validation Scorecard, in one batch rather than a report per row.
+    scorecards = await compact_scorecards_for(session, studies)
     return [
         ValidationStudySummary(
             id=s.id,
@@ -286,6 +288,7 @@ async def list_studies(
             source_accession=s.source_accession,
             experiment_id=s.experiment_id,
             created_at=s.created_at,
+            scorecard=scorecards.get(s.id),
         )
         for s in studies
     ]

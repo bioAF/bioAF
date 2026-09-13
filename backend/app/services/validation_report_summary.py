@@ -1316,30 +1316,93 @@ async def report_summary_for(session, study, org_id: int) -> dict:
             .all()
         )
         targets = [target_dict(t) for t in rows]
-        plan_dict = {
-            "blockers": plan.blockers_json,
-            "blocker_kinds": plan.blocker_kinds_json,
-            "differential_design": plan.differential_design_json,
-            "finding_claim": plan.finding_claim_json,
-            # change_7.5 stage 2.
-            "resources": plan.resources_json,
-            "reported_experiments": plan.reported_experiments_json,
-            "analysis_selection": plan.analysis_selection_json,
-            # plan_8 section 2.
-            "finding_inventory": plan.finding_inventory_json,
-        }
+        plan_dict = plan_projection(plan)
     return summarize(
-        study={
-            "state": study.state,
-            "classification": study.classification,
-            "analysis_run_id": study.analysis_run_id,
-            "data_run_id": study.data_run_id,
-        },
+        study=study_projection(study),
         evidence=study.evidence_json,
         plan=plan_dict,
         targets=targets,
         issues=await ValidationIssueService.list_for_study(session, study.id, org_id),
     )
+
+
+def study_projection(study) -> dict:
+    """The study fields the projection reads."""
+    return {
+        "state": study.state,
+        "classification": study.classification,
+        "analysis_run_id": study.analysis_run_id,
+        "data_run_id": study.data_run_id,
+    }
+
+
+def plan_projection(plan) -> dict:
+    """The plan fields the projection reads."""
+    return {
+        "blockers": plan.blockers_json,
+        "blocker_kinds": plan.blocker_kinds_json,
+        "differential_design": plan.differential_design_json,
+        "finding_claim": plan.finding_claim_json,
+        # change_7.5 stage 2.
+        "resources": plan.resources_json,
+        "reported_experiments": plan.reported_experiments_json,
+        "analysis_selection": plan.analysis_selection_json,
+        # plan_8 section 2.
+        "finding_inventory": plan.finding_inventory_json,
+    }
+
+
+async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
+    """plan_8 section 7: each listed study's compact scorecard, in two queries whatever the number of
+    studies (the active plans, then their claims), from the same builder the report uses."""
+    from sqlalchemy import and_, or_, select
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.models.reproduction_plan import ReproductionPlan
+    from app.services.validation_scorecard import compact_scorecard
+
+    if not studies:
+        return {}
+    pointed = [s.reproduction_plan_id for s in studies if s.reproduction_plan_id]
+    unpointed = [s.id for s in studies if not s.reproduction_plan_id]
+    conditions = []
+    if pointed:
+        conditions.append(ReproductionPlan.id.in_(pointed))
+    if unpointed:
+        conditions.append(
+            and_(ReproductionPlan.validation_study_id.in_(unpointed), ReproductionPlan.superseded_at.is_(None))
+        )
+    plans = (await session.execute(select(ReproductionPlan).where(or_(*conditions)))).scalars().all()
+    by_pointer = {p.id: p for p in plans}
+    by_study: dict[int, object] = {}
+    for plan in sorted(plans, key=lambda p: p.id):
+        by_study[plan.validation_study_id] = plan
+    targets: dict[int, list[dict]] = {}
+    if plans:
+        rows = (
+            (
+                await session.execute(
+                    select(ComparisonTarget)
+                    .where(ComparisonTarget.reproduction_plan_id.in_([p.id for p in plans]))
+                    .order_by(ComparisonTarget.reproduction_plan_id, ComparisonTarget.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for row in rows:
+            targets.setdefault(row.reproduction_plan_id, []).append(target_dict(row))
+    compact: dict[int, dict] = {}
+    for study in studies:
+        plan = by_pointer.get(study.reproduction_plan_id) if study.reproduction_plan_id else by_study.get(study.id)
+        card = scorecard_projection(
+            study=study_projection(study),
+            evidence=study.evidence_json,
+            plan=plan_projection(plan) if plan is not None else {},
+            targets=targets.get(plan.id, []) if plan is not None else [],
+        )
+        compact[study.id] = compact_scorecard(card)
+    return compact
 
 
 def target_dict(t) -> dict:

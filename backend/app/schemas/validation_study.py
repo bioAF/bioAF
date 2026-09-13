@@ -224,6 +224,9 @@ class ValidationStudySummary(BaseModel):
     intended_route: Literal["deposit", "pipeline", "both"] | None = None
     experiment_id: int | None = None
     created_at: datetime | None = None
+    # plan_8 section 7: the compact Validation Scorecard (the overall score, the assessed scope and the
+    # primary indicators), cut from the same scorecard the report renders.
+    scorecard: dict | None = None
 
 
 class ValidationStudyResponse(BaseModel):
