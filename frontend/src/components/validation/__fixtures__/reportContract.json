@@ -2126,6 +2126,7 @@
       }
     ],
     "scorecard": {
+      "analysis_selection_revision": null,
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
@@ -2582,6 +2583,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": null,
       "assessed_count": 1,
       "assessed_items": [
         {
@@ -3668,6 +3670,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": null,
       "assessed_count": 2,
       "assessed_items": [
         {
@@ -4392,6 +4395,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": null,
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
@@ -4719,6 +4723,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": 1,
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
@@ -5010,6 +5015,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": 1,
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
@@ -5512,6 +5518,7 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "analysis_selection_revision": null,
       "assessed_count": 5,
       "assessed_items": [
         {

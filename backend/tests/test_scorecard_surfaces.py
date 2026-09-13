@@ -201,3 +201,87 @@ class TestTheListIsOneBatch:
             assert response.status_code == 200
             counts.append(len(statements))
         assert counts[0] == counts[1]
+
+
+class TestAJustifiedImportanceCorrection:
+    @pytest_asyncio.fixture(autouse=True)
+    async def _enable(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_it_revises_the_inventory_and_the_score_without_rerunning_anything(
+        self, client, session, admin_user, admin_token
+    ):
+        study = await _seed(session, admin_user)
+        headers = {"Authorization": f"Bearer {admin_token}"}
+        before = (await client.get(f"/api/validation-studies/{study.id}", headers=headers)).json()
+        evidence_before = before["evidence"]
+
+        await ReproductionPlanService.revise_finding_importance(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            finding_id="F5",
+            category="supporting",
+            rationale="The discussion presents it as extending the main result, not establishing it.",
+            reason="the reading overstated its role",
+        )
+        await session.commit()
+
+        after = (await client.get(f"/api/validation-studies/{study.id}", headers=headers)).json()
+        card = after["report_summary"]["scorecard"]
+        # Four supporting supported, one supporting discrepant: 4 of 5 weighted.
+        assert (card["score_label"], card["scope_label"]) == ("80 / 100", "5 / 5 assessed")
+        assert card["inventory_revision"] == 2
+        assert card["primary_discrepancy_count"] == 0
+        # Nothing was rerun: the evidence and the state are what they were.
+        assert after["evidence"] == evidence_before
+        assert after["state"] == before["state"]
+        # The listed compact form follows the revision too, though the assessed count did not change.
+        rows = (await client.get("/api/validation-studies", headers=headers)).json()
+        row = next(r for r in rows if r["id"] == study.id)
+        assert (row["scorecard"]["score_label"], row["scorecard"]["inventory_revision"]) == ("80 / 100", 2)
+
+    @pytest.mark.asyncio
+    async def test_the_score_it_replaced_is_kept_as_history(self, session, admin_user):
+        study = await _seed(session, admin_user)
+        await ReproductionPlanService.revise_finding_importance(
+            session,
+            study.id,
+            admin_user.organization_id,
+            admin_user.id,
+            finding_id="F5",
+            category="supporting",
+            rationale="It extends the main result.",
+            reason="the reading overstated its role",
+        )
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        [previous] = plan.finding_inventory_json["history"]
+        assert previous["revision"] == 1
+        assert previous["scorecard"]["score_label"] == "67 / 100"
+        assert previous["findings"][4]["importance"]["category"] == "primary"
+        assert plan.finding_inventory_json["revised"]["decided_by"] == {"kind": "person", "user_id": admin_user.id}
+
+    @pytest.mark.asyncio
+    async def test_a_study_read_before_the_inventory_has_nothing_to_revise(self, session, admin_user):
+        from fastapi import HTTPException
+
+        study = await _seed(session, admin_user)
+        plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        plan.finding_inventory_json = None
+        await session.flush()
+        with pytest.raises(HTTPException):
+            await ReproductionPlanService.revise_finding_importance(
+                session,
+                study.id,
+                admin_user.organization_id,
+                admin_user.id,
+                finding_id="F1",
+                category="primary",
+                rationale="r",
+                reason="r",
+            )
