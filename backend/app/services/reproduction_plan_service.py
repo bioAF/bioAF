@@ -188,12 +188,16 @@ async def _revise_selection_for_contrast(session: AsyncSession, study, plan, con
     if not record or not record.get("current"):
         return
     rows = (
-        await session.execute(
-            select(ComparisonTarget)
-            .where(ComparisonTarget.reproduction_plan_id == plan.id)
-            .order_by(ComparisonTarget.id)
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     on_contrast = [i for i, t in enumerate(rows) if t.contrast_index == contrast_index]
     if not on_contrast:
         return
@@ -219,10 +223,13 @@ async def _revise_selection_for_contrast(session: AsyncSession, study, plan, con
     )
     if not changed:
         return
-    revised["unassessed"] = [
-        u for u in revised.get("unassessed") or [] if u.get("claim_index") != claim_index
-    ] + (
-        [{"claim_index": current.get("claim_index"), "reason": "not selected for this run; a person chose another claim at the gate"}]
+    revised["unassessed"] = [u for u in revised.get("unassessed") or [] if u.get("claim_index") != claim_index] + (
+        [
+            {
+                "claim_index": current.get("claim_index"),
+                "reason": "not selected for this run; a person chose another claim at the gate",
+            }
+        ]
         if current.get("claim_index") != claim_index
         else []
     )
@@ -259,6 +266,7 @@ class ReproductionPlanService:
         reported_experiments: list | None = None,
         resources: list | None = None,
         analysis_selection: dict | None = None,
+        finding_inventory: dict | None = None,
     ) -> ReproductionPlan:
         """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
         plan = ReproductionPlan(
@@ -284,6 +292,7 @@ class ReproductionPlanService:
             reported_experiments_json=reported_experiments,
             resources_json=resources,
             analysis_selection_json=analysis_selection,
+            finding_inventory_json=finding_inventory,
         )
         session.add(plan)
         await session.flush()
