@@ -233,7 +233,14 @@ def evaluate_checks(
 
         if matrices:
             processed = (
-                _check(UNRESOLVED, "the sample mapping is established when the input is chosen", "sample_mapping")
+                # plan_8_1 section 3.4: a deposited matrix is a candidate input until its value type is
+                # measured and a valid test exists for it; the sample mapping is settled with the input.
+                _check(
+                    UNRESOLVED,
+                    "the deposited matrix is a candidate input until its value type is measured, and the sample "
+                    "mapping is established when the input is chosen",
+                    "sample_mapping",
+                )
                 if pred_status == AVAILABLE
                 else _check(pred_status, pred_reason, "predicate")
             )

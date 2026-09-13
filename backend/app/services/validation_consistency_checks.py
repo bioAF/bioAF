@@ -286,7 +286,26 @@ async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None
                 )
                 concluded += 1
                 continue
+            stored = (
+                supplements[supplement_index].get("storage_uri")
+                if isinstance(supplement_index, int) and 0 <= supplement_index < len(supplements)
+                else None
+            )
+            if stored and not table.get("url"):
+                table = {**table, "url": stored}
         url = table.get("url") or ""
+        if not url:
+            await queue.finish(
+                session,
+                record,
+                state=queue.UNRESOLVED,
+                outcome={
+                    "outcome": "unresolved",
+                    "reason": "bioAF holds no copy of this table to check the claim against",
+                },
+            )
+            concluded += 1
+            continue
         spent_bytes, spent_seconds = _spent(records)
         started = time.monotonic()
         if url not in texts:
@@ -356,6 +375,11 @@ async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None
 
 
 async def _default_fetch(url: str) -> bytes:
+    """A deposit's table over HTTP; a retrieved supplement from bioAF's own storage."""
+    if not url.startswith(("http://", "https://")):
+        from app.adapters.registry import get_storage_adapter
+
+        return await get_storage_adapter().read_bytes(url)
     from app.services.validation_assessment import deposit_bytes_fetcher
 
     return await deposit_bytes_fetcher(url)

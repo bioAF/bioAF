@@ -63,8 +63,32 @@ def _size_hint(n: int | None) -> str:
 
 
 def selectable(inventory: list[DepositEntry]) -> list[DepositEntry]:
-    """The entries that could be a reproduction input, in inventory order."""
+    """The entries that could be a reproduction input, in inventory order: candidates, until their value
+    type is measured (plan_8_1 section 3.4, ``input_eligibility``)."""
     return [e for e in inventory or [] if e.classification in _SELECTABLE]
+
+
+# plan_8_1 section 3.4: whether a deposited file can be a reanalysis input.
+ELIGIBLE = "eligible"
+CANDIDATE = "candidate"
+NEVER = "never"
+
+
+def input_eligibility(classification: str | None, value_type: str | None) -> str:
+    """``eligible`` when the file is a matrix whose value type is established and a valid test exists for
+    it; ``candidate`` for a matrix until then; ``never`` for anything else. A result table is the
+    authors' answer and never an input."""
+    from app.services.validation_level3_service import template_for_value_type
+
+    if classification not in _SELECTABLE:
+        return NEVER
+    if classification in ("peaks", "barcodes", "features"):
+        return (
+            CANDIDATE
+            if not value_type
+            else (ELIGIBLE if template_for_value_type(value_type, kind="interval") else CANDIDATE)
+        )
+    return ELIGIBLE if value_type and template_for_value_type(value_type) is not None else CANDIDATE
 
 
 def deposit_blocker(inventory: list[DepositEntry]) -> str | None:

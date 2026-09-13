@@ -376,7 +376,7 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
         usable = selectable(inventory.entries)
         preprocessed = YES if usable else NO
         listing = (
-            f"{len(usable)} of {len(inventory.entries)} deposited file(s) could serve as a reproduction input"
+            candidate_inputs_words(len(usable), len(inventory.entries))
             if usable
             else f"GEO lists {len(inventory.entries)} supplementary file(s), none holding per-feature values"
         )
@@ -412,6 +412,12 @@ async def describe_geo_deposit(accession: str, *, fetcher: Fetcher) -> dict:
             "sample_titles": [str(s.get("title") or "") for s in manifest.samples[:_MAX_DIGEST_SAMPLES]],
         },
     )
+
+
+def candidate_inputs_words(candidates: int, listed: int) -> str:
+    """plan_8_1 section 3.4, pending sign-off: a matrix is a candidate input until its value type is
+    established and a valid test exists for it, so the row counts candidates, never usable inputs."""
+    return f"{candidates} of {listed} deposited file(s) are candidate reproduction inputs"
 
 
 async def describe_sra_deposit(accession: str, *, fetcher: Fetcher) -> dict:
