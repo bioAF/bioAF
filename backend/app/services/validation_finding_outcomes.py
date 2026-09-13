@@ -493,6 +493,8 @@ def finding_outcomes(
                 supporting.extend(facts)
             supporting.extend(_supporting(index, ev, consistency))
             results.append(result)
+        # The same fact about two claims of one finding (both counts consistent with one table) is one line.
+        supporting = [dict(pair) for pair in dict.fromkeys(tuple(sorted(s.items())) for s in supporting)]
         outcome = _combine(finding, results, claims, ev, supporting)
         method = outcome.get("assessment_method")
         outcomes[finding["id"]] = {

@@ -167,3 +167,21 @@ test("the page shows the paper's resources and each claim's checks", async () =>
   expect(screen.getByText("What this run checks")).toBeInTheDocument();
   expect(screen.getByTestId("claim-selection-current")).toBeInTheDocument();
 });
+
+test("the Validation Scorecard leads the report, above the outcome (plan_8 section 6)", async () => {
+  mockGet.mockResolvedValue({ ...study(), report_summary: contract.scorecard_scored });
+  render(<ValidationStudyPage />);
+  const scorecard = await screen.findByRole("heading", { name: "Validation Scorecard" });
+  const outcome = screen.getByRole("heading", { name: "Outcome" });
+  expect(scorecard.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByTestId("scorecard-score")).toHaveTextContent("67 / 100");
+  expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("5 / 5 assessed");
+});
+
+test("a report projected before the scorecard existed renders no card and no error", async () => {
+  const { scorecard: _omitted, ...older } = contract.groff_failed as Record<string, unknown>;
+  mockGet.mockResolvedValue({ ...study(), report_summary: older });
+  render(<ValidationStudyPage />);
+  await screen.findByText("Reproduction not attempted");
+  expect(screen.queryByRole("heading", { name: "Validation Scorecard" })).not.toBeInTheDocument();
+});

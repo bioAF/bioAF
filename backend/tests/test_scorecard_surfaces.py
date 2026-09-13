@@ -15,6 +15,7 @@ from sqlalchemy import event
 from app.services.provenance.report_service import ProvenanceReportService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_finding_inventory import inventory_from_proposal
+from app.services.validation_scorecard import compact_scorecard
 from app.services.validation_study_service import ValidationStudyService
 from tests.test_report_scorecard import _SCALAR_CHECKS
 
@@ -134,7 +135,8 @@ class TestEverySurfaceShowsTheSameScorecard:
     ):
         study = await _seed(session, admin_user)
         report, row, _, _ = await self._surfaces(client, session, admin_user, admin_token, study)
-        assert row == {key: report[key] for key in _COMPACT}
+        assert row == compact_scorecard(report)
+        assert {key: row[key] for key in _COMPACT} == {key: report[key] for key in _COMPACT}
 
     @pytest.mark.asyncio
     async def test_the_markdown_states_the_metrics_weights_and_every_finding(

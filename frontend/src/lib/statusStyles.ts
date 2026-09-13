@@ -229,6 +229,17 @@ export const STATUS_STYLES: Record<string, StatusDomain> = {
     classified: { badge: "bg-gray-100 text-gray-700" },
   },
 
+  // plan_8: a finding's status on the Validation Scorecard. Only a discrepancy is red: an access
+  // restriction, missing data or a bioAF limitation must never read like a scientific disagreement.
+  validationFinding: {
+    supported: { badge: "bg-green-100 text-green-800" },
+    discrepancy: { badge: "bg-red-100 text-red-800" },
+    inconclusive: { badge: "bg-yellow-100 text-yellow-800" },
+    blocked: { badge: "bg-gray-100 text-gray-700" },
+    unresolved: { badge: "bg-yellow-100 text-yellow-800" },
+    not_attempted: { badge: "bg-gray-100 text-gray-700" },
+  },
+
   // Sample QC status.
   sampleQc: {
     pass: { badge: "bg-green-100 text-green-800", label: "Pass" },

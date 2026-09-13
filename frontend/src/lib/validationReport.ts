@@ -174,6 +174,79 @@ export interface ReportSelection {
   superseded_revisions: number;
 }
 
+/**
+ * plan_8: the Validation Scorecard. Every number and every word is the backend's
+ * (`validation_scorecard.build_scorecard`); the frontend never computes a metric.
+ */
+export type FindingStatus = "supported" | "discrepancy" | "inconclusive" | "blocked" | "unresolved" | "not_attempted";
+export type ScorecardStatus = "scored" | "not_assessed" | "not_established" | "not_applicable" | "unavailable";
+
+export interface ScorecardItem {
+  finding_id: string;
+  description: string | null;
+  locator: string | null;
+  category: "primary" | "supporting" | "technical";
+  category_label: string;
+  weight: number;
+  rationale: string | null;
+  quote: string | null;
+  claim_indices: number[];
+  status: FindingStatus;
+  status_label: string;
+  reason: string | null;
+  cause: string | null;
+  cause_label: string | null;
+  assessment_method: string | null;
+  method_label: string | null;
+  supporting_checks: { kind: string; text: string }[];
+}
+
+export interface ScorecardMessage {
+  kind: "primary_discrepancy" | "primary_unassessed";
+  text: string;
+  findings: string[];
+}
+
+export interface CompactScorecard {
+  status: ScorecardStatus;
+  status_label: string | null;
+  score: number | null;
+  display_score: number | null;
+  score_label: string | null;
+  assessed_count: number | null;
+  total_count: number | null;
+  scope_label: string | null;
+  primary_discrepancy_count: number | null;
+  primary_unassessed_count: number | null;
+  // The primary facts a high score must not hide, worded by the backend.
+  indicators: { kind: "primary_discrepancy" | "primary_unassessed"; text: string }[];
+  in_progress: boolean;
+  in_progress_label: string | null;
+  rubric_version: number;
+  inventory_revision: number | null;
+}
+
+export interface ValidationScorecardData extends CompactScorecard {
+  version: number;
+  title: string;
+  rubric_label: string;
+  explanation: string;
+  reason: string | null;
+  inventory_status: string | null;
+  analysis_selection_revision?: number | null;
+  supported_count: number | null;
+  discrepant_count: number | null;
+  supported_weight: number | null;
+  discrepant_weight: number | null;
+  assessed_weight: number | null;
+  summary: string | null;
+  messages: ScorecardMessage[];
+  assessed_items: ScorecardItem[];
+  unassessed_items: ScorecardItem[];
+  excluded_items: ScorecardItem[];
+  unresolved_importance: { finding_id: string; description: string | null; problem: string | null }[];
+}
+
 export interface CompletionFact {
   key: string;
   label: string;
@@ -221,6 +294,8 @@ export interface ReportSummary {
   comparisons: { performed: boolean; label: string | null; reason: string | null };
   resume: { label: string; requirements: string[] };
   issue_count: number;
+  // plan_8. Absent from a report projected before the scorecard existed.
+  scorecard?: ValidationScorecardData | null;
 }
 
 // Shown beside anything that rests on the paper's prose alone (section 6).

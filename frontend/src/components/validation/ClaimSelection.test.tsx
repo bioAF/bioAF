@@ -100,3 +100,10 @@ describe("each claim's predicate, consistency and reanalysis (sections 3.1, 4.1 
     expect(within(screen.getByTestId("claim-2")).queryByText(/Deposited data/)).not.toBeInTheDocument();
   });
 });
+
+describe("ClaimSelection anchors (plan_8 section 6)", () => {
+  it("gives each claim the anchor the scorecard's evidence links point to", () => {
+    render(<ClaimSelection summary={stage2} />);
+    expect(screen.getByTestId("claim-1")).toHaveAttribute("id", "claim-1");
+  });
+});

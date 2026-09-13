@@ -344,7 +344,9 @@ class TestTheCompactForm:
             "scope_label": "5 / 5 assessed",
             "primary_discrepancy_count": 1,
             "primary_unassessed_count": 0,
+            "indicators": [{"kind": "primary_discrepancy", "text": "Primary discrepancy"}],
             "in_progress": False,
+            "in_progress_label": None,
             "rubric_version": 1,
             "inventory_revision": 1,
         }
@@ -354,3 +356,17 @@ class TestTheCompactForm:
         compact = compact_scorecard(_card(findings, {f"F{i}": BLOCKED for i in range(1, 8)}))
         assert compact["score_label"] is None
         assert compact["scope_label"] == "0 / 7 assessed"
+
+    def test_the_indicators_are_worded_and_pluralized(self):
+        card = _card(
+            [("F1", "primary"), ("F2", "primary"), ("F3", "primary"), ("F4", "primary")],
+            dict(F1=DISCREPANCY, F2=DISCREPANCY, F3=BLOCKED, F4=SUPPORTED),
+        )
+        assert [i["text"] for i in compact_scorecard(card)["indicators"]] == [
+            "Primary discrepancies",
+            "Primary finding remains unassessed",
+        ]
+
+    def test_an_active_studys_compact_form_says_so(self):
+        card = _card([("F1", "primary")], dict(F1=SUPPORTED), in_progress=True)
+        assert compact_scorecard(card)["in_progress_label"] == "In progress"

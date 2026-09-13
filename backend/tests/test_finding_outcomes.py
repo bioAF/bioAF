@@ -504,3 +504,16 @@ class TestRepeatedRunsCountOnce:
         outcomes = _outcomes(_INVENTORY, _TWO, _plan(), evidence)
         assert outcomes["F1"]["status"] == DISCREPANCY
         assert len(outcomes["F1"]["subchecks"]) == 1
+
+
+class TestSupportingFactsAreShownOnce:
+    def test_the_same_fact_from_two_claims_of_one_finding_is_listed_once(self):
+        consistency = {
+            0: {"outcome": "agree", "label": "Consistent with the authors' deposited results", "table": "t.txt.gz"},
+            1: {"outcome": "agree", "label": "Consistent with the authors' deposited results", "table": "t.txt.gz"},
+        }
+        inventory = _inventory(_finding("F1", "primary", [0, 1]))
+        f1 = _outcomes(inventory, _TWO, {}, {}, consistency=consistency)["F1"]
+        assert f1["supporting_checks"] == [
+            {"kind": "author_results", "text": "Consistent with the authors' deposited results (t.txt.gz)"}
+        ]
