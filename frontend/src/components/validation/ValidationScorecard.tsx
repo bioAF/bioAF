@@ -132,7 +132,8 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
     );
   }
 
-  const unestablished = card.status === "not_established" || card.status === "not_applicable";
+  const unestablished =
+    card.status === "not_established" || card.status === "not_applicable" || card.status === "pending";
   return (
     <Card title={card.title} actions={inProgress || undefined}>
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">

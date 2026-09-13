@@ -86,6 +86,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -237,6 +238,7 @@
       "not_applicable": "Not applicable",
       "not_assessed": "",
       "not_established": "Scope not established",
+      "pending": "",
       "scored": "",
       "unavailable": "Score unavailable for this historical report."
     },
@@ -352,6 +354,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -512,6 +515,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -1205,6 +1209,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
@@ -1370,6 +1375,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -1531,6 +1537,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -2535,6 +2542,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -2998,6 +3006,7 @@
       "in_progress": true,
       "in_progress_label": "In progress",
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [],
@@ -3077,6 +3086,158 @@
       "superseded_revisions": 0,
       "workflow": null
     },
+    "selection_history": [],
+    "summary": [
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_inventory_failed": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 1
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "genes up",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": null
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "in_progress",
+      "label": null
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": null,
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "analysis_selection_revision": null,
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": true,
+      "in_progress_label": "In progress",
+      "indicators": [],
+      "inventory_retry": true,
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "provisional": false,
+      "provisional_note": null,
+      "reason": "bioAF could not group the paper's claims into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: bioAF could not reach the language model.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "score_status_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
     "selection_history": [],
     "summary": [
       "Whether raw data are deposited could not be established.",
@@ -4148,6 +4309,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -4879,6 +5041,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "not_applicable",
       "messages": [],
@@ -5173,6 +5336,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "unresolved",
       "messages": [],
@@ -5220,6 +5384,158 @@
     "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_pending": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 1
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "genes up",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": null
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "in_progress",
+      "label": null
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": null,
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "analysis_selection_revision": null,
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": true,
+      "in_progress_label": "In progress",
+      "indicators": [],
+      "inventory_retry": false,
+      "inventory_revision": null,
+      "inventory_status": "pending",
+      "messages": [],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "provisional": false,
+      "provisional_note": null,
+      "reason": "The findings are being established.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "score_status_label": null,
+      "status": "pending",
+      "status_label": null,
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
+    "selection_history": [],
+    "summary": [
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
@@ -5489,6 +5805,7 @@
           "text": "1 unassessed finding has no established importance; it could be primary."
         }
       ],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "provisional",
       "messages": [
@@ -5837,6 +6154,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -6247,6 +6565,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "provisional",
       "messages": [],
@@ -6922,6 +7241,7 @@
           "text": "Primary discrepancy"
         }
       ],
+      "inventory_retry": false,
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -7404,6 +7724,7 @@
       "in_progress": true,
       "in_progress_label": "In progress",
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
@@ -8120,6 +8441,7 @@
       "in_progress": false,
       "in_progress_label": null,
       "indicators": [],
+      "inventory_retry": false,
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],

@@ -1,8 +1,8 @@
 {
   "call": "extraction",
-  "fingerprint": "2c72242e8841c8fbae1526911faaa804c5ef039fa425463fcd775ae606e72e8b",
+  "fingerprint": "d0a37eca9cb360cd35e97894491871d0830ff52185732dca6e3113ad0bb35dc4",
   "chosen_budget": 16000,
-  "headroom": "Not measured yet: 16000 is plan_8_1 section 1.1's starting budget. Once the three papers are measured, the budget is set with recorded headroom above the largest answer, within the model's documented maximum.",
+  "headroom": "Not measured yet: 16000 is plan_8_1 section 1.1's starting budget, kept after section 2.2 moved the findings out of this answer. Once the three papers are measured, the budget is set with recorded headroom above the largest answer, within the model's documented maximum.",
   "date": null,
   "status": "not_measured",
   "models": {}

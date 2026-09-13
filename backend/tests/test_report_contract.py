@@ -136,6 +136,29 @@ async def _contract() -> dict:
     # plan_8_1 section 2.3: an unassessed finding of unestablished importance (a provisional scope), and an
     # assessed one (the score withheld).
     provisional = qc_scenario(["agree", "not_computed"], ["primary", "supporting"], unquoted=(1,))
+    # plan_8_1 section 2.1: the claims committed and the findings being established; and the inventory
+    # stage failed with the claims kept.
+    from app.services.validation_inventory_stage import failed_inventory, pending_inventory
+
+    pending = summarize(
+        study={"state": "reading"},
+        evidence={"extraction": {"status": "succeeded"}},
+        plan={"finding_inventory": pending_inventory()},
+        targets=[{"id": 1, "claim_text": "genes up"}],
+        issues=[],
+    )
+    inventory_failed = summarize(
+        study={"state": "plan_ready"},
+        evidence={"extraction": {"status": "succeeded"}},
+        plan={
+            "finding_inventory": failed_inventory(
+                "the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed "
+                "too: bioAF could not reach the language model"
+            )
+        },
+        targets=[{"id": 1, "claim_text": "genes up"}],
+        issues=[],
+    )
     score_pending = qc_scenario(["agree", "diverge"], ["primary", "supporting"], unquoted=(1,))
     # plan_8_1 sections 1.3 and 1.4: a study shaped like 42 (legacy) and a failed read on this build.
     from tests.test_read_failure_projection import _STUDY_42
@@ -177,6 +200,8 @@ async def _contract() -> dict:
                 "scorecard_not_applicable": not_applicable,
                 "scorecard_in_progress": in_progress,
                 "scorecard_provisional": provisional,
+                "scorecard_pending": pending,
+                "scorecard_inventory_failed": inventory_failed,
                 "scorecard_score_pending": score_pending,
                 "failed_read_legacy": failed_read_legacy,
                 "failed_read": failed_read,

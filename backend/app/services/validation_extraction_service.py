@@ -89,11 +89,6 @@ _SCHEMA_HINT = (
     '"output_type": "count | percentage | gene_set_size | ratio"}], '
     '"significance_ambiguities": [{"claim_index": 0, "readings": [{"kind": "pvalue | padj | fdr | qvalue", '
     '"operator": "< | <=", "value": 0, "quote": "the paper\'s exact words for this reading"}]}], '
-    '"findings": [{"description": "the finding in a few words", "claim_indices": [0], '
-    '"importance": "primary | supporting | technical", '
-    '"rationale": "one sentence: the finding\'s role in the paper\'s conclusions", '
-    '"quote": "the paper\'s exact words presenting it as a main result or as supporting one", '
-    '"prerequisite_for": ["for a technical check, the indices in findings of the findings it enables"]}], '
     '"data_availability": "deposited | none | restricted", '
     '"code_availability": [{"kind": "github|gitlab|zenodo|codeocean|supplementary|none", "url": "", '
     '"identifier": "e.g. a DOI", "stated_in": "methods | data availability | code availability", '
@@ -299,22 +294,6 @@ def build_extraction_prompt(full_text: str) -> tuple[str, str]:
         '"at least" is >=, "about 3,000" is approx (with its tolerance when the paper states one), and a '
         "plain number is =. For an adjusted P value, give the adjustment method when the paper names it "
         "(Benjamini-Hochberg is BH), and leave it null when it does not.\n\n"
-        # plan_8 section 2: the finding inventory, proposed before anything is measured, under a fixed
-        # rubric. The model proposes a category; the weight is the rubric's and is never asked for.
-        "Group the claims into FINDINGS, the distinct computational results the paper reports. Every claim "
-        "belongs to exactly one finding, by its index in claims. Claims that together establish one result, "
-        "such as the genes up and the genes down in one comparison, or a set and its subset, are one "
-        "finding, never several. Give each finding one importance category under this fixed rubric: "
-        "primary, a distinct computational finding necessary to support a main conclusion of the paper; "
-        "supporting, a substantive computational finding that supports, extends or qualifies the main "
-        "conclusions without independently being necessary to establish them; technical, an operational or "
-        "contextual check (sequencing depth, alignment rate, sample counts, quality control) that enables "
-        "assessment but does not itself establish a scientific finding. The category follows the "
-        "finding's scientific role in the paper, never its metric name, how easy it is to check, or whether "
-        "its data are accessible. Give a one-sentence rationale naming that role, and for a primary or "
-        "supporting finding quote the paper's exact words that present it as a main result or as "
-        "supporting one. Never give a numeric weight. For a technical check, list in prerequisite_for the "
-        "findings whose assessment depends on it.\n\n"
         "Give each blocker a kind: sample_assignment when which sample belongs to which group is not "
         "stated, data_access when the data sits behind an access agreement, missing_detail for an "
         "unstated methods detail, no_accession when no data deposit is named, method_mismatch when the "
@@ -543,8 +522,6 @@ def parse_extraction(response_text: str, *, full_text: str | None = None) -> dic
         "significance_ambiguities": [],
         "reported_experiments": [],
         "resources": [],
-        # plan_8 section 2: None when the reading proposed no inventory, which is not an empty one.
-        "findings": None,
         "blockers": [],
         "blocker_kinds": [],
         "not_read": [],
@@ -585,8 +562,6 @@ def extraction_from(data: dict, *, full_text: str | None = None, not_read=()) ->
         # change_7.5 stage 2: validated in `extract`, where the claims and contrasts they index are known.
         "reported_experiments": _as_list(data.get("reported_experiments")),
         "resources": [r for r in _as_list(data.get("resources")) if isinstance(r, dict)],
-        # plan_8 section 2: validated in `extract`, where the claims it groups are known.
-        "findings": data.get("findings") if isinstance(data.get("findings"), list) else None,
         "blockers": blockers,
         "blocker_kinds": blocker_kinds,
         "parse_failure": False,
@@ -1593,9 +1568,6 @@ class ValidationExtractionService:
         blockers.extend(reading.blockers)
         targets = []
         claims_to_bind = []
-        # plan_8 section 2: where each of the reading's claims landed among the kept targets, so the
-        # proposed findings can name them.
-        claim_targets: dict[int, int] = {}
         for position, c in enumerate(parsed["claims"]):
             metric_key = (c.get("metric_key") or "").strip()
             # A claim with no measurable metric is STILL one of the paper's claims. It used to be
@@ -1603,7 +1575,6 @@ class ValidationExtractionService:
             # reached the plan and the report was silent about them.
             if not metric_key and not (c.get("claim_text") or "").strip():
                 continue
-            claim_targets[position] = len(targets)
             targets.append(
                 {
                     "metric_key": metric_key,
@@ -1655,19 +1626,11 @@ class ValidationExtractionService:
                 }
             )
 
-        # plan_8 section 2: the finding inventory, established here, before anything is measured, so no
-        # result can regroup or reweight it. Validated against the fixed rubric; a proposal the rubric
-        # cannot validate is kept as unresolved, never defaulted.
-        from app.services.validation_finding_inventory import inventory_from_proposal
+        # plan_8_1 section 2.2: the finding inventory is its own stage, over the claims committed here,
+        # still before anything is measured. The plan carries it as pending until that stage runs.
+        from app.services.validation_inventory_stage import pending_inventory
 
-        finding_inventory = inventory_from_proposal(
-            parsed["findings"],
-            targets=targets,
-            full_text=full_text,
-            decided_by={"kind": "model", "model": cfg.model},
-            claim_targets=claim_targets,
-            parse_failure=parsed["parse_failure"],
-        )
+        finding_inventory = pending_inventory()
 
         # Which of the paper's contrasts THIS run could reproduce. A paper reports one per finding
         # across every assay it ran; the plan runs one pipeline.

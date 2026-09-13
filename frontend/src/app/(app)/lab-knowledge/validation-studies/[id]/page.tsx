@@ -48,6 +48,7 @@ import { ClaimSelection } from "@/components/validation/ClaimSelection";
 import { ResourceInventory } from "@/components/validation/ResourceInventory";
 import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
 import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
+import { InventoryRetryNotice } from "@/components/validation/InventoryRetryNotice";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -271,6 +272,9 @@ export default function ValidationStudyPage() {
         {summary?.scorecard && (
           <div className="mb-6">
             <ValidationScorecard scorecard={summary.scorecard} />
+            {summary.scorecard.inventory_retry && (
+              <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
+            )}
           </div>
         )}
 

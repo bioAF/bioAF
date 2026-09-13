@@ -24,6 +24,8 @@ from functools import lru_cache
 from pathlib import Path
 
 EXTRACTION = "extraction"
+# plan_8_1 section 2.2: the finding inventory's own call, measured and fingerprinted on its own.
+INVENTORY = "inventory"
 
 _RECORDS = Path(__file__).resolve().parent / "read_measurements"
 
@@ -72,6 +74,13 @@ def extraction_fingerprint() -> str:
 
     system, _ = build_extraction_prompt("")
     return fingerprint(system)
+
+
+def inventory_fingerprint() -> str:
+    """The inventory call's system prompt, which carries its schema, as its record pins it."""
+    from app.services.validation_inventory_stage import inventory_fingerprint as _fingerprint
+
+    return _fingerprint()
 
 
 @lru_cache(maxsize=None)
