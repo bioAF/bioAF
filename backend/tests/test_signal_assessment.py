@@ -36,7 +36,7 @@ class _Client:
         self.payloads: list[str] = []
         self.prompts: list[str] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.calls += 1
         self.payloads.append(payload)
         self.prompts.append(prompt)

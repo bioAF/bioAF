@@ -55,14 +55,21 @@ def _strings(raw) -> list[str]:
     return [t for t in (_text(v) for v in (raw if isinstance(raw, list) else [])) if t]
 
 
-def _reference_part(raw: dict, name: str) -> dict:
-    """One part of a stated reference, as the paper words it, with the quote it rests on."""
-    return {
-        "stated": _text(raw.get(name)),
-        "quote": _text(raw.get(f"{name}_quote")),
+def _reference_part(raw: dict | None, name: str) -> dict:
+    """One part of a stated reference, as the paper words it, with the quote it rests on.
+
+    plan_8_1 section 1.2: a part the reading left out is ``not_read``, which is not the paper stating
+    nothing (an explicit empty value).
+    """
+    part = {
+        "stated": _text((raw or {}).get(name)),
+        "quote": _text((raw or {}).get(f"{name}_quote")),
         "resolved": None,
         "status": None,
     }
+    if raw is None or name not in raw:
+        part["not_read"] = True
+    return part
 
 
 def assay_is_compound(assay: str | None) -> bool:
@@ -89,7 +96,7 @@ def normalize_reported_experiments(raw, *, claim_count: int, contrast_count: int
         seen_ids.add(experiment_id)
 
         assay = _text(item.get("assay"))
-        reference = item.get("reference") if isinstance(item.get("reference"), dict) else {}
+        reference = item.get("reference") if isinstance(item.get("reference"), dict) else None
         experiment = {
             "id": experiment_id,
             "assay": assay,
@@ -110,7 +117,13 @@ def normalize_reported_experiments(raw, *, claim_count: int, contrast_count: int
             "resources": _strings(item.get("resources")),
             "status": EXTRACTED,
         }
-        if not assay:
+        if not assay and "assay" not in item:
+            # plan_8_1 section 1.2: the reading left the assay out, which says nothing about the paper.
+            experiment["assay_not_read"] = True
+            reading.blockers.append(
+                f"The reading omitted experiment {experiment_id}'s assay, so no workflow can be chosen for it."
+            )
+        elif not assay:
             reading.blockers.append(f"Experiment {experiment_id} names no assay, so no workflow can be chosen for it.")
         elif experiment["assay_ambiguous"]:
             reading.blockers.append(

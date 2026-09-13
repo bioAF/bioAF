@@ -40,7 +40,7 @@ class _Client:
         self.error = error
         self.calls: list[dict] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.calls.append({"prompt": prompt, "payload": payload, "model": model})
         if self.error is not None:
             raise self.error

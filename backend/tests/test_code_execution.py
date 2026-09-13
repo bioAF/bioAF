@@ -43,7 +43,7 @@ class _Client:
         self.response, self.error = response, error
         self.payloads: list[str] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.payloads.append(payload)
         if self.error:
             raise self.error

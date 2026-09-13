@@ -133,6 +133,28 @@ async def _contract() -> dict:
     )
     not_applicable = qc_scenario(["agree"], ["technical"])
     in_progress = qc_scenario(["agree", "not_computed"], ["primary", "supporting"], state="comparing")
+    # plan_8_1 sections 1.3 and 1.4: a study shaped like 42 (legacy) and a failed read on this build.
+    from tests.test_read_failure_projection import _STUDY_42
+
+    failed_read_legacy = summarize(
+        study=_STUDY_42["study"],
+        evidence=_STUDY_42["evidence"],
+        plan=_STUDY_42["plan"],
+        targets=[],
+        issues=_STUDY_42["issues"],
+    )
+    blocker = (
+        "bioAF could not read the paper: the answer was cut off at its token limit of 16,000 output tokens; the "
+        "recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a "
+        "bioAF limitation, not a finding about the paper."
+    )
+    failed_read = summarize(
+        study={"state": "error"},
+        evidence={"extraction": {"status": "failed", "cause": blocker.split(": ", 1)[1].rsplit(". This", 1)[0]}},
+        plan={"blockers": [blocker], "blocker_kinds": [{"text": blocker, "kind": "bioaf_limitation"}]},
+        targets=[],
+        issues=[],
+    )
     return json.loads(
         json.dumps(
             {
@@ -150,6 +172,8 @@ async def _contract() -> dict:
                 "scorecard_not_established": not_established,
                 "scorecard_not_applicable": not_applicable,
                 "scorecard_in_progress": in_progress,
+                "failed_read_legacy": failed_read_legacy,
+                "failed_read": failed_read,
             }
         )
     )

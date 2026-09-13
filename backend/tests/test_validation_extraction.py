@@ -30,8 +30,8 @@ _GOOD = """Here is the extraction:
    "contrasts": [{"name": "dex vs untreated", "test_condition": "dexamethasone", "reference_condition": "untreated",
                   "test_samples": ["GSM1", "GSM2"], "reference_samples": ["GSM3", "GSM4"]}],
    "thresholds": {"log2fc": 1.0, "padj": 0.05}},
- "claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "tolerance": 0.05, "source_locator": "Results"},
-            {"metric_key": "de_genes", "value": 316, "unit": "count", "source_locator": "Fig 3"}],
+ "claims": [{"metric_key": "alignment_rate", "claim_text": "83.4% of reads aligned.", "value": 83.4, "unit": "%", "tolerance": 0.05, "source_locator": "Results"},
+            {"metric_key": "de_genes", "claim_text": "316 genes were differentially expressed.", "value": 316, "unit": "count", "source_locator": "Fig 3"}],
  "data_availability": "deposited", "blockers": []}
 ```
 Done."""
@@ -39,7 +39,7 @@ Done."""
 
 def _fake_client(response):
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     return _C()
@@ -1082,7 +1082,7 @@ async def test_a_binding_call_that_fails_keeps_the_plan_and_marks_the_claims(ses
     await session.flush()
 
     class _FlakyClient:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             if prompt.startswith("You are binding a paper's quantitative claims"):
                 raise ProviderError("provider exploded", error_class="server")
             return _GOOD

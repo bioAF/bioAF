@@ -72,10 +72,11 @@ def test_error_is_parked_rather_than_closed():
 
     It stays TERMINAL, which is what stops the background driver touching it: a study that failed
     must never re-launch itself on a tick, or one broken parameter becomes a spend loop. Retrying is
-    a human act, and these are the two places a human can send it."""
+    a human act, and these are the places a human can send it. plan_8_1 section 1.3 (D6): a study
+    whose READ failed goes back to `requested` and is read again."""
     assert is_terminal("error")
     assert "error" in VALIDATION_STUDY_TERMINAL_STATES
-    assert set(next_states("error")) == {"setup", "plan_ready"}
+    assert set(next_states("error")) == {"setup", "plan_ready", "requested"}
 
 
 def test_early_exit_to_classified_before_running():

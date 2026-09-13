@@ -255,8 +255,12 @@ def _driver_owns(study: "ValidationStudy") -> bool:
     The back half is always the driver's. The front half is only the driver's when the requester
     already chose a route at the button; otherwise `requested` waits for "Read paper" and
     `plan_ready` waits at the C1 gate, exactly as they did before.
+
+    plan_8_1 section 1.2: a read that started is the driver's to finish. A study only stays in
+    `reading` when its worker stopped mid-read (a live worker holds the claim), and the next tick resumes
+    its cycle without granting another attempt.
     """
-    if study.state in _ACTIVE_BACK_HALF_STATES:
+    if study.state in _ACTIVE_BACK_HALF_STATES or study.state in _RESUMABLE_READ_STATES:
         return True
     return study.state in _SELF_DRIVING_FRONT_HALF_STATES and study.intended_route is not None
 
@@ -298,6 +302,9 @@ async def study_activity(session: AsyncSession, study: "ValidationStudy") -> dic
 # the assessment record exists before any acquisition is attempted and regardless of whether the
 # acquisition then succeeds.
 _ASSESSMENT_STATES = ("acquiring_data", "acquiring_processed")
+
+# plan_8_1 section 1.2: a read the driver resumes when its worker stopped.
+_RESUMABLE_READ_STATES = ("reading",)
 
 _ACTIVE_BACK_HALF_STATES = (
     "acquiring_data",
@@ -555,9 +562,27 @@ class ValidationDriverService:
         *,
         claim,
     ) -> ValidationStudy:
-        """The read itself, performed under a claim this caller holds."""
-        if study.state != "requested":
+        """The read itself, performed under a claim this caller holds.
+
+        plan_8_1 section 1.2: the read commits as it goes. The study lands in ``reading`` with its
+        extraction cycle begun, and every attempt is committed before it is submitted, so a worker that
+        stops mid-read leaves a cycle the next tick resumes (``reading`` is the driver's) rather than a
+        fresh count. Section 1.3: a read that ends with no usable answer ends the study in ``error``,
+        never in an early-exit classification.
+        """
+        from app.services import validation_read_cycle as cycles
+
+        if study.state not in ("requested", "reading"):
             raise ValidationError(f"read_and_plan can only start from 'requested'; study is in '{study.state}'.")
+
+        async def _checkpoint() -> None:
+            # The fence, then the commit: an attempt is on the record before its call goes out.
+            try:
+                await assert_held(session, claim)
+            except ClaimLost:
+                await session.rollback()
+                raise
+            await session.commit()
 
         # change_7.1 section 2: the article's supplement manifest comes from the SAME document the
         # body text does. A pasted body is not a document, so it carries none, and an empty manifest
@@ -565,9 +590,20 @@ class ValidationDriverService:
         supplements: list[dict] = []
         pmcid = ""
         sections = None
+        resuming = study.state == "reading"
+        cycle = cycles.current_cycle(study.evidence_json) if resuming else None
+        source = "pasted" if full_text else "europe_pmc"
+        if resuming and not full_text and (cycle or {}).get("text", {}).get("source") == "pasted":
+            # The pasted text was never kept (artifact retention is a separate decision), so an
+            # interrupted read of it cannot continue.
+            cause = "the read was interrupted, and the pasted text it was reading was not kept; paste it again"
+            return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
         if not full_text:
             result = await FullTextFetchService.fetch(doi=study.source_doi)
             if result is None:
+                if resuming:
+                    cause = "the read was interrupted, and the paper's text could not be fetched again"
+                    return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
                 raise ValidationError(
                     "Could not acquire full text for this study. Provide full_text, or set a source "
                     "DOI that resolves to an open-access Europe PMC article."
@@ -579,10 +615,11 @@ class ValidationDriverService:
             # change_7.5 section 2.4: the methods and captions, addressable, for binding. Not persisted.
             sections = getattr(result, "sections", None)
 
-        # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
-        # stage is a pass-through.
-        study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "acquiring_text")
-        study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
+        if not resuming:
+            # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
+            # stage is a pass-through.
+            study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "acquiring_text")
+            study = await ValidationStudyService.transition(session, study.id, org_id, user_id, "reading")
         record_stage(study, "reading")
 
         # change_7.5 sections 1.5 and 2.6: what the text names and what the article attaches are on the
@@ -595,8 +632,22 @@ class ValidationDriverService:
         if pmcid:
             evidence["pmcid"] = pmcid
         evidence["scanned_identifiers"] = scan_identifiers(full_text)
+        if not resuming and isinstance(evidence.get("scorecard_record"), dict):
+            # plan_8_1 section 1.4: a re-read supersedes the plan, and the score recorded from it is history.
+            evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [
+                evidence.pop("scorecard_record")
+            ]
         study.evidence_json = evidence
-        await session.flush()
+        text = {
+            "source": source,
+            "sha256": hashlib.sha256(full_text.encode("utf-8")).hexdigest(),
+            "chars": len(full_text),
+        }
+        if (cycle or {}).get("status") == cycles.IN_PROGRESS:
+            cycles.update_cycle(study, text=text)
+        else:
+            cycles.begin_cycle(study, text=text)
+        await _checkpoint()
 
         # plan_7 step 13: establish what this paper actually has, BEFORE the C1 gate, so the route
         # modal offers what is available rather than three equal-looking options. Runs here rather
@@ -609,8 +660,9 @@ class ValidationDriverService:
             )
 
         plan = await ValidationExtractionService.extract(
-            session, study, full_text, org_id, user_id, sections=sections, discover=_discover
+            session, study, full_text, org_id, user_id, sections=sections, discover=_discover, checkpoint=_checkpoint
         )
+        unread = (cycles.current_cycle(study.evidence_json) or {}).get("status") == cycles.FAILED
 
         evidence = dict(study.evidence_json or {})
         # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
@@ -622,7 +674,9 @@ class ValidationDriverService:
 
         # plan_7 step 14: the cheap checks, beside step 13 and for the same reason. The gate is
         # pre-approval, so an answer produced after approval cannot inform the decision to approve.
-        await ValidationDriverService._run_precompute_checks(session, study, plan, full_text=full_text)
+        await ValidationDriverService._run_precompute_checks(
+            session, study, plan, full_text=full_text, paper_not_read=unread
+        )
 
         # The fence. A claim that expired under this work means somebody else owns the study now, and
         # landing this extraction over theirs is the duplicate the claim exists to prevent.
@@ -631,6 +685,12 @@ class ValidationDriverService:
         except ClaimLost:
             await session.rollback()
             raise
+
+        if unread:
+            # plan_8_1 section 1.3: bioAF's limitation, not the paper's. No early-exit classification.
+            return await ValidationStudyService.transition(
+                session, study.id, org_id, user_id, "error", failure_reason=(plan.blockers_json or [None])[0]
+            )
 
         classification = _early_exit_classification(plan)
         if classification is not None:
@@ -643,6 +703,25 @@ class ValidationDriverService:
             )
 
         return await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
+
+    @staticmethod
+    async def _end_unread(session: AsyncSession, study: ValidationStudy, org_id: int, user_id: int, *, cause: str):
+        """An interrupted read that cannot continue ends as a failed read, with its cause."""
+        from app.services import validation_read_cycle as cycles
+
+        if (cycles.current_cycle(study.evidence_json) or {}).get("status") == cycles.IN_PROGRESS:
+            cycles.mark_interrupted(study)
+            cycles.finish_cycle(study, status=cycles.FAILED, cause=cause)
+        else:
+            cycles.begin_cycle(study)
+            cycles.finish_cycle(study, status=cycles.FAILED, cause=cause)
+        cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_VALIDATION)
+        plan = await ValidationExtractionService.plan_from_failed_read(
+            session, study, user_id, cfg=cfg, cause=cause, issues=[], full_text=None
+        )
+        return await ValidationStudyService.transition(
+            session, study.id, org_id, user_id, "error", failure_reason=(plan.blockers_json or [None])[0]
+        )
 
     @staticmethod
     async def _paper_passages(session: AsyncSession, plan, full_text: str | None) -> dict:
@@ -685,6 +764,7 @@ class ValidationDriverService:
                 accessions=_named_accessions(study, plan, for_discovery=True),
                 has_full_text=has_full_text,
                 code_availability=(plan.code_availability_json if plan else None),
+                code_not_read_reason=getattr(plan, "code_not_read_reason", None),
                 fetcher=fetcher,
             )
         except Exception as exc:  # noqa: BLE001 - discovery informs the gate; it cannot fail a read
@@ -717,7 +797,13 @@ class ValidationDriverService:
 
     @staticmethod
     async def _run_precompute_checks(
-        session: AsyncSession, study: ValidationStudy, plan, *, full_text: str | None, fetcher=None
+        session: AsyncSession,
+        study: ValidationStudy,
+        plan,
+        *,
+        full_text: str | None,
+        fetcher=None,
+        paper_not_read: bool = False,
     ) -> dict:
         """plan_7 step 14: land the four pre-compute checks on ``evidence["precompute_checks"]``.
 
@@ -763,6 +849,9 @@ class ValidationDriverService:
                 model=cfg.model if cfg else "",
                 api_key=cfg.api_key if cfg else None,
                 on_issue=issues.append,
+                # plan_8_1 section 1.3: what the reading never reached is said to be not read.
+                paper_not_read=paper_not_read,
+                not_read=((study.evidence_json or {}).get("extraction") or {}).get("not_read") or (),
             )
         except Exception as exc:  # noqa: BLE001 - the checks inform the gate; they cannot fail a read
             logger.warning("pre-compute checks failed for study %s: %s", study.id, exc)
@@ -817,6 +906,7 @@ class ValidationDriverService:
                     select(ValidationStudy.id).where(
                         or_(
                             ValidationStudy.state.in_(_ACTIVE_BACK_HALF_STATES),
+                            ValidationStudy.state.in_(_RESUMABLE_READ_STATES),
                             # Self-driving front half: the route was chosen at the button, so the read
                             # and the approval are this loop's work rather than two more clicks.
                             and_(
@@ -879,6 +969,7 @@ class ValidationDriverService:
             "reproducing": ValidationDriverService._handle_reproducing,
             "comparing": ValidationDriverService._handle_comparing,
             "requested": ValidationDriverService._handle_requested,
+            "reading": ValidationDriverService._handle_requested,
             "plan_ready": ValidationDriverService._handle_plan_ready,
         }
         handler = handlers.get(study.state)
@@ -886,7 +977,7 @@ class ValidationDriverService:
             return False
         # The steps that take this tick's claim: the read races two writers, and the two launches
         # dispatch external work that a database fence cannot recall.
-        if study.state in ("requested", "acquiring_data", "setup"):
+        if study.state in ("requested", "reading", "acquiring_data", "setup"):
             advanced = await handler(session, study, claim=claim)
         else:
             advanced = await handler(session, study)

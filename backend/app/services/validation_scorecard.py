@@ -142,6 +142,9 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "unresolved_importance": [],
         # Set by the projection when the outcomes come from the record kept when the study concluded.
         "outcomes_recorded_at": None,
+        # plan_8_1 section 1.3: whose limitation a card with no score is, when that is established.
+        "cause": None,
+        "cause_label": None,
     }
 
 
@@ -379,6 +382,10 @@ _COMPACT_KEYS = (
     "in_progress_label",
     "rubric_version",
     "inventory_revision",
+    # plan_8_1 section 1.3: a failed read's list cell says what the report says.
+    "reason",
+    "cause",
+    "cause_label",
 )
 
 

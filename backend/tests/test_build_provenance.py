@@ -209,7 +209,7 @@ class TestTheEvidenceForAFailedParseSurvives:
         long_answer = "prose, and rather a lot of it. " * 100
 
         class _Client:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return long_answer
 
         decision = asyncio.run(
@@ -228,7 +228,7 @@ class TestTheEvidenceForAFailedParseSurvives:
         from app.services.llm_decision import decide
 
         class _Client:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return "a stack trace and a wall of json fragments"
 
         decision = asyncio.run(

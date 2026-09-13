@@ -225,7 +225,7 @@ async def test_a_column_resolution_the_model_could_not_answer_is_an_issue(sessio
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _Prose:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return "I would guess the second column, but I am not sure."
 
     monkeypatch.setattr(rps.llm_provider_config_service, "get_for_feature", fake_get_for_feature)

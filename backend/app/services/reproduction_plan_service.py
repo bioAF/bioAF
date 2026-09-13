@@ -263,12 +263,25 @@ class ReproductionPlanService:
         extractor_provider: str | None = None,
         library_strategy: str | None = None,
         code_availability: list | None = None,
+        code_availability_read: bool = True,
         reported_experiments: list | None = None,
         resources: list | None = None,
         analysis_selection: dict | None = None,
         finding_inventory: dict | None = None,
     ) -> ReproductionPlan:
-        """Create a plan for ``study`` and point the study at it (its current plan). Audited."""
+        """Create a plan for ``study`` and point the study at it (its current plan). Audited.
+
+        plan_8_1 section 1.4: a re-read supersedes the study's active plan, which is kept as history.
+        """
+        from datetime import datetime, timezone
+
+        from sqlalchemy import update
+
+        await session.execute(
+            update(ReproductionPlan)
+            .where(ReproductionPlan.validation_study_id == study.id, ReproductionPlan.superseded_at.is_(None))
+            .values(superseded_at=datetime.now(timezone.utc))
+        )
         plan = ReproductionPlan(
             validation_study_id=study.id,
             accessions_json=accessions if accessions is not None else [],
@@ -286,9 +299,11 @@ class ReproductionPlanService:
             extractor_model=extractor_model,
             extractor_provider=extractor_provider,
             library_strategy=_clamp(library_strategy, 100),
-            # [] when the extraction looked and the paper named no code; NULL only for a plan made
-            # before the column existed.
-            code_availability_json=code_availability if code_availability is not None else [],
+            # [] when the extraction looked and the paper named no code; NULL for a plan made before
+            # the column existed, and (plan_8_1 section 1.3) for a reading that never read the part.
+            code_availability_json=(
+                (code_availability if code_availability is not None else []) if code_availability_read else None
+            ),
             reported_experiments_json=reported_experiments,
             resources_json=resources,
             analysis_selection_json=analysis_selection,

@@ -204,7 +204,7 @@ async def test_a_read_lists_what_the_text_names_beside_what_the_model_named(sess
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return extraction
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)
@@ -409,7 +409,7 @@ async def test_discovery_runs_before_the_plan_so_its_inventory_holds_what_was_fo
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return extraction
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)

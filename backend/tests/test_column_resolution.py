@@ -93,7 +93,7 @@ class TestTheCall:
     @pytest.mark.asyncio
     async def test_it_returns_the_mapping(self):
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response(
                     chrom="regions.seqnames",
                     start="regions.start",

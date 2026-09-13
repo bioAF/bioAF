@@ -123,6 +123,7 @@ ISSUE_OUTCOME_LABELS = {
     "truncated": "the model's answer was cut off at its token limit",
     # plan_8_1 section 1.1, pending the owner's sign-off.
     "timed_out": "the model's answer did not finish within bioAF's time limit",
+    "incomplete": "the model's answer left out parts bioAF requires",
     "retrieval_failed": "bioAF could not retrieve a file it needed",
     "not_performed": "this step could not run",
 }
@@ -222,6 +223,10 @@ def summarize(
     claims, counts = _claims(targets, plan, evidence)
     reconciliation = _reconciliation(evidence)
     headline = _headline(study, attempt)
+    # plan_8_1 section 1.4: the one rule, applied to this study's current plan.
+    from app.services.validation_read_failure import read_failure
+
+    failure = read_failure(evidence, issues=issues, claim_count=len(targets))
     completion_facts = _completion_facts(completion, evidence, study, uninspected=uninspected)
     acquired = any(f["key"] == "input_acquired" and f["value"] == "yes" for f in completion_facts)
     facts = _facts(evidence, artifacts, attempt, counts, acquired=acquired)
@@ -245,7 +250,8 @@ def summarize(
         "selection_history": _selection_history(evidence),
         "claims": claims,
         "claim_counts": counts,
-        "blockers": _blockers(plan, evidence),
+        "blockers": _blockers(plan, evidence, failure=failure),
+        "read_failure": _read_failure_projection(failure, study),
         "contrasts": _contrasts(plan, evidence),
         "reconciliation": reconciliation,
         "consistency": _consistency(evidence),
@@ -259,7 +265,9 @@ def summarize(
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
         # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
-        "scorecard": scorecard_projection(study=study, evidence=evidence, plan=plan, targets=targets, claims=claims),
+        "scorecard": scorecard_projection(
+            study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues
+        ),
     }
 
 
@@ -309,6 +317,7 @@ def scorecard_projection(
     plan: dict | None,
     targets: list[dict] | None,
     claims: list[dict] | None = None,
+    issues: list[dict] | None = None,
 ) -> dict:
     """plan_8: the scorecard for one study, from its finding inventory and its outcomes.
 
@@ -326,6 +335,13 @@ def scorecard_projection(
     plan = plan or {}
     targets = [t for t in targets or [] if isinstance(t, dict)]
     in_progress = study.get("state") not in _ACTIVE_STATES_TERMINAL
+    # plan_8_1 sections 1.3 and 1.4: a plan that came from a failed read has no findings to score, and
+    # says whose limitation that is and what to do, whatever it recorded before.
+    from app.services.validation_read_failure import read_failure
+
+    failure = read_failure(evidence, issues=issues, claim_count=len(targets))
+    if failure is not None:
+        return _read_failure_card(failure, in_progress=in_progress)
     inventory = plan.get("finding_inventory")
     if not isinstance(inventory, dict) or not inventory:
         if plan:
@@ -355,6 +371,33 @@ def scorecard_projection(
             {},
             in_progress=in_progress,
         )
+
+
+def _read_failure_card(failure: dict, *, in_progress: bool) -> dict:
+    from app.services.validation_finding_outcomes import CAUSE_BIOAF, CAUSE_LABELS
+    from app.services.validation_read_failure import scorecard_reason
+    from app.services.validation_scorecard import build_scorecard
+
+    card = build_scorecard(
+        {"status": "unresolved", "reason": scorecard_reason(failure["cause"])}, {}, in_progress=in_progress
+    )
+    card.update(cause=CAUSE_BIOAF, cause_label=CAUSE_LABELS[CAUSE_BIOAF])
+    return card
+
+
+def _read_failure_projection(failure: dict | None, study: dict) -> dict | None:
+    """What the report says about a failed read beside the scorecard, or None when the read did not fail."""
+    if failure is None:
+        return None
+    from app.services.validation_read_failure import CLASSIFICATION_NOTE
+
+    classified = study.get("state") == "classified" and bool(study.get("classification"))
+    return {
+        "cause": failure["cause"],
+        "legacy": failure["legacy"],
+        "classification_from_failed_read": classified,
+        "classification_note": CLASSIFICATION_NOTE if classified else None,
+    }
 
 
 async def record_scorecard(session, study) -> None:
@@ -676,14 +719,38 @@ def _basis(evidence: dict) -> str:
     return (evidence.get("assessment") or {}).get("basis") or "paper_text"
 
 
-def _blockers(plan: dict, evidence: dict) -> list[dict]:
-    """Section 6: a blocker is a reading of the prose, provisional until inspected evidence settles it."""
+def _blockers(plan: dict, evidence: dict, *, failure: dict | None = None) -> list[dict]:
+    """Section 6: a blocker is a reading of the prose, provisional until inspected evidence settles it.
+
+    plan_8_1 section 1.4: on a plan from a failed read, the bioAF-limitation blocker leads, and every
+    other stored blocker (each derived from a field the read never reached) is withheld and listed as
+    not established. The withheld sentence is kept for the collapsed detail, never as the statement.
+    """
     basis = _basis(evidence)
     kinds = {str(k.get("text")): k.get("kind") for k in plan.get("blocker_kinds") or [] if isinstance(k, dict)}
-    return [
+    rows = [
         {"text": str(b), "kind": kinds.get(str(b)), "basis": basis, "provisional": basis != "inspected_evidence"}
         for b in plan.get("blockers") or []
     ]
+    if failure is None:
+        return rows
+    from app.services.validation_read_failure import BIOAF_LIMITATION, NOT_ESTABLISHED_BLOCKER, read_failure_blocker
+
+    limitation = [r for r in rows if r["kind"] == BIOAF_LIMITATION] or [
+        {"text": read_failure_blocker(failure["cause"]), "kind": BIOAF_LIMITATION, "basis": basis, "provisional": False}
+    ]
+    withheld = [
+        {
+            "text": NOT_ESTABLISHED_BLOCKER,
+            "kind": "not_established",
+            "withheld": r["text"],
+            "basis": basis,
+            "provisional": False,
+        }
+        for r in rows
+        if r["kind"] != BIOAF_LIMITATION
+    ]
+    return [*(dict(r, provisional=False) for r in limitation), *withheld]
 
 
 def _contrasts(plan: dict, evidence: dict) -> list[dict]:
@@ -1489,6 +1556,29 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
         )
         for row in rows:
             targets.setdefault(row.reproduction_plan_id, []).append(target_dict(row))
+    # plan_8_1 section 1.4: the legacy failed-read rule reads the blocked paper-reading issues, in one
+    # more query whatever the number of studies.
+    from app.models.validation_study_issue import ValidationStudyIssue
+    from app.services.validation_read_failure import PAPER_READING_STEP
+
+    reading_issues: dict[int, list[dict]] = {}
+    blocked = (
+        (
+            await session.execute(
+                select(ValidationStudyIssue).where(
+                    ValidationStudyIssue.validation_study_id.in_([s.id for s in studies]),
+                    ValidationStudyIssue.step == PAPER_READING_STEP,
+                    ValidationStudyIssue.impact == "blocked",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for issue in blocked:
+        reading_issues.setdefault(issue.validation_study_id, []).append(
+            {"step": issue.step, "outcome": issue.outcome, "impact": issue.impact}
+        )
     compact: dict[int, dict] = {}
     for study in studies:
         plan = by_pointer.get(study.reproduction_plan_id) if study.reproduction_plan_id else by_study.get(study.id)
@@ -1497,6 +1587,7 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
             evidence=study.evidence_json,
             plan=plan_projection(plan) if plan is not None else {},
             targets=targets.get(plan.id, []) if plan is not None else [],
+            issues=reading_issues.get(study.id, []),
         )
         compact[study.id] = compact_scorecard(card)
     return compact

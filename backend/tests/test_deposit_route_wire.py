@@ -111,7 +111,7 @@ def _patch_selector(monkeypatch, response, model="claude-opus-4-8"):
     class _C:
         calls: list[str] = []
 
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             _C.calls.append(payload)
             return response
 

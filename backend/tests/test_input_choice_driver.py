@@ -80,7 +80,7 @@ class _Client:
         self.answers = list(answers)
         self.calls = 0
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         answer = self.answers[min(self.calls, len(self.answers) - 1)]
         self.calls += 1
         return "```json\n" + json.dumps(answer) + "\n```"

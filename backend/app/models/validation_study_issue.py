@@ -33,11 +33,18 @@ from app.services.llm_decision import OUTCOME_OK, OUTCOMES
 # pass that raised). Both were logged and never reached the report.
 OUTCOME_RETRIEVAL_FAILED = "retrieval_failed"
 OUTCOME_NOT_PERFORMED = "not_performed"
+# plan_8_1 section 1.2: an answer that parsed and left out a part bioAF requires. It is not a badly
+# formatted answer, and never a statement that the paper lacks the part.
+OUTCOME_INCOMPLETE = "incomplete"
 
 # What went wrong. ONE vocabulary: every failure `llm_decision` can report, imported rather than
 # re-spelled, plus the two above. The hand-copied list this replaced lacked `truncated`, so a
 # truncated answer's issue was discarded on write while every test of `as_issue` passed.
-ISSUE_OUTCOMES = tuple(o for o in OUTCOMES if o != OUTCOME_OK) + (OUTCOME_RETRIEVAL_FAILED, OUTCOME_NOT_PERFORMED)
+ISSUE_OUTCOMES = tuple(o for o in OUTCOMES if o != OUTCOME_OK) + (
+    OUTCOME_RETRIEVAL_FAILED,
+    OUTCOME_NOT_PERFORMED,
+    OUTCOME_INCOMPLETE,
+)
 
 # Whether the step still produced something usable. Without this distinction every fallback would
 # read as a failure.

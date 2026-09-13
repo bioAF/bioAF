@@ -177,7 +177,7 @@ async def _autonomous(session, org_id, monkeypatch, response):
         return SimpleNamespace(provider="anthropic", model="m", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     monkeypatch.setattr(drv.llm_provider_config_service, "get_for_feature", fake_get_for_feature)

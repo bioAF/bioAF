@@ -308,18 +308,45 @@ async def run_precompute_checks(
     model: str,
     api_key: str | None,
     on_issue=None,
+    paper_not_read: bool = False,
+    not_read: list[str] | tuple[str, ...] = (),
 ) -> dict:
     """All four checks, keyed by check name, for ``evidence["precompute_checks"]``.
 
     The two facts are answered first and independently of the model, so a provider outage cannot
     take the species hold with it.
+
+    plan_8_1 section 1.3: the two facts compare what the READING says the paper states. When the paper
+    was not read (``paper_not_read``), or the reading left the part out (``not_read`` names its path),
+    the row says so, and never that the paper lacks it. The two judgments read the text itself.
     """
+    from app.services.validation_read_failure import PAPER_NOT_READ, omitted_part
+
+    omitted = set(not_read or ())
+
+    def _unread(path: str, part: str) -> str | None:
+        if paper_not_read:
+            return PAPER_NOT_READ
+        if path in omitted or path.split(".")[0] in omitted:
+            return omitted_part(part)
+        return None
+
+    species_unread = _unread("sample_structure.organism", "the paper's organism")
+    count_unread = _unread("sample_structure.sample_count", "how many samples the paper used")
     checks = {
-        CHECK_SPECIES: check_species(plan_organism, deposit_organisms, organism_source=organism_source),
+        CHECK_SPECIES: (
+            _result(CHECK_SPECIES, UNKNOWN, detail=species_unread)
+            if species_unread
+            else check_species(plan_organism, deposit_organisms, organism_source=organism_source)
+        ),
         # change_7.1 section 7: the paper's own attachments are evidence for these checks, not just
         # for the report. A check that contradicts the inventory beside it is worse than no check.
-        CHECK_SAMPLE_DATA: check_sample_data(
-            paper_sample_count=paper_sample_count, entries=entries, supplements=supplements, deposits=deposits
+        CHECK_SAMPLE_DATA: (
+            _result(CHECK_SAMPLE_DATA, UNKNOWN, detail=count_unread)
+            if count_unread
+            else check_sample_data(
+                paper_sample_count=paper_sample_count, entries=entries, supplements=supplements, deposits=deposits
+            )
         ),
     }
     checks[CHECK_METHODS] = await _judge(

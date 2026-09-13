@@ -72,14 +72,19 @@ def _answer(value: str, *, evidence: str | None = None, failure_reason: str | No
     return {"value": value, "evidence": evidence, "failure_reason": failure_reason}
 
 
-def _code_answers(code_availability: list[dict] | None) -> tuple[list[dict], dict, dict]:
+def _code_answers(
+    code_availability: list[dict] | None, *, not_read_reason: str | None = None
+) -> tuple[list[dict], dict, dict]:
     """The paper's code sources, and the two checklist rows derived from them.
 
     ``None`` and ``[]`` are different facts: ``None`` is "the extraction never answered this", which
-    is UNKNOWN, and ``[]`` is "we read the paper and it named no code", which is NO.
+    is UNKNOWN, and ``[]`` is "we read the paper and it named no code", which is NO. plan_8_1 section
+    1.3: ``not_read_reason`` says why it was never answered (a failed read, or an omitted part).
     """
     if code_availability is None:
-        unknown = _answer(UNKNOWN, failure_reason="the paper's code availability was never extracted")
+        unknown = _answer(
+            UNKNOWN, failure_reason=not_read_reason or "the paper's code availability was never extracted"
+        )
         return [], unknown, dict(unknown)
 
     sources = [
@@ -121,6 +126,7 @@ async def discover_capabilities(
     has_full_text: bool,
     code_availability: list[dict] | None,
     fetcher: Fetcher | None = None,
+    code_not_read_reason: str | None = None,
 ) -> dict:
     """Answer the phase-1 questions for one paper, across every deposit it names. Never raises.
 
@@ -142,7 +148,7 @@ async def discover_capabilities(
         )
     }
 
-    sources, artifact_answer, repo_answer = _code_answers(code_availability)
+    sources, artifact_answer, repo_answer = _code_answers(code_availability, not_read_reason=code_not_read_reason)
     caps["code_sources"] = sources
     caps["code_artifact"] = artifact_answer
     caps["code_repository"] = repo_answer
