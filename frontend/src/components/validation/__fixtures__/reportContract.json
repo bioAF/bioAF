@@ -59,6 +59,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -75,6 +76,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -160,6 +163,7 @@
       "reproduction_not_attempted": "Reproduction not attempted"
     },
     "issue_outcome": {
+      "incomplete": "the model's answer left out parts bioAF requires",
       "internal": "bioAF hit an internal error",
       "not_performed": "this step could not run",
       "refusal": "the model declined to answer",
@@ -247,6 +251,293 @@
       "unknown": "Unknown",
       "yes": "Yes"
     }
+  },
+  "failed_read": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [
+      {
+        "basis": "paper_text",
+        "kind": "bioaf_limitation",
+        "provisional": false,
+        "text": "bioAF could not read the paper: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a bioAF limitation, not a finding about the paper."
+      }
+    ],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "in_progress",
+      "label": null
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": {
+      "cause": "the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens",
+      "classification_from_failed_read": false,
+      "classification_note": null,
+      "legacy": false
+    },
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "indicators": [],
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "bioAF could not read the paper into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a bioAF limitation; read the paper again.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
+    "selection_history": [],
+    "summary": [
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "failed_read_legacy": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [
+      {
+        "basis": "paper_text",
+        "kind": "bioaf_limitation",
+        "provisional": false,
+        "text": "bioAF could not read the paper: the model's answer was cut off at its token limit. This is a bioAF limitation, not a finding about the paper."
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_established",
+        "provisional": false,
+        "text": "Not established: the paper was not read.",
+        "withheld": "insufficient method detail to identify an assay"
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_established",
+        "provisional": false,
+        "text": "Not established: the paper was not read.",
+        "withheld": "could not parse a structured extraction from the model response"
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_established",
+        "provisional": false,
+        "text": "Not established: the paper was not read.",
+        "withheld": "no data accession found in the paper"
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_established",
+        "provisional": false,
+        "text": "Not established: the paper was not read.",
+        "withheld": "The paper does not state its reference, so it is unresolved: reanalysis from raw reads and QC metrics from a run are refused for this paper, and no default is used. Checks that need no reference are unaffected."
+      }
+    ],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 1,
+    "limitations": [],
+    "read_failure": {
+      "cause": "the model's answer was cut off at its token limit",
+      "classification_from_failed_read": true,
+      "classification_note": "This classification came from a read that failed, not from the paper.",
+      "legacy": true
+    },
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "indicators": [],
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "bioAF could not read the paper into findings: the model's answer was cut off at its token limit. This is a bioAF limitation; read the paper again.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
   },
   "groff_failed": {
     "artifacts": [
@@ -855,6 +1146,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": "paper_text",
       "label": "Reconciled against the paper's own passages; from the paper text only; not checked against the attachments",
@@ -894,6 +1186,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -1037,6 +1331,7 @@
         }
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -1053,6 +1348,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -1192,6 +1489,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -1208,6 +1506,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -2099,6 +2399,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": "paper_text",
       "label": "Reconciled against the paper's own passages; from the paper text only; not checked against the attachments",
@@ -2139,6 +2440,8 @@
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -2586,6 +2889,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -2645,6 +2949,8 @@
         }
       ],
       "assessed_weight": 2,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": 100,
@@ -3675,6 +3981,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -3775,6 +4082,8 @@
         }
       ],
       "assessed_weight": 2,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": 100,
@@ -4407,6 +4716,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -4424,6 +4734,8 @@
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -4737,6 +5049,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -4754,6 +5067,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -5031,6 +5346,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -5048,6 +5364,8 @@
       "assessed_count": 0,
       "assessed_items": [],
       "assessed_weight": 0,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -5537,6 +5855,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -5760,6 +6079,8 @@
         }
       ],
       "assessed_weight": 6,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": 1,
       "discrepant_weight": 2,
       "display_score": 67,
@@ -6183,6 +6504,7 @@
     "index_pages": 0,
     "issue_count": 0,
     "limitations": [],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": null,
@@ -6241,6 +6563,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -6919,6 +7243,7 @@
         "technical_detail": null
       }
     ],
+    "read_failure": null,
     "reconciliation": {
       "basis": null,
       "label": "Reconciliation not performed: no attachments were inspected",
@@ -6951,6 +7276,8 @@
       "assessed_count": null,
       "assessed_items": [],
       "assessed_weight": null,
+      "cause": null,
+      "cause_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,

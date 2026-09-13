@@ -185,3 +185,63 @@ test("a report projected before the scorecard existed renders no card and no err
   await screen.findByText("Reproduction not attempted");
   expect(screen.queryByRole("heading", { name: "Validation Scorecard" })).not.toBeInTheDocument();
 });
+
+// plan_8_1 sections 1.3 and 1.4: a read that failed is never shown as a fact about the paper.
+describe("a study whose read failed", () => {
+  function legacy42() {
+    return {
+      ...study(),
+      id: 42,
+      state: "classified",
+      classification: "missing_data",
+      plan: {
+        pipeline_key: null,
+        blockers: ["insufficient method detail to identify an assay", "no data accession found in the paper"],
+        ai_decisions: [],
+      },
+      report_summary: contract.failed_read_legacy,
+    };
+  }
+
+  test("lists the bioAF limitation and withholds each absence blocker as not established", async () => {
+    mockGet.mockResolvedValue(legacy42());
+    render(<ValidationStudyPage />);
+    await waitFor(() =>
+      expect(screen.getByText(/^bioAF could not read the paper: the model's answer was cut off/)).toBeInTheDocument(),
+    );
+    const withheld = screen.getAllByTestId("blocker-withheld");
+    expect(withheld.length).toBe(contract.failed_read_legacy.blockers.length - 1);
+    for (const row of withheld) {
+      expect(row).toHaveTextContent(/^Not established: the paper was not read\./);
+    }
+    expect(screen.queryByTestId("blockers-provisional")).not.toBeInTheDocument();
+  });
+
+  test("says the classification came from a failed read", async () => {
+    mockGet.mockResolvedValue(legacy42());
+    render(<ValidationStudyPage />);
+    await waitFor(() =>
+      expect(screen.getByText(contract.failed_read_legacy.read_failure.classification_note as string)).toBeInTheDocument(),
+    );
+  });
+
+  test("the scorecard names the bioAF limitation and the next action", async () => {
+    mockGet.mockResolvedValue(legacy42());
+    render(<ValidationStudyPage />);
+    await waitFor(() => expect(screen.getByText(/This is a bioAF limitation; read the paper again\./)).toBeInTheDocument());
+  });
+
+  test("Retry says it reads the paper again", async () => {
+    mockGet.mockResolvedValue({
+      ...study(),
+      state: "error",
+      classification: null,
+      failure_reason: contract.failed_read.blockers[0].text,
+      report_summary: contract.failed_read,
+    });
+    render(<ValidationStudyPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument());
+    expect(screen.getByText(/Retrying reads the paper again\./)).toBeInTheDocument();
+    expect(screen.queryByText(/data that was already downloaded is reused/)).not.toBeInTheDocument();
+  });
+});

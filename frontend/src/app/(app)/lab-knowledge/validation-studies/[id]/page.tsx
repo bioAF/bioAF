@@ -47,6 +47,7 @@ import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
 import { ClaimSelection } from "@/components/validation/ClaimSelection";
 import { ResourceInventory } from "@/components/validation/ResourceInventory";
 import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
+import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -212,6 +213,11 @@ export default function ValidationStudyPage() {
   const plan = study.plan;
   const plan7 = (study.evidence ?? {}) as Plan7Evidence;
   const summary = study.report_summary ?? null;
+  // plan_8_1 section 1.4: the projection's blockers when the report carries them, else the plan's own.
+  const blockerRows: { text: string; withheld?: string }[] =
+    summary?.blockers && summary.blockers.length > 0
+      ? summary.blockers
+      : (plan?.blockers ?? []).map((text) => ({ text }));
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
 
@@ -277,6 +283,12 @@ export default function ValidationStudyPage() {
             failureReason={study.failure_reason}
             summary={summary}
           />
+          {/* plan_8_1 section 1.4: a classification a failed read produced is not about the paper. */}
+          {summary?.read_failure?.classification_note && (
+            <p className="mt-2 text-sm text-gray-700" data-testid="classification-from-failed-read">
+              {summary.read_failure.classification_note}
+            </p>
+          )}
         </section>
 
         {study.evidence?.classification_result && (
@@ -399,13 +411,22 @@ export default function ValidationStudyPage() {
             {plan.ai_decisions && plan.ai_decisions.length > 0 && (
               <AiDecisionList decisions={plan.ai_decisions} testedCount={summary?.claim_counts?.tested ?? 0} />
             )}
-            {plan.blockers && plan.blockers.length > 0 && (
+            {blockerRows.length > 0 && (
               <div className="mt-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
                 <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
-                  {plan.blockers.map((b, i) => (
-                    <li key={i}>{b}</li>
-                  ))}
+                  {/* plan_8_1 section 1.4: the projection's blockers, so a failed read's statements
+                      about the paper stay withheld; the sentence withheld sits in a collapsed detail. */}
+                  {blockerRows.map((b, i) =>
+                    b.withheld ? (
+                      <li key={i} data-testid="blocker-withheld">
+                        {b.text}
+                        <TechnicalDetails detail={{ withheld: b.withheld }} summary="Withheld statement" />
+                      </li>
+                    ) : (
+                      <li key={i}>{b.text}</li>
+                    ),
+                  )}
                 </ul>
                 {/* change_7.3 section 6: a blocker is a reading of the prose until inspected evidence
                     settles it, and it must not read as an established fact about the paper. */}
@@ -434,6 +455,7 @@ export default function ValidationStudyPage() {
             <RetryNotice
               studyId={study.id}
               failureReason={study.failure_reason}
+              readFailed={!!summary?.read_failure}
               reapAfter={study.evidence?.fetch_reap_after as string | undefined}
               dataDeleted={!!study.evidence?.fetch_reaped}
               onChanged={(updated) => setStudy(updated as ValidationStudy)}
