@@ -313,6 +313,13 @@ class ValidationStudyService:
         if new_state == "error":
             await record_study_error(study)
         if new_state == "classified":
+            # plan_8_1 section 3.2: each approved workflow check gets its outcome from what the run produced.
+            from app.services.validation_assessment import active_plan
+            from app.services.validation_workflow_checks import conclude_workflow_checks
+
+            plan = await active_plan(session, study)
+            if plan is not None:
+                await conclude_workflow_checks(session, study, plan)
             # plan_8 section 4: the outcomes a concluded study is scored from are kept with their revisions.
             from app.services.validation_report_summary import record_scorecard
 
@@ -530,6 +537,16 @@ class ValidationStudyService:
         # Recorded on BOTH routes, so a verdict can always say which kind of validation produced it
         # instead of inferring it from an absence.
         evidence["route"] = "pipeline" if route == "pipeline" else "deposit"
+
+        # plan_8_1 section 3.2 and D4: the approval covers a specified set of workflow checks, recorded
+        # as check records; nothing outside it is ever launched.
+        from app.services.validation_assessment import active_plan
+        from app.services.validation_workflow_checks import approve_workflow_checks
+
+        plan = await active_plan(session, study)
+        approval = await approve_workflow_checks(session, study, plan, route=route) if plan is not None else None
+        if approval is not None:
+            evidence["approval"] = approval
 
         # `both`: the sibling reuses this study's PLAN rather than re-reading the paper. Same paper,
         # same extraction, and a second LLM read would spend money to produce a plan we already have.

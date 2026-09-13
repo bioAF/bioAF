@@ -1225,6 +1225,10 @@ class ValidationDriverService:
         if plan is not None and (plan.analysis_selection_json or {}).get("current"):
             sync_revisions(study, plan)
             await session.flush()
+        # plan_8_1 sections 3.3 and 3.5: what this tick established (a retrieved results supplement, the
+        # table the input choice identified) queues or revises the claims' consistency records.
+        if plan is not None and study.state not in ("requested", "acquiring_text", "reading"):
+            await ValidationDriverService._enqueue_checks(session, study, plan)
 
     @staticmethod
     async def _handle_requested(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
@@ -1453,6 +1457,12 @@ class ValidationDriverService:
         # interval, and never unbounded.
         if _waiting_to_retry(study):
             return False
+        # plan_8_1 D4: no workflow check runs outside an approved set.
+        from app.services.validation_workflow_checks import assert_covered
+
+        await assert_covered(
+            session, study, await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        )
         evidence = dict(study.evidence_json or {})
 
         # change_7.4 section 1.5: the deposit route acquires for a differential analysis, and a plan
@@ -3673,6 +3683,10 @@ class ValidationDriverService:
     @staticmethod
     async def _launch_fetchngs(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+        # plan_8_1 D4: no workflow check runs outside an approved set.
+        from app.services.validation_workflow_checks import assert_covered
+
+        await assert_covered(session, study, plan)
         accessions = list(plan.accessions_json or []) if plan else []
         if not accessions:
             study.failure_reason = "no accession in the approved plan"

@@ -275,3 +275,49 @@ class TestTheReportReadsTheRecords:
         summary = await report_summary_for(session, study, admin_user.organization_id)
         assert summary["claims"][0]["consistency"]["table"] == "legacy.txt"
         assert "check_state" not in summary["claims"][0]["consistency"]
+
+
+class TestAResultsSupplement:
+    @pytest.mark.asyncio
+    async def test_a_retrieved_results_supplement_is_checked_from_what_the_assessment_read(self, session, admin_user):
+        """plan_8_1 section 3.5: a supplement that holds a result table is checked (3.3). The assessment
+        reads every claim against it while its bytes are in hand; that reading is the record's outcome."""
+        study, plan, targets = await _seed(session, admin_user, tables=())
+        held = {"claim_index": 0, "outcome": "agree", "table": "Supplemental_File_3.txt", "rows_passing": 3}
+        study.evidence_json = {
+            **study.evidence_json,
+            "supplements": [
+                {
+                    "label": "Supplemental File S3",
+                    "filename": "Supplemental_File_3.txt",
+                    "role": "results_table",
+                    "resolved": True,
+                    "consistency": [held],
+                }
+            ],
+        }
+        await session.flush()
+        records = await consistency.enqueue(session, study, plan)
+        assert {r.dependencies_json["table"]["source"] for r in records} == {"supplement"}
+        fetch = _Fetcher({})
+        await consistency.run_pending(session, study, plan, fetcher=fetch)
+        first = next(r for r in await queue.records_for(session, study.id) if r.comparison_target_id == targets[0].id)
+        assert (first.state, first.outcome_json["outcome"]) == ("done", "agree")
+        assert fetch.urls == []
+
+    @pytest.mark.asyncio
+    async def test_a_driver_tick_queues_what_the_assessment_found(self, session, admin_user):
+        from app.services.validation_driver_service import ValidationDriverService
+
+        study, plan, targets = await _seed(session, admin_user, tables=())
+        study.state = "classified"
+        study.classification = "access_restricted"
+        await session.flush()
+        assert await queue.records_for(session, study.id) == []
+        study.evidence_json = {
+            **study.evidence_json,
+            "supplements": [{"filename": "S3.txt", "role": "results_table", "resolved": True, "consistency": []}],
+        }
+        await session.flush()
+        await ValidationDriverService._sync_revisions(session, study)
+        assert len(await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)) == 3
