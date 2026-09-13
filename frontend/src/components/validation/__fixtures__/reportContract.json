@@ -71,6 +71,39 @@
       "requirements": []
     },
     "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "No reproduction plan was read for this study.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": null,
     "selection_history": [],
     "summary": [
@@ -98,6 +131,27 @@
       "disagree": "Differs from the authors' results",
       "not_checkable": "Not checkable against the authors' results",
       "unresolved": "Unresolved against the authors' results"
+    },
+    "finding_category": {
+      "primary": "Primary",
+      "supporting": "Supporting",
+      "technical": "Technical prerequisite or descriptive check"
+    },
+    "finding_cause": {
+      "access": "Access required",
+      "bioaf_limitation": "bioAF limitation",
+      "bioaf_unresolved": "Not resolved by bioAF",
+      "methods_unrecoverable": "Methods cannot be reconstructed",
+      "not_deposited": "Required data not deposited",
+      "prerequisite_failed": "A prerequisite check failed"
+    },
+    "finding_status": {
+      "blocked": "Blocked",
+      "discrepancy": "Discrepancy",
+      "inconclusive": "Attempted; result inconclusive",
+      "not_attempted": "Not attempted",
+      "supported": "Supported",
+      "unresolved": "Unresolved"
     },
     "headline": {
       "could_not_reproduce": "Could Not Reproduce",
@@ -168,6 +222,13 @@
       "sample_metadata": "Sample metadata",
       "supporting_input": "Supporting input",
       "unknown": "Retrieved; role not established"
+    },
+    "scorecard_status": {
+      "not_applicable": "Not applicable",
+      "not_assessed": "",
+      "not_established": "Scope not established",
+      "scored": "",
+      "unavailable": "Score unavailable for this historical report."
     },
     "selection": {
       "selected": "Selected for this run",
@@ -826,6 +887,39 @@
         }
       }
     ],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": null,
+      "inventory_status": null,
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "unavailable",
+      "status_label": "Score unavailable for this historical report.",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": null,
     "selection_history": [],
     "summary": [
@@ -950,6 +1044,39 @@
       "requirements": []
     },
     "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "No reproduction plan was read for this study.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": null,
     "selection_history": [],
     "summary": [
@@ -1070,7 +1197,4579 @@
       "requirements": []
     },
     "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": null,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "No reproduction plan was read for this study.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": null,
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_groff": {
+    "artifacts": [
+      {
+        "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "identification": [
+          "article_manifest"
+        ],
+        "identification_label": "the article's list of attachments",
+        "identity": "supp_gr.252981.119_Supplemental_Materials_.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S1",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt)",
+          "Supplemental File S1"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S2",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx)",
+          "Supplemental File S2"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      },
+      {
+        "filename": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "identification": [
+          "article_manifest",
+          "prose"
+        ],
+        "identification_label": "the article's list of attachments, the paper's text",
+        "identity": "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt",
+        "inspection": {
+          "measurements": [],
+          "role": null,
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "attachment",
+        "label": "Supplemental File S3",
+        "references": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt)",
+          "Supplemental File S3"
+        ],
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "ledger": "R3",
+          "recorded_reason": null,
+          "status": "failed"
+        }
+      }
+    ],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [
+      {
+        "detail": "bioAF holds the paper's full text",
+        "key": "paper_readable",
+        "label": "Paper text available",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access",
+        "key": "deposit_exists",
+        "label": "Data deposit exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset",
+        "key": "raw_data",
+        "label": "Raw sample data deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "raw_data_available",
+        "label": "Raw sample data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA lists 108 file(s), none of them processed tables",
+        "key": "preprocessed_data",
+        "label": "Pre-processed data deposited",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "nothing of this kind is deposited",
+        "key": "preprocessed_data_available",
+        "label": "Pre-processed data available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "EGAS00001003667: EGA registers 54 sample(s) for EGAD00001005044",
+        "key": "sample_metadata",
+        "label": "Sample metadata deposited",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": "EGAS00001003667 is controlled access and bioAF has no adapter for EGA",
+        "key": "sample_metadata_available",
+        "label": "Sample metadata available to bioAF",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "detail": "Supplemental File S2",
+        "key": "code_artifact",
+        "label": "Code artifact exists",
+        "value": "yes",
+        "value_label": "Yes"
+      },
+      {
+        "detail": null,
+        "key": "code_repository",
+        "label": "Code repository linked",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [
+      "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
+    ],
+    "claim_counts": {
+      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 4,
+      "tested": 0,
+      "total": 8
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "EGAS00001003667 registers 54 samples",
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": "total_samples",
+          "confidence": 0.9,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_samples",
+          "model": "claude-opus-4-8",
+          "reason": "Directly reports the dataset sample count (35 WE + 19 TE = 54 samples).",
+          "status": "mapped"
+        },
+        "population": "whole embryo and TE biopsy",
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "post-QC",
+        "unit": "RNA-seq samples (35 WE + 19 TE)",
+        "unresolved_reason": null,
+        "value": 54.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access))",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": "total_sequences",
+          "confidence": 0.7,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "mean_reads_per_cell",
+          "model": "claude-opus-4-8",
+          "reason": "Average raw sequencing depth per library is a per-sample read count, matching total_sequences; mean_reads_per_cell is a single-cell metric that does not apply to bulk RNA-seq libraries.",
+          "status": "mapped"
+        },
+        "population": "all RNA-seq libraries",
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as collected",
+        "unit": "reads per library (average)",
+        "unresolved_reason": null,
+        "value": 44600000.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "EGAS00001003667 registers 54 samples",
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across WE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "whole embryo",
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (WE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 13175.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "EGAS00001003667 registers 54 samples",
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "no analysis computes a count of samples",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "TE samples expressed 6086 transcripts",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": "total_genes_detected",
+          "confidence": 0.85,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "total_genes_detected",
+          "model": "claude-opus-4-8",
+          "reason": "Distinct expressed transcripts detected across TE samples matches total_genes_detected.",
+          "status": "mapped"
+        },
+        "population": "TE biopsy",
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "expressed transcripts (TE, >=1 TPM in 10+ samples)",
+        "unresolved_reason": null,
+        "value": 6086.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no result table is published for this claim's experiment",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no processed matrix holding both arms is published",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": "aneuploid vs euploid",
+        "cutoff": "adjusted P < 0.05",
+        "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially expressed gene count is not a controlled metric; no de_gene_count key exists in the vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo XX vs XY",
+        "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 194.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no result table is published for this claim's experiment",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no processed matrix holding both arms is published",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": "aneuploid vs euploid",
+        "cutoff": "adjusted P < 0.05",
+        "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count between aneuploid/euploid is not in the controlled vocabulary.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo aneuploid vs euploid",
+        "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 53.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no result table is published for this claim's experiment",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no processed matrix holding both arms is published",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": "aneuploid vs euploid",
+        "cutoff": "adjusted P < 0.05",
+        "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphology comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo AA vs CC morphology",
+        "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 10.0
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": "no QC metric measures a differential result",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no result table is published for this claim's experiment",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "no processed matrix holding both arms is published",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          }
+        ],
+        "consistency": null,
+        "contrast": "aneuploid vs euploid",
+        "cutoff": "adjusted P < 0.05",
+        "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": 0.97,
+          "decided_by": "model",
+          "explanation": "bioAF computes no QC metric that measures this claim, so it cannot be compared as a QC metric. This does not decide its other checks.",
+          "label": "No QC metric measures this claim",
+          "metric_key": "de_gene_count",
+          "model": "claude-opus-4-8",
+          "reason": "Differentially regulated gene count for morphokinetics comparison is not a controlled metric.",
+          "status": "no_supported_metric"
+        },
+        "population": "whole embryo high vs low morphokinetic quality",
+        "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": null,
+        "stage": "as analysed",
+        "unit": "genes",
+        "unresolved_reason": null,
+        "value": 9.0
+      }
+    ],
+    "code_sources": [
+      {
+        "execution": {
+          "label": "Not executed",
+          "outcome": null,
+          "status": "not_attempted"
+        },
+        "identification": [
+          "methods",
+          "article_manifest"
+        ],
+        "identification_label": "the methods, the article's list of attachments",
+        "inspection": {
+          "role_label": null,
+          "status": "not_inspected"
+        },
+        "kind": "supplementary",
+        "label": "Supplemental File S2",
+        "retrieval": {
+          "label": "Could not be retrieved in this attempt",
+          "reason": "retrieval was attempted and the file could not be retrieved in this attempt",
+          "status": "failed"
+        }
+      }
+    ],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": "4 of the paper's attachment(s) were not inspected, so whether the paper publishes processed results is not established",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt; 4 of the paper's attachment(s) were not inspected, so whether the paper attaches one is not established; EGAS00001003667 holds a published input that bioAF cannot acquire",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "consistency": {
+      "checked": true,
+      "label": "No contradictions found among the checked statements",
+      "pairs": [
+        "x"
+      ],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "adjusted P < 0.05",
+        "name": "aneuploid vs euploid",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [
+      {
+        "assay": "bulk RNA-seq",
+        "id": "e1",
+        "reference": [
+          {
+            "established_from": null,
+            "part": "assembly",
+            "reason": null,
+            "resolved": "GRCh38",
+            "stated": "GRCh38",
+            "status": "usable",
+            "status_label": "Usable"
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          }
+        ],
+        "status": null,
+        "workflow": "nf-core/rnaseq"
+      }
+    ],
+    "facts": {
+      "attachments": {
+        "failed": 4,
+        "identified": 4,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [
+          "controlled"
+        ],
+        "available_to_bioaf": "no",
+        "deposited": "yes"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 2,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 1,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "EGAS00001003667 is in EGA (controlled access), and bioAF has no adapter for EGA, so it cannot acquire anything from it. Its public listing holds no pre-processed data to reproduce the finding from",
+        "governs": true,
+        "kind": "unsupported_acquisition",
+        "label": "Acquisition not supported",
+        "leg": "deposit",
+        "observation": "EGA lists 108 file(s), none of them processed tables",
+        "resource": "EGAS00001003667",
+        "technical_detail": null
+      },
+      {
+        "detail": "bioAF could not retrieve 4 of the paper's attachment(s) in this attempt, so what they hold is not established",
+        "governs": true,
+        "kind": "retrieval_failed",
+        "label": "Could not be retrieved in this attempt",
+        "leg": "retrieval",
+        "observation": null,
+        "resource": "the paper's supplementary files",
+        "technical_detail": null
+      },
+      {
+        "detail": "EGAS00001003667 publishes raw sequencing reads to fetch and re-run under controlled access, and bioAF has no adapter for EGA. The data is published; the limitation is bioAF's",
+        "governs": false,
+        "kind": "unsupported_acquisition",
+        "label": "Acquisition not supported",
+        "leg": "pipeline",
+        "observation": "EGA lists 108 fastq.gz file(s) for this dataset",
+        "resource": "EGAS00001003667",
+        "technical_detail": null
+      }
+    ],
+    "reconciliation": {
+      "basis": "paper_text",
+      "label": "Reconciled against the paper's own passages; from the paper text only; not checked against the attachments",
+      "reason": "r",
+      "status": "performed"
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": [
+        "bioAF cannot yet acquire data from EGA, so credentials alone will not make this study runnable.",
+        "Approving again retries the attachment download."
+      ]
+    },
+    "retrieval_failures": [
+      {
+        "artifacts": [
+          "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx)",
+          "Supplemental File S1",
+          "Supplemental File S2",
+          "Supplemental File S3"
+        ],
+        "message": "bioAF could not download the paper's supplementary files in this attempt",
+        "source": "the article's supplementary bundle from Europe PMC",
+        "technical_detail": {
+          "attempts": 3,
+          "error_class": "_NotFound",
+          "first_at": "2026-09-10T13:09:18+00:00",
+          "http_status": 404,
+          "last_at": "2026-09-10T13:09:18+00:00",
+          "outcome": "the server answered that it was not found",
+          "url": "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC6771404/supplementaryFiles"
+        }
+      }
+    ],
+    "scorecard": {
+      "assessed_count": 0,
+      "assessed_items": [],
+      "assessed_weight": 0,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": null,
+      "excluded_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "technical",
+          "category_label": "Technical prerequisite or descriptive check",
+          "cause": "access",
+          "cause_label": "Access required",
+          "claim_indices": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Samples, depth and detected transcripts",
+          "finding_id": "F5",
+          "importance_decided_by": "model",
+          "locator": "Results, Fig. 1C; Results; Methods, Analysis",
+          "method_label": null,
+          "quote": null,
+          "rationale": "They describe the data set and establish no finding.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; QC metric comparison: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access); Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples.",
+          "status": "blocked",
+          "status_label": "Blocked",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": null,
+              "reason": null,
+              "status": null
+            },
+            {
+              "claim_index": 1,
+              "method": null,
+              "reason": null,
+              "status": null
+            },
+            {
+              "claim_index": 2,
+              "method": null,
+              "reason": null,
+              "status": null
+            },
+            {
+              "claim_index": 3,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 0
+        }
+      ],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 1,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": "0 / 4 assessed",
+      "score": null,
+      "score_label": null,
+      "status": "not_assessed",
+      "status_label": null,
+      "summary": "One primary finding not assessed; three supporting findings not assessed.",
+      "supported_count": 0,
+      "supported_weight": 0,
+      "title": "Validation Scorecard",
+      "total_count": 4,
+      "unassessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": "access",
+          "cause_label": "Access required",
+          "claim_indices": [
+            4
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Differential expression between embryo groups",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": "Results (sex chromosome DE)",
+          "method_label": null,
+          "quote": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
+          "rationale": "The paper's main conclusion rests on it.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "status": "blocked",
+          "status_label": "Blocked",
+          "subchecks": [
+            {
+              "claim_index": 4,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 2
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": "access",
+          "cause_label": "Access required",
+          "claim_indices": [
+            5
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Differences in group 2",
+          "finding_id": "F2",
+          "importance_decided_by": "model",
+          "locator": "Results, Fig. 4B",
+          "method_label": null,
+          "quote": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
+          "rationale": "It qualifies the main conclusion.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "status": "blocked",
+          "status_label": "Blocked",
+          "subchecks": [
+            {
+              "claim_index": 5,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": "access",
+          "cause_label": "Access required",
+          "claim_indices": [
+            6
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Differences in group 3",
+          "finding_id": "F3",
+          "importance_decided_by": "model",
+          "locator": "Results, Fig. 5B",
+          "method_label": null,
+          "quote": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
+          "rationale": "It qualifies the main conclusion.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "status": "blocked",
+          "status_label": "Blocked",
+          "subchecks": [
+            {
+              "claim_index": 6,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": "access",
+          "cause_label": "Access required",
+          "claim_indices": [
+            7
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Differences in group 4",
+          "finding_id": "F4",
+          "importance_decided_by": "model",
+          "locator": "Results, Fig. 6C",
+          "method_label": null,
+          "quote": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
+          "rationale": "It qualifies the main conclusion.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "status": "blocked",
+          "status_label": "Blocked",
+          "subchecks": [
+            {
+              "claim_index": 7,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        }
+      ],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Raw data are deposited under controlled access and were unavailable to bioAF in this attempt.",
+      "Four supplementary attachments were identified, but their download failed.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_in_progress": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "2 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 2,
+      "tested": 0,
+      "total": 2
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 1 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1000
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 2 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1001
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "in_progress",
+      "label": null
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": 1,
+      "assessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            0
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 1",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 1 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 2
+        }
+      ],
+      "assessed_weight": 2,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": 100,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": true,
+      "in_progress_label": "In progress",
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [],
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 0,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": "1 / 2 assessed",
+      "score": 100.0,
+      "score_label": "100 / 100",
+      "status": "scored",
+      "status_label": null,
+      "summary": "One primary finding supported; one supporting finding not assessed.",
+      "supported_count": 1,
+      "supported_weight": 2,
+      "title": "Validation Scorecard",
+      "total_count": 2,
+      "unassessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 2",
+          "finding_id": "F2",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 2 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 1,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        }
+      ],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": null,
+      "check_label": null,
+      "claim_index": null,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": "no claim can be checked on the requested route",
+      "revision": null,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_long": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "14 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 14,
+      "tested": 0,
+      "total": 14
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 1 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1000
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 2 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1001
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 3 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1002
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 4 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1003
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 5 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1004
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 6 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1005
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 7 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1006
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 8 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1007
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 9 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1008
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 10 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1009
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 11 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1010
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 12 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1011
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 13 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1012
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 14 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1013
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": 2,
+      "assessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            0
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 1",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 1 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 2",
+          "finding_id": "F2",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 2 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 1,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        }
+      ],
+      "assessed_weight": 2,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": 100,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F3"
+          ],
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 1,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": "2 / 14 assessed",
+      "score": 100.0,
+      "score_label": "100 / 100",
+      "status": "scored",
+      "status_label": null,
+      "summary": "Two supporting findings supported; one primary finding not assessed; 11 supporting findings not assessed.",
+      "supported_count": 2,
+      "supported_weight": 2,
+      "title": "Validation Scorecard",
+      "total_count": 14,
+      "unassessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            2
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 3",
+          "finding_id": "F3",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 3 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 2,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 2
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            3
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 4",
+          "finding_id": "F4",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 4 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 3,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            4
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 5",
+          "finding_id": "F5",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 5 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 4,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            5
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 6",
+          "finding_id": "F6",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 6 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 5,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            6
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 7",
+          "finding_id": "F7",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 7 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 6,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            7
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 8",
+          "finding_id": "F8",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 8 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 7,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            8
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 9",
+          "finding_id": "F9",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 9 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 8,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            9
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 10",
+          "finding_id": "F10",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 10 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 9,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            10
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 11",
+          "finding_id": "F11",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 11 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 10,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            11
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 12",
+          "finding_id": "F12",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 12 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 11,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            12
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 13",
+          "finding_id": "F13",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 13 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 12,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": null,
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            13
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 14",
+          "finding_id": "F14",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "sample 14 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "Not selected for this run; its checks are available.",
+          "status": "not_attempted",
+          "status_label": "Not attempted",
+          "subchecks": [
+            {
+              "claim_index": 13,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [],
+          "weight": 1
+        }
+      ],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": null,
+      "check_label": null,
+      "claim_index": null,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": "no claim can be checked on the requested route",
+      "revision": null,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_not_applicable": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "1 claim mapped to candidate comparison metrics; none tested.",
+      "mapped": 1,
+      "tested": 0,
+      "total": 1
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 1 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1000
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": 0,
+      "assessed_items": [],
+      "assessed_weight": 0,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": null,
+      "excluded_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "technical",
+          "category_label": "Technical prerequisite or descriptive check",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            0
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 1",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 1 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 0
+        }
+      ],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "not_applicable",
+      "messages": [],
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 0,
+      "reason": "Every finding in the reviewed inventory is a technical prerequisite or descriptive check.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_applicable",
+      "status_label": "Not applicable",
+      "summary": null,
+      "supported_count": 0,
+      "supported_weight": 0,
+      "title": "Validation Scorecard",
+      "total_count": 0,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": null,
+      "check_label": null,
+      "claim_index": null,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": "no claim can be checked on the requested route",
+      "revision": null,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_not_established": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 2
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 257,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes up",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": "Reanalysis of processed data",
+          "label": "Selected for this run",
+          "reason": null,
+          "status": "selected"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 257
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 524,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes down",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 524
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": null,
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "P < 0.01",
+        "name": "KO vs WT",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "no column could be matched to KO",
+        "governs": true,
+        "kind": "sample_mapping_unresolved",
+        "label": "Samples could not be assigned to the comparison",
+        "leg": null,
+        "observation": null,
+        "resource": null,
+        "technical_detail": null
+      }
+    ],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "unresolved",
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": "The importance of F1 is not established: its quote is not in the paper's text.",
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "not_established",
+      "status_label": "Scope not established",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [
+        {
+          "description": "Loss of the gene deregulates hundreds of genes",
+          "finding_id": "F1",
+          "problem": "its quote is not in the paper's text"
+        }
+      ],
+      "version": 1
+    },
+    "selection": {
+      "check": "processed_reanalysis",
+      "check_label": "Reanalysis of processed data",
+      "claim_index": 0,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": null,
+      "revision": 1,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_samd1": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 2
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 257,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes up",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": "Reanalysis of processed data",
+          "label": "Selected for this run",
+          "reason": null,
+          "status": "selected"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 257
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 524,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes down",
+        "experiment": null,
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 524
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [
+      {
+        "key": "processed_results_available",
+        "label": "Processed results published",
+        "reason": null,
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "input_acquired",
+        "label": "Analysis input acquired",
+        "reason": "bioAF acquired no analysis input in this attempt",
+        "value": "no",
+        "value_label": "No"
+      },
+      {
+        "key": "input_usable",
+        "label": "Analysis input usable",
+        "reason": "no analysis input was acquired, so none was inspected",
+        "value": "not_established",
+        "value_label": "Not established"
+      },
+      {
+        "key": "ready_for_analysis",
+        "label": "Ready for analysis",
+        "reason": "no analysis input was acquired",
+        "value": "no",
+        "value_label": "No"
+      }
+    ],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "P < 0.01",
+        "name": "KO vs WT",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [
+      {
+        "detail": "no column could be matched to KO",
+        "governs": true,
+        "kind": "sample_mapping_unresolved",
+        "label": "Samples could not be assigned to the comparison",
+        "leg": null,
+        "observation": null,
+        "resource": null,
+        "technical_detail": null
+      }
+    ],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": 0,
+      "assessed_items": [],
+      "assessed_weight": 0,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 1,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": "0 / 1 assessed",
+      "score": null,
+      "score_label": null,
+      "status": "not_assessed",
+      "status_label": null,
+      "summary": "One primary finding not assessed.",
+      "supported_count": 0,
+      "supported_weight": 0,
+      "title": "Validation Scorecard",
+      "total_count": 1,
+      "unassessed_items": [
+        {
+          "analysis_selection_revision": 1,
+          "assessment_method": null,
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": "bioaf_unresolved",
+          "cause_label": "Not resolved by bioAF",
+          "claim_indices": [
+            0,
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Loss of the gene deregulates hundreds of genes",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": null,
+          "quote": "genes up",
+          "rationale": "The main conclusion.",
+          "reason": "bioAF could not resolve the inputs or their interpretation; this is not a finding about the paper. Samples could not be assigned to the comparison: no column could be matched to KO.",
+          "status": "unresolved",
+          "status_label": "Unresolved",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": null,
+              "reason": null,
+              "status": null
+            },
+            {
+              "claim_index": 1,
+              "method": null,
+              "reason": null,
+              "status": null
+            }
+          ],
+          "supporting_checks": [
+            {
+              "kind": "author_results",
+              "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
+            },
+            {
+              "kind": "author_results",
+              "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
+            }
+          ],
+          "supporting_evidence_ids": [],
+          "weight": 2
+        }
+      ],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": "processed_reanalysis",
+      "check_label": "Reanalysis of processed data",
+      "claim_index": 0,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": null,
+      "revision": 1,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction not attempted.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_scored": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "5 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 5,
+      "tested": 0,
+      "total": 5
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 1 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1000
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 2 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1001
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 3 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1002
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 4 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1003
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "reason": null,
+            "status": "available",
+            "status_label": "Available"
+          },
+          {
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "reason": "no deposited or attached file measures this quantity",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "bioAF computes no QC metric from processed files",
+            "status": "unavailable",
+            "status_label": "Unavailable"
+          },
+          {
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "reason": "the same run as the QC metric comparison; not a separate check (available)",
+            "status": "available",
+            "status_label": "Available"
+          }
+        ],
+        "consistency": null,
+        "contrast": null,
+        "cutoff": null,
+        "description": "sample 5 yielded many peaks",
+        "experiment": null,
+        "mapping": {
+          "bound_key": "peak_count",
+          "confidence": null,
+          "decided_by": "model",
+          "explanation": null,
+          "label": "Mapped to a candidate comparison metric",
+          "metric_key": "peak_count",
+          "model": null,
+          "reason": null,
+          "status": "mapped"
+        },
+        "population": null,
+        "predicate": null,
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run; its checks are available",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": "peaks",
+        "unresolved_reason": null,
+        "value": 1004
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "reproduction_not_attempted",
+      "label": "Reproduction not attempted"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": 5,
+      "assessed_items": [
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            4
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 5",
+          "finding_id": "F5",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 5 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is outside tolerance of the paper's value.",
+          "status": "discrepancy",
+          "status_label": "Discrepancy",
+          "subchecks": [
+            {
+              "claim_index": 4,
+              "method": "qc_metric",
+              "reason": "peak_count is outside tolerance of the paper's value.",
+              "status": "discrepancy"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 2
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            0
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 1",
+          "finding_id": "F1",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 1 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 0,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 2",
+          "finding_id": "F2",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 2 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 1,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            2
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 3",
+          "finding_id": "F3",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 3 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 2,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        },
+        {
+          "analysis_selection_revision": null,
+          "assessment_method": "qc_metric",
+          "category": "supporting",
+          "category_label": "Supporting",
+          "cause": null,
+          "cause_label": null,
+          "claim_indices": [
+            3
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "The value bioAF computed is within the metric's tolerance of the value the paper states."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "description": "Binding at the sites of sample 4",
+          "finding_id": "F4",
+          "importance_decided_by": "model",
+          "locator": null,
+          "method_label": "QC metric comparison",
+          "quote": "sample 4 yielded many peaks",
+          "rationale": "Its role in the paper's conclusions.",
+          "reason": "peak_count is within tolerance of the paper's value.",
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "claim_index": 3,
+              "method": "qc_metric",
+              "reason": "peak_count is within tolerance of the paper's value.",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [],
+          "supporting_evidence_ids": [
+            "classification_result comparison (peak_count)"
+          ],
+          "weight": 1
+        }
+      ],
+      "assessed_weight": 6,
+      "discrepant_count": 1,
+      "discrepant_weight": 2,
+      "display_score": 67,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F5"
+          ],
+          "kind": "primary_discrepancy",
+          "text": "Primary discrepancy: Binding at the sites of sample 5"
+        }
+      ],
+      "primary_discrepancy_count": 1,
+      "primary_unassessed_count": 0,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": "5 / 5 assessed",
+      "score": 66.66666666666667,
+      "score_label": "67 / 100",
+      "status": "scored",
+      "status_label": null,
+      "summary": "Four supporting findings supported; one primary finding discrepant.",
+      "supported_count": 4,
+      "supported_weight": 4,
+      "title": "Validation Scorecard",
+      "total_count": 5,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": null,
+      "check_label": null,
+      "claim_index": null,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": "no claim can be checked on the requested route",
+      "revision": null,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
     "selection_history": [],
     "summary": [
       "Reproduction not attempted.",
@@ -1492,6 +6191,39 @@
       "requirements": []
     },
     "retrieval_failures": [],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": true,
+      "in_progress_label": "In progress",
+      "inventory_revision": null,
+      "inventory_status": null,
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "unavailable",
+      "status_label": "Score unavailable for this historical report.",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": {
       "check": "processed_reanalysis",
       "check_label": "Reanalysis of processed data",
@@ -2167,6 +6899,39 @@
         }
       }
     ],
+    "scorecard": {
+      "assessed_count": null,
+      "assessed_items": [],
+      "assessed_weight": null,
+      "discrepant_count": null,
+      "discrepant_weight": null,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "inventory_revision": null,
+      "inventory_status": null,
+      "messages": [],
+      "primary_discrepancy_count": null,
+      "primary_unassessed_count": null,
+      "reason": null,
+      "rubric_label": "weighted rubric version 1",
+      "rubric_version": 1,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "status": "unavailable",
+      "status_label": "Score unavailable for this historical report.",
+      "summary": null,
+      "supported_count": null,
+      "supported_weight": null,
+      "title": "Validation Scorecard",
+      "total_count": null,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
     "selection": null,
     "selection_history": [],
     "summary": [
