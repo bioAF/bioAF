@@ -287,3 +287,31 @@ class TestAJustifiedImportanceCorrection:
                 rationale="r",
                 reason="r",
             )
+
+
+class TestTheMarkdownOfAnUnassessedStudy:
+    @pytest_asyncio.fixture(autouse=True)
+    async def _enable(self, session):
+        from app.services import beta_features_service
+
+        await beta_features_service.set_flag(session, "lit_validation", True)
+        await session.commit()
+
+    @pytest.mark.asyncio
+    async def test_it_explains_the_score_without_a_weighted_agreement_of_nothing(self, session, admin_user):
+        study = await _seed(
+            session, admin_user, verdicts=("not_computed", "not_computed"), categories=["primary", "supporting"]
+        )
+        markdown = await ProvenanceReportService.generate(
+            session=session,
+            entity_type="validation_study",
+            entity_id=study.id,
+            org_id=admin_user.organization_id,
+            user_email=admin_user.email,
+            format="md",
+        )
+        text = markdown.content if isinstance(markdown.content, str) else markdown.content.decode()
+        section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
+        assert "-- (not assessed)" in section and "0 / 2 assessed" in section
+        assert "Weighted agreement" not in section
+        assert "weighted rubric version 1" in section

@@ -86,6 +86,7 @@
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": "No reproduction plan was read for this study.",
@@ -903,6 +904,7 @@
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": null,
@@ -1061,6 +1063,7 @@
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": "No reproduction plan was read for this study.",
@@ -1215,6 +1218,7 @@
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": "No reproduction plan was read for this study.",
@@ -2217,6 +2221,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
       "reason": null,
@@ -2650,6 +2655,7 @@
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
       "reason": null,
@@ -3792,6 +3798,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
       "reason": null,
@@ -4469,6 +4476,7 @@
       "inventory_revision": 1,
       "inventory_status": "not_applicable",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
       "reason": "Every finding in the reviewed inventory is a technical prerequisite or descriptive check.",
@@ -4756,6 +4764,7 @@
       "inventory_revision": 1,
       "inventory_status": "unresolved",
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": "The importance of F1 is not established: its quote is not in the paper's text.",
@@ -5062,6 +5071,7 @@
           "text": "Primary finding remains unassessed"
         }
       ],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
       "reason": null,
@@ -5773,6 +5783,7 @@
           "text": "Primary discrepancy: Binding at the sites of sample 5"
         }
       ],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": 1,
       "primary_unassessed_count": 0,
       "reason": null,
@@ -6240,6 +6251,7 @@
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": null,
@@ -6949,6 +6961,7 @@
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
+      "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
       "reason": null,

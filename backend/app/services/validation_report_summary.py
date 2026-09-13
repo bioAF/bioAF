@@ -264,6 +264,42 @@ def summarize(
 _ACTIVE_STATES_TERMINAL = ("classified", "plan_declined", "error")
 
 
+def _live_outcomes(*, study: dict, evidence: dict, plan: dict, targets: list[dict], claims: list[dict] | None) -> dict:
+    """Each finding's outcome, normalized from the study's current evidence."""
+    from app.services.validation_finding_outcomes import finding_outcomes
+
+    if claims is None:
+        contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
+        consistency = {i: _claim_consistency(i, t, contrasts, evidence) for i, t in enumerate(targets)}
+    else:
+        consistency = {i: c.get("consistency") for i, c in enumerate(claims)}
+    return finding_outcomes(
+        plan["finding_inventory"], targets=targets, plan=plan, evidence=evidence, study=study, consistency=consistency
+    )
+
+
+def _current_selection_revision(plan: dict):
+    return ((plan.get("analysis_selection") or {}).get("current") or {}).get("revision")
+
+
+def _usable_record(study: dict, evidence: dict, plan: dict) -> dict | None:
+    """The outcomes recorded when the study concluded, while the revisions they were read under hold."""
+    from app.services.validation_scorecard import RUBRIC_VERSION
+
+    record = evidence.get("scorecard_record")
+    if study.get("state") != "classified" or not isinstance(record, dict):
+        return None
+    if not isinstance(record.get("outcomes"), dict):
+        return None
+    if (
+        record.get("rubric_version") != RUBRIC_VERSION
+        or record.get("inventory_revision") != (plan.get("finding_inventory") or {}).get("revision")
+        or record.get("analysis_selection_revision") != _current_selection_revision(plan)
+    ):
+        return None
+    return record
+
+
 def scorecard_projection(
     *,
     study: dict,
@@ -272,15 +308,16 @@ def scorecard_projection(
     targets: list[dict] | None,
     claims: list[dict] | None = None,
 ) -> dict:
-    """plan_8: the scorecard for one study, from its finding inventory and its current evidence.
+    """plan_8: the scorecard for one study, from its finding inventory and its outcomes.
 
     A plan read before the inventory existed gets no score: its evidence cannot be associated with
-    reviewed findings, and nothing is inferred from its classification. The studies list calls this
+    reviewed findings, and nothing is inferred from its classification. A concluded study reads the
+    outcomes recorded when it concluded, while the inventory, selection and rubric revisions they were
+    read under still hold; otherwise the current evidence is normalized. The studies list calls this
     directly, with the same inputs, so the list and the report cannot disagree.
     """
     import logging
 
-    from app.services.validation_finding_outcomes import finding_outcomes
     from app.services.validation_scorecard import ScorecardInvariantError, build_scorecard
 
     evidence = evidence or {}
@@ -293,20 +330,16 @@ def scorecard_projection(
             return build_scorecard(None, {}, in_progress=in_progress)
         reason = "The paper has not been read yet." if in_progress else "No reproduction plan was read for this study."
         return build_scorecard({"status": "unresolved", "reason": reason}, {}, in_progress=in_progress)
-    if claims is None:
-        contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
-        consistency = {i: _claim_consistency(i, t, contrasts, evidence) for i, t in enumerate(targets)}
-    else:
-        consistency = {i: c.get("consistency") for i, c in enumerate(claims)}
+    record = _usable_record(study, evidence, plan)
     try:
-        outcomes = finding_outcomes(
-            inventory, targets=targets, plan=plan, evidence=evidence, study=study, consistency=consistency
-        )
+        if record is not None:
+            outcomes = record["outcomes"]
+        else:
+            outcomes = _live_outcomes(study=study, evidence=evidence, plan=plan, targets=targets, claims=claims)
         card = build_scorecard(inventory, outcomes, in_progress=in_progress)
         # Which selection's evidence the outcomes were read from, beside the inventory and rubric revisions.
-        card["analysis_selection_revision"] = ((plan.get("analysis_selection") or {}).get("current") or {}).get(
-            "revision"
-        )
+        card["analysis_selection_revision"] = _current_selection_revision(plan)
+        card["outcomes_recorded_at"] = record.get("at") if record is not None else None
         return card
     except ScorecardInvariantError:
         # A breach is a defect in the records, never a number on screen. The details go to the log.
@@ -320,6 +353,63 @@ def scorecard_projection(
             {},
             in_progress=in_progress,
         )
+
+
+async def record_scorecard(session, study) -> None:
+    """plan_8 section 4: store a concluding study's outcome records with the revisions they were read
+    under, so a later change to how evidence is normalized cannot rewrite its score. The record it
+    replaces is kept in ``scorecard_history``."""
+    import logging
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_assessment import active_plan
+    from app.services.validation_scorecard import (
+        RUBRIC_VERSION,
+        ScorecardInvariantError,
+        build_scorecard,
+        compact_scorecard,
+    )
+
+    plan = await active_plan(session, study)
+    if plan is None or not isinstance(plan.finding_inventory_json, dict):
+        return
+    rows = (
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    plan_dict = plan_projection(plan)
+    evidence = dict(study.evidence_json or {})
+    projected = {**study_projection(study), "state": "classified"}
+    try:
+        outcomes = _live_outcomes(
+            study=projected, evidence=evidence, plan=plan_dict, targets=[target_dict(t) for t in rows], claims=None
+        )
+        card = build_scorecard(plan.finding_inventory_json, outcomes)
+    except ScorecardInvariantError:
+        logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
+        return
+    previous = evidence.get("scorecard_record")
+    if isinstance(previous, dict):
+        evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [previous]
+    evidence["scorecard_record"] = {
+        "rubric_version": RUBRIC_VERSION,
+        "inventory_revision": plan.finding_inventory_json.get("revision"),
+        "analysis_selection_revision": _current_selection_revision(plan_dict),
+        "outcomes": outcomes,
+        "compact": compact_scorecard(card),
+        "at": datetime.now(timezone.utc).isoformat(),
+    }
+    study.evidence_json = evidence
 
 
 def _resources(plan: dict) -> list[dict]:

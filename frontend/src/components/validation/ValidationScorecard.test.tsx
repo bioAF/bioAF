@@ -46,6 +46,12 @@ describe("the two metrics", () => {
     expect(container.textContent).not.toMatch(/undefined|NaN|0 \/ 100/);
   });
 
+  it("explains the weighting without a weighted agreement of nothing when nothing was assessed", () => {
+    const { container } = render(<ValidationScorecard scorecard={groff} />);
+    expect(screen.getByText(groff.explanation, { exact: false })).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/0 of 0/);
+  });
+
   it("explains the 2:1 weighting and names the rubric", () => {
     render(<ValidationScorecard scorecard={scored} />);
     expect(screen.getByText(scored.explanation, { exact: false })).toBeInTheDocument();

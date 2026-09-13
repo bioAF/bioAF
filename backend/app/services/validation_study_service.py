@@ -278,6 +278,11 @@ class ValidationStudyService:
         study.state = new_state
         if new_state == "error":
             await record_study_error(study)
+        if new_state == "classified":
+            # plan_8 section 4: the outcomes a concluded study is scored from are kept with their revisions.
+            from app.services.validation_report_summary import record_scorecard
+
+            await record_scorecard(session, study)
         await session.flush()
 
         await log_action(
