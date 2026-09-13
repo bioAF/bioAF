@@ -577,6 +577,9 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     summary = entity.get("report_summary") or {}
 
+    # plan_8 section 6: the Validation Scorecard leads the report, from the same projection the page renders.
+    _append_scorecard(parts, summary.get("scorecard") or {})
+
     # Verdict
     parts.append("## Verdict")
     parts.append("")
@@ -1411,6 +1414,86 @@ def _append_details(parts: list[str], lines: list[str], summary: str = "Technica
     parts.append("")
 
 
+def _scorecard_item(item: dict[str, Any]) -> list[str]:
+    status = item.get("status_label") or "--"
+    if item.get("cause_label"):
+        status = f"{status}: {item['cause_label']}"
+    line = f"- **{status}** ({item.get('category_label')}, {item.get('finding_id')}): {item.get('description') or '--'}"
+    if item.get("reason"):
+        line += f". {item['reason']}"
+    lines = [line]
+    if item.get("rationale"):
+        lines.append(f"  - Importance: {item['rationale']}")
+    lines.extend(f"  - {check['text']}" for check in item.get("supporting_checks") or [])
+    return lines
+
+
+def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
+    """plan_8 section 6: the two metrics, what they rest on, and every finding, assessed or not.
+
+    Weighted sums reconcile with the score; the scope is a raw count of findings. An export lists the
+    whole inventory: only the page bounds its lists."""
+    if not card:
+        return
+    parts.append(f"## {card.get('title') or 'Validation Scorecard'}")
+    parts.append("")
+    if card.get("in_progress"):
+        parts.append(f"**{card.get('in_progress_label') or 'In progress'}.** Updated only from committed evidence.")
+        parts.append("")
+    if card.get("status") in ("unavailable", "not_established", "not_applicable"):
+        parts.append(f"**{card.get('status_label')}**" + (f" {card['reason']}" if card.get("reason") else ""))
+        parts.append("")
+        for row in card.get("unresolved_importance") or []:
+            parts.append(f"- {row.get('finding_id')}: {row.get('description') or '--'} ({row.get('problem') or '--'})")
+        if card.get("unresolved_importance"):
+            parts.append("")
+        if card.get("status") != "not_applicable":
+            return
+    parts.append(
+        _table(
+            ["Overall score", "Assessed scope"],
+            [
+                [
+                    card.get("score_label") or "-- (not assessed)",
+                    card.get("scope_label") or card.get("status_label") or "--",
+                ]
+            ],
+        )
+    )
+    parts.append("")
+    if card.get("summary"):
+        parts.append(card["summary"])
+        parts.append("")
+    for message in card.get("messages") or []:
+        parts.append(f"- **{message['text']}**")
+    if card.get("messages"):
+        parts.append("")
+    if card.get("assessed_weight") is not None:
+        parts.append(
+            f"Weighted agreement: {card.get('supported_weight')} of {card.get('assessed_weight')} "
+            f"(supported weight over assessed weight; discrepant weight {card.get('discrepant_weight')}). "
+            f"{card.get('explanation')} Scored under {card.get('rubric_label')}, finding inventory revision "
+            f"{card.get('inventory_revision')}."
+        )
+        parts.append("")
+    for heading, key in (("Assessed", "assessed_items"), ("Not assessed / unresolved", "unassessed_items")):
+        items = card.get(key) or []
+        if not items:
+            continue
+        parts.append(f"### {heading}")
+        parts.append("")
+        for item in items:
+            parts.extend(_scorecard_item(item))
+        parts.append("")
+    excluded = card.get("excluded_items") or []
+    if excluded:
+        parts.append("### Not scored: technical prerequisites and descriptive checks")
+        parts.append("")
+        for item in excluded:
+            parts.extend(_scorecard_item(item))
+        parts.append("")
+
+
 def _append_outcome(parts: list[str], summary: dict[str, Any]) -> None:
     """The headline and the summary sentences, then the limitations that governed the outcome."""
     headline = (summary.get("headline") or {}).get("label")
@@ -1550,8 +1633,14 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
             lines.append(f"- Predicate: {claim['predicate']}")
         selected = claim.get("selection") or {}
         if selected:
-            reason = f" ({selected.get('reason')})" if selected.get("status") == "unassessed" and selected.get("reason") else ""
-            lines.append(f"- {selected.get('label')}{': ' + selected['check_label'] if selected.get('check_label') else ''}{reason}")
+            reason = (
+                f" ({selected.get('reason')})"
+                if selected.get("status") == "unassessed" and selected.get("reason")
+                else ""
+            )
+            lines.append(
+                f"- {selected.get('label')}{': ' + selected['check_label'] if selected.get('check_label') else ''}{reason}"
+            )
         for check in claim.get("checks") or []:
             lines.append(
                 f"- {check.get('label')}: {check.get('status_label') or check.get('status')}"
