@@ -1416,8 +1416,11 @@ def _append_details(parts: list[str], lines: list[str], summary: str = "Technica
     parts.append("")
 
 
-def _scorecard_item(item: dict[str, Any]) -> list[str]:
+def _scorecard_item(item: dict[str, Any], statements: dict[str, dict] | None = None) -> list[str]:
     status = item.get("status_label") or "--"
+    # plan_8_1 section 4.5: every assessed item shows its depth.
+    if item.get("depth_label"):
+        status = f"{status}, {item['depth_label']}"
     if item.get("cause_label"):
         status = f"{status}: {item['cause_label']}"
     line = f"- **{status}** ({item.get('category_label')}, {item.get('finding_id')}): {item.get('description') or '--'}"
@@ -1429,8 +1432,29 @@ def _scorecard_item(item: dict[str, Any]) -> list[str]:
     # plan_8_1 section 2.3: a finding whose importance is not validated is listed with its problem.
     if item.get("importance_problem"):
         lines.append(f"  - Importance not established: {item['importance_problem']}")
+    governing = (item.get("governing") or {}).get("evidence") or []
+    if item.get("depth") and governing:
+        lines.append(f"  - Governing evidence: {', '.join(str(e) for e in governing)}")
+    lines.extend(f"  - Concern: {concern.get('text')}" for concern in item.get("concerns") or [])
+    lines.extend(
+        f"  - {row.get('check_label')}: {row.get('cause_label') or '--'}"
+        + (f". {row['reason']}" if row.get("reason") else "")
+        for row in (item.get("check_causes") or [] if item.get("status") not in ("supported", "discrepancy") else [])
+    )
     lines.extend(f"  - {check['text']}" for check in item.get("supporting_checks") or [])
+    for identifier in item.get("resource_statements") or []:
+        statement = (statements or {}).get(identifier) or {}
+        lines.append(f"  - Resource statement {identifier}: {statement.get('outcome_label') or '--'}")
     return lines
+
+
+def _statement_line(statement: dict[str, Any]) -> str:
+    context = ", ".join(str(v) for v in (statement.get("archive"), statement.get("access")) if v)
+    checks = "; ".join(
+        f"{c.get('field')}: {c.get('outcome_label')} ({c.get('detail')})" for c in statement.get("checks") or []
+    )
+    head = f"- **{statement.get('identifier')}**" + (f" ({context})" if context else "")
+    return f"{head}: {statement.get('outcome_label')}" + (f". {checks}" if checks else "")
 
 
 def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
@@ -1460,7 +1484,8 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
             [
                 [
                     card.get("score_label") or card.get("score_status_label") or "-- (not assessed)",
-                    card.get("scope_label") or card.get("status_label") or "--",
+                    (card.get("scope_label") or card.get("status_label") or "--")
+                    + (f" ({card['depth_label']})" if card.get("depth_label") else ""),
                 ]
             ],
         )
@@ -1490,6 +1515,7 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
             f"{card.get('inventory_revision')}{recorded}."
         )
         parts.append("")
+    statements = {s.get("identifier"): s for s in card.get("resource_statements") or []}
     for heading, key in (("Assessed", "assessed_items"), ("Not assessed / unresolved", "unassessed_items")):
         items = card.get(key) or []
         if not items:
@@ -1497,14 +1523,22 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
         parts.append(f"### {heading}")
         parts.append("")
         for item in items:
-            parts.extend(_scorecard_item(item))
+            parts.extend(_scorecard_item(item, statements))
         parts.append("")
     excluded = card.get("excluded_items") or []
     if excluded:
         parts.append("### Not scored: technical prerequisites and descriptive checks")
         parts.append("")
         for item in excluded:
-            parts.extend(_scorecard_item(item))
+            parts.extend(_scorecard_item(item, statements))
+        parts.append("")
+    # plan_8_1 section 4.4: checked against each resource's own record, and outside both metrics.
+    if statements:
+        parts.append("### Resource statements")
+        parts.append("")
+        parts.append("What the paper states about each resource, checked against the resource's record. Not scored.")
+        parts.append("")
+        parts.extend(_statement_line(s) for s in statements.values())
         parts.append("")
 
 

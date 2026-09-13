@@ -174,9 +174,10 @@ class TestGroff:
         assert excluded["weight"] == 0
 
 
-def _samd1_like():
+def _samd1_like(version=1):
     """Two differential counts on one contrast, one finding, the selected claim checked against the
-    authors' table and never reanalysed (the mapping was unresolved)."""
+    authors' table and never reanalysed (the mapping was unresolved). ``version`` is the rubric the
+    inventory was established under (plan_8_1 stage 4)."""
     targets = [
         {
             "claim_text": "genes up",
@@ -221,9 +222,12 @@ def _samd1_like():
         "analysis_selection": {
             "current": {"revision": 1, "claim_index": 0, "check": "processed_reanalysis", "contrast_index": 0}
         },
-        "finding_inventory": inventory_from_proposal(
-            proposal, targets=targets, full_text="genes up and genes down", decided_by={"kind": "model"}
-        ),
+        "finding_inventory": {
+            **inventory_from_proposal(
+                proposal, targets=targets, full_text="genes up and genes down", decided_by={"kind": "model"}
+            ),
+            "rubric_version": version,
+        },
     }
     evidence = {
         "author_consistency": {
@@ -240,7 +244,18 @@ def _samd1_like():
 
 
 class TestSAMD1AuthorResultChecks:
-    def test_agreement_with_the_published_results_does_not_increase_supported_or_assessed(self):
+    def test_under_version_two_agreement_with_the_published_results_counts_at_consistency_depth(self):
+        # plan_8_1 stage 4: both required claims agree with the authors' table, so the finding is supported,
+        # and the depth line says none of it was independently assessed.
+        plan, targets, evidence = _samd1_like(version=2)
+        card = _summary(plan=plan, targets=targets, evidence=evidence)["scorecard"]
+        assert (card["supported_count"], card["assessed_count"], card["total_count"]) == (1, 1, 1)
+        assert card["score_label"] == "100 / 100"
+        assert card["depth_label"] == "1 consistency only; 0 independently assessed"
+        [item] = card["assessed_items"]
+        assert (item["depth"], item["depth_label"]) == ("consistency", "Consistency only")
+
+    def test_under_version_one_agreement_with_the_published_results_does_not_increase_supported_or_assessed(self):
         plan, targets, evidence = _samd1_like()
         card = _summary(plan=plan, targets=targets, evidence=evidence)["scorecard"]
         assert (card["supported_count"], card["assessed_count"], card["total_count"]) == (0, 0, 1)

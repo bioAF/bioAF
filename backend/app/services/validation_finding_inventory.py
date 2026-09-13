@@ -187,6 +187,12 @@ def _settle(inventory: dict) -> dict:
     return inventory
 
 
+def _authority() -> dict:
+    from app.services.validation_rubric_v2 import AUTHORITY
+
+    return {"rubric_version": RUBRIC_VERSION, **AUTHORITY}
+
+
 def inventory_from_proposal(
     raw,
     *,
@@ -212,6 +218,8 @@ def inventory_from_proposal(
         "decided_by": dict(decided_by),
         "at": _now(),
         "history": [],
+        # plan_8_1 section 4.3: the authority rules, declared before any result can reshape them.
+        "authority": _authority(),
     }
     if parse_failure:
         inventory["_unreadable"] = "the paper could not be read into findings"

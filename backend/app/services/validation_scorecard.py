@@ -22,8 +22,11 @@ from __future__ import annotations
 
 import math
 
-RUBRIC_VERSION = 1
-RUBRIC_LABEL = "weighted rubric version 1"
+# plan_8_1 stage 4: version 2 adds author-result consistency to the numbers, at consistency depth. A record
+# keeps the version its inventory was established under, and is labeled with it.
+RUBRIC_VERSION = 2
+RUBRIC_LABELS = {1: "weighted rubric version 1", 2: "weighted rubric version 2"}
+RUBRIC_LABEL = RUBRIC_LABELS[RUBRIC_VERSION]
 TITLE = "Validation Scorecard"
 EXPLANATION = (
     "The score measures agreement among assessed findings, with primary findings weighted twice as much as "
@@ -114,12 +117,18 @@ def display_score(
     return rounded
 
 
+def _version(inventory: dict | None) -> int:
+    version = (inventory or {}).get("rubric_version")
+    return version if version in RUBRIC_LABELS else RUBRIC_VERSION
+
+
 def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progress: bool) -> dict:
+    version = _version(inventory)
     return {
         "version": 1,
         "title": TITLE,
-        "rubric_version": RUBRIC_VERSION,
-        "rubric_label": RUBRIC_LABEL,
+        "rubric_version": version,
+        "rubric_label": RUBRIC_LABELS[version],
         "explanation": EXPLANATION,
         "status": status,
         "status_label": SCORECARD_STATUS_LABELS[status],
@@ -160,6 +169,12 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "score_status_label": None,
         # plan_8_1 section 2.1: the findings could not be established, and grouping them again may.
         "inventory_retry": False,
+        # plan_8_1 section 4.5: under version 2, how deep the assessed findings were checked, beside the scope.
+        "depth_label": None,
+        "independent_count": None,
+        "consistency_count": None,
+        # plan_8_1 section 4.4: what the paper states about its resources, checked and never scored.
+        "resource_statements": [],
     }
 
 
@@ -187,8 +202,23 @@ def _validated(finding: dict) -> bool:
     return ((finding.get("importance") or {}).get("status") or "validated") == "validated"
 
 
-def _item(finding: dict, outcome: dict, weight: int | None) -> dict:
+INDEPENDENT_DEPTH = "independent"
+CONSISTENCY_DEPTH = "consistency"
+DEPTH_LABELS = {INDEPENDENT_DEPTH: "Independently assessed", CONSISTENCY_DEPTH: "Consistency only"}
+
+
+def _depth(outcome: dict, status: str, version: int) -> str | None:
+    """An assessed finding's depth under version 2. An outcome read before depth existed was assessed
+    independently, since nothing else was conclusive then."""
+    if version < 2 or status not in ASSESSED_STATUSES:
+        return None
+    depth = outcome.get("depth")
+    return depth if depth in DEPTH_LABELS else INDEPENDENT_DEPTH
+
+
+def _item(finding: dict, outcome: dict, weight: int | None, version: int = 1) -> dict:
     status = outcome.get("status") or NOT_ATTEMPTED
+    depth = _depth(outcome, status, version)
     if status not in STATUS_LABELS:
         raise ScorecardInvariantError(f"finding {finding.get('id')} has an unknown outcome status {status!r}")
     importance = finding.get("importance") or {}
@@ -226,6 +256,14 @@ def _item(finding: dict, outcome: dict, weight: int | None) -> dict:
         "supporting_evidence_ids": list(outcome.get("supporting_evidence_ids") or []),
         "comparison_criteria": outcome.get("comparison_criteria") or finding.get("criteria"),
         "analysis_selection_revision": outcome.get("analysis_selection_revision"),
+        # plan_8_1 stage 4: the depth and the evidence that governs the status, every outcome kept beneath.
+        "depth": depth,
+        "depth_label": DEPTH_LABELS.get(depth) if depth else None,
+        "governing": outcome.get("governing") if version >= 2 else None,
+        "concerns": list(outcome.get("concerns") or []) if version >= 2 else [],
+        "check_causes": list(outcome.get("check_causes") or []) if version >= 2 else [],
+        "experiment_ids": list(outcome.get("experiment_ids") or []),
+        "resource_statements": [],
     }
 
 
@@ -258,7 +296,7 @@ def _unestablished_words(k: int) -> str:
     return f"{k} unassessed findings have no established importance; any could be primary."
 
 
-def _messages(items: list[dict]) -> list[dict]:
+def _messages(items: list[dict], statements: list[dict] | None = None) -> list[dict]:
     """What must never hide behind a high score or a truncated list: primary discrepancies and primary
     findings left unassessed. Context under the metrics, never a third metric.
 
@@ -286,6 +324,36 @@ def _messages(items: list[dict]) -> list[dict]:
                 "findings": open_importance,
             }
         )
+    # plan_8_1 section 4.3: a lower-authority outcome that disagrees with the governing one, on a primary
+    # finding, is named here as well as beneath the claim.
+    for item in items:
+        if item["category"] != PRIMARY:
+            continue
+        for concern in item.get("concerns") or []:
+            messages.append(
+                {
+                    "kind": "concern",
+                    "text": f"Concern on a primary finding: {item['description']}: {concern.get('text')}",
+                    "findings": [item["finding_id"]],
+                }
+            )
+    # plan_8_1 section 4.4: a contradicted resource statement is a concern; it changes neither metric.
+    for statement in statements or []:
+        if statement.get("outcome") != "contradicted":
+            continue
+        details = "; ".join(
+            c.get("detail")
+            for c in statement.get("checks") or []
+            if c.get("outcome") == "contradicted" and c.get("detail")
+        )
+        messages.append(
+            {
+                "kind": "resource_contradicted",
+                "text": f"Resource statement contradicted: {statement.get('identifier')}"
+                + (f" ({details})" if details else ""),
+                "findings": [i["finding_id"] for i in items if statement.get("identifier") in i["resource_statements"]],
+            }
+        )
     return messages
 
 
@@ -306,10 +374,33 @@ def _indicators(items: list[dict]) -> list[dict]:
     return indicators
 
 
-def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *, in_progress: bool = False) -> dict:
+def _attach_statements(items: list[dict], statements: list[dict]) -> None:
+    """plan_8_1 section 4.4: each statement beneath the findings whose reported experiment the resource serves."""
+    for item in items:
+        served = set(item.get("experiment_ids") or [])
+        item["resource_statements"] = [
+            s.get("identifier") for s in statements if served.intersection(s.get("experiment_ids") or [])
+        ]
+
+
+def _depth_words(consistency: int, independent: int) -> str:
+    return f"{consistency} consistency only; {independent} independently assessed"
+
+
+def build_scorecard(
+    inventory: dict | None,
+    outcomes: dict[str, dict] | None,
+    *,
+    in_progress: bool = False,
+    resource_statements: list[dict] | None = None,
+) -> dict:
     """The scorecard for one validation study: the two metrics, their counts and weight sums, and the
-    findings listed as assessed, not assessed, or not scored (weight zero)."""
+    findings listed as assessed, not assessed, or not scored (weight zero).
+
+    ``resource_statements`` (plan_8_1 section 4.4) are shown beneath the findings they serve and in the
+    messages when contradicted; they never enter either metric."""
     outcomes = outcomes or {}
+    statements = [s for s in resource_statements or [] if isinstance(s, dict)]
     if not inventory:
         return _empty(UNAVAILABLE, inventory=None, reason=None, in_progress=in_progress)
     if inventory.get("status") == PENDING:
@@ -341,13 +432,15 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     # plan_8_1 section 2.3: N counts every validated primary or supporting finding and every finding whose
     # importance is not validated, whatever category was proposed. Only a validated technical finding
     # leaves it, and only a validated importance gives an assessed finding weight.
+    version = _version(inventory)
     scoreable: list[dict] = []
     excluded: list[dict] = []
     for position, finding in enumerate(findings):
         weight = _checked_weight(finding) if _validated(finding) else None
-        item = _item(finding, outcomes.get(finding.get("id")) or {}, weight)
+        item = _item(finding, outcomes.get(finding.get("id")) or {}, weight, version)
         item["_position"] = position
         (excluded if weight == 0 else scoreable).append(item)
+    _attach_statements(scoreable + excluded, statements)
 
     if not scoreable:
         card = _empty(
@@ -368,6 +461,8 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
             primary_discrepancy_count=0,
             primary_unassessed_count=0,
             excluded_items=[_public(i) for i in excluded],
+            resource_statements=statements,
+            messages=_messages([], statements),
         )
         return card
 
@@ -409,6 +504,15 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
 
     provisional = bool(open_importance)
     card = _empty(SCORED if assessed else NOT_ASSESSED, inventory=inventory, reason=None, in_progress=in_progress)
+    if version >= 2:
+        # plan_8_1 section 4.5: the depth at equal prominence with the scope, once anything is assessed.
+        independent = sum(1 for i in assessed if i["depth"] == INDEPENDENT_DEPTH)
+        consistency = sum(1 for i in assessed if i["depth"] == CONSISTENCY_DEPTH)
+        card.update(
+            independent_count=independent,
+            consistency_count=consistency,
+            depth_label=_depth_words(consistency, independent) if assessed else None,
+        )
     card.update(
         score=score,
         display_score=shown,
@@ -432,11 +536,12 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
         primary_discrepancy_count=sum(1 for i in discrepant if i["category"] == PRIMARY),
         primary_unassessed_count=sum(1 for i in unassessed if i["category"] == PRIMARY),
         summary=_summary(by_position),
-        messages=_messages(by_position),
+        messages=_messages(by_position, statements),
         indicators=_indicators(by_position),
         assessed_items=[_public(i) for i in ordered_assessed],
         unassessed_items=[_public(i) for i in ordered_unassessed],
         excluded_items=[_public(i) for i in excluded],
+        resource_statements=statements,
     )
     return card
 
@@ -468,6 +573,10 @@ _COMPACT_KEYS = (
     "reason",
     "cause",
     "cause_label",
+    # plan_8_1 section 4.5: the list shows the fraction and the number independently assessed.
+    "depth_label",
+    "independent_count",
+    "consistency_count",
 )
 
 

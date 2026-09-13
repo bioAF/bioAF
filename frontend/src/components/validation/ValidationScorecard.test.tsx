@@ -56,7 +56,8 @@ describe("the two metrics", () => {
     render(<ValidationScorecard scorecard={scored} />);
     expect(screen.getByText(scored.explanation, { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/4 of 6/)).toBeInTheDocument();
-    expect(screen.getByText(/weighted rubric version 1/)).toBeInTheDocument();
+    // plan_8_1 stage 4: a new inventory is scored under version 2.
+    expect(screen.getByText(/weighted rubric version 2/)).toBeInTheDocument();
   });
 });
 
@@ -227,5 +228,56 @@ describe("when bioAF could not group the claims", () => {
     render(<ValidationScorecard scorecard={failed} />);
     expect(screen.getByText(/^bioAF could not group the paper's claims into findings: /)).toBeInTheDocument();
     expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("Scope not established");
+  });
+});
+
+// plan_8_1 stage 4: weighted rubric version 2. Depth beside the scope and on every item; concerns and
+// resource statements shown, never scored.
+describe("weighted rubric version 2", () => {
+  const v2 = card("scorecard_samd1_v2");
+
+  it("names the rubric and shows the depth line under the scope", () => {
+    render(<ValidationScorecard scorecard={v2} />);
+    expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("1 / 1 assessed");
+    expect(screen.getByTestId("scorecard-depth")).toHaveTextContent("1 consistency only; 0 independently assessed");
+    expect(screen.getByText(/weighted rubric version 2/)).toBeInTheDocument();
+  });
+
+  it("shows each item's depth and the evidence that governs it", () => {
+    render(<ValidationScorecard scorecard={v2} />);
+    const [item] = within(screen.getByTestId("scorecard-assessed")).getAllByRole("listitem");
+    expect(within(item).getByText("Consistency only")).toBeInTheDocument();
+    expect(within(item).getByText("Governing evidence: level3_result, author_results (deseq2.txt.gz)")).toBeInTheDocument();
+  });
+
+  it("shows a concern beneath the finding and, for a primary finding, in the messages", () => {
+    render(<ValidationScorecard scorecard={v2} />);
+    const [item] = within(screen.getByTestId("scorecard-assessed")).getAllByRole("listitem");
+    expect(within(item).getByText("Concern: the paper's text disagrees with its own table")).toBeInTheDocument();
+    const messages = screen.getByTestId("scorecard-messages");
+    expect(within(messages).getByText(/Concern on a primary finding/)).toBeInTheDocument();
+  });
+
+  it("shows the resource statements beneath the findings they serve and in a list outside the numbers", () => {
+    render(<ValidationScorecard scorecard={v2} />);
+    const [item] = within(screen.getByTestId("scorecard-assessed")).getAllByRole("listitem");
+    expect(within(item).getByText("Resource statement GSE999999: Contradicted")).toBeInTheDocument();
+    const statements = screen.getByTestId("scorecard-resource-statements");
+    expect(within(statements).getByText(/Not scored/)).toBeInTheDocument();
+    expect(within(statements).getAllByText("Contradicted").length).toBeGreaterThan(0);
+    expect(within(screen.getByTestId("scorecard-messages")).getByText(/Resource statement contradicted: GSE999999/)).toBeInTheDocument();
+  });
+
+  it("keeps each check's own cause, so access never stands in for a missing table", () => {
+    render(<ValidationScorecard scorecard={groff} />);
+    const first = within(screen.getByTestId("scorecard-unassessed")).getAllByRole("listitem")[0];
+    expect(within(first).getByText(/Reanalysis from raw reads: Access required/)).toBeInTheDocument();
+    expect(within(first).getByText(/Consistency with the authors' results: Required data not deposited/)).toBeInTheDocument();
+  });
+
+  it("shows no depth for a version 1 card", () => {
+    render(<ValidationScorecard scorecard={card("scorecard_samd1")} />);
+    expect(screen.queryByTestId("scorecard-depth")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("scorecard-resource-statements")).not.toBeInTheDocument();
   });
 });

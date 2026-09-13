@@ -28,6 +28,8 @@ export function ScorecardCompact({ scorecard }: { scorecard: CompactScorecard | 
         <div className="text-xs font-medium text-gray-700">{scorecard.score_status_label}</div>
       )}
       <div className="text-xs text-gray-600">{scorecard.scope_label ?? scorecard.status_label ?? NOT_SET}</div>
+      {/* plan_8_1 section 4.5: the number independently assessed, beside the fraction. */}
+      {scorecard.depth_label && <div className="text-xs font-medium text-gray-800">{scorecard.depth_label}</div>}
       {/* plan_8_1 section 1.3: whose limitation a card with no score is, as the report says it. */}
       {scorecard.cause_label && (
         <div className="text-xs font-medium text-gray-700" title={scorecard.reason ?? undefined}>

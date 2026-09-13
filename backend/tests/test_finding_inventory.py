@@ -85,11 +85,12 @@ def _inventory(proposal=None, **kwargs):
 
 
 class TestAValidProposalIsEstablished:
-    def test_it_is_established_at_revision_one_under_rubric_one(self):
+    def test_it_is_established_at_revision_one_under_rubric_two(self):
+        # plan_8_1 stage 4: an inventory established after version 2 deploys is scored under it.
         inventory = _inventory()
         assert inventory["status"] == ESTABLISHED
         assert inventory["revision"] == 1
-        assert inventory["rubric_version"] == 1
+        assert inventory["rubric_version"] == 2
         assert inventory["reason"] is None
 
     def test_each_finding_has_a_stable_id_and_its_claims(self):
@@ -110,7 +111,7 @@ class TestAValidProposalIsEstablished:
         assert importance["status"] == "validated"
         assert importance["decided_by"] == "model"
         assert importance["model"] == "a-model"
-        assert importance["validated_by"] == "weighted rubric version 1"
+        assert importance["validated_by"] == "weighted rubric version 2"
 
     def test_a_finding_carries_its_locator_experiment_and_contrast(self):
         primary, supporting, _ = _inventory()["findings"]

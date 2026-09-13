@@ -214,10 +214,39 @@ export interface ScorecardItem {
   assessment_method: string | null;
   method_label: string | null;
   supporting_checks: { kind: string; text: string }[];
+  // plan_8_1 stage 4 (version 2 only): how deep the assessment went, what governs it, and what disagreed.
+  depth?: ScorecardDepth | null;
+  depth_label?: string | null;
+  governing?: { method: string | null; evidence: string[] } | null;
+  concerns?: { kind: string; text: string }[];
+  check_causes?: ScorecardCheckCause[];
+  experiment_ids?: string[];
+  resource_statements?: string[];
+}
+
+export type ScorecardDepth = "independent" | "consistency";
+
+export interface ScorecardCheckCause {
+  check: string;
+  check_label: string;
+  cause: string;
+  cause_label: string | null;
+  reason: string | null;
+}
+
+// plan_8_1 section 4.4: what the paper states about a resource, checked against its record; never scored.
+export interface ResourceStatement {
+  identifier: string;
+  archive: string | null;
+  access: string | null;
+  experiment_ids: string[];
+  outcome: "verified" | "contradicted" | "not_established";
+  outcome_label: string;
+  checks: { field: string; outcome: string; outcome_label: string; detail: string }[];
 }
 
 export interface ScorecardMessage {
-  kind: "primary_discrepancy" | "primary_unassessed" | "importance_unestablished";
+  kind: "primary_discrepancy" | "primary_unassessed" | "importance_unestablished" | "concern" | "resource_contradicted";
   text: string;
   findings: string[];
 }
@@ -247,6 +276,10 @@ export interface CompactScorecard {
   reason?: string | null;
   cause?: string | null;
   cause_label?: string | null;
+  // plan_8_1 section 4.5: under version 2, the depth beside the scope; null under version 1.
+  depth_label?: string | null;
+  independent_count?: number | null;
+  consistency_count?: number | null;
 }
 
 export interface ValidationScorecardData extends CompactScorecard {
@@ -272,6 +305,7 @@ export interface ValidationScorecardData extends CompactScorecard {
   unassessed_items: ScorecardItem[];
   excluded_items: ScorecardItem[];
   unresolved_importance: { finding_id: string; description: string | null; problem: string | null }[];
+  resource_statements?: ResourceStatement[];
 }
 
 export interface CompletionFact {

@@ -356,6 +356,10 @@ class TestTheCompactForm:
             "reason": None,
             "cause": None,
             "cause_label": None,
+            # plan_8_1 section 4.5: the depth, which a version 1 record does not carry.
+            "depth_label": None,
+            "independent_count": None,
+            "consistency_count": None,
         }
 
     def test_the_compact_form_of_an_unassessed_study_keeps_its_scope(self):

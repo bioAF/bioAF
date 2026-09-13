@@ -182,10 +182,52 @@ async def _contract() -> dict:
         targets=[],
         issues=[],
     )
+    # plan_8_1 stage 4: version 2, a finding supported at consistency depth with a concern beneath it, and
+    # the resource statements (one verified, one contradicted). ``scorecard_samd1`` stays version 1.
+    samd1_v2_plan, samd1_v2_targets, samd1_v2_evidence = _samd1_like(version=2)
+    for target in samd1_v2_targets:
+        target["reported_experiment_id"] = "e1"
+    samd1_v2_plan["reported_experiments"] = [
+        {"id": "e1", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq", "resources": ["GSE144396", "GSE999999"]}
+    ]
+    samd1_v2_evidence = {
+        **samd1_v2_evidence,
+        "author_consistency": {
+            "records": [
+                {"claim_index": 0, "outcome": "disagree", "table": "deseq2.txt.gz", "rows_passing": 120},
+                {"claim_index": 1, "outcome": "agree", "table": "deseq2.txt.gz", "rows_passing": 524},
+            ]
+        },
+        "level3": {"claim_index": 0, "source": "deposit", "contrast": "KO vs WT", "cutoffs": {"significance": {}}},
+        "level3_result": {
+            "concordance": {"verdict": "agree", "paper_n": 257, "concordant": 240, "enrichment_p": 1e-20}
+        },
+        "completion": {},
+        "capabilities": {
+            "deposits": [
+                {
+                    "accession": "GSE144396",
+                    "archive": "geo",
+                    "exists": "yes",
+                    "access": "public",
+                    "listing": {"library_strategies": ["RNA-Seq"]},
+                },
+                {"accession": "GSE999999", "archive": "geo", "exists": "no", "access": "unknown"},
+            ]
+        },
+    }
+    samd1_v2 = summarize(
+        study={"state": "classified", "classification": "inconclusive"},
+        evidence=samd1_v2_evidence,
+        plan=samd1_v2_plan,
+        targets=samd1_v2_targets,
+        issues=[],
+    )
     return json.loads(
         json.dumps(
             {
                 "enums": enum_labels(),
+                "scorecard_samd1_v2": samd1_v2,
                 "stage2_selection": stage2,
                 "groff_failed": groff,
                 "study_34_legacy": legacy,

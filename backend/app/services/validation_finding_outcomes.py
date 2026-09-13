@@ -92,6 +92,12 @@ _CONCORDANCE_CRITERIA = (
     "same direction."
 )
 _QC_CRITERIA = "The value bioAF computed is within the metric's tolerance of the value the paper states."
+# plan_8_1 section 4.2: shows the paper's text agrees with its own results; never an independent assessment.
+_CONSISTENCY_CRITERIA = (
+    "Consistency with the authors' own result table at the claim's predicate: supported when the table agrees "
+    "with the claim, a discrepancy when it does not. This shows the paper's text agrees with its own results; it "
+    "is not an independent assessment."
+)
 
 
 def _execution_checks(target: dict) -> tuple[str, ...]:
@@ -461,6 +467,81 @@ def _combine(
     return {**base, **_why_not(claims, ev, technical_only=technical_only)}
 
 
+_UNSETTLED_CONSISTENCY = ("unresolved", "not_checkable")
+
+
+def _cause_row(check: str, cause: str, reason) -> dict:
+    from app.services.validation_report_summary import CLAIM_CHECK_LABELS
+
+    return {
+        "check": check,
+        "check_label": CLAIM_CHECK_LABELS.get(check, check),
+        "cause": cause,
+        "cause_label": CAUSE_LABELS.get(cause),
+        "reason": _sentence(reason),
+    }
+
+
+def _check_causes(claims: list[int], ev: _Evidence, consistency: dict) -> list[dict]:
+    """plan_8_1 section 4.7: why each of the finding's checks did not conclude, each with its own cause,
+    so an access-blocked analysis and a consistency check whose table was not retrieved stay distinct.
+    A requirement the run itself settles is not a cause; such a check could still be selected."""
+    rows: list[dict] = []
+    for index in claims:
+        target = ev.targets[index] if 0 <= index < len(ev.targets) else {}
+        checks = target.get("checks") or {}
+        record = consistency.get(index)
+        author = checks.get("author_results")
+        if isinstance(record, dict):
+            if record.get("outcome") in _UNSETTLED_CONSISTENCY:
+                cause = CAUSE_BIOAF if record.get("check_state") == "blocked" else CAUSE_UNRESOLVED
+                rows.append(_cause_row("author_results", cause, record.get("reason")))
+        elif isinstance(author, dict) and author.get("status") not in (None, "available"):
+            rows.append(_cause_row("author_results", _cause_of_check(author), author.get("reason")))
+        for key in _execution_checks(target):
+            check = checks.get(key)
+            if not isinstance(check, dict) or check.get("status") in (None, "available"):
+                continue
+            if check.get("status") == "unresolved" and check.get("requirement") in _PENDING_REQUIREMENTS:
+                continue
+            rows.append(_cause_row(key, _cause_of_check(check), check.get("reason")))
+    return [dict(pair) for pair in dict.fromkeys(tuple(sorted(r.items())) for r in rows)]
+
+
+def _experiment_ids(claims: list[int], ev: _Evidence) -> list:
+    """The reported experiments the finding's claims belong to, for the resource statements beneath it."""
+    found = (ev.targets[i].get("reported_experiment_id") for i in claims if 0 <= i < len(ev.targets))
+    return list(dict.fromkeys(e for e in found if e))
+
+
+def _combine_v2(
+    finding: dict,
+    governed: list[dict | None],
+    claims: list[int],
+    ev: _Evidence,
+    supporting: list[dict],
+    consistency: dict,
+) -> dict:
+    """plan_8_1 section 4.3: the finding under version 2, from each claim's governed status; when nothing
+    governs, why, with every check's own cause."""
+    from app.services.validation_rubric_v2 import combine_finding
+
+    outcome = combine_finding(finding, governed, claims)
+    outcome["check_causes"] = _check_causes(claims, ev, consistency)
+    if outcome["status"] is None:
+        technical_only = [c["text"] for c in supporting if c["kind"] == "technical_qc"]
+        why = _why_not(claims, ev, technical_only=technical_only)
+        unsettled = [
+            f"{c['check_label']}: {c['reason']}"
+            for c in outcome["check_causes"]
+            if c["check"] == "author_results" and c.get("reason")
+        ]
+        if unsettled:
+            why["reason"] = " ".join(part for part in (why["reason"], *unsettled) if part)
+        outcome.update(why)
+    return outcome
+
+
 def finding_outcomes(
     inventory: dict,
     *,
@@ -473,18 +554,23 @@ def finding_outcomes(
     """One outcome record per finding in ``inventory``, keyed by finding id.
 
     ``targets`` are the plan's claims in id order (a claim's position is its index); ``consistency``
-    is each claim's check against the authors' own results, as the report projects it.
+    is each claim's check against the authors' own results, as the report projects it. Under an
+    inventory established with weighted rubric version 2 (plan_8_1 stage 4), that check governs a claim
+    no independent assessment settles, at consistency depth.
     """
     from app.services.validation_report_summary import CLAIM_CHECK_LABELS
+    from app.services.validation_rubric_v2 import govern_claim
 
     ev = _Evidence([t for t in targets or [] if isinstance(t, dict)], plan or {}, evidence or {}, study or {})
     consistency = consistency or {}
+    version_two = (inventory.get("rubric_version") or 1) >= 2
     outcomes: dict[str, dict] = {}
     findings = [f for f in inventory.get("findings") or [] if isinstance(f, dict)]
     for finding in findings:
         technical = ((finding.get("importance") or {}).get("category")) == TECHNICAL
         claims = [c for c in finding.get("required") or finding.get("claim_indices") or [] if isinstance(c, int)]
         results: list[dict | None] = []
+        governed: list[dict | None] = []
         supporting: list[dict] = []
         for index in claims:
             result = _level3_result(index, ev)
@@ -493,9 +579,18 @@ def finding_outcomes(
                 supporting.extend(facts)
             supporting.extend(_supporting(index, ev, consistency))
             results.append(result)
+            if version_two:
+                source = consistency.get(index)
+                governed.append(
+                    govern_claim(index, [result] if result else [], [source] if isinstance(source, dict) else [])
+                )
         # The same fact about two claims of one finding (both counts consistent with one table) is one line.
         supporting = [dict(pair) for pair in dict.fromkeys(tuple(sorted(s.items())) for s in supporting)]
-        outcome = _combine(finding, results, claims, ev, supporting)
+        if version_two:
+            outcome = _combine_v2(finding, governed, claims, ev, supporting, consistency)
+            outcome["experiment_ids"] = _experiment_ids(claims, ev)
+        else:
+            outcome = _combine(finding, results, claims, ev, supporting)
         method = outcome.get("assessment_method")
         outcomes[finding["id"]] = {
             "finding_id": finding["id"],
@@ -507,7 +602,12 @@ def finding_outcomes(
             "comparison_criteria": {
                 "rule": (finding.get("criteria") or {}).get("rule"),
                 "words": (finding.get("criteria") or {}).get("words"),
-                "subchecks": list(dict.fromkeys(r["criteria"] for r in results if r is not None)),
+                "subchecks": list(dict.fromkeys(r["criteria"] for r in results if r is not None))
+                + (
+                    [_CONSISTENCY_CRITERIA]
+                    if version_two and any((g or {}).get("depth") == "consistency" for g in governed)
+                    else []
+                ),
             },
         }
 

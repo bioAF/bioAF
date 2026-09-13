@@ -78,6 +78,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -85,6 +87,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -96,8 +99,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "No reproduction plan was read for this study.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -355,6 +359,8 @@
       "assessed_weight": null,
       "cause": "bioaf_limitation",
       "cause_label": "bioAF limitation",
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -362,6 +368,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -373,8 +380,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "bioAF could not read the paper into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a bioAF limitation; read the paper again.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -516,6 +524,8 @@
       "assessed_weight": null,
       "cause": "bioaf_limitation",
       "cause_label": "bioAF limitation",
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -523,6 +533,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -534,8 +545,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "bioAF could not read the paper into findings: the model's answer was cut off at its token limit. This is a bioAF limitation; read the paper again.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -1210,6 +1222,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -1217,6 +1231,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -1228,8 +1243,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -1376,6 +1392,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -1383,6 +1401,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -1394,8 +1413,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "No reproduction plan was read for this study.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -1538,6 +1558,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -1545,6 +1567,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -1556,8 +1579,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "No reproduction plan was read for this study.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -2476,6 +2500,8 @@
       "assessed_weight": 0,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -2487,6 +2513,36 @@
           "category_label": "Technical prerequisite or descriptive check",
           "cause": "access",
           "cause_label": "Access required",
+          "check_causes": [
+            {
+              "cause": "bioaf_limitation",
+              "cause_label": "bioAF limitation",
+              "check": "processed_reanalysis",
+              "check_label": "Reanalysis of processed data",
+              "reason": "No analysis computes a count of samples."
+            },
+            {
+              "cause": "bioaf_limitation",
+              "cause_label": "bioAF limitation",
+              "check": "raw_reanalysis",
+              "check_label": "Reanalysis from raw reads",
+              "reason": "No analysis computes a count of samples."
+            },
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            },
+            {
+              "cause": "access",
+              "cause_label": "Access required",
+              "check": "qc_metric",
+              "check_label": "QC metric comparison",
+              "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)."
+            }
+          ],
           "claim_indices": [
             0,
             1,
@@ -2498,8 +2554,18 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Samples, depth and detected transcripts",
+          "experiment_ids": [
+            "e1"
+          ],
           "finding_id": "F5",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2508,30 +2574,39 @@
           "proposed_category": null,
           "quote": null,
           "rationale": "They describe the data set and establish no finding.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; QC metric comparison: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access); Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; QC metric comparison: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access); Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 0,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
             },
             {
+              "authority": null,
               "claim_index": 1,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
             },
             {
+              "authority": null,
               "claim_index": 2,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
             },
             {
+              "authority": null,
               "claim_index": 3,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -2545,6 +2620,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": 0,
       "indicators": [
         {
           "kind": "primary_unassessed",
@@ -2569,8 +2645,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "0 / 4 assessed",
       "score": null,
       "score_label": null,
@@ -2590,6 +2667,29 @@
           "category_label": "Primary",
           "cause": "access",
           "cause_label": "Access required",
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No result table is published for this claim's experiment."
+            },
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "processed_reanalysis",
+              "check_label": "Reanalysis of processed data",
+              "reason": "No processed matrix holding both arms is published."
+            },
+            {
+              "cause": "access",
+              "cause_label": "Access required",
+              "check": "raw_reanalysis",
+              "check_label": "Reanalysis from raw reads",
+              "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)."
+            }
+          ],
           "claim_indices": [
             4
           ],
@@ -2598,8 +2698,18 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Differential expression between embryo groups",
+          "experiment_ids": [
+            "e1"
+          ],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2608,12 +2718,15 @@
           "proposed_category": null,
           "quote": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
           "rationale": "The paper's main conclusion rests on it.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
+          "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 4,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -2630,6 +2743,29 @@
           "category_label": "Supporting",
           "cause": "access",
           "cause_label": "Access required",
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No result table is published for this claim's experiment."
+            },
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "processed_reanalysis",
+              "check_label": "Reanalysis of processed data",
+              "reason": "No processed matrix holding both arms is published."
+            },
+            {
+              "cause": "access",
+              "cause_label": "Access required",
+              "check": "raw_reanalysis",
+              "check_label": "Reanalysis from raw reads",
+              "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)."
+            }
+          ],
           "claim_indices": [
             5
           ],
@@ -2638,8 +2774,18 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Differences in group 2",
+          "experiment_ids": [
+            "e1"
+          ],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2648,12 +2794,15 @@
           "proposed_category": null,
           "quote": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
           "rationale": "It qualifies the main conclusion.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
+          "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 5,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -2670,6 +2819,29 @@
           "category_label": "Supporting",
           "cause": "access",
           "cause_label": "Access required",
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No result table is published for this claim's experiment."
+            },
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "processed_reanalysis",
+              "check_label": "Reanalysis of processed data",
+              "reason": "No processed matrix holding both arms is published."
+            },
+            {
+              "cause": "access",
+              "cause_label": "Access required",
+              "check": "raw_reanalysis",
+              "check_label": "Reanalysis from raw reads",
+              "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)."
+            }
+          ],
           "claim_indices": [
             6
           ],
@@ -2678,8 +2850,18 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Differences in group 3",
+          "experiment_ids": [
+            "e1"
+          ],
           "finding_id": "F3",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2688,12 +2870,15 @@
           "proposed_category": null,
           "quote": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
           "rationale": "It qualifies the main conclusion.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
+          "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 6,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -2710,6 +2895,29 @@
           "category_label": "Supporting",
           "cause": "access",
           "cause_label": "Access required",
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No result table is published for this claim's experiment."
+            },
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "processed_reanalysis",
+              "check_label": "Reanalysis of processed data",
+              "reason": "No processed matrix holding both arms is published."
+            },
+            {
+              "cause": "access",
+              "cause_label": "Access required",
+              "check": "raw_reanalysis",
+              "check_label": "Reanalysis from raw reads",
+              "reason": "EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access)."
+            }
+          ],
           "claim_indices": [
             7
           ],
@@ -2718,8 +2926,18 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Differences in group 4",
+          "experiment_ids": [
+            "e1"
+          ],
           "finding_id": "F4",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2728,12 +2946,15 @@
           "proposed_category": null,
           "quote": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
           "rationale": "It qualifies the main conclusion.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access).",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
+          "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 7,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -2966,6 +3187,15 @@
           "category_label": "Primary",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -2976,8 +3206,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -2987,11 +3227,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -3007,6 +3254,8 @@
       "assessed_weight": 2,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": "0 consistency only; 1 independently assessed",
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": 100,
@@ -3014,6 +3263,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "independent_count": 1,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": 1,
@@ -3025,8 +3275,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "1 / 2 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
@@ -3046,6 +3297,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             1
           ],
@@ -3054,8 +3314,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 2",
+          "experiment_ids": [],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -3064,12 +3332,15 @@
           "proposed_category": null,
           "quote": "sample 2 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 1,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -3211,6 +3482,8 @@
       "assessed_weight": null,
       "cause": "bioaf_limitation",
       "cause_label": "bioAF limitation",
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -3218,6 +3491,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": true,
       "inventory_revision": null,
@@ -3229,8 +3503,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "bioAF could not group the paper's claims into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: bioAF could not reach the language model.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -4220,6 +4495,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -4230,8 +4514,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4241,11 +4535,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -4264,6 +4565,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             1
           ],
@@ -4274,8 +4584,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 2",
+          "experiment_ids": [],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4285,11 +4605,18 @@
           "quote": "sample 2 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 1,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -4305,6 +4632,8 @@
       "assessed_weight": 2,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": "0 consistency only; 2 independently assessed",
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": 100,
@@ -4312,6 +4641,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": 2,
       "indicators": [
         {
           "kind": "primary_unassessed",
@@ -4336,8 +4666,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "2 / 14 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
@@ -4357,6 +4688,15 @@
           "category_label": "Primary",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             2
           ],
@@ -4365,8 +4705,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 3",
+          "experiment_ids": [],
           "finding_id": "F3",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4375,12 +4723,15 @@
           "proposed_category": null,
           "quote": "sample 3 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 2,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4397,6 +4748,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             3
           ],
@@ -4405,8 +4765,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 4",
+          "experiment_ids": [],
           "finding_id": "F4",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4415,12 +4783,15 @@
           "proposed_category": null,
           "quote": "sample 4 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 3,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4437,6 +4808,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             4
           ],
@@ -4445,8 +4825,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 5",
+          "experiment_ids": [],
           "finding_id": "F5",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4455,12 +4843,15 @@
           "proposed_category": null,
           "quote": "sample 5 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 4,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4477,6 +4868,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             5
           ],
@@ -4485,8 +4885,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 6",
+          "experiment_ids": [],
           "finding_id": "F6",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4495,12 +4903,15 @@
           "proposed_category": null,
           "quote": "sample 6 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 5,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4517,6 +4928,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             6
           ],
@@ -4525,8 +4945,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 7",
+          "experiment_ids": [],
           "finding_id": "F7",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4535,12 +4963,15 @@
           "proposed_category": null,
           "quote": "sample 7 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 6,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4557,6 +4988,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             7
           ],
@@ -4565,8 +5005,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 8",
+          "experiment_ids": [],
           "finding_id": "F8",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4575,12 +5023,15 @@
           "proposed_category": null,
           "quote": "sample 8 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 7,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4597,6 +5048,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             8
           ],
@@ -4605,8 +5065,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 9",
+          "experiment_ids": [],
           "finding_id": "F9",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4615,12 +5083,15 @@
           "proposed_category": null,
           "quote": "sample 9 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 8,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4637,6 +5108,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             9
           ],
@@ -4645,8 +5125,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 10",
+          "experiment_ids": [],
           "finding_id": "F10",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4655,12 +5143,15 @@
           "proposed_category": null,
           "quote": "sample 10 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 9,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4677,6 +5168,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             10
           ],
@@ -4685,8 +5185,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 11",
+          "experiment_ids": [],
           "finding_id": "F11",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4695,12 +5203,15 @@
           "proposed_category": null,
           "quote": "sample 11 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 10,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4717,6 +5228,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             11
           ],
@@ -4725,8 +5245,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 12",
+          "experiment_ids": [],
           "finding_id": "F12",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4735,12 +5263,15 @@
           "proposed_category": null,
           "quote": "sample 12 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 11,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4757,6 +5288,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             12
           ],
@@ -4765,8 +5305,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 13",
+          "experiment_ids": [],
           "finding_id": "F13",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4775,12 +5323,15 @@
           "proposed_category": null,
           "quote": "sample 13 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 12,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4797,6 +5348,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             13
           ],
@@ -4805,8 +5365,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 14",
+          "experiment_ids": [],
           "finding_id": "F14",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -4815,12 +5383,15 @@
           "proposed_category": null,
           "quote": "sample 14 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 13,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -4997,6 +5568,8 @@
       "assessed_weight": 0,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -5008,6 +5581,15 @@
           "category_label": "Technical prerequisite or descriptive check",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -5018,8 +5600,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -5029,11 +5621,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -5049,6 +5648,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": 1,
@@ -5060,8 +5660,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "Every finding in the reviewed inventory is a technical prerequisite or descriptive check.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -5337,6 +5938,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -5344,6 +5947,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": 1,
@@ -5355,6 +5959,7 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "The importance of F1 is not established: its quote is not in the paper's text.",
+      "resource_statements": [],
       "rubric_label": "weighted rubric version 1",
       "rubric_version": 1,
       "scope_label": null,
@@ -5507,6 +6112,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -5514,6 +6121,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -5525,8 +6133,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": "The findings are being established.",
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -5760,6 +6369,15 @@
           "category_label": "Primary",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -5770,8 +6388,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -5781,11 +6409,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -5801,6 +6436,8 @@
       "assessed_weight": 2,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": "0 consistency only; 1 independently assessed",
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": 100,
@@ -5808,6 +6445,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": 1,
       "indicators": [
         {
           "kind": "importance_unestablished",
@@ -5832,8 +6470,9 @@
       "provisional": true,
       "provisional_note": "The total includes 1 finding whose importance is not established; it falls by one for each that proves technical.",
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "1 / 2 assessed (provisional)",
       "score": 100.0,
       "score_label": "100 / 100",
@@ -5853,6 +6492,15 @@
           "category_label": "Importance not established (proposed: Supporting)",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             1
           ],
@@ -5861,8 +6509,16 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Binding at the sites of sample 2",
+          "experiment_ids": [],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [],
+            "method": null
+          },
           "importance_decided_by": "model",
           "importance_problem": "its quote is not in the paper's text",
           "importance_status": "proposed",
@@ -5871,12 +6527,15 @@
           "proposed_category": "supporting",
           "quote": "words the paper never wrote",
           "rationale": "Its role in the paper's conclusions.",
-          "reason": "Not selected for this run; its checks are available.",
+          "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "resource_statements": [],
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
             {
+              "authority": null,
               "claim_index": 1,
+              "depth": null,
               "method": null,
               "reason": null,
               "status": null
@@ -6150,6 +6809,8 @@
       "assessed_weight": 0,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": 0,
       "discrepant_weight": 0,
       "display_score": null,
@@ -6157,6 +6818,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [
         {
           "kind": "primary_unassessed",
@@ -6181,6 +6843,7 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
+      "resource_statements": [],
       "rubric_label": "weighted rubric version 1",
       "rubric_version": 1,
       "scope_label": "0 / 1 assessed",
@@ -6202,6 +6865,7 @@
           "category_label": "Primary",
           "cause": "bioaf_unresolved",
           "cause_label": "Not resolved by bioAF",
+          "check_causes": [],
           "claim_indices": [
             0,
             1
@@ -6211,8 +6875,13 @@
             "subchecks": [],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": null,
+          "depth_label": null,
           "description": "Loss of the gene deregulates hundreds of genes",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": null,
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -6222,6 +6891,7 @@
           "quote": "genes up",
           "rationale": "The main conclusion.",
           "reason": "bioAF could not resolve the inputs or their interpretation; this is not a finding about the paper. Samples could not be assigned to the comparison: no column could be matched to KO.",
+          "resource_statements": [],
           "status": "unresolved",
           "status_label": "Unresolved",
           "subchecks": [
@@ -6269,6 +6939,481 @@
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
+  "scorecard_samd1_v2": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [
+        "reproduction notebook"
+      ],
+      "status": "attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; 1 tested.",
+      "mapped": 0,
+      "tested": 1,
+      "total": 2
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Differs from the authors' results",
+          "outcome": "disagree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 120,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes up",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "provisional": true,
+        "result": {
+          "count": null,
+          "ground_truth": null,
+          "tier": "Deposited data",
+          "verdict": "agree"
+        },
+        "selection": {
+          "check_label": "Reanalysis of processed data",
+          "label": "Selected for this run",
+          "reason": null,
+          "status": "selected"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 257
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 524,
+          "rows_tested": null,
+          "source": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes down",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 524
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": null,
+      "performed": true,
+      "reason": null
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "P < 0.01",
+        "name": "KO vs WT",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [
+      {
+        "assay": "bulk RNA-seq",
+        "id": "e1",
+        "reference": [
+          {
+            "established_from": null,
+            "part": "assembly",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          }
+        ],
+        "status": null,
+        "workflow": "nf-core/rnaseq"
+      }
+    ],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 1,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": true
+    },
+    "figures": 0,
+    "headline": {
+      "key": "could_not_reproduce",
+      "label": "Could Not Reproduce"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": null,
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "analysis_selection_revision": 1,
+      "assessed_count": 1,
+      "assessed_items": [
+        {
+          "analysis_selection_revision": 1,
+          "assessment_method": null,
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": null,
+          "cause_label": null,
+          "check_causes": [],
+          "claim_indices": [
+            0,
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "Concordance with the authors' result set under the claim's statistical definition: supported when the overlap is enriched beyond chance (p <= 0.05) and at least half of the authors' findings are recovered in the same direction; a discrepancy when the overlap is no better than chance or none is recovered in the same direction.",
+              "Consistency with the authors' own result table at the claim's predicate: supported when the table agrees with the claim, a discrepancy when it does not. This shows the paper's text agrees with its own results; it is not an independent assessment."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "concerns": [
+            {
+              "kind": "text_disagrees",
+              "text": "the paper's text disagrees with its own table"
+            }
+          ],
+          "depth": "consistency",
+          "depth_label": "Consistency only",
+          "description": "Loss of the gene deregulates hundreds of genes",
+          "experiment_ids": [
+            "e1"
+          ],
+          "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "level3_result",
+              "author_results (deseq2.txt.gz)"
+            ],
+            "method": null
+          },
+          "importance_decided_by": "model",
+          "importance_problem": null,
+          "importance_status": "validated",
+          "locator": null,
+          "method_label": null,
+          "proposed_category": null,
+          "quote": "genes up",
+          "rationale": "The main conclusion.",
+          "reason": "240 of 257 of the authors' findings recovered in the same direction (overlap enrichment p = 1.0e-20). Consistent with the authors' deposited results (deseq2.txt.gz)",
+          "resource_statements": [
+            "GSE144396",
+            "GSE999999"
+          ],
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "authority": {
+                "excluded": [],
+                "governing": [
+                  "deseq2.txt.gz"
+                ],
+                "sources": [
+                  {
+                    "outcome": "disagree",
+                    "reason": null,
+                    "source": null,
+                    "table": "deseq2.txt.gz",
+                    "version_status": null
+                  }
+                ]
+              },
+              "claim_index": 0,
+              "depth": "independent",
+              "method": "processed_reanalysis",
+              "reason": "240 of 257 of the authors' findings recovered in the same direction (overlap enrichment p = 1.0e-20).",
+              "status": "supported"
+            },
+            {
+              "authority": {
+                "excluded": [],
+                "governing": [
+                  "deseq2.txt.gz"
+                ],
+                "sources": [
+                  {
+                    "outcome": "agree",
+                    "reason": null,
+                    "source": null,
+                    "table": "deseq2.txt.gz",
+                    "version_status": null
+                  }
+                ]
+              },
+              "claim_index": 1,
+              "depth": "consistency",
+              "method": "author_results",
+              "reason": "Consistent with the authors' deposited results (deseq2.txt.gz)",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [
+            {
+              "kind": "author_results",
+              "text": "Differs from the authors' results (deseq2.txt.gz)"
+            },
+            {
+              "kind": "author_results",
+              "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
+            }
+          ],
+          "supporting_evidence_ids": [
+            "level3_result",
+            "author_results (deseq2.txt.gz)"
+          ],
+          "weight": 2
+        }
+      ],
+      "assessed_weight": 2,
+      "cause": null,
+      "cause_label": null,
+      "consistency_count": 1,
+      "depth_label": "1 consistency only; 0 independently assessed",
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": 100,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "independent_count": 0,
+      "indicators": [],
+      "inventory_retry": false,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "concern",
+          "text": "Concern on a primary finding: Loss of the gene deregulates hundreds of genes: the paper's text disagrees with its own table"
+        },
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "resource_contradicted",
+          "text": "Resource statement contradicted: GSE999999 (the registry holds no record under the identifier the paper gives)"
+        }
+      ],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 0,
+      "provisional": false,
+      "provisional_note": null,
+      "reason": null,
+      "resource_statements": [
+        {
+          "access": "public",
+          "archive": "geo",
+          "checks": [
+            {
+              "detail": "the registry holds the record the paper names",
+              "field": "registered",
+              "outcome": "verified",
+              "outcome_label": "Verified"
+            },
+            {
+              "detail": "the paper describes bulk RNA-seq; the record registers RNA-Seq",
+              "field": "assay",
+              "outcome": "verified",
+              "outcome_label": "Verified"
+            }
+          ],
+          "experiment_ids": [
+            "e1"
+          ],
+          "identifier": "GSE144396",
+          "outcome": "verified",
+          "outcome_label": "Verified"
+        },
+        {
+          "access": "unknown",
+          "archive": "geo",
+          "checks": [
+            {
+              "detail": "the registry holds no record under the identifier the paper gives",
+              "field": "registered",
+              "outcome": "contradicted",
+              "outcome_label": "Contradicted"
+            }
+          ],
+          "experiment_ids": [
+            "e1"
+          ],
+          "identifier": "GSE999999",
+          "outcome": "contradicted",
+          "outcome_label": "Contradicted"
+        }
+      ],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
+      "scope_label": "1 / 1 assessed",
+      "score": 100.0,
+      "score_label": "100 / 100",
+      "score_status_label": null,
+      "status": "scored",
+      "status_label": null,
+      "summary": "One primary finding supported.",
+      "supported_count": 1,
+      "supported_weight": 2,
+      "title": "Validation Scorecard",
+      "total_count": 1,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": "processed_reanalysis",
+      "check_label": "Reanalysis of processed data",
+      "claim_index": 0,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": null,
+      "revision": 1,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction was attempted and reached no verdict.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and 1 scientific claim(s) were tested."
     ],
     "version": 1
   },
@@ -6481,6 +7626,15 @@
           "category_label": "Primary",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -6491,8 +7645,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -6502,11 +7666,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -6525,6 +7696,15 @@
           "category_label": "Importance not established (proposed: Supporting)",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             1
           ],
@@ -6535,8 +7715,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 2",
+          "experiment_ids": [],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": "its quote is not in the paper's text",
           "importance_status": "proposed",
@@ -6546,11 +7736,18 @@
           "quote": "words the paper never wrote",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is outside tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "discrepancy",
           "status_label": "Discrepancy",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 1,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is outside tolerance of the paper's value.",
               "status": "discrepancy"
@@ -6566,6 +7763,8 @@
       "assessed_weight": 2,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": "0 consistency only; 2 independently assessed",
       "discrepant_count": 1,
       "discrepant_weight": 0,
       "display_score": null,
@@ -6573,6 +7772,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": 2,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": 1,
@@ -6584,8 +7784,9 @@
       "provisional": true,
       "provisional_note": "The total includes 1 finding whose importance is not established; it falls by one for each that proves technical.",
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "2 / 2 assessed (provisional)",
       "score": null,
       "score_label": null,
@@ -7020,6 +8221,15 @@
           "category_label": "Primary",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             4
           ],
@@ -7030,8 +8240,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 5",
+          "experiment_ids": [],
           "finding_id": "F5",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -7041,11 +8261,18 @@
           "quote": "sample 5 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is outside tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "discrepancy",
           "status_label": "Discrepancy",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 4,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is outside tolerance of the paper's value.",
               "status": "discrepancy"
@@ -7064,6 +8291,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             0
           ],
@@ -7074,8 +8310,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 1",
+          "experiment_ids": [],
           "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -7085,11 +8331,18 @@
           "quote": "sample 1 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 0,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -7108,6 +8361,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             1
           ],
@@ -7118,8 +8380,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 2",
+          "experiment_ids": [],
           "finding_id": "F2",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -7129,11 +8401,18 @@
           "quote": "sample 2 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 1,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -7152,6 +8431,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             2
           ],
@@ -7162,8 +8450,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 3",
+          "experiment_ids": [],
           "finding_id": "F3",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -7173,11 +8471,18 @@
           "quote": "sample 3 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 2,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -7196,6 +8501,15 @@
           "category_label": "Supporting",
           "cause": null,
           "cause_label": null,
+          "check_causes": [
+            {
+              "cause": "not_deposited",
+              "cause_label": "Required data not deposited",
+              "check": "author_results",
+              "check_label": "Consistency with the authors' results",
+              "reason": "No deposited or attached file measures this quantity."
+            }
+          ],
           "claim_indices": [
             3
           ],
@@ -7206,8 +8520,18 @@
             ],
             "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
           },
+          "concerns": [],
+          "depth": "independent",
+          "depth_label": "Independently assessed",
           "description": "Binding at the sites of sample 4",
+          "experiment_ids": [],
           "finding_id": "F4",
+          "governing": {
+            "evidence": [
+              "classification_result comparison (peak_count)"
+            ],
+            "method": "qc_metric"
+          },
           "importance_decided_by": "model",
           "importance_problem": null,
           "importance_status": "validated",
@@ -7217,11 +8541,18 @@
           "quote": "sample 4 yielded many peaks",
           "rationale": "Its role in the paper's conclusions.",
           "reason": "peak_count is within tolerance of the paper's value.",
+          "resource_statements": [],
           "status": "supported",
           "status_label": "Supported",
           "subchecks": [
             {
+              "authority": {
+                "excluded": [],
+                "governing": [],
+                "sources": []
+              },
               "claim_index": 3,
+              "depth": "independent",
               "method": "qc_metric",
               "reason": "peak_count is within tolerance of the paper's value.",
               "status": "supported"
@@ -7237,6 +8568,8 @@
       "assessed_weight": 6,
       "cause": null,
       "cause_label": null,
+      "consistency_count": 0,
+      "depth_label": "0 consistency only; 5 independently assessed",
       "discrepant_count": 1,
       "discrepant_weight": 2,
       "display_score": 67,
@@ -7244,6 +8577,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": 5,
       "indicators": [
         {
           "kind": "primary_discrepancy",
@@ -7268,8 +8602,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": "5 / 5 assessed",
       "score": 66.66666666666667,
       "score_label": "67 / 100",
@@ -7725,6 +9060,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -7732,6 +9069,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -7743,8 +9081,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,
@@ -8442,6 +9781,8 @@
       "assessed_weight": null,
       "cause": null,
       "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
       "discrepant_count": null,
       "discrepant_weight": null,
       "display_score": null,
@@ -8449,6 +9790,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "independent_count": null,
       "indicators": [],
       "inventory_retry": false,
       "inventory_revision": null,
@@ -8460,8 +9802,9 @@
       "provisional": false,
       "provisional_note": null,
       "reason": null,
-      "rubric_label": "weighted rubric version 1",
-      "rubric_version": 1,
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
       "scope_label": null,
       "score": null,
       "score_label": null,

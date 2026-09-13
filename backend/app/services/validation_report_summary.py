@@ -307,17 +307,17 @@ def _current_selection_revision(plan: dict):
 
 
 def _usable_record(study: dict, evidence: dict, plan: dict) -> dict | None:
-    """The outcomes recorded when the study concluded, while the revisions they were read under hold."""
-    from app.services.validation_scorecard import RUBRIC_VERSION
-
+    """The outcomes recorded when the study concluded, while the revisions they were read under hold. A
+    record keeps the rubric version its inventory was established under (plan_8_1 section 4.1)."""
     record = evidence.get("scorecard_record")
     if study.get("state") != "classified" or not isinstance(record, dict):
         return None
     if not isinstance(record.get("outcomes"), dict):
         return None
+    inventory = plan.get("finding_inventory") or {}
     if (
-        record.get("rubric_version") != RUBRIC_VERSION
-        or record.get("inventory_revision") != (plan.get("finding_inventory") or {}).get("revision")
+        record.get("rubric_version") != (inventory.get("rubric_version") or 1)
+        or record.get("inventory_revision") != inventory.get("revision")
         or record.get("analysis_selection_revision") != _current_selection_revision(plan)
     ):
         return None
@@ -368,7 +368,12 @@ def scorecard_projection(
             outcomes = record["outcomes"]
         else:
             outcomes = _live_outcomes(study=study, evidence=evidence, plan=plan, targets=targets, claims=claims)
-        card = build_scorecard(inventory, outcomes, in_progress=in_progress)
+        card = build_scorecard(
+            inventory,
+            outcomes,
+            in_progress=in_progress,
+            resource_statements=_statements(inventory, plan, evidence, study),
+        )
         # Which selection's evidence the outcomes were read from, beside the inventory and rubric revisions.
         card["analysis_selection_revision"] = _current_selection_revision(plan)
         card["outcomes_recorded_at"] = record.get("at") if record is not None else None
@@ -385,6 +390,15 @@ def scorecard_projection(
             {},
             in_progress=in_progress,
         )
+
+
+def _statements(inventory: dict, plan: dict, evidence: dict, study: dict) -> list[dict]:
+    """plan_8_1 section 4.4: the resource statements, under version 2 only; a version 1 record renders as it did."""
+    if (inventory.get("rubric_version") or 1) < 2:
+        return []
+    from app.services.validation_rubric_v2 import resource_statements
+
+    return resource_statements(plan, evidence, source_accession=study.get("source_accession"))
 
 
 def _read_failure_card(failure: dict, *, in_progress: bool) -> dict:
@@ -426,7 +440,6 @@ async def record_scorecard(session, study) -> None:
     from app.models.comparison_target import ComparisonTarget
     from app.services.validation_assessment import active_plan
     from app.services.validation_scorecard import (
-        RUBRIC_VERSION,
         ScorecardInvariantError,
         build_scorecard,
         compact_scorecard,
@@ -453,7 +466,11 @@ async def record_scorecard(session, study) -> None:
         outcomes = _live_outcomes(
             study=projected, evidence=evidence, plan=plan_dict, targets=[target_dict(t) for t in rows], claims=None
         )
-        card = build_scorecard(plan.finding_inventory_json, outcomes)
+        card = build_scorecard(
+            plan.finding_inventory_json,
+            outcomes,
+            resource_statements=_statements(plan.finding_inventory_json, plan_dict, evidence, projected),
+        )
     except ScorecardInvariantError:
         logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
         return
@@ -461,7 +478,7 @@ async def record_scorecard(session, study) -> None:
     if isinstance(previous, dict):
         evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [previous]
     evidence["scorecard_record"] = {
-        "rubric_version": RUBRIC_VERSION,
+        "rubric_version": plan.finding_inventory_json.get("rubric_version") or 1,
         "inventory_revision": plan.finding_inventory_json.get("revision"),
         "analysis_selection_revision": _current_selection_revision(plan_dict),
         "outcomes": outcomes,
@@ -1546,6 +1563,7 @@ def study_projection(study) -> dict:
         "classification": study.classification,
         "analysis_run_id": study.analysis_run_id,
         "data_run_id": study.data_run_id,
+        "source_accession": getattr(study, "source_accession", None),
     }
 
 
@@ -1562,6 +1580,8 @@ def plan_projection(plan) -> dict:
         "analysis_selection": plan.analysis_selection_json,
         # plan_8 section 2.
         "finding_inventory": plan.finding_inventory_json,
+        # plan_8_1 section 4.4: what the paper states about its samples, for the resource statements.
+        "sample_sheet": plan.sample_sheet_json,
     }
 
 

@@ -149,7 +149,9 @@ class TestEverySurfaceShowsTheSameScorecard:
         report, _, _, text = await self._surfaces(client, session, admin_user, admin_token, study)
         section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
         assert "67 / 100" in section and "5 / 5 assessed" in section
-        assert "weighted rubric version 1" in section
+        # plan_8_1 stage 4: a new inventory is scored under version 2, with its depth beside the scope.
+        assert "weighted rubric version 2" in section
+        assert f"({report['depth_label']})" in section
         assert f"{report['supported_weight']} of {report['assessed_weight']}" in section
         assert report["summary"] in section
         for message in report["messages"]:
@@ -319,4 +321,4 @@ class TestTheMarkdownOfAnUnassessedStudy:
         section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
         assert "-- (not assessed)" in section and "0 / 2 assessed" in section
         assert "Weighted agreement" not in section
-        assert "weighted rubric version 1" in section
+        assert "weighted rubric version 2" in section
