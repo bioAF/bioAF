@@ -14,7 +14,7 @@ import logging
 
 import httpx
 
-from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients import ModelAnswer, ProviderError, as_int
 from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
@@ -70,21 +70,27 @@ async def submit(
     model: str,
     api_key: str | None,
     attachments: list[dict] | None = None,
-) -> str:
+    max_tokens: int | None = None,
+) -> ModelAnswer:
+    """One answer. ``max_tokens`` omitted sends no cap, as always; given, it is sent as the cap, and an
+    answer that stops at it is a truncation."""
     if not api_key:
         raise ProviderError("OpenAI requires an API key", error_class="auth")
-    body = {
+    body: dict = {
         "model": model,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": payload},
         ],
     }
+    if max_tokens is not None:
+        body["max_completion_tokens"] = max_tokens
     logger.info(
-        "openai submit: model=%s prompt_chars=%d payload_chars=%d",
+        "openai submit: model=%s prompt_chars=%d payload_chars=%d max_tokens=%s",
         model,
         len(prompt),
         len(payload),
+        max_tokens,
     )
 
     async def _send():
@@ -117,20 +123,46 @@ async def submit(
         data = resp.json()
         choice = data["choices"][0]
         content = choice["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        usage = data.get("usage") or {}
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as exc:
         raise ProviderError(f"OpenAI completion response not parseable: {exc}", error_class="parse") from exc
+
+    finish_reason = choice.get("finish_reason")
+    output_tokens = as_int(usage.get("completion_tokens"))
+    logger.info(
+        "openai submit usage: model=%s output_tokens=%s input_tokens=%s stop_reason=%s",
+        model,
+        output_tokens,
+        as_int(usage.get("prompt_tokens")),
+        finish_reason or "unknown",
+    )
 
     # A safety block comes back 200 with `finish_reason: "content_filter"` and content that is
     # usually null; newer models add an explicit `refusal` string. Neither was read, so the caller
     # received None and ran a regex over it. Silently empty.
-    if str(choice.get("finish_reason") or "").lower() == "content_filter":
+    if str(finish_reason or "").lower() == "content_filter":
         raise refusal(str(choice.get("message", {}).get("refusal") or "the model declined to answer"))
     explicit = choice.get("message", {}).get("refusal")
     if explicit:
         raise refusal(str(explicit))
+    # plan_8_1 section 1.2: a caller that set a budget is told its answer stopped at it, with the text
+    # that arrived. A caller that set none gets the answer exactly as before.
+    if max_tokens is not None and str(finish_reason or "").lower() == "length":
+        raise ProviderError(
+            "the model's answer was cut off at the token limit before it finished",
+            error_class="truncated",
+            text=content or "",
+            output_tokens=output_tokens,
+            stop_reason=finish_reason,
+        )
     if not content:
         raise refusal("the model returned no content")
-    return content
+    return ModelAnswer(
+        content,
+        output_tokens=output_tokens,
+        input_tokens=as_int(usage.get("prompt_tokens")),
+        stop_reason=finish_reason,
+    )
 
 
 def _raise_for_status(resp: httpx.Response) -> None:
