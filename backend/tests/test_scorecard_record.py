@@ -31,7 +31,8 @@ async def _conclude(session, admin_user, **kwargs):
 async def test_concluding_a_study_records_its_outcomes_and_their_revisions(session, admin_user):
     study = await _conclude(session, admin_user)
     record = study.evidence_json["scorecard_record"]
-    assert record["rubric_version"] == 1
+    # plan_8_1 stage 4: the record keeps the version its inventory was established under.
+    assert record["rubric_version"] == 2
     assert record["inventory_revision"] == 1
     assert record["analysis_selection_revision"] is None
     assert record["outcomes"]["F5"]["status"] == "discrepancy"

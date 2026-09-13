@@ -17,7 +17,7 @@ import { useId, useState } from "react";
 import { Card } from "@/components/ui/Card";
 import { NOT_SET } from "@/lib/placeholders";
 import { statusBadgeClass } from "@/lib/statusStyles";
-import type { ScorecardItem, ValidationScorecardData } from "@/lib/validationReport";
+import type { ResourceStatement, ScorecardItem, ValidationScorecardData } from "@/lib/validationReport";
 
 // A long inventory shows this many findings per list before "Show all".
 const INITIAL_ITEMS = 5;
@@ -33,6 +33,14 @@ const STATUS_ICON: Record<string, string> = {
 };
 
 const METRIC_VALUE = "text-3xl font-semibold tabular-nums text-ink";
+const ASSESSED = new Set(["supported", "discrepancy"]);
+
+// plan_8_1 section 4.4: a resource statement's outcome, in the same text-and-colour vocabulary.
+const STATEMENT_STATUS: Record<ResourceStatement["outcome"], string> = {
+  verified: "supported",
+  contradicted: "discrepancy",
+  not_established: "unresolved",
+};
 
 function scoreLabel(card: ValidationScorecardData): string {
   if (card.display_score === null || card.display_score === undefined) {
@@ -48,8 +56,9 @@ function scopeLabel(card: ValidationScorecardData): string {
   return `Assessed scope: ${card.assessed_count} of ${card.total_count} findings assessed`;
 }
 
-function FindingRow({ item }: { item: ScorecardItem }) {
+function FindingRow({ item, statements }: { item: ScorecardItem; statements?: Map<string, ResourceStatement> }) {
   const evidence = item.claim_indices?.[0];
+  const governing = item.depth ? (item.governing?.evidence ?? []) : [];
   return (
     <li className="py-2 text-sm">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -60,6 +69,12 @@ function FindingRow({ item }: { item: ScorecardItem }) {
           <span>{item.status_label}</span>
         </span>
         {item.cause_label && <span className="text-xs font-medium text-gray-700">{item.cause_label}</span>}
+        {/* plan_8_1 section 4.5: every assessed item shows its depth. */}
+        {item.depth_label && (
+          <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs font-medium text-gray-800">
+            {item.depth_label}
+          </span>
+        )}
         <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-700">{item.category_label}</span>
         <span className="text-gray-900">{item.description ?? item.finding_id}</span>
         {evidence !== undefined && (
@@ -69,6 +84,27 @@ function FindingRow({ item }: { item: ScorecardItem }) {
         )}
       </div>
       {item.reason && <p className="mt-0.5 text-xs text-gray-600">{item.reason}</p>}
+      {governing.length > 0 && (
+        <p className="mt-0.5 text-xs text-gray-600">Governing evidence: {governing.join(", ")}</p>
+      )}
+      {(item.concerns ?? []).map((concern, i) => (
+        <p key={`concern-${i}`} className="mt-0.5 text-xs font-medium text-gray-800">
+          Concern: {concern.text}
+        </p>
+      ))}
+      {/* plan_8_1 section 4.7: an unassessed finding keeps each check's own cause. */}
+      {!ASSESSED.has(item.status) &&
+        (item.check_causes ?? []).map((row) => (
+          <p key={`${row.check}-${row.cause}`} className="mt-0.5 text-xs text-gray-600">
+            {row.check_label}: {row.cause_label ?? NOT_SET}
+            {row.reason ? `. ${row.reason}` : ""}
+          </p>
+        ))}
+      {(item.resource_statements ?? []).map((identifier) => (
+        <p key={`statement-${identifier}`} className="mt-0.5 text-xs text-gray-600">
+          Resource statement {identifier}: {statements?.get(identifier)?.outcome_label ?? NOT_SET}
+        </p>
+      ))}
       {item.supporting_checks.map((check, i) => (
         <p key={`${check.kind}-${i}`} className="mt-0.5 text-xs text-gray-600">
           {check.text}
@@ -86,7 +122,17 @@ function FindingRow({ item }: { item: ScorecardItem }) {
   );
 }
 
-function FindingList({ title, items, testId }: { title: string; items: ScorecardItem[]; testId: string }) {
+function FindingList({
+  title,
+  items,
+  testId,
+  statements,
+}: {
+  title: string;
+  items: ScorecardItem[];
+  testId: string;
+  statements: Map<string, ResourceStatement>;
+}) {
   const [expanded, setExpanded] = useState(false);
   const listId = useId();
   if (items.length === 0) return null;
@@ -97,7 +143,7 @@ function FindingList({ title, items, testId }: { title: string; items: Scorecard
       <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
       <ul id={listId} className="divide-y divide-gray-100">
         {shown.map((item) => (
-          <FindingRow key={item.finding_id} item={item} />
+          <FindingRow key={item.finding_id} item={item} statements={statements} />
         ))}
       </ul>
       {items.length > INITIAL_ITEMS && (
@@ -115,9 +161,49 @@ function FindingList({ title, items, testId }: { title: string; items: Scorecard
   );
 }
 
+function ResourceStatements({ statements }: { statements: ResourceStatement[] }) {
+  if (statements.length === 0) return null;
+  return (
+    <div data-testid="scorecard-resource-statements" className="mt-4">
+      <h3 className="text-sm font-semibold text-gray-800">Resource statements</h3>
+      <p className="text-xs text-gray-600">
+        What the paper states about each resource, checked against the resource&apos;s own record. Not scored.
+      </p>
+      <ul className="divide-y divide-gray-100">
+        {statements.map((statement) => (
+          <li key={statement.identifier} className="py-2 text-sm">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <span
+                className={`rounded px-1.5 py-0.5 text-xs font-medium ${statusBadgeClass(
+                  "validationFinding",
+                  STATEMENT_STATUS[statement.outcome] ?? "unresolved",
+                )}`}
+              >
+                {statement.outcome_label}
+              </span>
+              <span className="font-mono text-gray-900">{statement.identifier}</span>
+              {[statement.archive, statement.access].filter(Boolean).length > 0 && (
+                <span className="text-xs text-gray-600">
+                  {[statement.archive, statement.access].filter(Boolean).join(", ")}
+                </span>
+              )}
+            </div>
+            {statement.checks.map((check) => (
+              <p key={check.field} className="mt-0.5 text-xs text-gray-600">
+                {check.outcome_label}: {check.detail}
+              </p>
+            ))}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorecardData | null | undefined }) {
   if (!scorecard) return null;
   const card = scorecard;
+  const statements = new Map((card.resource_statements ?? []).map((s) => [s.identifier, s]));
   const inProgress = card.in_progress && card.in_progress_label && (
     <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass("validationStage", "in_progress")}`}>
       {card.in_progress_label}
@@ -152,6 +238,12 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
           <dd data-testid="scorecard-scope" aria-label={scopeLabel(card)} className={METRIC_VALUE}>
             {card.scope_label ?? card.status_label ?? NOT_SET}
           </dd>
+          {/* plan_8_1 section 4.5: the depth, directly under the scope it qualifies. */}
+          {card.depth_label && (
+            <dd data-testid="scorecard-depth" className="text-base font-semibold text-ink">
+              {card.depth_label}
+            </dd>
+          )}
           <dt className="text-xs uppercase tracking-wide text-gray-500">Assessed scope</dt>
         </div>
       </dl>
@@ -177,9 +269,9 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
 
       {card.messages.length > 0 && (
         <ul data-testid="scorecard-messages" className="mt-2 space-y-1">
-          {card.messages.map((message) => (
+          {card.messages.map((message, i) => (
             <li
-              key={`${message.kind}-${message.findings.join("-")}`}
+              key={`${message.kind}-${i}`}
               className={`flex flex-wrap items-baseline gap-2 rounded px-2 py-1 text-sm font-medium ${statusBadgeClass(
                 "validationFinding",
                 message.kind === "primary_discrepancy" ? "discrepancy" : "unresolved",
@@ -217,8 +309,13 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </details>
       )}
 
-      <FindingList title="Assessed" items={card.assessed_items} testId="scorecard-assessed" />
-      <FindingList title="Not assessed / unresolved" items={card.unassessed_items} testId="scorecard-unassessed" />
+      <FindingList title="Assessed" items={card.assessed_items} testId="scorecard-assessed" statements={statements} />
+      <FindingList
+        title="Not assessed / unresolved"
+        items={card.unassessed_items}
+        testId="scorecard-unassessed"
+        statements={statements}
+      />
 
       {card.excluded_items.length > 0 && (
         <details data-testid="scorecard-excluded" className="mt-4 text-sm">
@@ -227,11 +324,13 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
           </summary>
           <ul className="divide-y divide-gray-100">
             {card.excluded_items.map((item) => (
-              <FindingRow key={item.finding_id} item={item} />
+              <FindingRow key={item.finding_id} item={item} statements={statements} />
             ))}
           </ul>
         </details>
       )}
+
+      <ResourceStatements statements={card.resource_statements ?? []} />
     </Card>
   );
 }

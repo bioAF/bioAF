@@ -25,3 +25,10 @@ test("the list reads provisional and a withheld score as the report does", () =>
   expect(screen.getByText("2 / 2 assessed (provisional)")).toBeInTheDocument();
   expect(screen.getByText("Score pending importance review")).toBeInTheDocument();
 });
+
+test("the list shows the depth beside the scope under version 2", () => {
+  const v2 = contract.scorecard_samd1_v2.scorecard as unknown as CompactScorecard;
+  render(<ScorecardCompact scorecard={v2} />);
+  expect(screen.getByText("1 / 1 assessed")).toBeInTheDocument();
+  expect(screen.getByText("1 consistency only; 0 independently assessed")).toBeInTheDocument();
+});
