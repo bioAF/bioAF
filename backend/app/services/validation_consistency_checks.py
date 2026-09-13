@@ -218,6 +218,14 @@ def _spent(records) -> tuple[int, float]:
     return sum(seen.values()), seconds
 
 
+def _note_attempt(record, **values) -> None:
+    """Add what this attempt measured to its entry, reassigned so the JSON column records the change."""
+    attempts = list(record.attempts_json or [])
+    if attempts:
+        attempts[-1] = {**attempts[-1], **values}
+        record.attempts_json = attempts
+
+
 async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None = None) -> int:
     """Run the study's pending consistency records within the limits. Returns how many concluded."""
     from sqlalchemy import select
@@ -331,7 +339,7 @@ async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None
                 )
                 concluded += 1
                 continue
-            record.attempts_json[-1]["bytes"] = len(blob)
+            _note_attempt(record, bytes=len(blob))
             if spent_bytes + len(blob) > limits["total_bytes"]:
                 await queue.finish(
                     session, record, state=queue.UNRESOLVED, outcome={"outcome": "unresolved", "reason": LIMIT_REASON}
@@ -368,7 +376,7 @@ async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None
         )
         result.pop("predicate", None)
         result["identified_by"] = deps.get("identified_by")
-        record.attempts_json[-1]["seconds"] = round(time.monotonic() - started, 3)
+        _note_attempt(record, seconds=round(time.monotonic() - started, 3))
         await queue.finish(session, record, state=queue.DONE, outcome=result)
         concluded += 1
     return concluded
