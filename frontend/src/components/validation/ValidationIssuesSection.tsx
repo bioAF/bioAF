@@ -39,6 +39,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   truncated: "the model's answer was cut off at its token limit",
   // plan_8_1 section 1.1: a raised budget can run past the time limit, and that is not a truncation.
   timed_out: "the model's answer did not finish within bioAF's time limit",
+  // plan_8_1 section 1.2: an answer that parsed and left out a required part, never a fact about the paper.
+  incomplete: "the model's answer left out parts bioAF requires",
   // change_7.3 section 9: failures that are not a model's.
   retrieval_failed: "bioAF could not retrieve a file it needed",
   not_performed: "this step could not run",

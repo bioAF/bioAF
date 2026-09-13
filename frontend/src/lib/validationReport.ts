@@ -224,6 +224,10 @@ export interface CompactScorecard {
   in_progress_label: string | null;
   rubric_version: number;
   inventory_revision: number | null;
+  // plan_8_1 section 1.3: a card with no score says why and whose limitation that is.
+  reason?: string | null;
+  cause?: string | null;
+  cause_label?: string | null;
 }
 
 export interface ValidationScorecardData extends CompactScorecard {
@@ -231,7 +235,6 @@ export interface ValidationScorecardData extends CompactScorecard {
   title: string;
   rubric_label: string;
   explanation: string;
-  reason: string | null;
   inventory_status: string | null;
   analysis_selection_revision?: number | null;
   // Set when the outcomes are the ones recorded when the study concluded.
@@ -277,7 +280,15 @@ export interface ReportSummary {
   selection_history?: { revision: number | null; artifacts: string[]; invalidated_by: string[]; at: string | null; label: string }[];
   claims: ReportClaim[];
   claim_counts: { total: number; mapped: number; tested: number; label: string };
-  blockers: { text: string; kind: string | null; basis: string; provisional: boolean }[];
+  // plan_8_1 section 1.4: on a failed read, a withheld blocker carries the sentence it replaced.
+  blockers: { text: string; kind: string | null; basis: string; provisional: boolean; withheld?: string }[];
+  // plan_8_1 section 1.4. Null when the read did not fail; absent from a report written before it.
+  read_failure?: {
+    cause: string;
+    legacy: boolean;
+    classification_from_failed_read: boolean;
+    classification_note: string | null;
+  } | null;
   contrasts: {
     name: string | null;
     // change_7.5 section 1.2: the stated cutoff in words ("P < 0.01"), never the legacy pair.

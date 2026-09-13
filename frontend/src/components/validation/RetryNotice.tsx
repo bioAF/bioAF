@@ -22,10 +22,13 @@ export function RetryNotice({
   failureReason,
   reapAfter,
   dataDeleted,
+  readFailed,
   onChanged,
 }: {
   studyId: number;
   failureReason?: string | null;
+  // plan_8_1 section 1.3: the study's read failed, so Retry reads the paper again rather than resuming.
+  readFailed?: boolean;
   // When the study's downloaded data stops being kept for a retry (ISO 8601, set by the server so
   // the retention window is not restated here).
   reapAfter?: string | null;
@@ -55,11 +58,13 @@ export function RetryNotice({
       <p className="mt-1 text-sm text-gray-700">{failureReason || "The reproduction could not be completed."}</p>
       <p className="mt-1 text-xs text-gray-600">
         This is not a result about the paper and not a verdict on whether its finding reproduces.{" "}
-        {dataDeleted
-          ? "Retrying runs this study again from the start."
-          : "Retrying picks up from the work already done: data that was already downloaded is reused, and only the steps that failed run again."}
+        {readFailed
+          ? "Retrying reads the paper again."
+          : dataDeleted
+            ? "Retrying runs this study again from the start."
+            : "Retrying picks up from the work already done: data that was already downloaded is reused, and only the steps that failed run again."}
       </p>
-      {dataDeleted ? (
+      {readFailed ? null : dataDeleted ? (
         <p className="mt-2 text-xs text-gray-600">
           The data downloaded for this study has been deleted to free storage. You can still retry it, and
           it will download the data again.
