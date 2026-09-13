@@ -302,7 +302,12 @@ def scorecard_projection(
         outcomes = finding_outcomes(
             inventory, targets=targets, plan=plan, evidence=evidence, study=study, consistency=consistency
         )
-        return build_scorecard(inventory, outcomes, in_progress=in_progress)
+        card = build_scorecard(inventory, outcomes, in_progress=in_progress)
+        # Which selection's evidence the outcomes were read from, beside the inventory and rubric revisions.
+        card["analysis_selection_revision"] = ((plan.get("analysis_selection") or {}).get("current") or {}).get(
+            "revision"
+        )
+        return card
     except ScorecardInvariantError:
         # A breach is a defect in the records, never a number on screen. The details go to the log.
         logging.getLogger("bioaf.validation_scorecard").exception("the scorecard could not be computed")

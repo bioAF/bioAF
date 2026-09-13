@@ -415,6 +415,81 @@ class ReproductionPlanService:
         ).scalar_one_or_none()
 
     @staticmethod
+    async def revise_finding_importance(
+        session: AsyncSession,
+        study_id: int,
+        org_id: int,
+        user_id: int,
+        *,
+        finding_id: str,
+        category: str,
+        rationale: str,
+        reason: str,
+        quote: str | None = None,
+    ) -> ReproductionPlan:
+        """plan_8 section 2: a person's justified correction to one finding's importance. Audited.
+
+        A new inventory revision; the one it replaces is kept in its history beside the scorecard it
+        produced, so the historical score is never rewritten. Nothing is rerun: the outcomes stand and
+        only the weights they are summed under change.
+        """
+        from datetime import datetime, timezone
+
+        from app.services.validation_finding_inventory import revise_importance
+        from app.services.validation_report_summary import report_summary_for
+        from app.services.validation_scorecard import compact_scorecard
+
+        study = (
+            await session.execute(
+                select(ValidationStudy).where(ValidationStudy.id == study_id, ValidationStudy.organization_id == org_id)
+            )
+        ).scalar_one_or_none()
+        if study is None:
+            raise HTTPException(404, "Validation study not found")
+        plan = await ReproductionPlanService.get_plan(session, study_id, org_id)
+        if plan is None or not plan.finding_inventory_json:
+            raise HTTPException(400, "This study has no finding inventory to revise.")
+        card = (await report_summary_for(session, study, org_id))["scorecard"]
+        snapshot = {
+            **compact_scorecard(card),
+            "supported_weight": card.get("supported_weight"),
+            "discrepant_weight": card.get("discrepant_weight"),
+            "assessed_weight": card.get("assessed_weight"),
+            "analysis_selection_revision": card.get("analysis_selection_revision"),
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            revised = revise_importance(
+                plan.finding_inventory_json,
+                finding_id,
+                category=category,
+                rationale=rationale,
+                reason=reason,
+                quote=quote,
+                decided_by={"kind": "person", "user_id": user_id},
+                snapshot=snapshot,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        plan.finding_inventory_json = revised
+        await session.flush()
+        await log_action(
+            session,
+            user_id=user_id,
+            entity_type="reproduction_plan",
+            entity_id=plan.id,
+            action="finding_importance_revised",
+            details={
+                "validation_study_id": study_id,
+                "finding_id": finding_id,
+                "category": category,
+                "reason": reason,
+                "inventory_revision": revised.get("revision"),
+            },
+        )
+        return plan
+
+    @staticmethod
     async def use_deposit_pipeline(session: AsyncSession, study_id: int, org_id: int, user_id: int) -> ReproductionPlan:
         """Re-point a conflicted plan at the pipeline the deposit's own strategy names.
 
