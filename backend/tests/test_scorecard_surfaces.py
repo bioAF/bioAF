@@ -67,7 +67,10 @@ async def _seed(session, user, *, verdicts=("agree", "agree", "agree", "agree", 
         for i, category in enumerate(categories)
     ]
     plan.finding_inventory_json = inventory_from_proposal(
-        proposal, targets=targets, full_text=" ".join(t["claim_text"] for t in targets), decided_by={"kind": "model"}
+        proposal,
+        targets=targets,
+        full_text=" ".join(str(t["claim_text"]) for t in targets),
+        decided_by={"kind": "model"},
     )
     study.state = "classified"
     study.classification = "inconclusive"
@@ -262,11 +265,13 @@ class TestAJustifiedImportanceCorrection:
             reason="the reading overstated its role",
         )
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
-        [previous] = plan.finding_inventory_json["history"]
+        assert plan is not None and plan.finding_inventory_json is not None
+        inventory = plan.finding_inventory_json
+        [previous] = inventory["history"]
         assert previous["revision"] == 1
         assert previous["scorecard"]["score_label"] == "67 / 100"
         assert previous["findings"][4]["importance"]["category"] == "primary"
-        assert plan.finding_inventory_json["revised"]["decided_by"] == {"kind": "person", "user_id": admin_user.id}
+        assert inventory["revised"]["decided_by"] == {"kind": "person", "user_id": admin_user.id}
 
     @pytest.mark.asyncio
     async def test_a_study_read_before_the_inventory_has_nothing_to_revise(self, session, admin_user):

@@ -317,7 +317,7 @@ def qc_scenario(verdicts: list[str], categories: list[str], *, state: str = "cla
         }
         for i in range(len(verdicts))
     ]
-    text = " ".join(t["claim_text"] for t in targets)
+    text = " ".join(str(t["claim_text"]) for t in targets)
     proposal = [
         {
             "description": f"Binding at the sites of sample {i + 1}",
