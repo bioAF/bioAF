@@ -80,6 +80,59 @@ async def _contract() -> dict:
         targets=STAGE2_TARGETS,
         issues=[],
     )
+    # plan_8: the Validation Scorecard in each of its states, through the real projection.
+    from tests.test_report_scorecard import (
+        _groff_plan_and_targets,
+        _samd1_like,
+        long_example,
+        qc_scenario,
+        scored_example,
+    )
+
+    groff_plan, groff_targets = _groff_plan_and_targets(evidence)
+    groff_scored = summarize(
+        study={"state": "classified", "classification": "access_restricted"},
+        evidence=evidence,
+        plan=groff_plan,
+        targets=groff_targets,
+        issues=[],
+    )
+    samd1_plan, samd1_targets, samd1_evidence = _samd1_like()
+    samd1 = summarize(
+        study={"state": "classified", "classification": "inconclusive"},
+        evidence=samd1_evidence,
+        plan=samd1_plan,
+        targets=samd1_targets,
+        issues=[],
+    )
+    unresolved_plan = {
+        **samd1_plan,
+        "finding_inventory": {
+            **samd1_plan["finding_inventory"],
+            "status": "unresolved",
+            "reason": "The importance of F1 is not established: its quote is not in the paper's text.",
+        },
+    }
+    unresolved_plan["finding_inventory"]["findings"] = [
+        {
+            **f,
+            "importance": {
+                **f["importance"],
+                "status": "unresolved",
+                "problem": "its quote is not in the paper's text",
+            },
+        }
+        for f in unresolved_plan["finding_inventory"]["findings"]
+    ]
+    not_established = summarize(
+        study={"state": "classified", "classification": "inconclusive"},
+        evidence=samd1_evidence,
+        plan=unresolved_plan,
+        targets=samd1_targets,
+        issues=[],
+    )
+    not_applicable = qc_scenario(["agree"], ["technical"])
+    in_progress = qc_scenario(["agree", "not_computed"], ["primary", "supporting"], state="comparing")
     return json.loads(
         json.dumps(
             {
@@ -90,6 +143,13 @@ async def _contract() -> dict:
                 "attempted_no_verdict": attempted,
                 "mapping_unresolved": mapping_unresolved,
                 "reference_unavailable": reference_unavailable,
+                "scorecard_scored": scored_example(),
+                "scorecard_long": long_example(),
+                "scorecard_groff": groff_scored,
+                "scorecard_samd1": samd1,
+                "scorecard_not_established": not_established,
+                "scorecard_not_applicable": not_applicable,
+                "scorecard_in_progress": in_progress,
             }
         )
     )
@@ -105,8 +165,15 @@ def _stage2_resources() -> list[dict]:
         extracted_accessions=["GSE555001"],
         supplements=[],
         deposits=[
-            {"accession": "GSE555001", "archive": "geo", "exists": "yes", "access": "public", "supported": "yes",
-             "raw_data": "yes", "preprocessed_data": "yes"}
+            {
+                "accession": "GSE555001",
+                "archive": "geo",
+                "exists": "yes",
+                "access": "public",
+                "supported": "yes",
+                "raw_data": "yes",
+                "preprocessed_data": "yes",
+            }
         ],
         experiments=[{"id": "e2", "assay": "bulk RNA-seq", "resources": ["GSE555001"]}],
     )

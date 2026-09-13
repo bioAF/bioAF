@@ -164,7 +164,15 @@ _NUMBER_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six",
 
 def enum_labels() -> dict[str, dict[str, str]]:
     """Every vocabulary a report renders, for the cross-stack contract test."""
+    from app.services.validation_finding_outcomes import CAUSE_LABELS
+    from app.services.validation_scorecard import CATEGORY_LABELS, SCORECARD_STATUS_LABELS, STATUS_LABELS
+
     return {
+        # plan_8: the scorecard's vocabularies.
+        "finding_status": dict(STATUS_LABELS),
+        "finding_category": dict(CATEGORY_LABELS),
+        "finding_cause": dict(CAUSE_LABELS),
+        "scorecard_status": {key: label or "" for key, label in SCORECARD_STATUS_LABELS.items()},
         "limitation_kind": dict(LIMITATION_LABELS),
         "resource_type": dict(RESOURCE_TYPE_LABELS),
         "resource_ability": dict(RESOURCE_ABILITY_LABELS),
@@ -248,7 +256,65 @@ def summarize(
         "comparisons": _comparisons(attempt, counts),
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
+        # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
+        "scorecard": scorecard_projection(study=study, evidence=evidence, plan=plan, targets=targets, claims=claims),
     }
+
+
+_ACTIVE_STATES_TERMINAL = ("classified", "plan_declined", "error")
+
+
+def scorecard_projection(
+    *,
+    study: dict,
+    evidence: dict | None,
+    plan: dict | None,
+    targets: list[dict] | None,
+    claims: list[dict] | None = None,
+) -> dict:
+    """plan_8: the scorecard for one study, from its finding inventory and its current evidence.
+
+    A plan read before the inventory existed gets no score: its evidence cannot be associated with
+    reviewed findings, and nothing is inferred from its classification. The studies list calls this
+    directly, with the same inputs, so the list and the report cannot disagree.
+    """
+    import logging
+
+    from app.services.validation_finding_outcomes import finding_outcomes
+    from app.services.validation_scorecard import ScorecardInvariantError, build_scorecard
+
+    evidence = evidence or {}
+    plan = plan or {}
+    targets = [t for t in targets or [] if isinstance(t, dict)]
+    in_progress = study.get("state") not in _ACTIVE_STATES_TERMINAL
+    inventory = plan.get("finding_inventory")
+    if not isinstance(inventory, dict) or not inventory:
+        if plan:
+            return build_scorecard(None, {}, in_progress=in_progress)
+        reason = "The paper has not been read yet." if in_progress else "No reproduction plan was read for this study."
+        return build_scorecard({"status": "unresolved", "reason": reason}, {}, in_progress=in_progress)
+    if claims is None:
+        contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
+        consistency = {i: _claim_consistency(i, t, contrasts, evidence) for i, t in enumerate(targets)}
+    else:
+        consistency = {i: c.get("consistency") for i, c in enumerate(claims)}
+    try:
+        outcomes = finding_outcomes(
+            inventory, targets=targets, plan=plan, evidence=evidence, study=study, consistency=consistency
+        )
+        return build_scorecard(inventory, outcomes, in_progress=in_progress)
+    except ScorecardInvariantError:
+        # A breach is a defect in the records, never a number on screen. The details go to the log.
+        logging.getLogger("bioaf.validation_scorecard").exception("the scorecard could not be computed")
+        return build_scorecard(
+            {
+                "status": "unresolved",
+                "revision": inventory.get("revision"),
+                "reason": "bioAF could not compute the scorecard from this study's records; the details are in the log.",
+            },
+            {},
+            in_progress=in_progress,
+        )
 
 
 def _resources(plan: dict) -> list[dict]:
@@ -423,13 +489,20 @@ def _claim_consistency(index: int, target: dict, contrasts: list[dict], evidence
             return _consistency_row(record)
     tables = [s for s in evidence.get("supplements") or [] if isinstance(s, dict) and s.get("role") == "results_table"]
     checked = [
-        (s, r) for s in tables for r in s.get("consistency") or [] if isinstance(r, dict) and r.get("claim_index") == index
+        (s, r)
+        for s in tables
+        for r in s.get("consistency") or []
+        if isinstance(r, dict) and r.get("claim_index") == index
     ]
     if len(tables) == 1 and checked:
         return _consistency_row(checked[0][1])
     position = target.get("contrast_index")
     name = contrasts[position].get("name") if isinstance(position, int) and 0 <= position < len(contrasts) else None
-    named = [r for s, r in checked if name and name.lower() in " ".join(str(v) for v in (r.get("columns") or {}).values()).lower()]
+    named = [
+        r
+        for s, r in checked
+        if name and name.lower() in " ".join(str(v) for v in (r.get("columns") or {}).values()).lower()
+    ]
     if len(named) == 1:
         return _consistency_row(named[0])
     if checked:
@@ -1018,7 +1091,10 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                 },
                 # change_7.5 sections 2.2, 2.5 and 2.6.
                 "experiment": (
-                    {"id": target["reported_experiment_id"], "assay": experiments[target["reported_experiment_id"]].get("assay")}
+                    {
+                        "id": target["reported_experiment_id"],
+                        "assay": experiments[target["reported_experiment_id"]].get("assay"),
+                    }
                     if target.get("reported_experiment_id") in experiments
                     else None
                 ),
@@ -1249,6 +1325,8 @@ async def report_summary_for(session, study, org_id: int) -> dict:
             "resources": plan.resources_json,
             "reported_experiments": plan.reported_experiments_json,
             "analysis_selection": plan.analysis_selection_json,
+            # plan_8 section 2.
+            "finding_inventory": plan.finding_inventory_json,
         }
     return summarize(
         study={
@@ -1267,6 +1345,8 @@ async def report_summary_for(session, study, org_id: int) -> dict:
 def target_dict(t) -> dict:
     """One comparison target as the projection reads it."""
     return {
+        # plan_8 section 4: the identity a QC comparison row is placed on its claim by.
+        "id": t.id,
         "metric_key": t.metric_key,
         "claim_text": t.claim_text,
         "claimed_value": t.claimed_value,
