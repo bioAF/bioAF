@@ -43,7 +43,7 @@ function CheckRow({ check }: { check: ClaimCheck }) {
 
 const CONSISTENCY_CLASS: Record<string, string> = {
   agree: "font-medium text-emerald-700",
-  disagree: "font-medium text-rose-700",
+  disagree: "font-medium text-red-700",
   unresolved: "text-amber-700",
   not_checkable: "text-gray-600",
 };
@@ -115,7 +115,7 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
         <ol className="space-y-3">
           {summary?.claims.map((claim, index) =>
             (claim.checks ?? []).length > 0 || claim.selection ? (
-              <li key={index} data-testid={`claim-${index}`} className="text-sm">
+              <li key={index} id={`claim-${index}`} data-testid={`claim-${index}`} className="text-sm">
                 <p className="text-gray-800">{claim.description}</p>
                 <p className="text-xs text-gray-500">
                   {claim.experiment ? `Experiment ${claim.experiment.id}${claim.experiment.assay ? ` (${claim.experiment.assay})` : ""}` : "Not linked to an experiment"}

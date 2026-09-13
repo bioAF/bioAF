@@ -37,11 +37,11 @@ export function ResourceInventory({ summary }: { summary: ReportSummary | null |
       <table className="min-w-full text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
-            <th className="py-1 pr-4 font-medium">Resource</th>
-            <th className="py-1 pr-4 font-medium">Type</th>
-            <th className="py-1 pr-4 font-medium">Experiment</th>
-            <th className="py-1 pr-4 font-medium">Retrievable by bioAF</th>
-            <th className="py-1 pr-4 font-medium">Analyzable by bioAF</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Resource</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Type</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Experiment</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Retrievable by bioAF</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Analyzable by bioAF</th>
           </tr>
         </thead>
         <tbody>
