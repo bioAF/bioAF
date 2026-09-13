@@ -42,11 +42,6 @@ class TestTheGuard:
         assert record["headroom"]
         assert "date" in record
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="plan_8_1 section 1.1: the three-paper measurement runs on the demo against the organisation's "
-        "configured model after this build deploys; remove this mark when the record holds it",
-    )
     def test_the_record_holds_three_measured_papers_within_the_budget(self):
         record = _record()
         measured = [m for model in record["models"].values() for m in model["papers"]]
@@ -126,11 +121,6 @@ class TestTheInventoryGuard:
         assert record["call"] == "inventory"
         assert isinstance(record["chosen_budget"], int) and record["chosen_budget"] >= 1000
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="plan_8_1 section 2.2: the inventory call is measured on the demo on the same three papers "
-        "after this build deploys; remove this mark when the record holds it",
-    )
     def test_the_inventory_record_holds_three_measured_papers(self):
         record = budget.load_record(budget.INVENTORY)
         measured = [m for model in record["models"].values() for m in model["papers"]]

@@ -2,8 +2,43 @@
   "call": "extraction",
   "fingerprint": "d0a37eca9cb360cd35e97894491871d0830ff52185732dca6e3113ad0bb35dc4",
   "chosen_budget": 16000,
-  "headroom": "Not measured yet: 16000 is plan_8_1 section 1.1's starting budget, kept after section 2.2 moved the findings out of this answer. Once the three papers are measured, the budget is set with recorded headroom above the largest answer, within the model's documented maximum.",
-  "date": null,
-  "status": "not_measured",
-  "models": {}
+  "headroom": "1.5x the largest complete answer (6245 output tokens), rounded up to 1000, never below the starting budget of 16000 and never above the model's documented maximum",
+  "date": "2026-09-13",
+  "status": "measured",
+  "models": {
+    "claude-opus-4-8": {
+      "papers": [
+        {
+          "paper": "SAMD1 fixture paper",
+          "output_tokens": 4782,
+          "elapsed_seconds": 44.903,
+          "stop_reason": "end_turn",
+          "claims": 6
+        },
+        {
+          "paper": "Groff fixture paper",
+          "output_tokens": 4283,
+          "elapsed_seconds": 39.929,
+          "stop_reason": "end_turn",
+          "claims": 11
+        },
+        {
+          "paper": "multi-assay paper A (Hi-C, ChIP-seq, ATAC-seq, RNA-seq)",
+          "output_tokens": 5130,
+          "elapsed_seconds": 48.459,
+          "stop_reason": "end_turn",
+          "claims": 6
+        },
+        {
+          "paper": "multi-assay paper B (epigenome compendium, the most claims)",
+          "output_tokens": 6245,
+          "elapsed_seconds": 56.859,
+          "stop_reason": "end_turn",
+          "claims": 13
+        }
+      ],
+      "tokens_per_second": 105.9
+    }
+  },
+  "papers_note": "The two fixture papers and two multi-assay papers, the larger with 13 claims, more than either fixture. Identifiers are in HANDOFF, never in application code. Measured on the demo with python -m app.cli.measure_read_budget under a 64000-token budget; every answer ended at end_turn."
 }
