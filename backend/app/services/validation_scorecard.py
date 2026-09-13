@@ -135,6 +135,7 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "primary_unassessed_count": None,
         "summary": None,
         "messages": [],
+        "indicators": [],
         "assessed_items": [],
         "unassessed_items": [],
         "excluded_items": [],
@@ -232,6 +233,20 @@ def _messages(items: list[dict]) -> list[dict]:
         text = "Primary finding remains unassessed" if len(unassessed) == 1 else "Primary findings remain unassessed"
         messages.append({"kind": "primary_unassessed", "text": text, "findings": unassessed})
     return messages
+
+
+def _indicators(items: list[dict]) -> list[dict]:
+    """The primary facts the studies list shows beside the two metrics, so a high score cannot hide them."""
+    discrepant = sum(1 for i in items if i["category"] == PRIMARY and i["status"] == DISCREPANCY)
+    unassessed = sum(1 for i in items if i["category"] == PRIMARY and i["status"] in UNASSESSED_STATUSES)
+    indicators = []
+    if discrepant:
+        text = "Primary discrepancy" if discrepant == 1 else "Primary discrepancies"
+        indicators.append({"kind": "primary_discrepancy", "text": text})
+    if unassessed:
+        text = "Primary finding remains unassessed" if unassessed == 1 else "Primary findings remain unassessed"
+        indicators.append({"kind": "primary_unassessed", "text": text})
+    return indicators
 
 
 def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *, in_progress: bool = False) -> dict:
@@ -334,6 +349,7 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
         primary_unassessed_count=sum(1 for i in unassessed if i["category"] == PRIMARY),
         summary=_summary(by_position),
         messages=_messages(by_position),
+        indicators=_indicators(by_position),
         assessed_items=[_public(i) for i in ordered_assessed],
         unassessed_items=[_public(i) for i in ordered_unassessed],
         excluded_items=[_public(i) for i in excluded],
@@ -356,7 +372,9 @@ _COMPACT_KEYS = (
     "scope_label",
     "primary_discrepancy_count",
     "primary_unassessed_count",
+    "indicators",
     "in_progress",
+    "in_progress_label",
     "rubric_version",
     "inventory_revision",
 )

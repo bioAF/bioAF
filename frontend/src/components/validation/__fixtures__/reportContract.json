@@ -82,6 +82,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -898,6 +899,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
@@ -1055,6 +1057,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -1208,6 +1211,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": "unresolved",
       "messages": [],
@@ -2196,6 +2200,12 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [
+        {
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -2636,6 +2646,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "indicators": [],
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [],
@@ -3764,6 +3775,12 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [
+        {
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -4448,6 +4465,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": 1,
       "inventory_status": "not_applicable",
       "messages": [],
@@ -4734,6 +4752,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": 1,
       "inventory_status": "unresolved",
       "messages": [],
@@ -5026,6 +5045,12 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [
+        {
+          "kind": "primary_unassessed",
+          "text": "Primary finding remains unassessed"
+        }
+      ],
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -5094,10 +5119,6 @@
             }
           ],
           "supporting_checks": [
-            {
-              "kind": "author_results",
-              "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
-            },
             {
               "kind": "author_results",
               "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
@@ -5735,6 +5756,12 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [
+        {
+          "kind": "primary_discrepancy",
+          "text": "Primary discrepancy"
+        }
+      ],
       "inventory_revision": 1,
       "inventory_status": "established",
       "messages": [
@@ -6209,6 +6236,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": true,
       "in_progress_label": "In progress",
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],
@@ -6917,6 +6945,7 @@
       "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
       "in_progress": false,
       "in_progress_label": null,
+      "indicators": [],
       "inventory_revision": null,
       "inventory_status": null,
       "messages": [],

@@ -4,11 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Breadcrumb } from "@/components/layout/Breadcrumb";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { ValidationStudyOutcome } from "@/components/validation/ValidationStudyOutcome";
+import { ScorecardCompact } from "@/components/validation/ScorecardCompact";
 import { LitValidationGate } from "@/components/validation/LitValidationGate";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { statusBadgeClass } from "@/lib/statusStyles";
+import { getValidationStage } from "@/lib/validationStage";
+import type { CompactScorecard } from "@/lib/validationReport";
 
 interface ValidationStudySummary {
   id: number;
@@ -25,6 +28,8 @@ interface ValidationStudySummary {
   source_accession?: string | null;
   experiment_id?: number | null;
   created_at?: string | null;
+  // plan_8 section 7: the compact Validation Scorecard, from the same scorecard the report renders.
+  scorecard?: CompactScorecard | null;
 }
 
 function formatDate(iso?: string | null): string {
@@ -91,7 +96,10 @@ export default function ValidationStudiesListPage() {
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Study</th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Source</th>
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Requested</th>
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Outcome</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
+                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">
+                      Validation Scorecard
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -112,13 +120,21 @@ export default function ValidationStudiesListPage() {
                         {s.source_doi || s.source_accession || (s.paper_id ? `paper ${s.paper_id}` : "-")}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-500">{formatDate(s.created_at)}</td>
+                      {/* plan_8 section 7: lifecycle state and the scorecard are different facts, so each
+                          has its own column. */}
                       <td className="px-4 py-3 text-sm">
-                        <ValidationStudyOutcome
-                          state={s.state}
-                          confidence={s.confidence}
-                          classification={s.classification}
-                          attempt={s.attempt ?? null}
-                        />
+                        <span
+                          title={getValidationStage(s.state).description}
+                          className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass(
+                            "validationStage",
+                            getValidationStage(s.state).kind,
+                          )}`}
+                        >
+                          {getValidationStage(s.state).label}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-sm">
+                        <ScorecardCompact scorecard={s.scorecard} />
                       </td>
                     </tr>
                   ))}

@@ -46,6 +46,7 @@ import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validati
 import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
 import { ClaimSelection } from "@/components/validation/ClaimSelection";
 import { ResourceInventory } from "@/components/validation/ResourceInventory";
+import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -259,6 +260,13 @@ export default function ValidationStudyPage() {
             </div>
           )}
         </div>
+
+        {/* plan_8 section 6: the Validation Scorecard leads the report; everything below is its detail. */}
+        {summary?.scorecard && (
+          <div className="mb-6">
+            <ValidationScorecard scorecard={summary.scorecard} />
+          </div>
+        )}
 
         <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
