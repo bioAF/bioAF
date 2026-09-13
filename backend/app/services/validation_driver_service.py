@@ -42,7 +42,7 @@ from app.schemas.experiment import ExperimentCreate
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.experiment_service import ExperimentService
 from app.services.fetchngs_ingest_service import FetchngsIngestService
-from app.services.literature.fulltext_service import FullTextFetchService
+from app.services.literature.fulltext_service import FullTextFetchService  # noqa: F401 - the read's fetch, patched through here
 from app.services.validation_assessment import (
     conclude_without_execution,
     record_refusal,
@@ -99,6 +99,8 @@ from app.services.validation_issue_service import ValidationIssueService
 from app.services.validation_sample_values import sample_values_from_design
 from app.services.validation_level3_service import resolve_level3, resolve_level3_from_deposit
 from app.services.validation_study_service import ValidationStudyService, record_study_error
+from app.services.validation_inventory_stage import run_inventory_stage
+from app.models.validation_study import next_states
 
 logger = logging.getLogger("bioaf.validation_driver")
 
@@ -510,6 +512,10 @@ async def _load_runnable_samples(session: AsyncSession, experiment_id: int) -> l
     )
 
 
+class PasteRequired(ValidationError):
+    """plan_8_1 section 2.1: the text a stage needs was pasted, and bioAF did not keep it."""
+
+
 class ValidationDriverService:
     # ---- Comprehension half (synchronous, request-driven) ----
 
@@ -564,12 +570,15 @@ class ValidationDriverService:
     ) -> ValidationStudy:
         """The read itself, performed under a claim this caller holds.
 
-        plan_8_1 section 1.2: the read commits as it goes. The study lands in ``reading`` with its
-        extraction cycle begun, and every attempt is committed before it is submitted, so a worker that
-        stops mid-read leaves a cycle the next tick resumes (``reading`` is the driver's) rather than a
-        fresh count. Section 1.3: a read that ends with no usable answer ends the study in ``error``,
-        never in an early-exit classification.
+        plan_8_1 sections 1.2 and 2.1: the read commits as it goes, in two steps. The extraction cycle's
+        every attempt is committed before it is submitted; then the extraction, discovery and the
+        pre-compute checks are committed with the study still ``reading`` and the inventory ``pending``;
+        then the inventory stage runs over the committed claims and the study moves on. A worker that
+        stops anywhere leaves a study the next tick resumes (``reading`` is the driver's): mid-extraction
+        without a fresh count, after the extraction at the inventory, never repeating the extraction.
+        Section 1.3: a read that ends with no usable answer ends the study in ``error``.
         """
+        from app.services import validation_paper_text as paper_text
         from app.services import validation_read_cycle as cycles
 
         if study.state not in ("requested", "reading"):
@@ -584,23 +593,30 @@ class ValidationDriverService:
                 raise
             await session.commit()
 
-        # change_7.1 section 2: the article's supplement manifest comes from the SAME document the
-        # body text does. A pasted body is not a document, so it carries none, and an empty manifest
-        # there means "nobody looked" rather than "the paper published none".
-        supplements: list[dict] = []
-        pmcid = ""
-        sections = None
         resuming = study.state == "reading"
         cycle = cycles.current_cycle(study.evidence_json) if resuming else None
-        source = "pasted" if full_text else "europe_pmc"
-        if resuming and not full_text and (cycle or {}).get("text", {}).get("source") == "pasted":
-            # The pasted text was never kept (artifact retention is a separate decision), so an
-            # interrupted read of it cannot continue.
-            cause = "the read was interrupted, and the pasted text it was reading was not kept; paste it again"
-            return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
-        if not full_text:
-            result = await FullTextFetchService.fetch(doi=study.source_doi)
-            if result is None:
+        if resuming and (cycle or {}).get("status") == cycles.SUCCEEDED:
+            plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+            if plan is not None and (plan.finding_inventory_json or {}).get("status") == "pending":
+                return await ValidationDriverService._resume_inventory(
+                    session, study, plan, org_id, user_id, checkpoint=_checkpoint, pasted=full_text, claim=claim
+                )
+
+        # D7: Europe PMC by DOI, then the Library's stored text, then pasted text. A resumed extraction
+        # reads again from the source it recorded.
+        recorded = (cycle or {}).get("text") or {}
+        if resuming and (cycle or {}).get("status") == cycles.IN_PROGRESS and recorded:
+            text = await paper_text.again(session, study, recorded.get("source"), pasted=full_text)
+            if text is None:
+                cause = (
+                    "the read was interrupted, and the pasted text it was reading was not kept; paste it again"
+                    if recorded.get("source") == paper_text.PASTED
+                    else "the read was interrupted, and the paper's text could not be fetched again"
+                )
+                return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
+        else:
+            text = await paper_text.acquire(session, study, pasted=full_text)
+            if text is None:
                 if resuming:
                     cause = "the read was interrupted, and the paper's text could not be fetched again"
                     return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
@@ -608,13 +624,16 @@ class ValidationDriverService:
                     "Could not acquire full text for this study. Provide full_text, or set a source "
                     "DOI that resolves to an open-access Europe PMC article."
                 )
-            full_text = result.text
-            supplements = result.supplements
-            # Kept so the supplement bundle can be fetched later without resolving the DOI again.
-            pmcid = result.external_id or ""
-            # change_7.5 section 2.4: the methods and captions, addressable, for binding. Not persisted.
-            sections = getattr(result, "sections", None)
+        return await ValidationDriverService._read_text(
+            session, study, text, org_id, user_id, checkpoint=_checkpoint, claim=claim, resuming=resuming
+        )
 
+    @staticmethod
+    async def _read_text(session, study, text, org_id: int, user_id: int, *, checkpoint, claim, resuming: bool):
+        """The extraction step over ``text``, committed, then the inventory step."""
+        from app.services import validation_read_cycle as cycles
+
+        full_text = text.text
         if not resuming:
             # B1 full-text acquisition is the acquiring_text stage; the text is now in hand, so this
             # stage is a pass-through.
@@ -624,30 +643,27 @@ class ValidationDriverService:
 
         # change_7.5 sections 1.5 and 2.6: what the text names and what the article attaches are on the
         # record BEFORE the extraction, because discovery, the resource inventory and the checks all
-        # read them before any claim is selected.
+        # read them before any claim is selected. change_7.1 section 2: the supplement manifest comes
+        # from the SAME document the text does, so a pasted or library text carries none.
         from app.services.resource_identifiers import scan_identifiers
 
         evidence = dict(study.evidence_json or {})
-        evidence["supplements"] = supplements
-        if pmcid:
-            evidence["pmcid"] = pmcid
+        evidence["supplements"] = text.supplements
+        if text.pmcid:
+            evidence["pmcid"] = text.pmcid
         evidence["scanned_identifiers"] = scan_identifiers(full_text)
-        if not resuming and isinstance(evidence.get("scorecard_record"), dict):
+        if isinstance(evidence.get("scorecard_record"), dict):
             # plan_8_1 section 1.4: a re-read supersedes the plan, and the score recorded from it is history.
             evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [
                 evidence.pop("scorecard_record")
             ]
         study.evidence_json = evidence
-        text = {
-            "source": source,
-            "sha256": hashlib.sha256(full_text.encode("utf-8")).hexdigest(),
-            "chars": len(full_text),
-        }
+        cycle = cycles.current_cycle(study.evidence_json)
         if (cycle or {}).get("status") == cycles.IN_PROGRESS:
-            cycles.update_cycle(study, text=text)
+            cycles.update_cycle(study, text=text.record())
         else:
-            cycles.begin_cycle(study, text=text)
-        await _checkpoint()
+            cycles.begin_cycle(study, text=text.record())
+        await checkpoint()
 
         # plan_7 step 13: establish what this paper actually has, BEFORE the C1 gate, so the route
         # modal offers what is available rather than three equal-looking options. Runs here rather
@@ -656,13 +672,21 @@ class ValidationDriverService:
         # change_7.5 section 2.6: inside the extraction, before the selection, which reads it.
         async def _discover(plan_like):
             return await ValidationDriverService._discover_capabilities(
-                session, study, plan_like, has_full_text=bool(full_text)
+                session, study, plan_like, has_full_text=bool(full_text), text_source=text.source
             )
 
         plan = await ValidationExtractionService.extract(
-            session, study, full_text, org_id, user_id, sections=sections, discover=_discover, checkpoint=_checkpoint
+            session,
+            study,
+            full_text,
+            org_id,
+            user_id,
+            sections=text.sections,
+            discover=_discover,
+            checkpoint=checkpoint,
         )
         unread = (cycles.current_cycle(study.evidence_json) or {}).get("status") == cycles.FAILED
+        cycles.update_cycle(study, plan_id=plan.id)
 
         evidence = dict(study.evidence_json or {})
         # change_7.3 section 7: bounded passages of the paper, kept while the text is in hand. Nothing
@@ -692,6 +716,80 @@ class ValidationDriverService:
                 session, study.id, org_id, user_id, "error", failure_reason=(plan.blockers_json or [None])[0]
             )
 
+        # plan_8_1 section 2.1, step one: the extraction, discovery and the checks are committed; the
+        # study stays in `reading`, its inventory `pending`. Nothing the next step does can lose them.
+        await checkpoint()
+        return await ValidationDriverService._inventory_then_conclude(
+            session, study, plan, full_text, org_id, user_id, checkpoint=checkpoint
+        )
+
+    @staticmethod
+    async def _plan_claims(session: AsyncSession, plan) -> list[dict]:
+        """The committed claims, in plan order, as the inventory stage reads them."""
+        from app.models.comparison_target import ComparisonTarget
+        from app.services.validation_report_summary import target_dict
+
+        rows = (
+            (
+                await session.execute(
+                    select(ComparisonTarget)
+                    .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                    .order_by(ComparisonTarget.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [target_dict(t) for t in rows]
+
+    @staticmethod
+    async def _group_claims(session: AsyncSession, study, plan, full_text: str, *, checkpoint=None):
+        """plan_8_1 section 2.2: the inventory stage over the plan's committed claims."""
+        cfg = await llm_provider_config_service.get_for_feature(
+            session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+        )
+        if cfg is None:
+            from app.services.validation_inventory_stage import InventoryResult, failed_inventory
+
+            cause = "no language model is configured for this organization"
+            return InventoryResult(inventory=failed_inventory(cause), failed=True, cause=cause)
+        return await run_inventory_stage(
+            study,
+            full_text=full_text,
+            targets=await ValidationDriverService._plan_claims(session, plan),
+            experiments=[e for e in plan.reported_experiments_json or [] if isinstance(e, dict)],
+            contrasts=[
+                c for c in ((plan.differential_design_json or {}).get("contrasts") or []) if isinstance(c, dict)
+            ],
+            client=get_client(cfg.provider),
+            cfg=cfg,
+            checkpoint=checkpoint,
+        )
+
+    @staticmethod
+    async def _land_inventory(session: AsyncSession, study, plan, result) -> None:
+        """Write a stage's inventory onto the plan, keeping the one it replaces, and its issues."""
+        previous = plan.finding_inventory_json if isinstance(plan.finding_inventory_json, dict) else None
+        inventory = dict(result.inventory)
+        if previous and previous.get("status") != "pending":
+            prior = {k: v for k, v in previous.items() if k != "history"}
+            inventory["history"] = list(previous.get("history") or []) + [prior]
+            inventory["revision"] = int(previous.get("revision") or 1) + 1
+        plan.finding_inventory_json = inventory
+        await session.flush()
+        await ValidationIssueService.record(session, study, result.issues)
+
+    @staticmethod
+    async def _inventory_then_conclude(
+        session: AsyncSession, study, plan, full_text: str, org_id: int, user_id: int, *, checkpoint
+    ) -> ValidationStudy:
+        """plan_8_1 section 2.1, step two: group the committed claims, then plan_ready or the early exit."""
+        result = await ValidationDriverService._group_claims(session, study, plan, full_text, checkpoint=checkpoint)
+        await ValidationDriverService._land_inventory(session, study, plan, result)
+        return await ValidationDriverService._conclude_read(session, study, plan, org_id, user_id)
+
+    @staticmethod
+    async def _conclude_read(session: AsyncSession, study, plan, org_id: int, user_id: int) -> ValidationStudy:
         classification = _early_exit_classification(plan)
         if classification is not None:
             # Record the "why" (the plan's blockers) before the terminal transition.
@@ -701,27 +799,95 @@ class ValidationDriverService:
             return await ValidationStudyService.transition(
                 session, study.id, org_id, user_id, "classified", classification=classification
             )
-
         return await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
 
     @staticmethod
-    async def _end_unread(session: AsyncSession, study: ValidationStudy, org_id: int, user_id: int, *, cause: str):
-        """An interrupted read that cannot continue ends as a failed read, with its cause."""
+    async def _resume_inventory(
+        session: AsyncSession, study, plan, org_id: int, user_id: int, *, checkpoint, pasted: str | None, claim=None
+    ) -> ValidationStudy:
+        """A worker stopped after the extraction was committed: group the committed claims, never read
+        again, from the text the extraction recorded. A text that is no longer that text is read again."""
+        from app.services import validation_paper_text as paper_text
         from app.services import validation_read_cycle as cycles
+        from app.services.validation_inventory_stage import InventoryResult, failed_inventory
 
-        if (cycles.current_cycle(study.evidence_json) or {}).get("status") == cycles.IN_PROGRESS:
-            cycles.mark_interrupted(study)
-            cycles.finish_cycle(study, status=cycles.FAILED, cause=cause)
-        else:
-            cycles.begin_cycle(study)
-            cycles.finish_cycle(study, status=cycles.FAILED, cause=cause)
-        cfg = await llm_provider_config_service.get_for_feature(session, org_id, FEATURE_LITERATURE_VALIDATION)
-        plan = await ValidationExtractionService.plan_from_failed_read(
-            session, study, user_id, cfg=cfg, cause=cause, issues=[], full_text=None
+        recorded = (cycles.current_cycle(study.evidence_json) or {}).get("text") or {}
+        text = await paper_text.again(session, study, recorded.get("source"), pasted=pasted)
+        if text is None:
+            cause = (
+                "the read was interrupted, and the pasted text it was reading was not kept; paste it again to "
+                "group the claims"
+                if recorded.get("source") == paper_text.PASTED
+                else "the read was interrupted, and the paper's text could not be fetched again"
+            )
+            await ValidationDriverService._land_inventory(
+                session, study, plan, InventoryResult(inventory=failed_inventory(cause), failed=True, cause=cause)
+            )
+            return await ValidationDriverService._conclude_read(session, study, plan, org_id, user_id)
+        if recorded.get("sha256") and text.record()["sha256"] != recorded["sha256"]:
+            # The claims were read from a different text, so they are read again, not regrouped.
+            logger.info("study %s: the paper's text changed since its claims were read; reading it again", study.id)
+            return await ValidationDriverService._read_text(
+                session, study, text, org_id, user_id, checkpoint=checkpoint, claim=claim, resuming=True
+            )
+        return await ValidationDriverService._inventory_then_conclude(
+            session, study, plan, text.text, org_id, user_id, checkpoint=checkpoint
         )
-        return await ValidationStudyService.transition(
-            session, study.id, org_id, user_id, "error", failure_reason=(plan.blockers_json or [None])[0]
-        )
+
+    @staticmethod
+    async def retry_inventory(
+        session: AsyncSession, study, org_id: int, user_id: int, *, full_text: str | None = None
+    ) -> ValidationStudy:
+        """plan_8_1 section 2.1: group a study's committed claims again after its inventory failed.
+
+        A new inventory cycle over the SAME claims, from the text the extraction recorded: the Library's
+        stored text, Europe PMC again, or pasted text, which bioAF did not keep and asks for again unless
+        the Library now holds the paper's text. A text whose hash differs from the one the claims were
+        read from sends the study to be read again rather than regrouped.
+        """
+        from app.services import validation_paper_text as paper_text
+        from app.services import validation_read_cycle as cycles
+        from app.services.validation_inventory_stage import INVENTORY_STAGE
+
+        if study.state in ("requested", "acquiring_text", "reading"):
+            raise ValidationError("This paper is still being read; its findings are established when the read ends.")
+        plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
+        inventory = (plan.finding_inventory_json if plan is not None else None) or {}
+        if not inventory.get("failed"):
+            raise ValidationError("Only an inventory bioAF could not establish can be grouped again.")
+        recorded = (cycles.current_cycle(study.evidence_json) or {}).get("text") or {}
+        source = recorded.get("source") or paper_text.EUROPE_PMC
+        text = await paper_text.again(session, study, source, pasted=full_text)
+        if text is None:
+            if source == paper_text.PASTED:
+                raise PasteRequired(
+                    "Paste the paper's text again: bioAF did not keep the text it read, and needs it to group "
+                    "the claims into findings."
+                )
+            raise ValidationError("bioAF could not fetch the paper's text again, so the claims cannot be grouped.")
+        if recorded.get("sha256") and text.record()["sha256"] != recorded["sha256"]:
+            if "requested" not in next_states(study.state):
+                raise ValidationError(
+                    "The paper's text has changed since its claims were read, so they are read again rather "
+                    "than regrouped; that is possible before approval."
+                )
+            evidence = dict(study.evidence_json or {})
+            evidence["reread_requested_at"] = _now().isoformat()
+            evidence["reread_reason"] = "the paper's text changed since its claims were read"
+            study.evidence_json = evidence
+            await session.flush()
+            return await ValidationStudyService.transition(session, study.id, org_id, user_id, "requested")
+
+        # An explicit retry begins a new cycle; the failed one is kept in history.
+        cycles.begin_cycle(study, INVENTORY_STAGE)
+        result = await ValidationDriverService._group_claims(session, study, plan, text.text)
+        await ValidationDriverService._land_inventory(session, study, plan, result)
+        if study.state == "classified":
+            from app.services.validation_report_summary import record_scorecard
+
+            await record_scorecard(session, study)
+        await session.flush()
+        return study
 
     @staticmethod
     async def _paper_passages(session: AsyncSession, plan, full_text: str | None) -> dict:
@@ -748,7 +914,13 @@ class ValidationDriverService:
 
     @staticmethod
     async def _discover_capabilities(
-        session: AsyncSession, study: ValidationStudy, plan, *, has_full_text: bool, fetcher=None
+        session: AsyncSession,
+        study: ValidationStudy,
+        plan,
+        *,
+        has_full_text: bool,
+        fetcher=None,
+        text_source: str | None = None,
     ) -> dict:
         """plan_7 step 13: land the phase-1 answers on ``evidence["capabilities"]``.
 
@@ -765,6 +937,7 @@ class ValidationDriverService:
                 has_full_text=has_full_text,
                 code_availability=(plan.code_availability_json if plan else None),
                 code_not_read_reason=getattr(plan, "code_not_read_reason", None),
+                text_source=text_source,
                 fetcher=fetcher,
             )
         except Exception as exc:  # noqa: BLE001 - discovery informs the gate; it cannot fail a read

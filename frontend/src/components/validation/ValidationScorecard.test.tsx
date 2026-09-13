@@ -207,3 +207,25 @@ describe("a provisional scope", () => {
     expect(screen.getByText(/its quote is not in the paper's text/)).toBeInTheDocument();
   });
 });
+
+// plan_8_1 section 2.1: between the committed claims and the inventory stage.
+describe("while the findings are being established", () => {
+  const pending = card("scorecard_pending");
+
+  it("reads In progress, and says the findings are being established", () => {
+    render(<ValidationScorecard scorecard={pending} />);
+    expect(screen.getByText("In progress")).toBeInTheDocument();
+    expect(screen.getByText("The findings are being established.")).toBeInTheDocument();
+  });
+});
+
+// plan_8_1 section 2.1: the inventory stage failed; the claims stand.
+describe("when bioAF could not group the claims", () => {
+  const failed = card("scorecard_inventory_failed");
+
+  it("says so, whose limitation it is, and keeps the scope unestablished", () => {
+    render(<ValidationScorecard scorecard={failed} />);
+    expect(screen.getByText(/^bioAF could not group the paper's claims into findings: /)).toBeInTheDocument();
+    expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("Scope not established");
+  });
+});

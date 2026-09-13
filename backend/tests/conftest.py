@@ -342,6 +342,22 @@ def _no_accession_manifest_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_full_text_network(monkeypatch):
+    """No test reaches Europe PMC for a paper's full text.
+
+    plan_8_1 D7: the read tries Europe PMC by DOI first, even when text was pasted, so a study with a DOI
+    would otherwise make a live call on every read. The fetch answers "not openly reachable" here, which
+    is what it returns for any failure; a test that wants Europe PMC's text supplies its own fetch.
+    """
+    from app.services.literature.fulltext_service import FullTextFetchService
+
+    async def _offline(*, doi=None, pmid=None, pmcid=None):
+        return None
+
+    monkeypatch.setattr(FullTextFetchService, "fetch", staticmethod(_offline))
+
+
+@pytest.fixture(autouse=True)
 def _no_supplement_bundle_network(monkeypatch):
     """No test reaches Europe PMC for a paper's supplementary bundle.
 

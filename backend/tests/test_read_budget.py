@@ -110,3 +110,28 @@ class TestTheRecoveryBudget:
 
     def test_an_unknown_model_is_capped_conservatively(self):
         assert budget.model_output_limit("some-future-model") == budget.DEFAULT_OUTPUT_LIMIT
+
+
+class TestTheInventoryGuard:
+    """plan_8_1 section 2.2: the inventory call has its own record, fingerprint and budget."""
+
+    def test_the_inventory_record_was_measured_under_the_current_inventory_prompt(self):
+        assert budget.load_record(budget.INVENTORY)["fingerprint"] == budget.inventory_fingerprint()
+
+    def test_the_inventory_and_extraction_fingerprints_differ(self):
+        assert budget.inventory_fingerprint() != budget.extraction_fingerprint()
+
+    def test_the_inventory_record_names_its_own_budget(self):
+        record = budget.load_record(budget.INVENTORY)
+        assert record["call"] == "inventory"
+        assert isinstance(record["chosen_budget"], int) and record["chosen_budget"] >= 1000
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="plan_8_1 section 2.2: the inventory call is measured on the demo on the same three papers "
+        "after this build deploys; remove this mark when the record holds it",
+    )
+    def test_the_inventory_record_holds_three_measured_papers(self):
+        record = budget.load_record(budget.INVENTORY)
+        measured = [m for model in record["models"].values() for m in model["papers"]]
+        assert len({m["paper"] for m in measured}) >= 3

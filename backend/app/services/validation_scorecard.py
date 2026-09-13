@@ -65,12 +65,15 @@ NOT_ASSESSED = "not_assessed"
 NOT_ESTABLISHED = "not_established"
 NOT_APPLICABLE = "not_applicable"
 UNAVAILABLE = "unavailable"
+# plan_8_1 section 2.1: the claims are committed and the inventory stage has not yet run.
+PENDING = "pending"
 SCORECARD_STATUS_LABELS = {
     SCORED: None,
     NOT_ASSESSED: None,
     NOT_ESTABLISHED: "Scope not established",
     NOT_APPLICABLE: "Not applicable",
     UNAVAILABLE: "Score unavailable for this historical report.",
+    PENDING: None,
 }
 IN_PROGRESS_LABEL = "In progress"
 
@@ -155,6 +158,8 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "provisional": False,
         "provisional_note": None,
         "score_status_label": None,
+        # plan_8_1 section 2.1: the findings could not be established, and grouping them again may.
+        "inventory_retry": False,
     }
 
 
@@ -307,8 +312,16 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     outcomes = outcomes or {}
     if not inventory:
         return _empty(UNAVAILABLE, inventory=None, reason=None, in_progress=in_progress)
+    if inventory.get("status") == PENDING:
+        # plan_8_1 section 2.1: "In progress", "The findings are being established."
+        return _empty(PENDING, inventory=inventory, reason=inventory.get("reason"), in_progress=True)
     if inventory.get("status") not in ("established", "provisional", NOT_APPLICABLE):
         card = _empty(NOT_ESTABLISHED, inventory=inventory, reason=inventory.get("reason"), in_progress=in_progress)
+        if inventory.get("failed"):
+            # plan_8_1 section 2.1: the inventory stage failed; the claims stand, and it can be run again.
+            from app.services.validation_finding_outcomes import CAUSE_BIOAF, CAUSE_LABELS
+
+            card.update(cause=CAUSE_BIOAF, cause_label=CAUSE_LABELS[CAUSE_BIOAF], inventory_retry=True)
         card["unresolved_importance"] = [
             {
                 "finding_id": f.get("id"),

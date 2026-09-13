@@ -101,7 +101,7 @@ def quiet_discovery(monkeypatch):
     """Discovery and the pre-compute checks without the network; records what discovery was asked."""
     seen: dict = {}
 
-    async def _discover(session, study, plan_like, *, has_full_text, fetcher=None):
+    async def _discover(session, study, plan_like, *, has_full_text, fetcher=None, text_source=None):
         from app.services.validation_driver_service import _named_accessions
 
         seen["accessions"] = [a["accession"] for a in _named_accessions(study, plan_like, for_discovery=True)]
@@ -117,9 +117,9 @@ def quiet_discovery(monkeypatch):
     return seen
 
 
-async def _read(session, admin_user, *, text=_PAPER, route=None):
+async def _read(session, admin_user, *, text=_PAPER, route=None, doi=None):
     study = await ValidationStudyService.create_study(
-        session, admin_user.organization_id, admin_user.id, intended_route=route
+        session, admin_user.organization_id, admin_user.id, intended_route=route, source_doi=doi
     )
     await session.flush()
     study = await ValidationDriverService.read_and_plan(session, study, text, admin_user.organization_id, admin_user.id)
@@ -281,7 +281,7 @@ class TestRetryReadsAgain:
         self, session, admin_user, llm, quiet_discovery, monkeypatch
     ):
         llm(_TRUNCATED, _TRUNCATED)
-        study, first_plan = await _read(session, admin_user, route="deposit")
+        study, first_plan = await _read(session, admin_user, route="deposit", doi="10.1/retry")
         assert study.state == "error"
 
         study = await ValidationStudyService.retry_study(session, study.id, admin_user.organization_id, admin_user.id)

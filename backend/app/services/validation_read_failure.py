@@ -50,6 +50,11 @@ def scorecard_reason(cause: str) -> str:
     return f"bioAF could not read the paper into findings: {cause}. This is a bioAF limitation; read the paper again."
 
 
+def inventory_failure_reason(cause: str) -> str:
+    """section 2.1: the scorecard's reason when the inventory stage could not establish the findings."""
+    return f"bioAF could not group the paper's claims into findings: {cause}."
+
+
 def omitted_part(part: str) -> str:
     """A part an otherwise usable answer left out, in the reader's words."""
     return f"Not read: the reading omitted {part}."

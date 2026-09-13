@@ -58,7 +58,9 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # `classified` is reachable from the gate since change_7.1 section 4: a study whose only routes
     # need data bioAF cannot obtain has an ANSWER, and holding it at plan_ready for ever made it
     # look like a study waiting for someone to click approve.
-    "plan_ready": ["acquiring_data", "acquiring_processed", "plan_declined", "classified", "error"],
+    # plan_8_1 section 2.1: `requested` when the text a failed inventory is regrouped from is no longer
+    # the text its claims were read from. The paper is read again, which spends one read and no compute.
+    "plan_ready": ["acquiring_data", "acquiring_processed", "plan_declined", "classified", "error", "requested"],
     # The deposit route. `acquiring_data` is the ESCALATION edge on both: a deposit that turns out
     # unusable is not a verdict on the paper, it is a reason to spend the compute after all, and it
     # is never automatic. `classified` is the genuine early exit (the deposit is a PDF, or the

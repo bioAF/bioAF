@@ -19,8 +19,15 @@ class ValidationStudyRequest(BaseModel):
 
 
 class ReadRequest(BaseModel):
-    """Text to read + plan. Optional: when omitted, B1 fetches the full text from the study's DOI;
-    a pasted-in body overrides the fetch (and is the fallback when the paper is not open access)."""
+    """Text to read + plan. Optional. plan_8_1 D7: the read takes Europe PMC's text by DOI first, then the
+    Literature Library's stored text for the study's paper, then this pasted body (the fallback when the
+    paper is neither open access nor in the library)."""
+
+    full_text: str | None = None
+
+
+class InventoryRetryRequest(BaseModel):
+    """plan_8_1 section 2.1: the paper's text again, needed only when it was pasted and bioAF did not keep it."""
 
     full_text: str | None = None
 

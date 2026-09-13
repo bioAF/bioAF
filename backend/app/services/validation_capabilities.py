@@ -127,6 +127,7 @@ async def discover_capabilities(
     code_availability: list[dict] | None,
     fetcher: Fetcher | None = None,
     code_not_read_reason: str | None = None,
+    text_source: str | None = None,
 ) -> dict:
     """Answer the phase-1 questions for one paper, across every deposit it names. Never raises.
 
@@ -139,12 +140,18 @@ async def discover_capabilities(
     ``source_accession`` at all, and passing that empty string into GEO's implementation answered NO
     to every question for a paper that deposited 54 samples and 108 FASTQ files.
     """
+    from app.services.validation_paper_text import SOURCE_LABELS
+
+    # plan_8_1 D7: the row names where the text came from.
+    held = (
+        f"bioAF read the paper's full text from {SOURCE_LABELS[text_source]}"
+        if text_source in SOURCE_LABELS
+        else "bioAF holds the paper's full text"
+    )
     caps: dict = {
         "paper_readable": _answer(
             YES if has_full_text else NO,
-            evidence=(
-                "bioAF holds the paper's full text" if has_full_text else "bioAF has no full text for this paper"
-            ),
+            evidence=(held if has_full_text else "bioAF has no full text for this paper"),
         )
     }
 

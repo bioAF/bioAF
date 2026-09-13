@@ -1,0 +1,9 @@
+{
+  "call": "inventory",
+  "fingerprint": "5af982bdb853c90110e4f034d4964d789d0bfebb5a2ec231edbd7a8acf92350b",
+  "chosen_budget": 16000,
+  "headroom": "Not measured yet: 16000 is plan_8_1 section 2.2's starting budget for the inventory call. Once the three papers are measured, the budget is set with recorded headroom above the largest answer, within the model's documented maximum.",
+  "date": null,
+  "status": "not_measured",
+  "models": {}
+}

@@ -179,7 +179,14 @@ export interface ReportSelection {
  * (`validation_scorecard.build_scorecard`); the frontend never computes a metric.
  */
 export type FindingStatus = "supported" | "discrepancy" | "inconclusive" | "blocked" | "unresolved" | "not_attempted";
-export type ScorecardStatus = "scored" | "not_assessed" | "not_established" | "not_applicable" | "unavailable";
+export type ScorecardStatus =
+  | "scored"
+  | "not_assessed"
+  | "not_established"
+  | "not_applicable"
+  | "unavailable"
+  // plan_8_1 section 2.1: the claims are committed and the findings are being established.
+  | "pending";
 
 export interface ScorecardItem {
   finding_id: string;
@@ -244,6 +251,8 @@ export interface ValidationScorecardData extends CompactScorecard {
   rubric_label: string;
   explanation: string;
   provisional_note?: string | null;
+  // plan_8_1 section 2.1: the inventory stage failed, and grouping the claims again may establish it.
+  inventory_retry?: boolean;
   inventory_status: string | null;
   analysis_selection_revision?: number | null;
   // Set when the outcomes are the ones recorded when the study concluded.

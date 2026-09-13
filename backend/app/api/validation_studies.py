@@ -30,6 +30,7 @@ from app.schemas.validation_study import (
     DeclineRequest,
     DifferentialDesignRequest,
     FindingSetRequest,
+    InventoryRetryRequest,
     ReadRequest,
     ReproductionPlanResponse,
     SampleManifestResponse,
@@ -356,6 +357,35 @@ async def read_and_plan(
     study = await _load(session, study_id, org_id)
     study = await ValidationDriverService.read_and_plan(session, study, data.full_text, org_id, user_id)
     await session.commit()
+    return await _study_response(session, study, org_id)
+
+
+@router.post("/{study_id}/inventory/retry", response_model=ValidationStudyResponse)
+async def retry_inventory(
+    study_id: int,
+    data: InventoryRetryRequest | None = None,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+):
+    """plan_8_1 section 2.1: group the study's committed claims into findings again, after its inventory
+    failed. 409 when the text was pasted and bioAF needs it pasted again."""
+    from app.services.validation_driver_service import PasteRequired
+    from app.services.validation_ownership import owned
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    async with owned(session, study.id, holder="api") as own:
+        if own is None:
+            raise HTTPException(409, "Another worker is working on this study. Try again when it finishes.")
+        await session.refresh(study)
+        try:
+            study = await ValidationDriverService.retry_inventory(
+                session, study, org_id, user_id, full_text=(data.full_text if data else None)
+            )
+        except PasteRequired as exc:
+            raise HTTPException(409, str(exc)) from exc
+        await session.commit()
     return await _study_response(session, study, org_id)
 
 

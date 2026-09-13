@@ -1,9 +1,12 @@
-"""plan_8 section 2 at read time: the reading proposes the finding inventory before anything is measured.
+"""plan_8 section 2 at read time, as plan_8_1 section 2.2 changed it: the extraction proposes no inventory.
 
-The grouping, the importance categories and the criteria are established at extraction, so no result
-can move them. The proposal is validated against the fixed rubric and persisted on the plan, and a
-reading that proposes none, or cannot be parsed, persists an unestablished inventory rather than no
-inventory: "Scope not established" is a fact about this study, not a historical gap.
+plan_8 asked the extraction call to propose the finding inventory. plan_8_1 moved it into its own call
+(``validation_inventory_stage``) over the committed claims, so the extraction answer shrinks and a failed
+inventory never takes the claims with it. The extraction now persists the inventory as pending; the
+stage that follows establishes it, still before anything is measured.
+
+Changed per plan_8_1 ("Existing tests expected to change"): these tests asserted the extraction prompt
+asked for findings and that ``extract`` persisted the proposed inventory.
 """
 
 from types import SimpleNamespace
@@ -66,78 +69,51 @@ async def _extract(session, admin_user, monkeypatch, response, text=_PAPER):
     return plan
 
 
-class TestThePromptAsksForTheInventory:
-    def test_the_schema_asks_for_findings_with_their_claims_importance_rationale_and_quote(self):
+class TestTheExtractionNoLongerAsksForTheInventory:
+    def test_the_extraction_prompt_asks_for_no_findings(self):
         system, _ = build_extraction_prompt("")
-        assert '"findings": [' in system
-        for field in ('"claim_indices"', '"importance": "primary | supporting | technical"', '"rationale"', '"quote"'):
-            assert field in system
+        assert '"findings"' not in system
+        assert "importance category" not in system
 
-    def test_the_rules_state_the_rubric_and_refuse_a_numeric_weight(self):
-        system, _ = build_extraction_prompt("")
+    def test_the_rubric_is_stated_to_the_inventory_call_instead(self):
+        from app.services.validation_inventory_stage import build_inventory_prompt
+
+        system, _ = build_inventory_prompt("", claims=[], experiments=[], contrasts=[])
         assert "necessary to support a main conclusion of the paper" in system
         assert "supports, extends or qualifies the main conclusions" in system
         assert "does not itself establish a scientific finding" in system
         assert "Never give a numeric weight" in system
         assert "never its metric name" in system
-
-    def test_the_rules_say_one_finding_is_one_opportunity(self):
-        system, _ = build_extraction_prompt("")
-        assert "Every claim belongs to exactly one finding" in system
+        assert "exactly one finding" in system
 
 
 class TestTheReadingIsParsed:
-    def test_the_proposed_findings_are_carried(self):
-        parsed = parse_extraction(_READING, full_text=_PAPER)
-        assert [f["description"] for f in parsed["findings"]] == [
-            "Knockout deregulates hundreds of genes",
-            "Sequencing depth",
-        ]
-
-    def test_a_reading_that_proposed_none_carries_none(self):
-        parsed = parse_extraction('```json\n{"claims": []}\n```')
-        assert parsed["findings"] is None
-
-    def test_an_unparseable_reading_carries_none(self):
-        assert parse_extraction("no json here")["findings"] is None
+    def test_the_parsed_reading_carries_no_findings(self):
+        assert "findings" not in parse_extraction(_READING, full_text=_PAPER)
 
 
-class TestTheInventoryIsPersistedOnThePlan:
+class TestTheInventoryIsPendingOnThePlan:
     @pytest.mark.asyncio
-    async def test_a_valid_proposal_is_established_on_the_kept_claims(self, session, admin_user, monkeypatch):
-        plan = await _extract(session, admin_user, monkeypatch, _READING)
-        inventory = plan.finding_inventory_json
-        assert inventory["status"] == "established"
-        assert inventory["revision"] == 1
-        # The reading's empty second claim was never kept, so its positions shift onto the targets.
-        assert [f["claim_indices"] for f in inventory["findings"]] == [[0, 1], [2]]
-        primary, technical = inventory["findings"]
-        assert (primary["id"], primary["importance"]["category"], primary["importance"]["weight"]) == (
-            "F1",
-            "primary",
-            2,
-        )
-        assert technical["prerequisite_for"] == ["F1"]
-        assert primary["importance"]["model"] == "a-model"
-        assert primary["contrast_index"] == 0
-
-    @pytest.mark.asyncio
-    async def test_a_reading_without_findings_is_persisted_as_not_established(self, session, admin_user, monkeypatch):
-        reading = _READING.replace('"findings"', '"not_findings"')
-        plan = await _extract(session, admin_user, monkeypatch, reading)
-        inventory = plan.finding_inventory_json
-        assert inventory is not None
-        assert inventory["status"] == "unresolved"
-        assert inventory["reason"]
-
-    @pytest.mark.asyncio
-    async def test_a_quote_the_paper_does_not_contain_leaves_the_scope_provisional(
+    async def test_extract_persists_a_pending_inventory_even_when_the_reading_proposes_findings(
         self, session, admin_user, monkeypatch
     ):
-        """plan_8_1 section 2.3: an importance not validated is a provisional scope, never a blank one."""
-        plan = await _extract(session, admin_user, monkeypatch, _READING, text="A different paper entirely.")
-        assert plan.finding_inventory_json["status"] == "provisional"
-        assert "quote" in plan.finding_inventory_json["reason"]
+        plan = await _extract(session, admin_user, monkeypatch, _READING)
+        assert plan.finding_inventory_json["status"] == "pending"
+        assert plan.finding_inventory_json["findings"] == []
+
+    @pytest.mark.asyncio
+    async def test_the_inventory_stage_sees_only_the_claims_that_were_kept(self, session, admin_user, monkeypatch):
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_inventory_stage import build_inventory_prompt
+
+        plan = await _extract(session, admin_user, monkeypatch, _READING)
+        claims = await ValidationDriverService._plan_claims(session, plan)
+        _, payload = build_inventory_prompt(_PAPER, claims=claims, experiments=[], contrasts=[])
+        # The reading's empty second claim was never kept, so the committed claims are three.
+        assert "[0] genes up in KO" in payload
+        assert "[1] genes down in KO" in payload
+        assert "[2] reads per library" in payload
+        assert "[3]" not in payload
 
     @pytest.mark.asyncio
     async def test_an_unparseable_reading_is_a_failed_read_with_no_inventory(self, session, admin_user, monkeypatch):
