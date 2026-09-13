@@ -124,6 +124,15 @@
     "version": 1
   },
   "enums": {
+    "check_state": {
+      "blocked": "Blocked",
+      "done": "Done",
+      "interrupted": "Interrupted",
+      "pending": "Pending",
+      "running": "Running",
+      "superseded": "Superseded",
+      "unresolved": "Unresolved"
+    },
     "claim_check": {
       "author_results": "Consistency with the authors' results",
       "processed_reanalysis": "Reanalysis of processed data",

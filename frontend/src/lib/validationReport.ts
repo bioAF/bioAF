@@ -117,6 +117,10 @@ export interface ClaimConsistency {
   count_range: number[] | null;
   candidates: { interpretation: string | null; count: number | null }[];
   assumptions: string[];
+  // plan_8_1 section 3.2: the claim's own check record, when the study has them.
+  check_state?: string | null;
+  check_state_label?: string | null;
+  identified_by?: string | null;
 }
 
 export interface ClaimCheck {
