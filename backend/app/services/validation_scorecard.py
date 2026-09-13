@@ -140,6 +140,8 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "unassessed_items": [],
         "excluded_items": [],
         "unresolved_importance": [],
+        # Set by the projection when the outcomes come from the record kept when the study concluded.
+        "outcomes_recorded_at": None,
     }
 
 

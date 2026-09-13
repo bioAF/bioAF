@@ -234,6 +234,8 @@ export interface ValidationScorecardData extends CompactScorecard {
   reason: string | null;
   inventory_status: string | null;
   analysis_selection_revision?: number | null;
+  // Set when the outcomes are the ones recorded when the study concluded.
+  outcomes_recorded_at?: string | null;
   supported_count: number | null;
   discrepant_count: number | null;
   supported_weight: number | null;

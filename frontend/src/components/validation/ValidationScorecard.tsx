@@ -188,12 +188,15 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </ul>
       )}
 
-      {card.assessed_weight !== null && card.status !== "not_applicable" && (
+      {(card.status === "scored" || card.status === "not_assessed") && (
         <details className="mt-3 text-xs text-gray-600">
           <summary className="cursor-pointer font-medium text-gray-700">How the score is calculated</summary>
           <p className="mt-1">
-            {card.explanation} Weighted agreement: {card.supported_weight} of {card.assessed_weight}. Scored under{" "}
-            {card.rubric_label}, finding inventory revision {card.inventory_revision}.
+            {card.explanation}
+            {(card.assessed_weight ?? 0) > 0 &&
+              ` Weighted agreement: ${card.supported_weight} of ${card.assessed_weight}.`}{" "}
+            Scored under {card.rubric_label}, finding inventory revision {card.inventory_revision}
+            {card.outcomes_recorded_at ? ", from the outcomes recorded when the study concluded" : ""}.
           </p>
         </details>
       )}

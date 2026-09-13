@@ -1468,12 +1468,17 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
         parts.append(f"- **{message['text']}**")
     if card.get("messages"):
         parts.append("")
-    if card.get("assessed_weight") is not None:
-        parts.append(
+    if card.get("status") in ("scored", "not_assessed"):
+        weights = (
             f"Weighted agreement: {card.get('supported_weight')} of {card.get('assessed_weight')} "
             f"(supported weight over assessed weight; discrepant weight {card.get('discrepant_weight')}). "
-            f"{card.get('explanation')} Scored under {card.get('rubric_label')}, finding inventory revision "
-            f"{card.get('inventory_revision')}."
+            if (card.get("assessed_weight") or 0) > 0
+            else ""
+        )
+        recorded = ", from the outcomes recorded when the study concluded" if card.get("outcomes_recorded_at") else ""
+        parts.append(
+            f"{weights}{card.get('explanation')} Scored under {card.get('rubric_label')}, finding inventory revision "
+            f"{card.get('inventory_revision')}{recorded}."
         )
         parts.append("")
     for heading, key in (("Assessed", "assessed_items"), ("Not assessed / unresolved", "unassessed_items")):
