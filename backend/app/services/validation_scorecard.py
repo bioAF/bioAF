@@ -74,6 +74,11 @@ SCORECARD_STATUS_LABELS = {
 }
 IN_PROGRESS_LABEL = "In progress"
 
+# plan_8_1 section 2.3, pending the owner's sign-off.
+PROVISIONAL_SUFFIX = " (provisional)"
+SCORE_PENDING_LABEL = "Score pending importance review"
+IMPORTANCE_NOT_ESTABLISHED_LABEL = "Importance not established"
+
 _NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
 
 
@@ -145,6 +150,11 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         # plan_8_1 section 1.3: whose limitation a card with no score is, when that is established.
         "cause": None,
         "cause_label": None,
+        # plan_8_1 section 2.3: a scope whose N holds findings of unestablished importance, and a score
+        # withheld because an assessed finding's weight is not established.
+        "provisional": False,
+        "provisional_note": None,
+        "score_status_label": None,
     }
 
 
@@ -166,18 +176,34 @@ def _checked_weight(finding: dict) -> int:
     return weight
 
 
-def _item(finding: dict, outcome: dict, weight: int) -> dict:
+def _validated(finding: dict) -> bool:
+    """Whether a finding's importance is validated. A record written before plan_8_1 carries no
+    separate statuses, and was only ever scored when every importance was validated."""
+    return ((finding.get("importance") or {}).get("status") or "validated") == "validated"
+
+
+def _item(finding: dict, outcome: dict, weight: int | None) -> dict:
     status = outcome.get("status") or NOT_ATTEMPTED
     if status not in STATUS_LABELS:
         raise ScorecardInvariantError(f"finding {finding.get('id')} has an unknown outcome status {status!r}")
     importance = finding.get("importance") or {}
     category = _category(finding)
+    validated = _validated(finding)
+    if validated:
+        category_label = CATEGORY_LABELS[category]
+    elif category in CATEGORY_LABELS:
+        category_label = f"{IMPORTANCE_NOT_ESTABLISHED_LABEL} (proposed: {CATEGORY_LABELS[category]})"
+    else:
+        category_label = IMPORTANCE_NOT_ESTABLISHED_LABEL
     return {
         "finding_id": finding.get("id"),
         "description": finding.get("description"),
         "locator": finding.get("locator"),
-        "category": category,
-        "category_label": CATEGORY_LABELS[category],
+        "category": category if validated else None,
+        "proposed_category": None if validated else (category or None),
+        "category_label": category_label,
+        "importance_status": importance.get("status") or "validated",
+        "importance_problem": None if validated else importance.get("problem"),
         "weight": weight,
         "rationale": importance.get("rationale"),
         "quote": importance.get("quote"),
@@ -221,9 +247,18 @@ def _summary(items: list[dict]) -> str | None:
     return sentence[0].upper() + sentence[1:] + "."
 
 
+def _unestablished_words(k: int) -> str:
+    if k == 1:
+        return "1 unassessed finding has no established importance; it could be primary."
+    return f"{k} unassessed findings have no established importance; any could be primary."
+
+
 def _messages(items: list[dict]) -> list[dict]:
     """What must never hide behind a high score or a truncated list: primary discrepancies and primary
-    findings left unassessed. Context under the metrics, never a third metric."""
+    findings left unassessed. Context under the metrics, never a third metric.
+
+    plan_8_1 section 2.3: the primary warning covers unassessed findings whose importance is not
+    established, because any of them could be primary."""
     messages = [
         {
             "kind": "primary_discrepancy",
@@ -237,6 +272,15 @@ def _messages(items: list[dict]) -> list[dict]:
     if unassessed:
         text = "Primary finding remains unassessed" if len(unassessed) == 1 else "Primary findings remain unassessed"
         messages.append({"kind": "primary_unassessed", "text": text, "findings": unassessed})
+    open_importance = [i["finding_id"] for i in items if i["weight"] is None and i["status"] in UNASSESSED_STATUSES]
+    if open_importance:
+        messages.append(
+            {
+                "kind": "importance_unestablished",
+                "text": _unestablished_words(len(open_importance)),
+                "findings": open_importance,
+            }
+        )
     return messages
 
 
@@ -251,6 +295,9 @@ def _indicators(items: list[dict]) -> list[dict]:
     if unassessed:
         text = "Primary finding remains unassessed" if unassessed == 1 else "Primary findings remain unassessed"
         indicators.append({"kind": "primary_unassessed", "text": text})
+    open_importance = sum(1 for i in items if i["weight"] is None and i["status"] in UNASSESSED_STATUSES)
+    if open_importance:
+        indicators.append({"kind": "importance_unestablished", "text": _unestablished_words(open_importance)})
     return indicators
 
 
@@ -260,7 +307,7 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     outcomes = outcomes or {}
     if not inventory:
         return _empty(UNAVAILABLE, inventory=None, reason=None, in_progress=in_progress)
-    if inventory.get("status") not in ("established", NOT_APPLICABLE):
+    if inventory.get("status") not in ("established", "provisional", NOT_APPLICABLE):
         card = _empty(NOT_ESTABLISHED, inventory=inventory, reason=inventory.get("reason"), in_progress=in_progress)
         card["unresolved_importance"] = [
             {
@@ -278,13 +325,16 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     if len(ids) != len(set(ids)):
         raise ScorecardInvariantError(f"the inventory repeats a finding id: {ids}")
 
+    # plan_8_1 section 2.3: N counts every validated primary or supporting finding and every finding whose
+    # importance is not validated, whatever category was proposed. Only a validated technical finding
+    # leaves it, and only a validated importance gives an assessed finding weight.
     scoreable: list[dict] = []
     excluded: list[dict] = []
     for position, finding in enumerate(findings):
-        weight = _checked_weight(finding)
+        weight = _checked_weight(finding) if _validated(finding) else None
         item = _item(finding, outcomes.get(finding.get("id")) or {}, weight)
         item["_position"] = position
-        (scoreable if weight > 0 else excluded).append(item)
+        (excluded if weight == 0 else scoreable).append(item)
 
     if not scoreable:
         card = _empty(
@@ -312,24 +362,31 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     discrepant = [i for i in scoreable if i["status"] == DISCREPANCY]
     assessed = supported + discrepant
     unassessed = [i for i in scoreable if i["status"] in UNASSESSED_STATUSES]
-    supported_weight = sum(i["weight"] for i in supported)
-    discrepant_weight = sum(i["weight"] for i in discrepant)
+    supported_weight = sum(i["weight"] or 0 for i in supported)
+    discrepant_weight = sum(i["weight"] or 0 for i in discrepant)
     assessed_weight = supported_weight + discrepant_weight
+    open_importance = [i for i in scoreable if i["weight"] is None]
+    withheld = any(i["weight"] is None for i in assessed)
 
     # The invariants plan_8 section 5 names. A breach is a defect, never a displayed number.
     if len(assessed) + len(unassessed) != len(scoreable):
         raise ScorecardInvariantError("a scoreable finding is in no scoring category, or in more than one")
     if len(assessed) > len(scoreable):
         raise ScorecardInvariantError("more findings assessed than the inventory holds")
-    if assessed_weight != sum(i["weight"] for i in assessed):
+    if assessed_weight != sum(i["weight"] or 0 for i in assessed):
         raise ScorecardInvariantError("the assessed weight is not the sum of the supported and discrepant weights")
 
-    score = 100 * supported_weight / assessed_weight if assessed_weight else None
-    shown = display_score(
-        supported_weight=supported_weight,
-        assessed_weight=assessed_weight,
-        discrepant_count=len(discrepant),
-        supported_count=len(supported),
+    # plan_8_1 section 2.3: an assessed finding whose weight is not established withholds the score.
+    score = 100 * supported_weight / assessed_weight if assessed_weight and not withheld else None
+    shown = (
+        None
+        if withheld
+        else display_score(
+            supported_weight=supported_weight,
+            assessed_weight=assessed_weight,
+            discrepant_count=len(discrepant),
+            supported_count=len(supported),
+        )
     )
     ordered_assessed = sorted(
         assessed, key=lambda i: (0 if i["category"] == PRIMARY and i["status"] == DISCREPANCY else 1, i["_position"])
@@ -337,12 +394,21 @@ def build_scorecard(inventory: dict | None, outcomes: dict[str, dict] | None, *,
     ordered_unassessed = sorted(unassessed, key=lambda i: (0 if i["category"] == PRIMARY else 1, i["_position"]))
     by_position = sorted(scoreable, key=lambda i: i["_position"])
 
+    provisional = bool(open_importance)
     card = _empty(SCORED if assessed else NOT_ASSESSED, inventory=inventory, reason=None, in_progress=in_progress)
     card.update(
         score=score,
         display_score=shown,
         score_label=f"{shown} / 100" if shown is not None else None,
-        scope_label=f"{len(assessed)} / {len(scoreable)} assessed",
+        score_status_label=SCORE_PENDING_LABEL if withheld else None,
+        scope_label=f"{len(assessed)} / {len(scoreable)} assessed" + (PROVISIONAL_SUFFIX if provisional else ""),
+        provisional=provisional,
+        provisional_note=(
+            f"The total includes {len(open_importance)} finding{'s' if len(open_importance) != 1 else ''} whose "
+            "importance is not established; it falls by one for each that proves technical."
+            if provisional
+            else None
+        ),
         supported_count=len(supported),
         discrepant_count=len(discrepant),
         assessed_count=len(assessed),
@@ -382,6 +448,9 @@ _COMPACT_KEYS = (
     "in_progress_label",
     "rubric_version",
     "inventory_revision",
+    # plan_8_1 section 2.3: "provisional" reads the same wherever the scope appears.
+    "provisional",
+    "score_status_label",
     # plan_8_1 section 1.3: a failed read's list cell says what the report says.
     "reason",
     "cause",

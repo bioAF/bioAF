@@ -23,6 +23,10 @@ export function ScorecardCompact({ scorecard }: { scorecard: CompactScorecard | 
       <div aria-label={scoreLabel} className="font-semibold tabular-nums text-gray-900">
         {scorecard.score_label ?? NOT_SET}
       </div>
+      {/* plan_8_1 section 2.3: a score withheld while an assessed finding's importance is open. */}
+      {!scorecard.score_label && scorecard.score_status_label && (
+        <div className="text-xs font-medium text-gray-700">{scorecard.score_status_label}</div>
+      )}
       <div className="text-xs text-gray-600">{scorecard.scope_label ?? scorecard.status_label ?? NOT_SET}</div>
       {/* plan_8_1 section 1.3: whose limitation a card with no score is, as the report says it. */}
       {scorecard.cause_label && (

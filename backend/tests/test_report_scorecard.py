@@ -301,9 +301,12 @@ _SCALAR_CHECKS = {
 }
 
 
-def qc_scenario(verdicts: list[str], categories: list[str], *, state: str = "classified") -> dict:
+def qc_scenario(
+    verdicts: list[str], categories: list[str], *, state: str = "classified", unquoted: tuple[int, ...] = ()
+) -> dict:
     """One scalar claim per finding, each compared as a finding-tier metric with the given verdict.
-    ``not_computed`` leaves a finding without a result. Rendered through the real projection."""
+    ``not_computed`` leaves a finding without a result. Rendered through the real projection.
+    ``unquoted`` findings propose a quote the text does not hold (plan_8_1 section 2.3)."""
     targets = [
         {
             "id": i + 1,
@@ -324,7 +327,7 @@ def qc_scenario(verdicts: list[str], categories: list[str], *, state: str = "cla
             "claim_indices": [i],
             "importance": category,
             "rationale": "Its role in the paper's conclusions.",
-            "quote": targets[i]["claim_text"],
+            "quote": "words the paper never wrote" if i in unquoted else targets[i]["claim_text"],
         }
         for i, category in enumerate(categories)
     ]
