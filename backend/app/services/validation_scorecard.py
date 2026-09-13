@@ -182,12 +182,12 @@ def _item(finding: dict, outcome: dict, weight: int) -> dict:
         "reason": outcome.get("reason"),
         "cause": outcome.get("cause"),
         "cause_label": outcome.get("cause_label"),
-        "method": outcome.get("method"),
+        "assessment_method": outcome.get("assessment_method"),
         "method_label": outcome.get("method_label"),
         "supporting_checks": list(outcome.get("supporting_checks") or []),
         "subchecks": list(outcome.get("subchecks") or []),
-        "evidence": list(outcome.get("evidence") or []),
-        "criteria": outcome.get("criteria") or finding.get("criteria"),
+        "supporting_evidence_ids": list(outcome.get("supporting_evidence_ids") or []),
+        "comparison_criteria": outcome.get("comparison_criteria") or finding.get("criteria"),
         "analysis_selection_revision": outcome.get("analysis_selection_revision"),
     }
 

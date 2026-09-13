@@ -236,12 +236,16 @@ async def _selected_claim_text(session: AsyncSession, plan) -> str | None:
     if not isinstance(index, int) or plan is None:
         return None
     rows = (
-        await session.execute(
-            select(ComparisonTarget.claim_text)
-            .where(ComparisonTarget.reproduction_plan_id == plan.id)
-            .order_by(ComparisonTarget.id)
+        (
+            await session.execute(
+                select(ComparisonTarget.claim_text)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return rows[index] if 0 <= index < len(rows) else None
 
 
@@ -1443,9 +1447,7 @@ class ValidationDriverService:
         # reads evidence["level3"] and is deliberately untouched by plan_7.
         # change_7.5 section 4.1: the claims on this contrast checked against the authors' own table.
         await ValidationDriverService._check_author_table(session, evidence, plan, storage)
-        decision = await resolve_level3_from_deposit(
-            session, study, plan, evidence=evidence, storage_adapter=storage
-        )
+        decision = await resolve_level3_from_deposit(session, study, plan, evidence=evidence, storage_adapter=storage)
         if decision.inputs:
             evidence["level3"] = decision.inputs
             _record_readiness(evidence, "yes", _readiness_statement(decision.inputs))
@@ -1707,7 +1709,11 @@ class ValidationDriverService:
         from app.services.validation_author_consistency import check_claim, claim_predicates
 
         table = next(
-            (f for f in (evidence.get("deposit") or {}).get("files") or [] if f.get("artifact_type") == "deposited_result_table"),
+            (
+                f
+                for f in (evidence.get("deposit") or {}).get("files") or []
+                if f.get("artifact_type") == "deposited_result_table"
+            ),
             None,
         )
         if table is None or plan is None:
@@ -1718,19 +1724,25 @@ class ValidationDriverService:
             evidence["author_consistency"] = {"records": [], "table": table.get("filename"), "reason": str(exc)[:300]}
             return
         rows = (
-            await session.execute(
-                select(ComparisonTarget)
-                .where(ComparisonTarget.reproduction_plan_id == plan.id)
-                .order_by(ComparisonTarget.id)
+            (
+                await session.execute(
+                    select(ComparisonTarget)
+                    .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                    .order_by(ComparisonTarget.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         selected = ((plan.analysis_selection_json or {}).get("current") or {}).get("contrast_index")
         records = []
         for item in claim_predicates(list(rows), plan):
             if selected is not None and item["predicate"].get("contrast_index") != selected:
                 continue
             record = check_claim(
-                {}, item["predicate"], {"name": table.get("filename"), "text": text, "source": "deposit"},
+                {},
+                item["predicate"],
+                {"name": table.get("filename"), "text": text, "source": "deposit"},
                 contrast=item["contrast"],
             )
             record.pop("predicate", None)
@@ -1739,7 +1751,14 @@ class ValidationDriverService:
 
     @staticmethod
     async def _map_from_input_choice(
-        session: AsyncSession, study: ValidationStudy, evidence: dict, plan, design: dict, inspection: dict, matrix: dict, choice: dict
+        session: AsyncSession,
+        study: ValidationStudy,
+        evidence: dict,
+        plan,
+        design: dict,
+        inspection: dict,
+        matrix: dict,
+        choice: dict,
     ) -> bool | None:
         """change_7.5 section 3.3: validate the proposed mapping against the acquired matrix's columns
         and rewrite the selected contrast from it. None when the design is rewritten; otherwise the
@@ -1755,7 +1774,9 @@ class ValidationDriverService:
             validate_mapping,
         )
 
-        selected, _ = selected_contrast_for(design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy)
+        selected, _ = selected_contrast_for(
+            design, pipeline_key=plan.pipeline_key, library_strategy=plan.library_strategy
+        )
         contrast = design["contrasts"][selected] if selected is not None else {}
         experiment = _plan_experiment(plan)
         records = scoped_records(evidence.get("sample_manifest") or [], experiment)
@@ -1765,7 +1786,10 @@ class ValidationDriverService:
             cfg = await llm_provider_config_service.get_for_feature(
                 session, study.organization_id, FEATURE_LITERATURE_VALIDATION
             )
-            if cfg is not None and ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) == AUTONOMY_AUTONOMOUS:
+            if (
+                cfg is not None
+                and ((org.lit_validation_autonomy if org else None) or AUTONOMY_ASSISTED) == AUTONOMY_AUTONOMOUS
+            ):
                 issues: list[dict] = []
                 current = (plan.analysis_selection_json or {}).get("current") or {}
                 proposal = await propose_mapping(
@@ -2192,6 +2216,9 @@ class ValidationDriverService:
         # invisible to the code whose whole job is to use it.
         targets = [
             {
+                # plan_8 section 4: which claim each comparison row is about, so the scorecard places a
+                # row on its finding by identity rather than by position.
+                "id": t.id,
                 "metric_key": t.metric_key,
                 "claim_text": t.claim_text,
                 "claimed_value": t.claimed_value,
