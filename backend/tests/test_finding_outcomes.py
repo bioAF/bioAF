@@ -487,3 +487,20 @@ class TestWhyAFindingHasNoConclusiveResult:
     def test_a_declined_or_errored_study(self, state, status):
         f1 = _outcomes(_INVENTORY, _TWO, _plan(claim=0), {}, study={"state": state})["F1"]
         assert f1["status"] == status
+
+
+class TestRepeatedRunsCountOnce:
+    def test_an_earlier_run_of_the_same_finding_kept_as_history_adds_nothing(self):
+        attribution = {"our_side": "cleared", "reasons": []}
+        evidence = _evidence("diverge", attribution=attribution)
+        # The earlier revision's run agreed; it is history, and only the current run counts.
+        evidence["selection_history"] = [
+            {
+                "revision": 1,
+                "artifacts": {"level3_result": {"concordance": _concordance("agree")}},
+                "invalidated_by": ["input"],
+            }
+        ]
+        outcomes = _outcomes(_INVENTORY, _TWO, _plan(), evidence)
+        assert outcomes["F1"]["status"] == DISCREPANCY
+        assert len(outcomes["F1"]["subchecks"]) == 1
