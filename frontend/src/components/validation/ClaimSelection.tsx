@@ -142,7 +142,10 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                 {claim.consistency && (
                   <div className="mt-1 text-xs">
                     <span className={CONSISTENCY_CLASS[claim.consistency.outcome ?? ""] ?? "text-gray-700"}>
-                      {claim.consistency.label}
+                      {claim.consistency.label ??
+                        (claim.consistency.check_state_label
+                          ? `Consistency with the authors' results: ${claim.consistency.check_state_label}`
+                          : null)}
                     </span>
                     {claim.consistency.table && <span className="text-gray-500"> ({claim.consistency.table})</span>}
                     {claim.consistency.rows_passing !== null && claim.consistency.rows_passing !== undefined && (

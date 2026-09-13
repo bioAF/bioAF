@@ -107,3 +107,36 @@ describe("ClaimSelection anchors (plan_8 section 6)", () => {
     expect(screen.getByTestId("claim-1")).toHaveAttribute("id", "claim-1");
   });
 });
+
+// plan_8_1 section 3.2: a claim's own consistency record, while it waits in the queue.
+describe("a claim's consistency record", () => {
+  it("says the check is pending before it has an outcome", () => {
+    const pending = {
+      ...stage2,
+      claims: stage2.claims.map((claim, i) =>
+        i === 0
+          ? {
+              ...claim,
+              consistency: {
+                outcome: null,
+                label: null,
+                reason: null,
+                table: "results.txt.gz",
+                source: "deposit",
+                rows_tested: null,
+                rows_passing: null,
+                rows_missing: null,
+                count_range: null,
+                candidates: [],
+                assumptions: [],
+                check_state: "pending",
+                check_state_label: contract.enums.check_state.pending,
+              },
+            }
+          : claim,
+      ),
+    } as unknown as ReportSummary;
+    render(<ClaimSelection summary={pending} />);
+    expect(screen.getByText("Consistency with the authors' results: Pending")).toBeInTheDocument();
+  });
+});

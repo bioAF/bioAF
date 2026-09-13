@@ -73,6 +73,16 @@ REFERENCE_STATUS_LABELS = {
     "unstated": "Not stated",
 }
 # change_7.5 section 4, pending the owner's sign-off item by item (7.4 section 3.2's tiers).
+# plan_8_1 section 3.2, pending the owner's sign-off: a check record's state.
+CHECK_STATE_LABELS = {
+    "pending": "Pending",
+    "running": "Running",
+    "done": "Done",
+    "blocked": "Blocked",
+    "unresolved": "Unresolved",
+    "interrupted": "Interrupted",
+    "superseded": "Superseded",
+}
 CONSISTENCY_LABELS = {
     "agree": "Consistent with the authors' deposited results",
     "disagree": "Differs from the authors' results",
@@ -184,6 +194,7 @@ def enum_labels() -> dict[str, dict[str, str]]:
         "reference_status": dict(REFERENCE_STATUS_LABELS),
         "selection": {"selected": SELECTED_LABEL, "unassessed": UNASSESSED_LABEL},
         "consistency": dict(CONSISTENCY_LABELS),
+        "check_state": dict(CHECK_STATE_LABELS),
         "tier": dict(TIER_LABELS),
         "role": dict(ROLE_LABELS),
         "retrieval_status": dict(RETRIEVAL_LABELS),
@@ -204,10 +215,13 @@ def summarize(
     plan: dict | None,
     targets: list[dict] | None,
     issues: list[dict] | None,
+    checks: list[dict] | None = None,
 ) -> dict:
     """The report, as one set of statements every surface renders.
 
     ``study`` carries ``state``, ``classification``, ``analysis_run_id`` and ``data_run_id``.
+    ``checks`` are the study's check records (plan_8_1 section 3.2); a study made before them has none,
+    and renders from its single-slot artifacts as it always did.
     """
     evidence = evidence or {}
     plan = plan or {}
@@ -220,7 +234,7 @@ def summarize(
     completion = evidence.get("completion") or {}
     uninspected = any(a["inspection"]["status"] != "inspected" for a in artifacts)
     limitations = _limitations(completion, uninspected=uninspected)
-    claims, counts = _claims(targets, plan, evidence)
+    claims, counts = _claims(targets, plan, evidence, checks=checks)
     reconciliation = _reconciliation(evidence)
     headline = _headline(study, attempt)
     # plan_8_1 section 1.4: the one rule, applied to this study's current plan.
@@ -620,10 +634,39 @@ def _consistency_row(record: dict) -> dict:
     }
 
 
-def _claim_consistency(index: int, target: dict, contrasts: list[dict], evidence: dict) -> dict | None:
-    """The claim checked against the authors' results: the table identified with the input first, then
-    the one results supplement checked for it, then the supplement whose own columns name its contrast.
-    Several candidate tables and none naming the contrast is not established."""
+def _record_consistency(record: dict) -> dict:
+    """plan_8_1 section 3.3: a claim's consistency from its own check record."""
+    outcome = record.get("outcome") or {}
+    state = record.get("state")
+    row = _consistency_row(outcome) if outcome else _consistency_row({})
+    if not outcome:
+        row["reason"] = None
+    row.update(
+        check_state=state,
+        check_state_label=CHECK_STATE_LABELS.get(state, state),
+        table=row.get("table") or ((record.get("dependencies") or {}).get("table") or {}).get("name"),
+        identified_by=(record.get("dependencies") or {}).get("identified_by"),
+        revision=record.get("revision"),
+    )
+    if (
+        not outcome.get("candidates")
+        and (record.get("dependencies") or {}).get("candidates")
+        and row["outcome"] == "unresolved"
+    ):
+        row["candidates"] = [{"interpretation": name, "count": None} for name in record["dependencies"]["candidates"]]
+    return row
+
+
+def _claim_consistency(
+    index: int, target: dict, contrasts: list[dict], evidence: dict, *, checks: list[dict] | None = None
+) -> dict | None:
+    """The claim checked against the authors' results: the claim's own check record when the study has
+    them (plan_8_1 section 3.3); otherwise, for a study made before them, the table identified with the
+    input first, then the one results supplement checked for it, then the supplement whose own columns
+    name its contrast. Several candidate tables and none naming the contrast is not established."""
+    for record in checks or []:
+        if record.get("kind") == "author_results" and record.get("comparison_target_id") == target.get("id"):
+            return _record_consistency(record)
     for record in (evidence.get("author_consistency") or {}).get("records") or []:
         if isinstance(record, dict) and record.get("claim_index") == index:
             return _consistency_row(record)
@@ -1195,7 +1238,9 @@ def _tested_count(evidence: dict) -> int:
     return tested
 
 
-def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict], dict]:
+def _claims(
+    targets: list[dict], plan: dict, evidence: dict, *, checks: list[dict] | None = None
+) -> tuple[list[dict], dict]:
     from app.services.validation_claim_cutoffs import claim_cutoff_words
 
     assessment = evidence.get("assessment") or {}
@@ -1267,7 +1312,7 @@ def _claims(targets: list[dict], plan: dict, evidence: dict) -> tuple[list[dict]
                 # change_7.5 section 3.1: the claim's statistical definition, in words.
                 "predicate": _predicate_words(target, contrasts, plan),
                 # change_7.5 section 4: the authors' results and the reanalysis, on the claim itself.
-                "consistency": _claim_consistency(position, target, contrasts, evidence),
+                "consistency": _claim_consistency(position, target, contrasts, evidence, checks=checks),
                 "result": _claim_result(position, target, contrasts, evidence),
             }
         )
@@ -1481,12 +1526,16 @@ async def report_summary_for(session, study, org_id: int) -> dict:
         )
         targets = [target_dict(t) for t in rows]
         plan_dict = plan_projection(plan)
+    from app.services.validation_check_queue import record_dict, records_for
+
+    checks = [record_dict(r) for r in await records_for(session, study.id)] if plan is not None else []
     return summarize(
         study=study_projection(study),
         evidence=study.evidence_json,
         plan=plan_dict,
         targets=targets,
         issues=await ValidationIssueService.list_for_study(session, study.id, org_id),
+        checks=[c for c in checks if plan is not None and c.get("check_id", "").startswith(f"plan:{plan.id}:")],
     )
 
 

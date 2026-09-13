@@ -781,6 +781,11 @@ async def _validation_driver_loop():
                 advanced = await ValidationDriverService.advance_active_studies(session)
                 if advanced:
                     logger.info("Validation driver loop: advanced %d studies", advanced)
+            # plan_8_1 section 3.1: the checks that launch no workflow run from their own queue.
+            async with async_session_factory() as session:
+                checked = await ValidationDriverService.advance_check_queue(session)
+                if checked:
+                    logger.info("Validation driver loop: concluded %d queued checks", checked)
         except asyncio.CancelledError:
             break
         except Exception as e:

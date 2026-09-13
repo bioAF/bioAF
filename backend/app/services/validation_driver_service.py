@@ -783,10 +783,68 @@ class ValidationDriverService:
     async def _inventory_then_conclude(
         session: AsyncSession, study, plan, full_text: str, org_id: int, user_id: int, *, checkpoint
     ) -> ValidationStudy:
-        """plan_8_1 section 2.1, step two: group the committed claims, then plan_ready or the early exit."""
+        """plan_8_1 section 2.1, step two: group the committed claims, then plan_ready or the early exit.
+        Section 3.3: every claim with an identified table is queued for a consistency check."""
         result = await ValidationDriverService._group_claims(session, study, plan, full_text, checkpoint=checkpoint)
         await ValidationDriverService._land_inventory(session, study, plan, result)
+        await ValidationDriverService._enqueue_checks(session, study, plan)
         return await ValidationDriverService._conclude_read(session, study, plan, org_id, user_id)
+
+    @staticmethod
+    async def _enqueue_checks(session: AsyncSession, study, plan) -> None:
+        """plan_8_1 section 3.3: a pending consistency record for every claim with an identified table.
+        Idempotent, and it never fails the step it rides on."""
+        from app.services.validation_consistency_checks import enqueue
+
+        try:
+            await enqueue(session, study, plan)
+        except Exception:  # noqa: BLE001 - a check that cannot be queued is not a reason to fail a read
+            logger.exception("study %s: consistency checks could not be queued", study.id)
+
+    @staticmethod
+    async def advance_check_queue(session: AsyncSession, *, fetcher=None, limit: int = 5) -> int:
+        """plan_8_1 section 3.1: run the pending checks that launch no analysis workflow, within bioAF's
+        limits for checks before approval. A study being read, or held by another worker, waits for a
+        later tick. Records only: a study's state and evidence are never touched here."""
+        from app.models.validation_check_record import ValidationCheckRecord
+        from app.services import validation_check_queue as queue
+        from app.services.validation_assessment import active_plan
+        from app.services.validation_consistency_checks import run_pending
+
+        ids = list(
+            (
+                await session.execute(
+                    select(ValidationCheckRecord.validation_study_id)
+                    .join(ValidationStudy, ValidationStudy.id == ValidationCheckRecord.validation_study_id)
+                    .where(
+                        ValidationCheckRecord.kind == queue.AUTHOR_RESULTS,
+                        ValidationCheckRecord.state == queue.PENDING,
+                        ValidationStudy.state.not_in(("requested", "acquiring_text", "reading")),
+                    )
+                    .distinct()
+                    .limit(limit)
+                )
+            ).scalars()
+        )
+        ran = 0
+        for study_id in ids:
+            try:
+                async with owned(session, study_id, holder="check_queue") as claim:
+                    if claim is None:
+                        continue
+                    study = (
+                        await session.execute(select(ValidationStudy).where(ValidationStudy.id == study_id))
+                    ).scalar_one_or_none()
+                    plan = await active_plan(session, study) if study is not None else None
+                    if plan is None:
+                        continue
+                    ran += await run_pending(session, study, plan, fetcher=fetcher)
+                    await assert_held(session, claim)
+                    await session.commit()
+            except Exception:
+                logger.exception("validation study %d: consistency checks failed", study_id)
+                await session.rollback()
+        return ran
 
     @staticmethod
     async def _conclude_read(session: AsyncSession, study, plan, org_id: int, user_id: int) -> ValidationStudy:
