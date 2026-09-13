@@ -1426,6 +1426,9 @@ def _scorecard_item(item: dict[str, Any]) -> list[str]:
     lines = [line]
     if item.get("rationale"):
         lines.append(f"  - Importance: {item['rationale']}")
+    # plan_8_1 section 2.3: a finding whose importance is not validated is listed with its problem.
+    if item.get("importance_problem"):
+        lines.append(f"  - Importance not established: {item['importance_problem']}")
     lines.extend(f"  - {check['text']}" for check in item.get("supporting_checks") or [])
     return lines
 
@@ -1456,13 +1459,17 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
             ["Overall score", "Assessed scope"],
             [
                 [
-                    card.get("score_label") or "-- (not assessed)",
+                    card.get("score_label") or card.get("score_status_label") or "-- (not assessed)",
                     card.get("scope_label") or card.get("status_label") or "--",
                 ]
             ],
         )
     )
     parts.append("")
+    # plan_8_1 section 2.3: a provisional scope says why, as the page does.
+    if card.get("provisional_note"):
+        parts.append(f"Provisional: {card['provisional_note']}")
+        parts.append("")
     if card.get("summary"):
         parts.append(card["summary"])
         parts.append("")

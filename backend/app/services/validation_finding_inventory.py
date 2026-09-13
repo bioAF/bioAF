@@ -40,8 +40,18 @@ from app.services.validation_scorecard import (
 ESTABLISHED = "established"
 UNRESOLVED = "unresolved"
 NOT_APPLICABLE = "not_applicable"
+# plan_8_1 section 2.3: membership is established and some finding's importance is not validated. The
+# scope stands, marked provisional; it never satisfies anything that requires an established one.
+PROVISIONAL = "provisional"
 
 VALIDATED = "validated"
+# plan_8_1 section 2.3: a valid category whose support failed (no rationale, a quote not found, a weight
+# of the model's own), and no valid category at all.
+PROPOSED = "proposed"
+UNKNOWN = "unknown"
+
+MEMBERSHIP_ESTABLISHED = "established"
+MEMBERSHIP_NOT_ESTABLISHED = "not_established"
 
 # The category names a proposal may use: the rubric's short names and its full wording.
 _CATEGORY_NAMES = {
@@ -118,7 +128,7 @@ def _importance(raw: dict, *, decided_by: dict, full_text: str | None) -> dict:
         "weight": weight,
         "rationale": rationale or None,
         "quote": quote,
-        "status": VALIDATED if not problems else UNRESOLVED,
+        "status": VALIDATED if not problems else (PROPOSED if category else UNKNOWN),
         "problem": "; ".join(problems) or None,
         "decided_by": decided_by.get("kind") or "model",
         "model": decided_by.get("model"),
@@ -126,19 +136,44 @@ def _importance(raw: dict, *, decided_by: dict, full_text: str | None) -> dict:
     }
 
 
+def _sentence(reasons: list[str]) -> str | None:
+    if not reasons:
+        return None
+    sentence = "; ".join(reasons)
+    return sentence[0].upper() + sentence[1:] + "."
+
+
 def _settle(inventory: dict) -> dict:
-    """The inventory's status and reason, from its findings and its unplaced claims."""
-    open_findings = [f for f in inventory["findings"] if f["importance"]["status"] != VALIDATED]
-    reasons = [f"the importance of {f['id']} is not established: {f['importance']['problem']}" for f in open_findings]
+    """The inventory's status and reason, from its findings' membership and importance.
+
+    plan_8_1 section 2.3: membership decides whether there is a denominator at all; importance only
+    whether the scope is provisional. Unresolved membership is "Scope not established"; importance not
+    validated is a provisional scope, never a blank one.
+    """
+    membership = []
+    if inventory.get("_unreadable"):
+        membership.append(inventory.pop("_unreadable"))
+    for finding in inventory["findings"]:
+        finding.setdefault("membership", {"status": MEMBERSHIP_ESTABLISHED, "problems": []})
+        if finding["membership"]["status"] != MEMBERSHIP_ESTABLISHED:
+            membership.append(f"{finding['id']}: {'; '.join(finding['membership']['problems'])}")
     unplaced = inventory.get("unplaced_claims") or []
     if unplaced:
-        reasons.append(f"{_claim_numbers(unplaced)} {'belongs' if len(unplaced) == 1 else 'belong'} to no finding")
-    if inventory.get("_unreadable"):
-        reasons.insert(0, inventory.pop("_unreadable"))
-    if reasons:
+        membership.append(f"{_claim_numbers(unplaced)} {'belongs' if len(unplaced) == 1 else 'belong'} to no finding")
+    inventory["membership"] = {
+        "status": MEMBERSHIP_NOT_ESTABLISHED if membership else MEMBERSHIP_ESTABLISHED,
+        "reason": _sentence(membership),
+    }
+    open_findings = [f for f in inventory["findings"] if f["importance"]["status"] != VALIDATED]
+    importance = [
+        f"the importance of {f['id']} is not established: {f['importance']['problem']}" for f in open_findings
+    ]
+    if membership:
         inventory["status"] = UNRESOLVED
-        sentence = "; ".join(reasons)
-        inventory["reason"] = sentence[0].upper() + sentence[1:] + "."
+        inventory["reason"] = _sentence(membership + importance)
+    elif open_findings:
+        inventory["status"] = PROVISIONAL
+        inventory["reason"] = _sentence(importance)
     elif not any(f["importance"]["weight"] for f in inventory["findings"]):
         inventory["status"] = NOT_APPLICABLE
         inventory["reason"] = (
@@ -204,9 +239,12 @@ def inventory_from_proposal(
             placed[target] = finding_id
         if not claims and not problems:
             problems.append("it holds none of the paper's claims")
-        if problems:
-            joined = "; ".join(p for p in (importance["problem"], *problems) if p)
-            importance.update(status=UNRESOLVED, problem=joined)
+        # plan_8_1 section 2.3: where a finding's claims sit is its membership, recorded apart from its
+        # importance, so a misplaced claim never makes a validated importance look unvalidated.
+        membership = {
+            "status": MEMBERSHIP_NOT_ESTABLISHED if problems else MEMBERSHIP_ESTABLISHED,
+            "problems": problems,
+        }
         members = [targets[i] for i in claims if 0 <= i < len(targets)]
         locators = list(
             dict.fromkeys(_text(t.get("source_locator")) for t in members if _text(t.get("source_locator")))
@@ -224,6 +262,7 @@ def inventory_from_proposal(
                 "claim_indices": claims,
                 "required": list(claims),
                 "prerequisite_for": [],
+                "membership": membership,
                 "importance": importance,
                 "criteria": dict(CRITERIA),
             }

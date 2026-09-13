@@ -175,3 +175,35 @@ describe("the states that are not a score", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+// plan_8_1 section 2.3: importance uncertainty marks the scope provisional; it never blanks it.
+describe("a provisional scope", () => {
+  const provisional = card("scorecard_provisional");
+  const pending = card("scorecard_score_pending");
+
+  it("shows the scope as provisional and says why", () => {
+    render(<ValidationScorecard scorecard={provisional} />);
+    expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("1 / 2 assessed (provisional)");
+    expect(screen.getByTestId("scorecard-provisional-note")).toHaveTextContent(provisional.provisional_note as string);
+  });
+
+  it("keeps the score when no assessed finding lacks an established importance", () => {
+    render(<ValidationScorecard scorecard={provisional} />);
+    expect(screen.getByTestId("scorecard-score")).toHaveTextContent("100 / 100");
+  });
+
+  it("withholds the score while an assessed finding's importance is not established", () => {
+    render(<ValidationScorecard scorecard={pending} />);
+    expect(screen.getByTestId("scorecard-score")).toHaveTextContent("Score pending importance review");
+  });
+
+  it("warns that a finding of unestablished importance could be primary", () => {
+    render(<ValidationScorecard scorecard={provisional} />);
+    expect(screen.getByText("1 unassessed finding has no established importance; it could be primary.")).toBeInTheDocument();
+  });
+
+  it("lists the finding with its problem", () => {
+    render(<ValidationScorecard scorecard={provisional} />);
+    expect(screen.getByText(/its quote is not in the paper's text/)).toBeInTheDocument();
+  });
+});

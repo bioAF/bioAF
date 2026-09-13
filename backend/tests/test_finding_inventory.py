@@ -10,6 +10,7 @@ import pytest
 from app.services.validation_finding_inventory import (
     ESTABLISHED,
     NOT_APPLICABLE,
+    PROVISIONAL,
     UNRESOLVED,
     inventory_from_proposal,
     revise_importance,
@@ -152,9 +153,11 @@ class TestAProposalTheRubricCannotValidate:
         proposal = _proposal()
         proposal[1]["weight"] = 3
         inventory = _inventory(proposal)
-        assert inventory["status"] == UNRESOLVED
+        # plan_8_1 section 2.3: an importance the rubric cannot validate is proposed, and the scope is
+        # provisional rather than unestablished.
+        assert inventory["status"] == PROVISIONAL
         status, problem = self._problem(inventory, "F2")
-        assert status == "unresolved"
+        assert status == "proposed"
         assert "weight" in problem
         # The finding keeps the rubric's weight for its category, never the model's number.
         assert inventory["findings"][1]["importance"]["weight"] == 1
@@ -168,9 +171,9 @@ class TestAProposalTheRubricCannotValidate:
         proposal = _proposal()
         proposal[1]["importance"] = "major"
         inventory = _inventory(proposal)
-        assert inventory["status"] == UNRESOLVED
+        assert inventory["status"] == PROVISIONAL
         status, problem = self._problem(inventory, "F2")
-        assert status == "unresolved"
+        assert status == "unknown"
         assert "major" in problem
         assert inventory["findings"][1]["importance"]["weight"] is None
 
@@ -178,18 +181,18 @@ class TestAProposalTheRubricCannotValidate:
         proposal = _proposal()
         proposal[0]["quote"] = "a sentence the paper never wrote"
         inventory = _inventory(proposal)
-        assert inventory["status"] == UNRESOLVED
+        assert inventory["status"] == PROVISIONAL
         assert "quote" in self._problem(inventory, "F1")[1]
 
     def test_a_scoreable_finding_without_a_quote_is_unresolved(self):
         proposal = _proposal()
         del proposal[1]["quote"]
-        assert _inventory(proposal)["status"] == UNRESOLVED
+        assert _inventory(proposal)["status"] == PROVISIONAL
 
     def test_a_finding_without_a_rationale_is_unresolved(self):
         proposal = _proposal()
         proposal[2]["rationale"] = "  "
-        assert _inventory(proposal)["status"] == UNRESOLVED
+        assert _inventory(proposal)["status"] == PROVISIONAL
 
     def test_a_claim_in_no_finding_is_never_silently_omitted(self):
         proposal = _proposal()[:2]
@@ -203,7 +206,8 @@ class TestAProposalTheRubricCannotValidate:
         proposal[1]["claim_indices"] = [1, 2]
         inventory = _inventory(proposal)
         assert inventory["status"] == UNRESOLVED
-        assert "claim 2" in self._problem(inventory, "F2")[1]
+        # plan_8_1 section 2.3: where a claim sits is the finding's membership, not its importance.
+        assert "claim 2" in "; ".join(inventory["findings"][1]["membership"]["problems"])
 
     def test_the_reason_names_every_finding_whose_importance_is_open(self):
         proposal = _proposal()
@@ -282,7 +286,7 @@ class TestAJustifiedCorrectionIsARevision:
             reason="resolving the open importance",
             decided_by={"kind": "person", "user_id": 7},
         )
-        assert before["status"] == UNRESOLVED
+        assert before["status"] == PROVISIONAL
         assert after["status"] == ESTABLISHED
         assert after["reason"] is None
 

@@ -35,9 +35,10 @@ const STATUS_ICON: Record<string, string> = {
 const METRIC_VALUE = "text-3xl font-semibold tabular-nums text-ink";
 
 function scoreLabel(card: ValidationScorecardData): string {
-  return card.display_score === null || card.display_score === undefined
-    ? "Overall score: not assessed"
-    : `Overall score: ${card.display_score} out of 100`;
+  if (card.display_score === null || card.display_score === undefined) {
+    return card.score_status_label ? `Overall score: ${card.score_status_label}` : "Overall score: not assessed";
+  }
+  return `Overall score: ${card.display_score} out of 100`;
 }
 
 function scopeLabel(card: ValidationScorecardData): string {
@@ -73,10 +74,13 @@ function FindingRow({ item }: { item: ScorecardItem }) {
           {check.text}
         </p>
       ))}
-      {item.rationale && (
+      {item.rationale && !item.importance_problem && (
         <p className="mt-0.5 text-xs text-gray-500">
           {item.category_label} because: {item.rationale}
         </p>
+      )}
+      {item.importance_problem && (
+        <p className="mt-0.5 text-xs text-gray-600">Importance not established: {item.importance_problem}</p>
       )}
     </li>
   );
@@ -134,7 +138,12 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <dd data-testid="scorecard-score" aria-label={scoreLabel(card)} className={METRIC_VALUE}>
-            {card.score_label ?? NOT_SET}
+            {card.score_label ??
+              (card.score_status_label ? (
+                <span className="text-base font-medium text-gray-700">{card.score_status_label}</span>
+              ) : (
+                NOT_SET
+              ))}
           </dd>
           <dt className="text-xs uppercase tracking-wide text-gray-500">Overall score</dt>
         </div>
@@ -147,6 +156,12 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
       </dl>
 
       {unestablished && card.reason && <p className="mt-3 text-sm text-gray-700">{card.reason}</p>}
+      {/* plan_8_1 section 2.3: a provisional scope says why its total may fall. */}
+      {card.provisional_note && (
+        <p data-testid="scorecard-provisional-note" className="mt-3 text-sm text-gray-700">
+          Provisional: {card.provisional_note}
+        </p>
+      )}
       {card.unresolved_importance.length > 0 && (
         <ul className="mt-2 list-disc pl-5 text-xs text-gray-600">
           {card.unresolved_importance.map((row) => (

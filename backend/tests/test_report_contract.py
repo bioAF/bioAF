@@ -133,6 +133,10 @@ async def _contract() -> dict:
     )
     not_applicable = qc_scenario(["agree"], ["technical"])
     in_progress = qc_scenario(["agree", "not_computed"], ["primary", "supporting"], state="comparing")
+    # plan_8_1 section 2.3: an unassessed finding of unestablished importance (a provisional scope), and an
+    # assessed one (the score withheld).
+    provisional = qc_scenario(["agree", "not_computed"], ["primary", "supporting"], unquoted=(1,))
+    score_pending = qc_scenario(["agree", "diverge"], ["primary", "supporting"], unquoted=(1,))
     # plan_8_1 sections 1.3 and 1.4: a study shaped like 42 (legacy) and a failed read on this build.
     from tests.test_read_failure_projection import _STUDY_42
 
@@ -172,6 +176,8 @@ async def _contract() -> dict:
                 "scorecard_not_established": not_established,
                 "scorecard_not_applicable": not_applicable,
                 "scorecard_in_progress": in_progress,
+                "scorecard_provisional": provisional,
+                "scorecard_score_pending": score_pending,
                 "failed_read_legacy": failed_read_legacy,
                 "failed_read": failed_read,
             }

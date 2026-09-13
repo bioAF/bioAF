@@ -349,6 +349,9 @@ class TestTheCompactForm:
             "in_progress_label": None,
             "rubric_version": 1,
             "inventory_revision": 1,
+            # plan_8_1 section 2.3: "provisional" reads the same wherever the scope appears.
+            "provisional": False,
+            "score_status_label": None,
             # plan_8_1 section 1.3: the list says what the report says of a card with no score.
             "reason": None,
             "cause": None,

@@ -185,9 +185,13 @@ export interface ScorecardItem {
   finding_id: string;
   description: string | null;
   locator: string | null;
-  category: "primary" | "supporting" | "technical";
+  // plan_8_1 section 2.3: null while the importance is not validated (its proposal is `proposed_category`).
+  category: "primary" | "supporting" | "technical" | null;
+  proposed_category?: string | null;
   category_label: string;
-  weight: number;
+  weight: number | null;
+  importance_status?: "validated" | "proposed" | "unknown";
+  importance_problem?: string | null;
   rationale: string | null;
   quote: string | null;
   claim_indices: number[];
@@ -202,7 +206,7 @@ export interface ScorecardItem {
 }
 
 export interface ScorecardMessage {
-  kind: "primary_discrepancy" | "primary_unassessed";
+  kind: "primary_discrepancy" | "primary_unassessed" | "importance_unestablished";
   text: string;
   findings: string[];
 }
@@ -219,11 +223,15 @@ export interface CompactScorecard {
   primary_discrepancy_count: number | null;
   primary_unassessed_count: number | null;
   // The primary facts a high score must not hide, worded by the backend.
-  indicators: { kind: "primary_discrepancy" | "primary_unassessed"; text: string }[];
+  indicators: { kind: "primary_discrepancy" | "primary_unassessed" | "importance_unestablished"; text: string }[];
   in_progress: boolean;
   in_progress_label: string | null;
   rubric_version: number;
   inventory_revision: number | null;
+  // plan_8_1 section 2.3: a scope whose total holds findings of unestablished importance, and a score
+  // withheld while an assessed finding's importance is open.
+  provisional?: boolean;
+  score_status_label?: string | null;
   // plan_8_1 section 1.3: a card with no score says why and whose limitation that is.
   reason?: string | null;
   cause?: string | null;
@@ -235,6 +243,7 @@ export interface ValidationScorecardData extends CompactScorecard {
   title: string;
   rubric_label: string;
   explanation: string;
+  provisional_note?: string | null;
   inventory_status: string | null;
   analysis_selection_revision?: number | null;
   // Set when the outcomes are the ones recorded when the study concluded.

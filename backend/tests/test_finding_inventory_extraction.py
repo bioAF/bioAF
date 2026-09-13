@@ -131,9 +131,12 @@ class TestTheInventoryIsPersistedOnThePlan:
         assert inventory["reason"]
 
     @pytest.mark.asyncio
-    async def test_a_quote_the_paper_does_not_contain_is_not_established(self, session, admin_user, monkeypatch):
+    async def test_a_quote_the_paper_does_not_contain_leaves_the_scope_provisional(
+        self, session, admin_user, monkeypatch
+    ):
+        """plan_8_1 section 2.3: an importance not validated is a provisional scope, never a blank one."""
         plan = await _extract(session, admin_user, monkeypatch, _READING, text="A different paper entirely.")
-        assert plan.finding_inventory_json["status"] == "unresolved"
+        assert plan.finding_inventory_json["status"] == "provisional"
         assert "quote" in plan.finding_inventory_json["reason"]
 
     @pytest.mark.asyncio

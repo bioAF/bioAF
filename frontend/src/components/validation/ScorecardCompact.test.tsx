@@ -18,3 +18,10 @@ test("a scored card shows no cause line", () => {
   render(<ScorecardCompact scorecard={contract.scorecard_scored.scorecard as unknown as CompactScorecard} />);
   expect(screen.queryByText("bioAF limitation")).not.toBeInTheDocument();
 });
+
+test("the list reads provisional and a withheld score as the report does", () => {
+  const pending = contract.scorecard_score_pending.scorecard as unknown as CompactScorecard;
+  render(<ScorecardCompact scorecard={pending} />);
+  expect(screen.getByText("2 / 2 assessed (provisional)")).toBeInTheDocument();
+  expect(screen.getByText("Score pending importance review")).toBeInTheDocument();
+});
