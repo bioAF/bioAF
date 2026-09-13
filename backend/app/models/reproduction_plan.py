@@ -113,6 +113,10 @@ class ReproductionPlan(Base):
     # change_7.5 section 2.6: the selected (claim, check) and everything chosen from it, as revisions.
     # ``{"current": {...}, "history": [...]}``; a superseded revision is kept, never overwritten.
     analysis_selection_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # plan_8 section 2: the reviewed inventory of the paper's distinct computational findings, each with
+    # its claims, its importance under the fixed rubric and its criteria, as revisions. The Validation
+    # Scorecard's denominator. NULL means the plan predates it, and no score is derived for it.
+    finding_inventory_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Provenance of the AI extraction that produced this plan.
     extractor_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
