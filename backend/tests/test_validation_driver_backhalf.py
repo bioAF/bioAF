@@ -1091,3 +1091,42 @@ async def test_only_the_selected_contrast_s_picks_are_required(session, admin_us
     assert contrasts[1]["test_samples"] == ["GSM_A_SRR1"]
     # The unselected contrast stays in the plan untouched.
     assert contrasts[0]["test_samples"] == ["SRX7"]
+
+
+@pytest.mark.asyncio
+async def test_the_evidence_copy_of_each_claim_carries_its_target_id(session, admin_user, monkeypatch):
+    """plan_8 section 4: a QC comparison row belongs to one claim. The rows follow the evidence's copy
+    of the targets, and the scorecard places them on findings by the target's id."""
+
+    async def _fake_get(session, org_id, run_id):
+        return SimpleNamespace(id=7, status="ready", metrics_json={"total_sequences": 5})
+
+    monkeypatch.setattr(QCDashboardService, "get_dashboard_by_run", _fake_get)
+    exp_id = await _experiment_id(session, admin_user)
+    study = await _study(session, admin_user, state="extracting", experiment_id=exp_id)
+    analysis = await _run(session, admin_user, exp_id, name="nf-core/rnaseq", status="completed")
+    study.analysis_run_id = analysis.id
+    plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    await ReproductionPlanService.add_comparison_targets(
+        session,
+        plan,
+        [
+            {"metric_key": "total_sequences", "claim_text": "reads", "claimed_value": 5},
+            {"metric_key": "peak_count", "claim_text": "peaks", "claimed_value": 9},
+        ],
+    )
+    await session.flush()
+    # The targets were written after the plan's collection was loaded; read them as a new tick would.
+    session.expire(plan, ["comparison_targets"])
+
+    await ValidationDriverService._handle_extracting(session, study)
+
+    ids = [
+        row.id
+        for row in (
+            await session.execute(
+                text("select id from comparison_targets where reproduction_plan_id = :p order by id"), {"p": plan.id}
+            )
+        )
+    ]
+    assert sorted(t["id"] for t in study.evidence_json["comparison_targets"]) == ids
