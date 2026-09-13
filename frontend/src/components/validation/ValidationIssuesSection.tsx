@@ -37,6 +37,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   // change_7.2 section 7: an answer cut off at the token limit is its own event. Reporting it as
   // badly formatted is a true statement about the text and a false one about what happened.
   truncated: "the model's answer was cut off at its token limit",
+  // plan_8_1 section 1.1: a raised budget can run past the time limit, and that is not a truncation.
+  timed_out: "the model's answer did not finish within bioAF's time limit",
   // change_7.3 section 9: failures that are not a model's.
   retrieval_failed: "bioAF could not retrieve a file it needed",
   not_performed: "this step could not run",

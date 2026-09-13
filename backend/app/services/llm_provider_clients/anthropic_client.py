@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import time
 
 import httpx
 
-from app.services.llm_provider_clients import ProviderError
-from app.services.llm_provider_clients.transport import refusal, request_with_retry
+from app.services.llm_provider_clients import ModelAnswer, ProviderError, as_int
+from app.services.llm_provider_clients.transport import (
+    MAX_ATTEMPTS,
+    backoff_seconds,
+    is_retryable,
+    refusal,
+    request_with_retry,
+)
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
 logger = logging.getLogger("bioaf.llm.anthropic")
@@ -20,6 +29,19 @@ _BASE_URL = "https://api.anthropic.com/v1"
 # routinely timed out experiment-scope reviews. Connect stays at 10s.
 _TIMEOUT = httpx.Timeout(300.0, connect=10.0)
 _API_VERSION = "2023-06-01"
+
+# What a call that names no budget sends, as it always has.
+DEFAULT_MAX_TOKENS = 4096
+
+# plan_8_1 section 1.1: a call that names its own budget is streamed. A 16,000-token answer from an
+# Opus-class model takes minutes, and a request that sends nothing back until it has finished runs into
+# the 300 s read timeout above, or an idle connection dropped along the way. A stream sends text and
+# pings throughout, so the read timeout only ever measures a stall. This bounds the whole answer.
+STREAM_DEADLINE_SECONDS = 900.0
+
+# Mid-stream error events that are the provider's own transient failure, retried within the transport
+# policy exactly as a 429 or a 5xx before the stream would be.
+_RETRYABLE_STREAM_ERRORS = ("overloaded_error", "api_error", "rate_limit_error")
 
 
 def _transport_detail(exc: httpx.HTTPError) -> str:
@@ -70,22 +92,70 @@ async def submit(
     model: str,
     api_key: str | None,
     attachments: list[dict] | None = None,
-) -> str:
+    max_tokens: int | None = None,
+) -> ModelAnswer:
+    """One answer. ``max_tokens`` omitted sends 4096, as always; given, it is sent and the call streams."""
     if not api_key:
         raise ProviderError("Anthropic requires an API key", error_class="auth")
-    body = {
+    body: dict = {
         "model": model,
-        "max_tokens": 4096,
+        "max_tokens": max_tokens if max_tokens is not None else DEFAULT_MAX_TOKENS,
         "system": prompt,
         "messages": [{"role": "user", "content": payload}],
     }
     logger.info(
-        "anthropic submit: model=%s prompt_chars=%d payload_chars=%d",
+        "anthropic submit: model=%s prompt_chars=%d payload_chars=%d max_tokens=%d streamed=%s",
         model,
         len(prompt),
         len(payload),
+        body["max_tokens"],
+        max_tokens is not None,
     )
+    if max_tokens is not None:
+        body["stream"] = True
+        text, output_tokens, input_tokens, stop_reason = await _streamed(body, api_key)
+    else:
+        text, output_tokens, input_tokens, stop_reason = await _unstreamed(body, api_key)
+    logger.info(
+        "anthropic submit usage: model=%s output_tokens=%s input_tokens=%s stop_reason=%s",
+        model,
+        output_tokens,
+        input_tokens,
+        stop_reason or "unknown",
+    )
+    return _answer(text, output_tokens=output_tokens, input_tokens=input_tokens, stop_reason=stop_reason)
 
+
+def _answer(text: str, *, output_tokens: int | None, input_tokens: int | None, stop_reason: str | None) -> ModelAnswer:
+    """The answer, or the typed failure its stop reason says it is."""
+    stop = (stop_reason or "").lower()
+    # A safety block comes back 200 with `stop_reason: "refusal"` and the refusal prose as an
+    # ordinary text block. Nothing read the field, so the caller saw prose with no fenced JSON in it
+    # and reported an unparseable answer, which is a true statement about the text and a false one
+    # about what happened.
+    if stop == "refusal":
+        raise refusal(text or "the model declined to answer")
+    # change_7.2 section 7: a capped answer is not an unparseable one. `max_tokens` returns a
+    # well-formed prefix that stops mid-JSON, and reporting it as "the model's answer was not in the
+    # format bioAF asked for" is a true statement about the text and a false one about what happened.
+    # That is the same misreading the refusal handling above was written to eliminate.
+    # plan_8_1 section 1.2: the prefix travels with the failure, for diagnosis only.
+    if stop == "max_tokens":
+        raise ProviderError(
+            "the model's answer was cut off at the token limit before it finished",
+            error_class="truncated",
+            text=text,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+        )
+    # No text at all is the same event by a different route. An empty string would be reported as
+    # unparseable for the same wrong reason.
+    if not text:
+        raise refusal("the model returned no content")
+    return ModelAnswer(text, output_tokens=output_tokens, input_tokens=input_tokens, stop_reason=stop_reason)
+
+
+async def _unstreamed(body: dict, api_key: str) -> tuple[str, int | None, int | None, str | None]:
     async def _send():
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             return await client.post(f"{_BASE_URL}/messages", headers=_headers(api_key), json=body)
@@ -99,30 +169,109 @@ async def submit(
         data = resp.json()
         parts = data.get("content", [])
         text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
-    except (ValueError, KeyError, TypeError) as exc:
+        usage = data.get("usage") or {}
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise ProviderError(f"Anthropic message response not parseable: {exc}", error_class="parse") from exc
+    return text, as_int(usage.get("output_tokens")), as_int(usage.get("input_tokens")), data.get("stop_reason")
 
-    # A safety block comes back 200 with `stop_reason: "refusal"` and the refusal prose as an
-    # ordinary text block. Nothing read the field, so the caller saw prose with no fenced JSON in it
-    # and reported an unparseable answer, which is a true statement about the text and a false one
-    # about what happened.
-    stop_reason = str(data.get("stop_reason") or "").lower()
-    if stop_reason == "refusal":
-        raise refusal(text or "the model declined to answer")
-    # change_7.2 section 7: a capped answer is not an unparseable one. `max_tokens` returns a
-    # well-formed prefix that stops mid-JSON, and reporting it as "the model's answer was not in the
-    # format bioAF asked for" is a true statement about the text and a false one about what happened.
-    # That is the same misreading the refusal handling above was written to eliminate.
-    if stop_reason == "max_tokens":
-        raise ProviderError(
-            "the model's answer was cut off at the token limit before it finished",
-            error_class="truncated",
-        )
-    # No text at all is the same event by a different route. An empty string would be reported as
-    # unparseable for the same wrong reason.
-    if not text:
-        raise refusal("the model returned no content")
-    return text
+
+class _StreamState:
+    """What one streamed attempt has received so far. Kept outside the attempt so a timeout can still
+    report the text that arrived."""
+
+    def __init__(self) -> None:
+        self.parts: list[str] = []
+        self.output_tokens: int | None = None
+        self.input_tokens: int | None = None
+        self.stop_reason: str | None = None
+        self.error: dict | None = None
+
+    @property
+    def text(self) -> str:
+        return "".join(self.parts)
+
+    def read(self, data: dict) -> None:
+        kind = data.get("type")
+        if kind == "message_start":
+            usage = (data.get("message") or {}).get("usage") or {}
+            self.input_tokens = as_int(usage.get("input_tokens"))
+        elif kind == "content_block_delta":
+            delta = data.get("delta") or {}
+            if delta.get("type") == "text_delta":
+                self.parts.append(str(delta.get("text") or ""))
+        elif kind == "message_delta":
+            self.stop_reason = (data.get("delta") or {}).get("stop_reason") or self.stop_reason
+            output = as_int((data.get("usage") or {}).get("output_tokens"))
+            self.output_tokens = output if output is not None else self.output_tokens
+        elif kind == "error":
+            self.error = data.get("error") if isinstance(data.get("error"), dict) else {"message": str(data)}
+
+
+async def _stream_once(body: dict, api_key: str, state: _StreamState, deadline: float) -> httpx.Response | None:
+    """One streamed attempt. Returns the response when it failed before streaming, else None."""
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with client.stream("POST", f"{_BASE_URL}/messages", headers=_headers(api_key), json=body) as resp:
+            if resp.status_code >= 400:
+                await resp.aread()
+                return resp
+            async for line in resp.aiter_lines():
+                if time.monotonic() > deadline:
+                    raise TimeoutError
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    data = json.loads(line[len("data:") :].strip())
+                except ValueError:
+                    continue
+                if isinstance(data, dict):
+                    state.read(data)
+                    if state.error is not None:
+                        return None
+    return None
+
+
+async def _streamed(body: dict, api_key: str) -> tuple[str, int | None, int | None, str | None]:
+    """The streamed answer, retried within the transport policy: a 429 or 5xx before the stream, a
+    dropped connection, or the provider's own transient error event mid-stream."""
+    for attempt in range(MAX_ATTEMPTS):
+        state = _StreamState()
+        last = attempt == MAX_ATTEMPTS - 1
+        try:
+            failed = await _stream_once(body, api_key, state, time.monotonic() + STREAM_DEADLINE_SECONDS)
+        except TimeoutError:
+            raise ProviderError(
+                f"the model's answer did not finish within bioAF's limit of {STREAM_DEADLINE_SECONDS:.0f} seconds",
+                error_class="timeout",
+                text=state.text,
+                output_tokens=state.output_tokens,
+                stop_reason=state.stop_reason,
+            ) from None
+        except httpx.HTTPError as exc:
+            detail = _transport_detail(exc)
+            if last:
+                logger.warning("anthropic streamed submit transport failure: %s", detail)
+                raise ProviderError(detail, error_class="transport") from exc
+            logger.warning(
+                "anthropic streamed submit transport failure (attempt %d), retrying: %s", attempt + 1, detail
+            )
+            await asyncio.sleep(backoff_seconds(attempt))
+            continue
+        if failed is not None:
+            logger.warning("anthropic streamed submit non-2xx (%d): %s", failed.status_code, failed.text[:2000])
+            if is_retryable(failed.status_code) and not last:
+                await asyncio.sleep(backoff_seconds(attempt))
+                continue
+            _raise_for_status(failed)
+        if state.error is not None:
+            kind = str(state.error.get("type") or "error")
+            message = str(state.error.get("message") or kind)
+            if kind in _RETRYABLE_STREAM_ERRORS and not last:
+                logger.warning("anthropic stream error event (attempt %d), retrying: %s", attempt + 1, message)
+                await asyncio.sleep(backoff_seconds(attempt))
+                continue
+            raise ProviderError(message, error_class="rate_limit" if kind == "rate_limit_error" else "server")
+        return state.text, state.output_tokens, state.input_tokens, state.stop_reason
+    raise ProviderError("the streamed answer could not be obtained", error_class="transport")  # pragma: no cover
 
 
 def _tools_to_anthropic(tools: list[dict]) -> list[dict]:

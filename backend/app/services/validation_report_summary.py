@@ -121,6 +121,8 @@ ISSUE_OUTCOME_LABELS = {
     "internal": "bioAF hit an internal error",
     "unparseable": "the model's answer was not in the format bioAF asked for",
     "truncated": "the model's answer was cut off at its token limit",
+    # plan_8_1 section 1.1, pending the owner's sign-off.
+    "timed_out": "the model's answer did not finish within bioAF's time limit",
     "retrieval_failed": "bioAF could not retrieve a file it needed",
     "not_performed": "this step could not run",
 }

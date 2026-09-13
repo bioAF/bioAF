@@ -31,6 +31,7 @@ async def submit(
     model: str,
     api_key: str | None,
     attachments: list[dict] | None = None,
+    max_tokens: int | None = None,
 ) -> str:
     """Synchronous submit is not supported for Gemma.
 

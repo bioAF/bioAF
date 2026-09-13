@@ -42,6 +42,11 @@ def is_retryable(status: int) -> bool:
     return status in RETRYABLE_STATUSES or status >= 500
 
 
+def backoff_seconds(attempt: int) -> float:
+    """How long to wait after the ``attempt``-th (zero-based) failed try."""
+    return _BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS) - 1)]
+
+
 async def request_with_retry(send: Callable[[], Awaitable[httpx.Response]], *, what: str) -> httpx.Response:
     """Send, retrying a 429, a 5xx and a dropped connection. Returns the last response.
 

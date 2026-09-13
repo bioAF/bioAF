@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -55,6 +56,9 @@ OUTCOME_UNPARSEABLE = "unparseable"
 # refusal, not a transport failure, and not a badly formatted answer, and calling it any of
 # those sends whoever reads the report to the wrong remedy.
 OUTCOME_TRUNCATED = "truncated"
+# plan_8_1 section 1.1: an answer that did not finish within bioAF's time limit. A budget raised for a
+# long answer can run past the limit, and that is a timeout, never a truncation.
+OUTCOME_TIMED_OUT = "timed_out"
 
 # How much of an unreadable answer reaches the log. It was 400 characters, which is not enough to
 # attribute a failure to a cause: no unparseable response in either of the owner's runs could be
@@ -69,6 +73,7 @@ OUTCOMES = (
     OUTCOME_INTERNAL,
     OUTCOME_UNPARSEABLE,
     OUTCOME_TRUNCATED,
+    OUTCOME_TIMED_OUT,
 )
 
 # What each provider failure means to a person. `refusal` names the model so an admin can request an
@@ -82,6 +87,7 @@ _ERROR_CLASS_OUTCOMES = {
     "server": OUTCOME_UNREACHABLE,
     "parse": OUTCOME_UNPARSEABLE,
     "truncated": OUTCOME_TRUNCATED,
+    "timeout": OUTCOME_TIMED_OUT,
 }
 
 _FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
@@ -128,6 +134,12 @@ class Decision:
     text: str = ""
     allowed: tuple[str, ...] | None = None
     notes: list[str] = field(default_factory=list)
+    # plan_8_1 section 1.1: what the call used, as the provider reported it (None where it did not),
+    # the budget it was given, and how long it took. A read records these on its provenance.
+    output_tokens: int | None = None
+    stop_reason: str | None = None
+    max_tokens: int | None = None
+    elapsed_seconds: float | None = None
 
     @property
     def ok(self) -> bool:
@@ -197,6 +209,11 @@ def _failure_reason(outcome: str, *, intent: str, model: str | None) -> str:
             f"The model's answer while {intent} was cut off at its token limit before it finished, "
             "so the part bioAF received could not be read as a complete answer."
         )
+    if outcome == OUTCOME_TIMED_OUT:
+        return (
+            f"The model's answer while {intent} did not finish within bioAF's time limit, so bioAF "
+            "received no complete answer."
+        )
     return f"bioAF hit an internal error while {intent}."
 
 
@@ -209,6 +226,7 @@ async def decide(
     model: str,
     api_key: str | None,
     allowed: Iterable[str] | None = None,
+    max_tokens: int | None = None,
 ) -> Decision:
     """Ask a model to decide something, and always return an account of what happened.
 
@@ -217,10 +235,24 @@ async def decide(
 
     ``allowed`` is optional and constrains VALUES. Absent means the model may answer anything, which
     is what lets the extractor and the generated-analysis arm use this function rather than fork it.
+
+    ``max_tokens`` is the output budget (plan_8_1 section 1.1). It reaches the client only when given,
+    so a caller that names none reaches its provider exactly as before.
     """
     allow = tuple(str(a) for a in allowed) if allowed is not None else None
+    started = time.monotonic()
 
-    def _failed(outcome: str, detail: str, *, full_text: str = "") -> Decision:
+    def _elapsed() -> float:
+        return round(time.monotonic() - started, 3)
+
+    def _failed(
+        outcome: str,
+        detail: str,
+        *,
+        full_text: str = "",
+        output_tokens: int | None = None,
+        stop_reason: str | None = None,
+    ) -> Decision:
         logger.warning("llm decision failed (%s) while %s: %s", outcome, intent, detail)
         return Decision(
             outcome=outcome,
@@ -231,22 +263,46 @@ async def decide(
             # Kept on the decision so the issue record carries the answer that could not be read.
             # A cause that is only in a truncated log line cannot be established later.
             text=full_text,
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+            max_tokens=max_tokens,
+            elapsed_seconds=_elapsed(),
         )
 
     try:
-        text = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
+        if max_tokens is None:
+            text = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
+        else:
+            text = await client.submit(
+                prompt=system, payload=payload, model=model, api_key=api_key, max_tokens=max_tokens
+            )
     except ProviderError as exc:
-        return _failed(_ERROR_CLASS_OUTCOMES.get(exc.error_class, OUTCOME_INTERNAL), f"{exc.error_class}: {exc}")
+        return _failed(
+            _ERROR_CLASS_OUTCOMES.get(exc.error_class, OUTCOME_INTERNAL),
+            f"{exc.error_class}: {exc}",
+            # plan_8_1 section 1.2: a cut-off answer's text is kept for diagnosis. It is never parsed.
+            full_text=getattr(exc, "text", None) or "",
+            output_tokens=getattr(exc, "output_tokens", None),
+            stop_reason=getattr(exc, "stop_reason", None),
+        )
     except Exception as exc:  # noqa: BLE001 - asking a model for help cannot be allowed to fail a study
         logger.exception("llm decision raised while %s", intent)
         return _failed(OUTCOME_INTERNAL, str(exc))
 
+    output_tokens = getattr(text, "output_tokens", None)
+    stop_reason = getattr(text, "stop_reason", None)
     data = fenced_json(text)
     if data is None:
         # change_7.2 section 7: the whole answer, not 400 characters of it. No unparseable response
         # in either of the owner's runs could be attributed to a cause, because the evidence needed
         # to attribute it had already been thrown away by the time anyone read the log.
-        return _failed(OUTCOME_UNPARSEABLE, (text or "")[:_LOG_ANSWER_CHARS], full_text=text or "")
+        return _failed(
+            OUTCOME_UNPARSEABLE,
+            (text or "")[:_LOG_ANSWER_CHARS],
+            full_text=str(text or ""),
+            output_tokens=output_tokens,
+            stop_reason=stop_reason,
+        )
 
     if "confidence" in data:
         data["confidence"] = confidence_of(data.get("confidence"))
@@ -255,7 +311,11 @@ async def decide(
         data=data,
         model=model,
         intent=intent,
-        text=text or "",
+        text=str(text or ""),
         allowed=allow,
         reason=str(data.get("reason") or "").strip(),
+        output_tokens=output_tokens,
+        stop_reason=stop_reason,
+        max_tokens=max_tokens,
+        elapsed_seconds=_elapsed(),
     )

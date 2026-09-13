@@ -7,7 +7,7 @@ import logging
 
 import httpx
 
-from app.services.llm_provider_clients import ProviderError
+from app.services.llm_provider_clients import ModelAnswer, ProviderError, as_int
 from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
@@ -69,17 +69,23 @@ async def submit(
     model: str,
     api_key: str | None,
     attachments: list[dict] | None = None,
-) -> str:
+    max_tokens: int | None = None,
+) -> ModelAnswer:
+    """One answer. ``max_tokens`` omitted sends no cap, as always; given, it is sent as the cap, and an
+    answer that stops at it is a truncation."""
     if not api_key:
         raise ProviderError("Google requires an API key", error_class="auth")
-    body = {
+    body: dict = {
         "contents": [{"role": "user", "parts": [{"text": f"{prompt}\n\n{payload}"}]}],
     }
+    if max_tokens is not None:
+        body["generationConfig"] = {"maxOutputTokens": max_tokens}
     logger.info(
-        "google submit: model=%s prompt_chars=%d payload_chars=%d",
+        "google submit: model=%s prompt_chars=%d payload_chars=%d max_tokens=%s",
         model,
         len(prompt),
         len(payload),
+        max_tokens,
     )
 
     async def _send():
@@ -105,20 +111,45 @@ async def submit(
     # returning a candidate with no `content` key at all. The second used to raise KeyError and be
     # reported as `error_class="parse"`, which told the user bioAF could not read the answer when in
     # fact the model declined to give one.
+    usage = data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else {}
+    output_tokens = as_int(usage.get("candidatesTokenCount"))
+    candidates = data.get("candidates") or []
+    finish_reason = candidates[0].get("finishReason") if candidates and isinstance(candidates[0], dict) else None
+    logger.info(
+        "google submit usage: model=%s output_tokens=%s input_tokens=%s stop_reason=%s",
+        model,
+        output_tokens,
+        as_int(usage.get("promptTokenCount")),
+        finish_reason or "unknown",
+    )
     block_reason = (data.get("promptFeedback") or {}).get("blockReason")
     if block_reason:
         raise refusal(f"the model declined to answer ({block_reason})")
-    candidates = data.get("candidates") or []
     if not candidates:
         raise refusal("the model returned no candidate answer")
     content = candidates[0].get("content")
     if not content or not content.get("parts"):
-        finish = candidates[0].get("finishReason") or "no content"
+        finish = finish_reason or "no content"
         raise refusal(f"the model declined to answer ({finish})")
     text = "".join(p.get("text", "") for p in content["parts"])
+    # plan_8_1 section 1.2: a caller that set a budget is told its answer stopped at it, with the text
+    # that arrived. A caller that set none gets the answer exactly as before.
+    if max_tokens is not None and str(finish_reason or "").upper() == "MAX_TOKENS":
+        raise ProviderError(
+            "the model's answer was cut off at the token limit before it finished",
+            error_class="truncated",
+            text=text,
+            output_tokens=output_tokens,
+            stop_reason=finish_reason,
+        )
     if not text:
         raise refusal("the model returned no content")
-    return text
+    return ModelAnswer(
+        text,
+        output_tokens=output_tokens,
+        input_tokens=as_int(usage.get("promptTokenCount")),
+        stop_reason=finish_reason,
+    )
 
 
 def _tools_to_google(tools: list[dict]) -> list[dict]:
