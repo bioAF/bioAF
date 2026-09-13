@@ -226,7 +226,7 @@ class TestTheExtractionRecordsWhatItCouldNotGet:
             return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return await submit(prompt)
 
         monkeypatch.setattr(ext.llm_provider_config_service, "get_active", _cfg)
@@ -261,7 +261,7 @@ class TestTheExtractionRecordsWhatItCouldNotGet:
 
         extraction = (
             '```json\n{"accessions": ["GSE52778"], "method": {"assay": "bulk RNA-seq"}, '
-            '"claims": [{"metric_key": "alignment_rate", "value": 93, "unit": "%"}], '
+            '"claims": [{"metric_key": "alignment_rate", "claim_text": "93% of reads aligned.", "value": 93, "unit": "%"}], '
             '"data_availability": "public", "blockers": []}\n```'
         )
 

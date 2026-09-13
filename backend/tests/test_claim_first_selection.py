@@ -101,7 +101,7 @@ class _Client:
         self.answer = answer
         self.calls = 0
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.calls += 1
         self.payload = payload
         return "```json\n" + json.dumps(self.answer) + "\n```"
@@ -298,7 +298,7 @@ def _patch(monkeypatch):
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return "```json\n" + json.dumps(_EXTRACTION) + "\n```"
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)

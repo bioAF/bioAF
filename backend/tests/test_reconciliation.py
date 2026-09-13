@@ -239,7 +239,7 @@ class _Provider:
         self.answer = answer
         self.calls: list[tuple[str, str]] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.calls.append((prompt, payload))
         return self.answer
 

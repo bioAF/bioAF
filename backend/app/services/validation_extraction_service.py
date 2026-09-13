@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +36,12 @@ from app.services.literature.accession_manifest_service import (
 from app.services.llm_decision import confidence_of, decide, fenced_json
 from app.services.llm_provider_clients import get_client
 from app.services.validation_issue_service import ValidationIssueService
+from app.services.validation_read_failure import (
+    BIOAF_LIMITATION,
+    PAPER_NOT_READ,
+    omitted_part,
+    read_failure_blocker,
+)
 from app.services.pipeline_assay_fallback import resolve_pipeline_for_assay
 from app.services.pipeline_mapper import library_strategy_conflict
 from app.services.reproduction_plan_service import ReproductionPlanService
@@ -539,12 +547,18 @@ def parse_extraction(response_text: str, *, full_text: str | None = None) -> dic
         "findings": None,
         "blockers": [],
         "blocker_kinds": [],
+        "not_read": [],
         "parse_failure": True,
     }
     data = fenced_json(response_text)
     if data is None:
         return empty
+    return extraction_from(data, full_text=full_text)
 
+
+def extraction_from(data: dict, *, full_text: str | None = None, not_read=()) -> dict:
+    """A complete answer, normalized. ``not_read`` names the parts the answer left out (plan_8_1 section
+    1.2): those stay null, never empty, so "not read" is never reported as "the paper named none"."""
     claims = [c for c in _as_list(data.get("claims")) if isinstance(c, dict)]
     blockers, blocker_kinds = _typed_blockers(data.get("blockers"))
     blockers, blocker_kinds = _without_stated_significance_blockers(blockers, blocker_kinds, claims)
@@ -557,8 +571,14 @@ def parse_extraction(response_text: str, *, full_text: str | None = None) -> dic
         "data_availability": str(data.get("data_availability") or "unknown"),
         # Normalized by `parse_code_availability` at the point of storage; kept raw here so a paper
         # that named nothing reads as `[]` ("we looked and it named none") rather than as a missing
-        # key, which step 13 renders as UNKNOWN ("we never asked").
-        "code_availability": [c for c in _as_list(data.get("code_availability")) if isinstance(c, dict)],
+        # key, which step 13 renders as UNKNOWN ("we never asked"). plan_8_1: an answer that left the
+        # part out did not look, so it stays None.
+        "code_availability": (
+            None
+            if "code_availability" in not_read
+            else [c for c in _as_list(data.get("code_availability")) if isinstance(c, dict)]
+        ),
+        "not_read": list(not_read),
         "significance_ambiguities": _shown_significance_ambiguities(
             data.get("significance_ambiguities"), full_text, claim_count=len(claims)
         ),
@@ -879,6 +899,210 @@ CLAIM_BINDING_INTENT = "binding the paper's claims to measurable metrics"
 PAPER_READING_INTENT = "reading the paper and extracting its methods and claims"
 
 
+# ---- plan_8_1 section 1.2: a bounded read -------------------------------------------------------------
+#
+# At most two submissions per cycle, the first attempt and one recovery attempt shared across truncation
+# and structural failure. Each attempt is recorded, and committed by the caller's checkpoint, before it
+# is submitted, so a worker restart never grants another. Nothing is parsed from a cut-off answer.
+
+# How much of a cut-off or incomplete answer the issue record keeps for diagnosis.
+_KEPT_ANSWER_CHARS = 250_000
+
+_ATTEMPT_CAUSES = {
+    "refusal": "the model declined to answer",
+    "unreachable": "bioAF could not reach the language model",
+    "unparseable": "the model's answer was not in the format bioAF asked for",
+    "timed_out": "the model's answer did not finish within bioAF's time limit",
+    "internal": "bioAF hit an internal error",
+    "interrupted": "the read was interrupted before the model's answer arrived",
+}
+
+
+@dataclass
+class PaperRead:
+    """How one extraction cycle ended: a complete answer to read, or the cause bioAF could not."""
+
+    ok: bool
+    data: dict | None = None
+    check: object | None = None
+    text: str = ""
+    cause: str | None = None
+    issues: list[dict] = dataclass_field(default_factory=list)
+
+
+def _attempt_cause(attempt: dict) -> str:
+    outcome = attempt.get("outcome") or "internal"
+    if outcome == "truncated":
+        return f"the answer was cut off at its token limit of {attempt.get('max_tokens') or 0:,} output tokens"
+    if outcome == "incomplete":
+        return f"the answer was structurally incomplete ({'; '.join(attempt.get('problems') or [])})"
+    return _ATTEMPT_CAUSES.get(outcome, _ATTEMPT_CAUSES["internal"])
+
+
+def _cycle_cause(attempts: list[dict], *, no_larger_budget: bool = False) -> str:
+    """The cycle's failure in words, naming both attempts when the recovery was spent."""
+    if not attempts:
+        return _ATTEMPT_CAUSES["internal"]
+    if no_larger_budget:
+        return f"{_attempt_cause(attempts[-1])}, the largest this model allows"
+    if len(attempts) == 1:
+        return _attempt_cause(attempts[0])
+    return f"{_attempt_cause(attempts[0])}; the recovery attempt failed too: {_attempt_cause(attempts[-1])}"
+
+
+def _attempt_issue(decision, *, attempt: dict, impact: str, problems: list[str] | None = None) -> dict:
+    """One issue row for an attempt that did not produce a usable answer, with its answer kept."""
+    from app.models.validation_study_issue import OUTCOME_INCOMPLETE
+
+    if problems:
+        row = {
+            "step": PAPER_READING_INTENT,
+            "outcome": OUTCOME_INCOMPLETE,
+            "impact": impact,
+            "message": (
+                f"The model's answer while {PAPER_READING_INTENT} left out parts bioAF requires, so it could not be "
+                "read as a complete answer."
+            ),
+            "model": decision.model,
+        }
+    else:
+        row = decision.as_issue(impact=impact) or {}
+    detail = {
+        "attempt": attempt.get("attempt"),
+        "max_tokens": attempt.get("max_tokens"),
+        "output_tokens": decision.output_tokens,
+        "stop_reason": decision.stop_reason,
+        "elapsed_seconds": decision.elapsed_seconds,
+        "problems": "; ".join(problems) if problems else None,
+        "answer_text": (decision.text or "")[:_KEPT_ANSWER_CHARS] or None,
+    }
+    row["technical_detail"] = {k: v for k, v in detail.items() if v is not None}
+    return row
+
+
+def _next_attempt(previous: dict | None, *, budget: int, cfg) -> tuple[int, str] | None:
+    """The budget and the note for the attempt after ``previous``, or None when there is no recovery.
+
+    The first attempt runs at the measured budget. A truncation is retried with a larger budget, an
+    incomplete answer at the same budget naming what was rejected, and an attempt a restart interrupted
+    at its own budget. Anything else ends the cycle.
+    """
+    from app.services import validation_read_budget as read_budget
+    from app.services.validation_extraction_schema import rejection_note
+    from app.services.validation_read_cycle import ATTEMPT_INCOMPLETE, ATTEMPT_INTERRUPTED
+
+    if previous is None:
+        return budget, ""
+    spent = int(previous.get("max_tokens") or budget)
+    outcome = previous.get("outcome")
+    if outcome == "truncated":
+        larger = read_budget.recovery_budget(
+            spent, model=cfg.model, provider=cfg.provider, record=read_budget.load_record(read_budget.EXTRACTION)
+        )
+        return (larger, "") if larger is not None else None
+    if outcome == ATTEMPT_INCOMPLETE:
+        return spent, "\n\n" + rejection_note(previous.get("problems") or [])
+    if outcome == ATTEMPT_INTERRUPTED:
+        return spent, ""
+    return None
+
+
+async def read_paper(study, *, system: str, payload: str, client, cfg, checkpoint=None) -> PaperRead:
+    """Run (or resume) the current extraction cycle. Never raises for a model's failure.
+
+    ``checkpoint`` is awaited after each attempt is recorded and before it is submitted, and after it
+    ends; the driver's commits the study under its claim, so the count survives a restart. Without one
+    (a direct call), nothing commits.
+    """
+    from app.services import validation_read_budget as read_budget
+    from app.services import validation_read_cycle as cycles
+    from app.services.validation_extraction_schema import check_extraction
+
+    budget = read_budget.budget_for(read_budget.EXTRACTION, cfg.model)
+    # A cycle in progress is resumed; a finished one belongs to an earlier read, and this is a new one.
+    if (cycles.current_cycle(study.evidence_json) or {}).get("status") != cycles.IN_PROGRESS:
+        cycles.begin_cycle(study, model=cfg.model, provider=cfg.provider)
+    if not (cycles.current_cycle(study.evidence_json) or {}).get("budget"):
+        cycles.update_cycle(study, budget=budget.provenance())
+    cycles.mark_interrupted(study)
+    issues: list[dict] = []
+
+    async def _commit() -> None:
+        if checkpoint is not None:
+            await checkpoint()
+
+    def _attempts() -> list[dict]:
+        return list((cycles.current_cycle(study.evidence_json) or {}).get("attempts") or [])
+
+    def _fail(cause: str) -> PaperRead:
+        cycles.finish_cycle(study, status=cycles.FAILED, cause=cause)
+        return PaperRead(ok=False, cause=cause, issues=issues)
+
+    while len(_attempts()) < cycles.MAX_SUBMISSIONS:
+        previous = _attempts()[-1] if _attempts() else None
+        planned = _next_attempt(previous, budget=budget.max_tokens, cfg=cfg)
+        if planned is None:
+            no_larger = bool(previous) and previous.get("outcome") == "truncated"
+            return _fail(_cycle_cause(_attempts(), no_larger_budget=no_larger))
+        max_tokens, note = planned
+
+        attempt = cycles.start_attempt(study, max_tokens=max_tokens, model=cfg.model)
+        await _commit()
+        decision = await decide(
+            intent=PAPER_READING_INTENT,
+            system=system,
+            payload=payload + note,
+            client=client,
+            model=cfg.model,
+            api_key=cfg.api_key,
+            max_tokens=max_tokens,
+        )
+        usage = {
+            "output_tokens": decision.output_tokens,
+            "stop_reason": decision.stop_reason,
+            "elapsed_seconds": decision.elapsed_seconds,
+        }
+        logger.info(
+            "study %s: reading attempt %d: outcome=%s max_tokens=%d output_tokens=%s stop_reason=%s elapsed=%ss",
+            study.id,
+            attempt["attempt"],
+            decision.outcome,
+            max_tokens,
+            decision.output_tokens,
+            decision.stop_reason,
+            decision.elapsed_seconds,
+        )
+        # The decision's data is the fenced object of its text; read it from the text when a caller's
+        # decision carries only that.
+        data = (decision.data or fenced_json(decision.text) or {}) if decision.ok else None
+        check = check_extraction(data) if data is not None else None
+        if check is not None and check.complete:
+            cycles.finish_attempt(study, outcome=cycles.ATTEMPT_OK, **usage)
+            cycles.finish_cycle(study, status=cycles.SUCCEEDED, not_read=list(check.not_read))
+            await _commit()
+            return PaperRead(ok=True, data=data, check=check, text=decision.text, issues=issues)
+
+        problems = list(check.core_problems) if check is not None else None
+        finished = cycles.finish_attempt(
+            study,
+            outcome=cycles.ATTEMPT_INCOMPLETE if check is not None else decision.outcome,
+            **({"problems": problems} if problems else {}),
+            **usage,
+        )
+        recovers = len(_attempts()) < cycles.MAX_SUBMISSIONS and (
+            _next_attempt(finished, budget=budget.max_tokens, cfg=cfg) is not None
+        )
+        issues.append(
+            _attempt_issue(decision, attempt=finished, impact="degraded" if recovers else "blocked", problems=problems)
+        )
+        await _commit()
+        if not recovers:
+            no_larger = finished.get("outcome") == "truncated" and len(_attempts()) < cycles.MAX_SUBMISSIONS
+            return _fail(_cycle_cause(_attempts(), no_larger_budget=no_larger))
+
+    return _fail(_cycle_cause(_attempts()))
+
+
 def binding_failure_blocker(decisions: list[dict]) -> str | None:
     """The plan blocker for a claim set that bound nothing, or None while anything bound.
 
@@ -1055,7 +1279,13 @@ def _reported_experiments(parsed: dict, method: dict, design_contrasts: list[dic
                 "id": "e1",
                 "assay": method.get("assay"),
                 "tools": method.get("tools"),
-                "reference": {"assembly": method.get("reference_build")},
+                # The paper-level reference names both parts in one string; the annotation was never
+                # asked for separately, so it is not "not read". A reference the reading left out is.
+                "reference": (
+                    {}
+                    if "method.reference_build" in (parsed.get("not_read") or [])
+                    else {"assembly": method.get("reference_build"), "annotation": None}
+                ),
                 "claim_indices": list(range(claim_count)),
                 "contrast_indices": list(range(contrast_count)),
             }
@@ -1111,7 +1341,92 @@ async def _org_reference_datasets(session: AsyncSession, org_id: int) -> list:
     return list(rows.scalars().all())
 
 
+async def _plan_from_failed_read(
+    session: AsyncSession,
+    study: ValidationStudy,
+    user_id: int,
+    *,
+    cfg,
+    cause: str,
+    issues: list[dict],
+    full_text: str | None,
+    discover=None,
+) -> ReproductionPlan:
+    """plan_8_1 section 1.3: the plan of a read that ended with no usable answer.
+
+    It carries one blocker, of kind ``bioaf_limitation``, and nothing derived from the fields the answer
+    never reached: no missing method, no missing accession, no unstated reference, no absent code. Parts
+    not read stay null. What discovery finds over the identifiers scanned from the text does not depend on
+    the read, so it runs as it always does.
+    """
+    blocker = read_failure_blocker(cause)
+    requested = (study.source_accession or "").strip()
+    accessions = [requested] if requested else []
+    study.evidence_json = {**(study.evidence_json or {}), "extracted_accessions": []}
+
+    capabilities: dict = {}
+    if discover is not None:
+        capabilities = (
+            await discover(
+                SimpleNamespace(
+                    accessions_json=accessions, code_availability_json=None, code_not_read_reason=PAPER_NOT_READ
+                )
+            )
+            or {}
+        )
+    from app.services.resource_identifiers import scan_identifiers
+    from app.services.resource_inventory import build_resource_inventory
+
+    evidence = study.evidence_json or {}
+    resources = build_resource_inventory(
+        scanned=evidence.get("scanned_identifiers") or scan_identifiers(full_text or ""),
+        model_resources=None,
+        extracted_accessions=[],
+        supplements=[s for s in evidence.get("supplements") or [] if isinstance(s, dict)],
+        deposits=[d for d in capabilities.get("deposits") or [] if isinstance(d, dict)],
+        experiments=[],
+    )
+    plan = await ReproductionPlanService.create_plan(
+        session,
+        study,
+        user_id,
+        accessions=accessions,
+        sample_sheet=None,
+        pipeline_key=None,
+        pipeline_version=None,
+        parameters={},
+        differential_design=None,
+        tools=[],
+        code_availability=None,
+        code_availability_read=False,
+        reference_genome=None,
+        reference_build=None,
+        mapping_confidence=None,
+        mapping_notes=None,
+        blockers=[blocker],
+        extractor_model=getattr(cfg, "model", None),
+        extractor_provider=getattr(cfg, "provider", None),
+        reported_experiments=None,
+        resources=resources,
+        analysis_selection=None,
+        finding_inventory=None,
+    )
+    plan.blocker_kinds_json = [{"text": blocker, "kind": BIOAF_LIMITATION}]
+    await ValidationIssueService.record(session, study, issues)
+    logger.warning("study %s: the paper was not read: %s", study.id, cause)
+    return plan
+
+
 class ValidationExtractionService:
+    @staticmethod
+    async def plan_from_failed_read(
+        session: AsyncSession, study: ValidationStudy, user_id: int, *, cfg, cause: str, issues: list[dict], full_text
+    ) -> ReproductionPlan:
+        """The plan of a read that cannot produce an answer (plan_8_1 section 1.3)."""
+        return await _plan_from_failed_read(
+            session, study, user_id, cfg=cfg, cause=cause, issues=issues, full_text=full_text
+        )
+
     @staticmethod
     async def extract(
         session: AsyncSession,
@@ -1122,17 +1437,22 @@ class ValidationExtractionService:
         *,
         sections: dict | None = None,
         discover=None,
+        checkpoint=None,
     ) -> ReproductionPlan:
         """Extract a ReproductionPlan (+ ComparisonTargets) for ``study`` from ``full_text``.
 
-        Uses the org's active LLM provider. Any gaps (no accession, unmappable method, parse failure)
-        are recorded as plan blockers rather than raised, so the C1 gate can show them.
+        Uses the org's active LLM provider. Any gaps (no accession, unmappable method) are recorded as
+        plan blockers rather than raised, so the C1 gate can show them.
 
         change_7.5 stage 2: reading, then experiments, then each experiment's workflow and reference,
         then the claims and their cutoffs, then discovery (``discover(plan_like) -> capabilities``,
         before any selection), the resource inventory, binding with context, the four checks per
         claim, and last the selection of one claim and check, whose experiment gives the plan its
         workflow. ``sections`` is the paper's addressable methods and captions, when the text had them.
+
+        plan_8_1 section 1.2: the reading is a bounded cycle (``read_paper``), and ``checkpoint`` commits
+        each attempt before it goes out. A read that ends with no usable answer produces a plan carrying
+        one bioAF-limitation blocker and nothing derived from the fields it never reached (section 1.3).
         """
         # plan_6 step 6: validation runs on its own model when the org named one. The paper is a
         # whole document and the vocabulary is 23 near neighbours; that is a different demand from
@@ -1147,18 +1467,21 @@ class ValidationExtractionService:
         # list is study-scoped rather than plan-scoped because a refusal can happen before a plan
         # exists, and it reaches the report through `ValidationStudy.evidence_json` (step 14c).
         issues: list[dict] = []
-        reading = await decide(
-            intent=PAPER_READING_INTENT,
-            system=system,
-            payload=payload,
-            client=client,
-            model=cfg.model,
-            api_key=cfg.api_key,
-        )
-        if not reading.ok:
-            # `blocked`: with no extraction there is no plan, so this one really did produce nothing.
-            issues.append(reading.as_issue(impact="blocked"))
-        parsed = parse_extraction(reading.text, full_text=full_text)
+        read = await read_paper(study, system=system, payload=payload, client=client, cfg=cfg, checkpoint=checkpoint)
+        issues.extend(read.issues)
+        if not read.ok:
+            return await _plan_from_failed_read(
+                session,
+                study,
+                user_id,
+                cfg=cfg,
+                cause=read.cause or "",
+                issues=issues,
+                full_text=full_text,
+                discover=discover,
+            )
+        not_read = list(read.check.not_read) if read.check is not None else []
+        parsed = extraction_from(read.data or {}, full_text=full_text, not_read=not_read)
 
         method = parsed["method"]
         library_strategy = await scoped_library_strategy(study)
@@ -1238,8 +1561,6 @@ class ValidationExtractionService:
 
         blockers: list[str] = list(parsed["blockers"])
         later: list[str] = []
-        if parsed["parse_failure"]:
-            later.append("could not parse a structured extraction from the model response")
         accessions = parsed["accessions"]
         extracted_accessions = list(accessions)
         # change_7.5 section 1.5: every accession the model read, kept for discovery. A requested
@@ -1362,11 +1683,24 @@ class ValidationExtractionService:
 
         # change_7.5 section 1.5: what the paper's repositories hold, established before any selection
         # so the checks can read it. Two HTTP calls, no model, no compute.
-        code_availability = parse_code_availability(parsed.get("code_availability"))
+        # plan_8_1 section 1.3: an answer that left the part out did not look for code, so it stays None.
+        code_availability = (
+            parse_code_availability(parsed["code_availability"])
+            if parsed.get("code_availability") is not None
+            else None
+        )
         capabilities: dict = {}
         if discover is not None:
             capabilities = (
-                await discover(SimpleNamespace(accessions_json=accessions, code_availability_json=code_availability))
+                await discover(
+                    SimpleNamespace(
+                        accessions_json=accessions,
+                        code_availability_json=code_availability,
+                        code_not_read_reason=(
+                            omitted_part("the paper's code availability") if code_availability is None else None
+                        ),
+                    )
+                )
                 or {}
             )
         deposits = [d for d in capabilities.get("deposits") or [] if isinstance(d, dict)]
@@ -1531,7 +1865,9 @@ class ValidationExtractionService:
         if plan_experiment is None or inferred:
             raw_genome = method.get("reference_build")
             named_builds = _builds_named_in(raw_genome)
-            reference = paper_reference(_str_or_none(raw_genome), mapping.pipeline_key)
+            reference = paper_reference(
+                _str_or_none(raw_genome), mapping.pipeline_key, not_read="method.reference_build" in parsed["not_read"]
+            )
             reference_build = _str_or_none(raw_genome)
             reference_genome = _normalize_reference_genome(raw_genome) if reference["status"] == USABLE else None
             if reference["status"] != USABLE and _normalize_reference_genome(raw_genome) is not None:
@@ -1621,6 +1957,7 @@ class ValidationExtractionService:
             tools=[str(t).strip() for t in _as_list(method.get("tools")) if str(t).strip()],
             # Where the authors said their own analysis code lives. Shown at the C1 gate, never run.
             code_availability=code_availability,
+            code_availability_read=code_availability is not None,
             reference_genome=reference_genome,
             # The controlled token collapses "GRCh38 / Gencode 29" and "GRCh38 / Ensembl 112" onto
             # one value, and the ANNOTATION is the half that decides which genes exist and what they

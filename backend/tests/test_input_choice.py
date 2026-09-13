@@ -216,7 +216,7 @@ class _Client:
         self.answer = answer
         self.payload = None
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.payload = payload
         return "```json\n" + json.dumps(self.answer) + "\n```"
 

@@ -47,7 +47,7 @@ _READING = """```json
 
 def _patch_llm(monkeypatch, response):
     class _Client:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     async def fake_get_active(sess, org_id):
@@ -137,7 +137,9 @@ class TestTheInventoryIsPersistedOnThePlan:
         assert "quote" in plan.finding_inventory_json["reason"]
 
     @pytest.mark.asyncio
-    async def test_an_unparseable_reading_is_persisted_as_not_established(self, session, admin_user, monkeypatch):
+    async def test_an_unparseable_reading_is_a_failed_read_with_no_inventory(self, session, admin_user, monkeypatch):
+        """plan_8_1 section 1.3: an unparseable answer is a failed read. Its plan holds no inventory and
+        one bioAF-limitation blocker; the scorecard names the limitation (test_read_failure_projection)."""
         plan = await _extract(session, admin_user, monkeypatch, "prose, no json")
-        assert plan.finding_inventory_json["status"] == "unresolved"
-        assert "could not be read" in plan.finding_inventory_json["reason"]
+        assert plan.finding_inventory_json is None
+        assert plan.blocker_kinds_json == [{"text": plan.blockers_json[0], "kind": "bioaf_limitation"}]

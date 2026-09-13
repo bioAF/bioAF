@@ -185,7 +185,7 @@ class _FakeLlm:
         ("naming the MOST LIKELY explanation", "cause"),
     )
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         for marker, key in self._ROUTES:
             if marker in prompt:
                 self.calls.append(key)

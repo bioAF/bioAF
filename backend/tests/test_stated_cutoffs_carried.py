@@ -558,7 +558,7 @@ def _fake_reader(monkeypatch):
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return "```json\n" + _P_EXTRACTION + "\n```"
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)

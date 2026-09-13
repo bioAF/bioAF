@@ -16,7 +16,7 @@ from app.services.validation_study_service import ValidationStudyService
 _GOOD = (
     '```json\n{"accessions": ["GSE52778"], "sample_structure": {"organism": "Homo sapiens"}, '
     '"method": {"assay": "bulk RNA-seq", "tools": ["TopHat"], "reference_build": "GRCh37"}, '
-    '"claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
+    '"claims": [{"metric_key": "alignment_rate", "claim_text": "83.4% of reads aligned.", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
     '"data_availability": "deposited", "blockers": []}\n```'
 )
 _NO_DATA = (
@@ -38,7 +38,7 @@ def _patch_llm(monkeypatch, response):
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)

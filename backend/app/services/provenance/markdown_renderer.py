@@ -650,9 +650,11 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     if plan.get("mapping_notes"):
         parts.append(f"**Mapping notes:** {plan['mapping_notes']}")
         parts.append("")
-    blockers = plan.get("blockers") or []
+    # plan_8_1 section 1.4: the projection's blockers, so a failed read's withheld statements stay withheld.
+    projected = [b for b in summary.get("blockers") or [] if isinstance(b, dict)]
+    blockers = [b.get("text") for b in projected] if projected else list(plan.get("blockers") or [])
     if blockers:
-        provisional = any(b.get("provisional") for b in summary.get("blockers") or [])
+        provisional = any(b.get("provisional") for b in projected)
         parts.append(
             "**Blockers:** "
             + "; ".join(str(b) for b in blockers)

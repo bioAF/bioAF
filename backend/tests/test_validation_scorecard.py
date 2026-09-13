@@ -349,6 +349,10 @@ class TestTheCompactForm:
             "in_progress_label": None,
             "rubric_version": 1,
             "inventory_revision": 1,
+            # plan_8_1 section 1.3: the list says what the report says of a card with no score.
+            "reason": None,
+            "cause": None,
+            "cause_label": None,
         }
 
     def test_the_compact_form_of_an_unassessed_study_keeps_its_scope(self):

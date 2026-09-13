@@ -26,6 +26,9 @@ USABLE = "usable"
 UNAVAILABLE = "unavailable"
 UNRESOLVED = "unresolved"
 UNSTATED = "unstated"
+# plan_8_1 section 1.2: the reading left the part out. That is not the paper stating nothing, so it
+# never reads as "the paper does not state its reference"; an operation that needs it is still refused.
+NOT_READ = "not_read"
 
 REFERENCE_UNAVAILABLE = "reference_unavailable"
 
@@ -121,13 +124,21 @@ def supplied_assemblies(pipeline_key: str | None = None) -> set[str]:
     return set(_ENSEMBL_REFERENCE_BY_GENOME)
 
 
-def paper_reference(reference_build: str | None, pipeline_key: str | None) -> dict:
+def paper_reference(reference_build: str | None, pipeline_key: str | None, *, not_read: bool = False) -> dict:
     """The paper's reference, resolved against what bioAF can supply, and never defaulted.
 
     Returns ``{"status", "stated", "assembly", "reason"}``. ``assembly`` is the launch token only when
-    the status is ``usable``; ``stated`` is the assembly the record names.
+    the status is ``usable``; ``stated`` is the assembly the record names. ``not_read`` is a reading that
+    left the reference out, which says nothing about whether the paper states one.
     """
     raw = " ".join(str(reference_build or "").split())
+    if not raw and not_read:
+        return {
+            "status": NOT_READ,
+            "stated": None,
+            "assembly": None,
+            "reason": "the paper's reference was not read",
+        }
     if not raw:
         return {
             "status": UNSTATED,
@@ -344,6 +355,8 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
                 established_from="annotation release",
                 reason=f"the paper's annotation belongs to {from_release}; bioAF cannot supply {from_release} to {target}",
             )
+    elif assembly_in.get("not_read"):
+        assembly.update(status=NOT_READ, reason="the paper's reference was not read")
     else:
         assembly.update(status=UNSTATED, reason="the paper does not state its reference")
 
@@ -365,6 +378,10 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
                 status=UNAVAILABLE,
                 reason=f"the paper states {label}; {supplies}, and never swaps one release for another",
             )
+    elif annotation_in.get("not_read"):
+        # plan_8_1 section 1.2: a reading that left the annotation out never established that the paper
+        # states none, so bioAF's pinned release is not assumed for it either.
+        annotation.update(status=NOT_READ, reason="the paper's annotation was not read")
     elif resolved_assembly and pinned:
         annotation.update(
             status=USABLE,
@@ -400,7 +417,7 @@ def operation_reference(reference: dict, operation: str, *, pipeline_key: str | 
 
 def _operation_status(part: dict) -> tuple[str, str | None]:
     status = part.get("status") or UNSTATED
-    return (UNRESOLVED if status == UNSTATED else status), part.get("reason")
+    return (UNRESOLVED if status in (UNSTATED, NOT_READ) else status), part.get("reason")
 
 
 def experiment_reference_blocker(experiment: dict) -> str | None:

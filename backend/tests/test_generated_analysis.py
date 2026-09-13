@@ -35,7 +35,7 @@ class _Client:
         self.prompts: list[str] = []
         self.payloads: list[str] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.calls += 1
         self.prompts.append(prompt)
         self.payloads.append(payload)
@@ -232,7 +232,7 @@ class TestTheDriverWiresRungThree:
             return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return response
 
         monkeypatch.setattr(drv.llm_provider_config_service, "get_for_feature", _cfg)

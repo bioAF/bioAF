@@ -32,7 +32,7 @@ class _Client:
         self.error = error
         self.prompts: list[str] = []
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         self.prompts.append(prompt)
         if self.error:
             raise self.error
@@ -428,7 +428,7 @@ class TestTheReadGivesEveryConsumerWhatItKnows:
             return SimpleNamespace(provider="anthropic", model="m", api_key=None)
 
         class _Client:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return extraction
 
         monkeypatch.setattr(ext.llm_provider_config_service, "get_for_feature", _cfg)

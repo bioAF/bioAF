@@ -159,7 +159,7 @@ class TestTheFeaturesUseTheirOwnModel:
         seen = {}
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 seen["model"], seen["api_key"] = model, api_key
                 return '```json\n{"accessions": [], "claims": [], "blockers": []}\n```'
 
@@ -188,7 +188,7 @@ class TestTheFeaturesUseTheirOwnModel:
         seen = {}
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 seen["model"] = model
                 return '```json\n{"accessions": [], "claims": [], "blockers": []}\n```'
 

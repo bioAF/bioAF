@@ -133,7 +133,7 @@ class _FakeLlmClient:
     def __init__(self, responses: list[str]):
         self._responses = list(responses)
 
-    async def submit(self, prompt, payload, model, api_key, attachments=None):
+    async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
         return self._responses.pop(0) if self._responses else ""
 
 

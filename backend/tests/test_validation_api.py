@@ -31,7 +31,7 @@ _GOOD = (
     '"differential_design": {"contrasts": [{"name": "dex vs untreated", "test_condition": "dex", '
     '"reference_condition": "untreated", "test_samples": ["GSM1"], "reference_samples": ["GSM2"]}], '
     '"thresholds": {"log2fc": 1.0, "padj": 0.05}}, '
-    '"claims": [{"metric_key": "alignment_rate", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
+    '"claims": [{"metric_key": "alignment_rate", "claim_text": "83.4% of reads aligned.", "value": 83.4, "unit": "%", "source_locator": "Results"}], '
     '"data_availability": "deposited", "blockers": []}\n```'
 )
 
@@ -45,7 +45,7 @@ def _patch_llm(monkeypatch, response):
         return SimpleNamespace(provider="anthropic", model="claude-opus-4-8", api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     monkeypatch.setattr(ext.llm_provider_config_service, "get_active", fake_get_active)

@@ -98,7 +98,9 @@ VALIDATION_STUDY_TRANSITIONS: dict[str, list[str]] = {
     # decision the C1 gate owns, and a direct edge would pick the deposit route without a human
     # choosing it. `error -> plan_ready -> acquiring_processed` reaches the same place with the
     # choice made where choices are made, and it needs no new edge.
-    "error": ["setup", "plan_ready"],
+    # plan_8_1 section 1.3: a study whose READ failed goes back to `requested`, and the paper is read
+    # again. That spends one read and no compute; every other failure keeps the two edges above.
+    "error": ["setup", "plan_ready", "requested"],
 }
 
 # Terminal classification buckets (spec-03). The classifier states facts; there is no "bad" label.

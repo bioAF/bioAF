@@ -103,7 +103,7 @@ class TestRatify:
         clean = dict(_RESULT, classification="validated", auto_finalize=True)
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response("accept")
 
         out = await rat.ratify(clean, autonomy="autonomous", client=_C(), model="claude-opus-4-8", api_key=None)
@@ -116,7 +116,7 @@ class TestRatify:
     @pytest.mark.asyncio
     async def test_autonomous_overrides_an_inconclusive_and_stores_its_reasoning(self):
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response(
                     "override", "not_validated", "the alignment divergence is the paper's", ["alignment_rate"]
                 )
@@ -200,7 +200,7 @@ def _patch_ratifier(monkeypatch, response, model="claude-opus-4-8"):
         return SimpleNamespace(provider="anthropic", model=model, api_key=None)
 
     class _C:
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             return response
 
     monkeypatch.setattr(drv.llm_provider_config_service, "get_for_feature", fake_get_for_feature)

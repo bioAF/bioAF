@@ -68,7 +68,7 @@ class TestTheCall:
     @pytest.mark.asyncio
     async def test_it_returns_the_selection(self):
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response(2)
 
         out = await cs.select_contrast(
@@ -250,7 +250,7 @@ class TestDistinguishingTwoContrastsOnOneAssay:
         seen = {}
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 seen["payload"] = payload
                 return _response(2)
 
@@ -469,7 +469,7 @@ class TestEverySelectedContrastIsChecked:
         asked = []
 
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 asked.append(payload)
                 return _response(0, reason="the only contrast, on this run's assay")
 
@@ -483,7 +483,7 @@ class TestEverySelectedContrastIsChecked:
     @pytest.mark.asyncio
     async def test_a_null_answer_for_a_sole_contrast_is_no_compatible_contrast(self):
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response(None, reason="not measured on this run's assay")
 
         out = await cs.select_contrast(
@@ -496,7 +496,7 @@ class TestEverySelectedContrastIsChecked:
     @pytest.mark.asyncio
     async def test_a_models_pick_measured_on_another_assay_is_refused(self):
         class _C:
-            async def submit(self, prompt, payload, model, api_key, attachments=None):
+            async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
                 return _response(0, reason="picked the RNA-seq one")
 
         out = await cs.select_contrast(

@@ -107,6 +107,28 @@ async def _has_runnable_samples(session: AsyncSession, experiment_id: int | None
     return row is not None
 
 
+async def failed_read_of(session: AsyncSession, study: ValidationStudy) -> dict | None:
+    """plan_8_1 section 1.4: whether the study's current plan came from a failed read, by the one rule
+    every surface uses (``validation_read_failure.read_failure``)."""
+    from sqlalchemy import func
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_issue_service import ValidationIssueService
+    from app.services.validation_read_failure import read_failure
+
+    claims = 0
+    if study.reproduction_plan_id:
+        claims = (
+            await session.execute(
+                select(func.count(ComparisonTarget.id)).where(
+                    ComparisonTarget.reproduction_plan_id == study.reproduction_plan_id
+                )
+            )
+        ).scalar_one()
+    issues = await ValidationIssueService.list_for_study(session, study.id, study.organization_id)
+    return read_failure(study.evidence_json, issues=issues, claim_count=claims)
+
+
 RENEWED_SELECTION_REQUIRED = (
     "This plan was read before bioAF separated a paper's experiments, and its contrasts span more than "
     "one assay. Choose the contrast this run checks at the gate before it resumes."
@@ -204,6 +226,18 @@ class ValidationStudyService:
                 400,
                 f"Only a study in 'error' can be retried; this one is in '{study.state}'.",
             )
+
+        # plan_8_1 section 1.3: a study whose read failed is read again. Nothing else it holds came
+        # from a read, so there is no later point to resume at.
+        if await failed_read_of(session, study) is not None:
+            evidence = dict(study.evidence_json or {})
+            for key in ("error_at", "fetch_reap_after", "acquire_retry_at"):
+                evidence.pop(key, None)
+            evidence["reread_requested_at"] = datetime.now(timezone.utc).isoformat()
+            study.evidence_json = evidence
+            study.failure_reason = None
+            await session.flush()
+            return await ValidationStudyService.transition(session, study_id, org_id, user_id, "requested")
 
         resumable = await _has_runnable_samples(session, study.experiment_id)
         target = "setup" if resumable else "plan_ready"

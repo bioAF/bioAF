@@ -156,7 +156,7 @@ def _groff_world(monkeypatch):
             self.bundle: list = [_bundle()]
             self.bundle_calls = 0
 
-        async def submit(self, prompt, payload, model, api_key, attachments=None):
+        async def submit(self, prompt, payload, model, api_key, attachments=None, max_tokens=None):
             if prompt.startswith("You are binding"):
                 self.binding_payloads.append(payload)
                 # The reconciliation call carries the inventory or the paper's kept statements, and
