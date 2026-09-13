@@ -131,9 +131,7 @@ def binding_context(
         experiment_text = _clip("; ".join(parts), _CAPS["experiment"])
 
     linked = [
-        r
-        for r in resources or []
-        if not experiment or experiment.get("id") in (r.get("reported_experiment_ids") or [])
+        r for r in resources or [] if not experiment or experiment.get("id") in (r.get("reported_experiment_ids") or [])
     ]
     resource_lines = []
     for resource in linked:
@@ -241,7 +239,11 @@ def binding_match(
                 "established before the run lists its samples",
             )
         if aggregation == "not_stated":
-            return False, "unresolved", f"the paper does not state how its number is aggregated; bioAF computes {computes}"
+            return (
+                False,
+                "unresolved",
+                f"the paper does not state how its number is aggregated; bioAF computes {computes}",
+            )
         return (
             False,
             "unavailable",
@@ -260,7 +262,11 @@ def binding_match(
         )
     if wanted == "per_sample":
         if scope == "not_stated":
-            return False, "unresolved", f"the paper does not state which samples its number covers; bioAF computes {computes}"
+            return (
+                False,
+                "unresolved",
+                f"the paper does not state which samples its number covers; bioAF computes {computes}",
+            )
         if scope != "all_samples":
             described = population.get("value") or ("one sample" if scope == "one_sample" else "a subset of samples")
             return (
@@ -271,7 +277,11 @@ def binding_match(
             )
     if spec_denominator not in ("none", "other"):
         if denominator is None:
-            return False, "unresolved", f"the paper does not state what its proportion is of; bioAF's is of {spec_denominator.replace('_', ' ')}"
+            return (
+                False,
+                "unresolved",
+                f"the paper does not state what its proportion is of; bioAF's is of {spec_denominator.replace('_', ' ')}",
+            )
         if denominator != spec_denominator:
             return (
                 False,
@@ -281,9 +291,7 @@ def binding_match(
     return True, None, None
 
 
-def settle_binding(
-    key: str | None, facts: dict | None, *, workflow: str | None, earlier: dict | None = None
-) -> dict:
+def settle_binding(key: str | None, facts: dict | None, *, workflow: str | None, earlier: dict | None = None) -> dict:
     """What one binding decision lands as: ``{"bound_key", "binding_facts", "aggregation", "reason"}``.
 
     The facts merge over any earlier reading (a stated fact is never overwritten by `not_stated`), and

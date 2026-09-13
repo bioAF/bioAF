@@ -46,20 +46,37 @@ def _resource(**listing):
     }
 
 
-_DEPOSIT = {"accession": "GSE1", "archive": "geo", "exists": "yes", "access": "public", "supported": "yes",
-            "raw_data": "yes", "preprocessed_data": "yes"}
+_DEPOSIT = {
+    "accession": "GSE1",
+    "archive": "geo",
+    "exists": "yes",
+    "access": "public",
+    "supported": "yes",
+    "raw_data": "yes",
+    "preprocessed_data": "yes",
+}
 
 
 def _differential(**over):
-    return {"claim_text": "257 genes were up", "claimed_value": 257, "output_type": "gene_set_size",
-            "contrast_index": 0, "cutoffs": _P, "reported_experiment_id": "e1", "bound_by": "model", **over}
+    return {
+        "claim_text": "257 genes were up",
+        "claimed_value": 257,
+        "output_type": "gene_set_size",
+        "contrast_index": 0,
+        "cutoffs": _P,
+        "reported_experiment_id": "e1",
+        "bound_by": "model",
+        **over,
+    }
 
 
 def _checks(target, **kw):
     return evaluate_checks(
         target,
         experiment=kw.get("experiment", _experiment()),
-        resources=kw.get("resources", [_resource(kinds={"matrix_normalized": 1, "de_table": 1}, result_tables=["t.txt.gz"])]),
+        resources=kw.get(
+            "resources", [_resource(kinds={"matrix_normalized": 1, "de_table": 1}, result_tables=["t.txt.gz"])]
+        ),
         deposits=kw.get("deposits", [_DEPOSIT]),
         supplements=kw.get("supplements", []),
         contrast=kw.get("contrast", {"name": "KO vs WT", "cutoffs": _P}),
@@ -71,8 +88,14 @@ def _checks(target, **kw):
 
 def test_claim_types_are_read_from_the_claim_itself():
     assert claim_type(_differential()) == "differential"
-    assert claim_type({"claim_text": "SAMD1 target genes are up in KO", "direction": "up", "contrast_index": 0}) == "membership"
-    assert claim_type({"metric_key": "total_samples", "claimed_value": 54, "unit": "samples", "output_type": "count"}) == "sample_count"
+    assert (
+        claim_type({"claim_text": "SAMD1 target genes are up in KO", "direction": "up", "contrast_index": 0})
+        == "membership"
+    )
+    assert (
+        claim_type({"metric_key": "total_samples", "claimed_value": 54, "unit": "samples", "output_type": "count"})
+        == "sample_count"
+    )
     assert claim_type({"metric_key": "peak_count", "claimed_value": 8000, "unit": "peaks"}) == "scalar"
 
 
@@ -104,8 +127,14 @@ def test_processed_reanalysis_needs_a_processed_matrix():
 
 
 def test_raw_reanalysis_needs_a_usable_reference():
-    unavailable = {"status": "unavailable", "resolved": None, "reason": "the paper states GENCODE M23; bioAF supplies Ensembl 102"}
-    experiment = _experiment(reference={"assembly": {"status": "usable", "resolved": "GRCm38"}, "annotation": unavailable})
+    unavailable = {
+        "status": "unavailable",
+        "resolved": None,
+        "reason": "the paper states GENCODE M23; bioAF supplies Ensembl 102",
+    }
+    experiment = _experiment(
+        reference={"assembly": {"status": "usable", "resolved": "GRCm38"}, "annotation": unavailable}
+    )
     checks = _checks(_differential(), experiment=experiment)
     assert checks[RAW_REANALYSIS]["status"] == UNAVAILABLE
     assert checks[RAW_REANALYSIS]["requirement"] == "reference"
@@ -141,9 +170,16 @@ def test_an_unlisted_deposit_is_unresolved_never_unavailable():
 
 
 def _scalar(**over):
-    return {"metric_key": "peak_count", "claimed_value": 8000, "unit": "peaks", "reported_experiment_id": "e1",
-            "bound_key": "peak_count", "bound_by": "model",
-            "binding_facts": {"match": {"ok": True}}, **over}
+    return {
+        "metric_key": "peak_count",
+        "claimed_value": 8000,
+        "unit": "peaks",
+        "reported_experiment_id": "e1",
+        "bound_key": "peak_count",
+        "bound_by": "model",
+        "binding_facts": {"match": {"ok": True}},
+        **over,
+    }
 
 
 def test_a_matched_binding_makes_the_qc_check_available():
@@ -162,7 +198,13 @@ def test_a_declined_binding_closes_only_the_qc_check():
 
 
 def test_a_binding_whose_facts_did_not_match_carries_the_mismatch():
-    facts = {"match": {"ok": False, "status": "unavailable", "reason": "a value for one sample is not a mean over all of them"}}
+    facts = {
+        "match": {
+            "ok": False,
+            "status": "unavailable",
+            "reason": "a value for one sample is not a mean over all of them",
+        }
+    }
     checks = _checks(_scalar(bound_key=None, binding_facts=facts), experiment=_experiment(workflow="nf-core/chipseq"))
     assert checks[QC_METRIC]["status"] == UNAVAILABLE
     assert "one sample" in checks[QC_METRIC]["reason"]
@@ -172,8 +214,13 @@ def test_a_binding_whose_facts_did_not_match_carries_the_mismatch():
 
 
 def test_a_sample_count_is_checked_against_the_registered_samples():
-    target = {"metric_key": "total_samples", "claimed_value": 54, "unit": "samples", "output_type": "count",
-              "reported_experiment_id": "e1"}
+    target = {
+        "metric_key": "total_samples",
+        "claimed_value": 54,
+        "unit": "samples",
+        "output_type": "count",
+        "reported_experiment_id": "e1",
+    }
     checks = _checks(target, deposits=[{**_DEPOSIT, "registered_samples": 54}])
     assert checks[AUTHOR_RESULTS]["status"] == AVAILABLE
     assert checks[QC_METRIC]["status"] == UNAVAILABLE
@@ -211,7 +258,9 @@ def test_an_absent_requirement_decides_before_one_not_yet_established():
     """The reference is known to be unavailable before the deposit is listed; raw reanalysis is then
     unavailable, not waiting on the listing."""
     unavailable = {"status": "unavailable", "resolved": None, "reason": "the paper states mm9; bioAF cannot supply mm9"}
-    experiment = _experiment(workflow="nf-core/chipseq", reference={"assembly": unavailable, "annotation": {"status": "unstated"}})
+    experiment = _experiment(
+        workflow="nf-core/chipseq", reference={"assembly": unavailable, "annotation": {"status": "unstated"}}
+    )
     checks = _checks(_differential(), experiment=experiment, resources=[_resource()], deposits=[])
     assert checks[PROCESSED_REANALYSIS]["requirement"] == "deposit_listing"
     assert checks[RAW_REANALYSIS]["status"] == UNAVAILABLE

@@ -18,8 +18,18 @@ from app.services.validation_revisions import (
 
 
 def _record(**current):
-    base = {"revision": 1, "claim_index": 1, "check": "processed_reanalysis", "contrast_index": 0, "input": None,
-            "sample_mapping": None, "predicate": None, "decided_by": "model", "reason": "r", "confidence": 0.8}
+    base = {
+        "revision": 1,
+        "claim_index": 1,
+        "check": "processed_reanalysis",
+        "contrast_index": 0,
+        "input": None,
+        "sample_mapping": None,
+        "predicate": None,
+        "decided_by": "model",
+        "reason": "r",
+        "confidence": 0.8,
+    }
     return {"current": {**base, **current}, "history": [], "unassessed": []}
 
 
@@ -32,7 +42,9 @@ def _plan(record, finding_claim=None):
 
 
 def test_a_revision_supersedes_the_current_one_and_keeps_it_as_history():
-    record, changed = revise(_record(), {"contrast_index": 1, "claim_index": 2}, decided_by="human", reason="chosen at the gate")
+    record, changed = revise(
+        _record(), {"contrast_index": 1, "claim_index": 2}, decided_by="human", reason="chosen at the gate"
+    )
     assert changed == {"claim", "contrast"}
     assert record["current"]["revision"] == 2
     assert record["current"]["decided_by"] == "human"
@@ -72,7 +84,9 @@ def test_artifacts_are_stamped_with_the_revision_they_were_computed_for_and_stal
     plan = _plan(_record())
     sync_revisions(study, plan)
     assert study.evidence_json["artifact_revisions"] == {"level3": 1}
-    plan.analysis_selection_json, _ = revise(plan.analysis_selection_json, {"predicate": {"kind": "padj"}}, decided_by="human", reason="r")
+    plan.analysis_selection_json, _ = revise(
+        plan.analysis_selection_json, {"predicate": {"kind": "padj"}}, decided_by="human", reason="r"
+    )
     assert stale_artifacts(study, plan) == ["level3"]
     sync_revisions(study, plan)
     assert "level3" not in study.evidence_json
@@ -98,33 +112,85 @@ async def _gate(session, admin_user):
     study = await ValidationStudyService.create_study(session, admin_user.organization_id, admin_user.id)
     await session.flush()
     experiments = [
-        {"id": "e1", "assay": "bulk RNA-seq", "status": "extracted", "workflow": "nf-core/rnaseq", "workflow_version": "3.14.0"},
-        {"id": "e2", "assay": "ATAC-seq", "status": "extracted", "workflow": "nf-core/atacseq", "workflow_version": "2.1.2"},
+        {
+            "id": "e1",
+            "assay": "bulk RNA-seq",
+            "status": "extracted",
+            "workflow": "nf-core/rnaseq",
+            "workflow_version": "3.14.0",
+        },
+        {
+            "id": "e2",
+            "assay": "ATAC-seq",
+            "status": "extracted",
+            "workflow": "nf-core/atacseq",
+            "workflow_version": "2.1.2",
+        },
     ]
     design = {
         "contrasts": [
             {"name": "KO vs WT", "assay": "bulk RNA-seq", "test_samples": [], "reference_samples": [], "cutoffs": _P},
-            {"name": "KO vs WT accessibility", "assay": "ATAC-seq", "test_samples": [], "reference_samples": [], "cutoffs": _P},
+            {
+                "name": "KO vs WT accessibility",
+                "assay": "ATAC-seq",
+                "test_samples": [],
+                "reference_samples": [],
+                "cutoffs": _P,
+            },
         ],
-        "selected_contrast": {"contrast_index": 0, "decided_by": "claim_selection", "reason": "r", "confidence": 0.8, "model": "m"},
+        "selected_contrast": {
+            "contrast_index": 0,
+            "decided_by": "claim_selection",
+            "reason": "r",
+            "confidence": 0.8,
+            "model": "m",
+        },
     }
     record = {
-        "current": {"revision": 1, "reported_experiment_id": "e1", "claim_index": 0, "check": "processed_reanalysis",
-                    "contrast_index": 0, "workflow": "nf-core/rnaseq", "decided_by": "model", "reason": "r"},
+        "current": {
+            "revision": 1,
+            "reported_experiment_id": "e1",
+            "claim_index": 0,
+            "check": "processed_reanalysis",
+            "contrast_index": 0,
+            "workflow": "nf-core/rnaseq",
+            "decided_by": "model",
+            "reason": "r",
+        },
         "history": [],
-        "candidates": [{"claim_index": 0, "check": "processed_reanalysis"}, {"claim_index": 1, "check": "raw_reanalysis"}],
+        "candidates": [
+            {"claim_index": 0, "check": "processed_reanalysis"},
+            {"claim_index": 1, "check": "raw_reanalysis"},
+        ],
         "unassessed": [{"claim_index": 1, "reason": "not selected"}],
     }
     plan = await ReproductionPlanService.create_plan(
-        session, study, admin_user.id, pipeline_key="nf-core/rnaseq", differential_design=design,
-        reported_experiments=experiments, analysis_selection=record,
+        session,
+        study,
+        admin_user.id,
+        pipeline_key="nf-core/rnaseq",
+        differential_design=design,
+        reported_experiments=experiments,
+        analysis_selection=record,
     )
     await ReproductionPlanService.add_comparison_targets(
         session,
         plan,
         [
-            {"metric_key": "", "claim_text": "257 genes up", "claimed_value": 257, "contrast_index": 0, "reported_experiment_id": "e1"},
-            {"metric_key": "", "claim_text": "900 regions opened", "claimed_value": 900, "contrast_index": 1, "reported_experiment_id": "e2"},
+            {
+                "metric_key": "",
+                "claim_text": "257 genes up",
+                "claimed_value": 257,
+                "contrast_index": 0,
+                "reported_experiment_id": "e1",
+            },
+            {
+                "metric_key": "",
+                "claim_text": "900 regions opened",
+                "claimed_value": 900,
+                "contrast_index": 1,
+                "reported_experiment_id": "e2",
+            },
         ],
     )
     for st in ("acquiring_text", "reading", "plan_ready"):
@@ -183,10 +249,18 @@ async def _classified_legacy_study(session, admin_user, *, ambiguous=True):
     await session.flush()
     contrasts = [
         {"name": "KO vs WT", "assay": "bulk RNA-seq", "test_samples": ["K1", "K2"], "reference_samples": ["W1", "W2"]},
-        {"name": "KO vs WT binding", "assay": "ChIP-seq" if ambiguous else "RNA-seq", "test_samples": [], "reference_samples": []},
+        {
+            "name": "KO vs WT binding",
+            "assay": "ChIP-seq" if ambiguous else "RNA-seq",
+            "test_samples": [],
+            "reference_samples": [],
+        },
     ]
     await ReproductionPlanService.create_plan(
-        session, study, admin_user.id, pipeline_key="nf-core/rnaseq",
+        session,
+        study,
+        admin_user.id,
+        pipeline_key="nf-core/rnaseq",
         differential_design={"contrasts": contrasts, "selected_contrast": {"contrast_index": 0, "decided_by": "model"}},
     )
     study.state = "classified"

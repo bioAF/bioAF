@@ -22,8 +22,15 @@ _CONTRAST = {"name": "KO vs WT", "test_condition": "KO", "reference_condition": 
 
 
 def _claim(**over):
-    return {"claim_text": "524 genes were down (P < 0.01)", "claimed_value": 524, "output_type": "gene_set_size",
-            "direction": "down", "contrast_index": 0, "cutoffs": [_P], **over}
+    return {
+        "claim_text": "524 genes were down (P < 0.01)",
+        "claimed_value": 524,
+        "output_type": "gene_set_size",
+        "direction": "down",
+        "contrast_index": 0,
+        "cutoffs": [_P],
+        **over,
+    }
 
 
 # ---- building ----
@@ -57,7 +64,11 @@ def test_an_adjustment_method_the_paper_states_is_recorded():
     assert build_predicate(claim, contrast=_CONTRAST)["significance"]["adjustment"] == "BH"
     fdr = _claim(cutoffs=[{"kind": "fdr", "operator": "<", "value": 0.05}])
     assert build_predicate(fdr, contrast=_CONTRAST)["significance"] == {
-        "kind": "padj", "operator": "<", "value": 0.05, "adjustment": "FDR unspecified"}
+        "kind": "padj",
+        "operator": "<",
+        "value": 0.05,
+        "adjustment": "FDR unspecified",
+    }
 
 
 def test_more_than_and_about_are_kept():
@@ -75,8 +86,9 @@ def test_a_bare_count_is_read_as_exact_and_the_reading_is_an_assumption():
 
 def test_an_unspecified_fold_change_is_not_the_same_as_none():
     legacy = {"claim_text": "x", "claimed_value": 10, "output_type": "gene_set_size", "contrast_index": 0}
-    predicate = build_predicate(legacy, contrast={"name": "c", "thresholds": {"padj": 0.05, "log2fc": None}},
-                                design={"thresholds": {}})
+    predicate = build_predicate(
+        legacy, contrast={"name": "c", "thresholds": {"padj": 0.05, "log2fc": None}}, design={"thresholds": {}}
+    )
     assert predicate["effect"] is None
     assert predicate["significance"]["kind"] == "padj"
 
@@ -92,7 +104,9 @@ def test_no_stated_significance_is_not_checkable_for_a_count():
 
 def test_the_legacy_shapes_are_read_through_one_adapter():
     assert legacy_cutoffs({"cutoffs": [_P]}) == [_P]
-    assert legacy_cutoffs({"threshold": 0.05, "threshold_kind": "padj"}) == [{"kind": "padj", "operator": "<", "value": 0.05}]
+    assert legacy_cutoffs({"threshold": 0.05, "threshold_kind": "padj"}) == [
+        {"kind": "padj", "operator": "<", "value": 0.05}
+    ]
     assert legacy_cutoffs({}, contrast={"thresholds": {"padj": 0.1, "log2fc": 1.0}}) == [
         {"kind": "padj", "operator": "<=", "value": 0.1},
         {"kind": "abs_log2fc", "operator": ">=", "value": 1.0},
@@ -147,8 +161,13 @@ def test_duplicates_that_disagree_make_the_count_a_range():
 
 @pytest.mark.parametrize(
     "relation,value,observed,expected",
-    [("=", 524, [524, 524], "holds"), ("=", 524, [500, 500], "fails"), (">", 5000, [6000, 6000], "holds"),
-     (">", 5000, [5000, 5000], "fails"), (">", 5000, [4000, 6000], "unresolved")],
+    [
+        ("=", 524, [524, 524], "holds"),
+        ("=", 524, [500, 500], "fails"),
+        (">", 5000, [6000, 6000], "holds"),
+        (">", 5000, [5000, 5000], "fails"),
+        (">", 5000, [4000, 6000], "unresolved"),
+    ],
 )
 def test_the_count_relation_is_honoured(relation, value, observed, expected):
     status, _words = evaluate_count({"relation": relation, "value": value, "tolerance": None}, observed)
@@ -159,7 +178,9 @@ def test_about_with_no_stated_tolerance_is_unresolved_never_guessed():
     status, words = evaluate_count({"relation": "approx", "value": 5000, "tolerance": None}, [5100, 5100])
     assert status == "unresolved"
     assert "tolerance" in words
-    status, _ = evaluate_count({"relation": "approx", "value": 5000, "tolerance": {"kind": "relative", "value": 0.05}}, [5100, 5100])
+    status, _ = evaluate_count(
+        {"relation": "approx", "value": 5000, "tolerance": {"kind": "relative", "value": 0.05}}, [5100, 5100]
+    )
     assert status == "holds"
 
 
@@ -189,9 +210,12 @@ def test_a_claims_cutoffs_keep_the_adjustment_the_paper_states():
     assert claim_cutoffs({"cutoffs": [{"kind": "fdr", "operator": "<", "value": 0.05}]}) == [
         {"kind": "padj", "operator": "<", "value": 0.05, "adjustment": "FDR unspecified"}
     ]
-    assert claim_cutoffs({"cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05, "adjustment": "BH"}]})[0][
-        "adjustment"
-    ] == "BH"
+    assert (
+        claim_cutoffs({"cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05, "adjustment": "BH"}]})[0][
+            "adjustment"
+        ]
+        == "BH"
+    )
     assert "adjustment" not in claim_cutoffs({"cutoffs": [_P]})[0]
 
 
@@ -204,8 +228,12 @@ async def test_the_count_relation_is_stored_and_validated(session, admin_user):
     await session.flush()
     plan = await ReproductionPlanService.create_plan(session, study, admin_user.id, accessions=["GSE1"])
     rows = await ReproductionPlanService.add_comparison_targets(
-        session, plan, [{"metric_key": "", "claim_text": "more than 5000 genes", "claimed_value": 5000.0, "count_relation": ">"},
-                        {"metric_key": "", "claim_text": "roughly one", "claimed_value": 1.0, "count_relation": "roughly"}],
+        session,
+        plan,
+        [
+            {"metric_key": "", "claim_text": "more than 5000 genes", "claimed_value": 5000.0, "count_relation": ">"},
+            {"metric_key": "", "claim_text": "roughly one", "claimed_value": 1.0, "count_relation": "roughly"},
+        ],
     )
     assert [r.count_relation for r in rows] == [">", None]
 
@@ -217,9 +245,15 @@ async def test_the_selection_carries_the_selected_claims_predicate():
     target = {**_claim(), "reported_experiment_id": "e1", "bound_by": "model"}
     checks = [{"processed_reanalysis": {"status": "unresolved", "requirement": "sample_mapping"}}]
     selection = await select_analysis(
-        [target], checks, experiments=[{"id": "e1", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq"}],
-        contrasts=[{**_CONTRAST, "assay": "bulk RNA-seq", "cutoffs": [_P]}], route="deposit", autonomous=False,
-        client=None, model="m", api_key=None,
+        [target],
+        checks,
+        experiments=[{"id": "e1", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq"}],
+        contrasts=[{**_CONTRAST, "assay": "bulk RNA-seq", "cutoffs": [_P]}],
+        route="deposit",
+        autonomous=False,
+        client=None,
+        model="m",
+        api_key=None,
     )
     predicate = selection["current"]["predicate"]
     assert predicate["significance"]["kind"] == "pvalue"
@@ -248,7 +282,11 @@ def test_the_normalizer_filters_through_the_one_function(monkeypatch):
     monkeypatch.setattr(validation_predicate, "row_passes", counted)
     table = "gene\tlog2FoldChange\tpvalue\tpadj\ng1\t-1.5\t0.001\t0.01\ng2\t0.2\t0.5\t0.9\n"
     fs = result_set_normalizer.normalize_gene_table(
-        table, padj_threshold=0.01, significance_kind="pvalue", significance_operator="<", lfc_threshold=0.0,
+        table,
+        padj_threshold=0.01,
+        significance_kind="pvalue",
+        significance_operator="<",
+        lfc_threshold=0.0,
         effect_operator=">=",
     )
     assert [e.id for e in fs.entities] == ["g1"]

@@ -37,9 +37,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["updated_by_user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(
-        "ix_llm_feature_model_override_organization_id", "llm_feature_model_override", ["organization_id"]
-    )
+    op.create_index("ix_llm_feature_model_override_organization_id", "llm_feature_model_override", ["organization_id"])
     op.create_index(
         "uq_llm_feature_model_override_org_feature",
         "llm_feature_model_override",

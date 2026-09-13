@@ -101,7 +101,9 @@ class TestTheReportStatesTheBuild:
                     "id": 1,
                     "state": "classified",
                     "build_provenance": {
-                        "stages": [{"stage": "assessment", "at": "now", "commit": "abc123", "image_digest": "sha256:x"}],
+                        "stages": [
+                            {"stage": "assessment", "at": "now", "commit": "abc123", "image_digest": "sha256:x"}
+                        ],
                         "spans_more_than_one_build": False,
                     },
                 },
@@ -181,9 +183,7 @@ class TestACappedAnswerIsNotAnUnreadableOne:
             with pytest.raises(ProviderError) as ei:
                 asyncio.get_event_loop().run_until_complete(
                     anthropic_client.submit("p", "payload", "claude-opus-5", "key")
-                ) if False else asyncio.run(
-                    anthropic_client.submit("p", "payload", "claude-opus-5", "key")
-                )
+                ) if False else asyncio.run(anthropic_client.submit("p", "payload", "claude-opus-5", "key"))
         finally:
             anthropic_client.request_with_retry = original
         assert ei.value.error_class == "truncated"
@@ -213,7 +213,9 @@ class TestTheEvidenceForAFailedParseSurvives:
                 return long_answer
 
         decision = asyncio.run(
-            decide(intent="binding the paper's claims", system="s", payload="p", client=_Client(), model="m", api_key=None)
+            decide(
+                intent="binding the paper's claims", system="s", payload="p", client=_Client(), model="m", api_key=None
+            )
         )
         assert decision.outcome == "unparseable"
         assert len(decision.text) == len(long_answer)
@@ -230,7 +232,9 @@ class TestTheEvidenceForAFailedParseSurvives:
                 return "a stack trace and a wall of json fragments"
 
         decision = asyncio.run(
-            decide(intent="binding the paper's claims", system="s", payload="p", client=_Client(), model="m", api_key=None)
+            decide(
+                intent="binding the paper's claims", system="s", payload="p", client=_Client(), model="m", api_key=None
+            )
         )
         issue = decision.as_issue(impact="degraded")
         assert "stack trace" not in issue["message"]

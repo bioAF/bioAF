@@ -22,32 +22,55 @@ _BASE = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE555nnn/GSE555001/suppl/"
 _MATRIX = "GSE555001_normalized_counts.txt.gz"
 _TABLE = "GSE555001_DESeq2_results.txt.gz"
 _COLUMNS = ["WT_a", "WT_b", "KO_c5", "KO_c16", "KO_c5_d7"]
-_MATRIX_TEXT = "gene\t" + "\t".join(_COLUMNS) + "\n" + "\n".join(
-    f"g{i}\t" + "\t".join(f"{(i * 7 + j * 3) % 50 + 0.5:.2f}" for j in range(5)) for i in range(8)
+_MATRIX_TEXT = (
+    "gene\t"
+    + "\t".join(_COLUMNS)
+    + "\n"
+    + "\n".join(f"g{i}\t" + "\t".join(f"{(i * 7 + j * 3) % 50 + 0.5:.2f}" for j in range(5)) for i in range(8))
 )
 _TABLE_TEXT = "gene\tlog2FoldChange\tpvalue\tpadj\ng1\t1.5\t0.001\t0.01\ng2\t-2.0\t0.004\t0.02\ng3\t0.1\t0.5\t0.9\n"
 _SERIES_MATRIX = (
-    "!Series_title\t\"x\"\n"
-    "!Sample_title\t\"WT_a\"\t\"WT_b\"\t\"KO_c5\"\t\"KO_c16\"\t\"KO_c5_d7\"\n"
-    "!Sample_geo_accession\t\"GSM1\"\t\"GSM2\"\t\"GSM3\"\t\"GSM4\"\t\"GSM5\"\n"
-    "!Sample_characteristics_ch1\t\"genotype: wild type\"\t\"genotype: wild type\"\t\"genotype: SAMD1 KO\"\t"
-    "\"genotype: SAMD1 KO\"\t\"genotype: SAMD1 KO\"\n"
-    "!Sample_characteristics_ch1\t\"culture: WT1\"\t\"culture: WT2\"\t\"clone: c5\"\t\"clone: c16\"\t\"clone: c5\"\n"
-    "!Sample_characteristics_ch1\t\"time: day 0\"\t\"time: day 0\"\t\"time: day 0\"\t\"time: day 0\"\t\"time: day 7\"\n"
+    '!Series_title\t"x"\n'
+    '!Sample_title\t"WT_a"\t"WT_b"\t"KO_c5"\t"KO_c16"\t"KO_c5_d7"\n'
+    '!Sample_geo_accession\t"GSM1"\t"GSM2"\t"GSM3"\t"GSM4"\t"GSM5"\n'
+    '!Sample_characteristics_ch1\t"genotype: wild type"\t"genotype: wild type"\t"genotype: SAMD1 KO"\t'
+    '"genotype: SAMD1 KO"\t"genotype: SAMD1 KO"\n'
+    '!Sample_characteristics_ch1\t"culture: WT1"\t"culture: WT2"\t"clone: c5"\t"clone: c16"\t"clone: c5"\n'
+    '!Sample_characteristics_ch1\t"time: day 0"\t"time: day 0"\t"time: day 0"\t"time: day 0"\t"time: day 7"\n'
 )
 _LISTING = f'<html><body><a href="{_MATRIX}">{_MATRIX}</a><a href="{_TABLE}">{_TABLE}</a></body></html>'
 
 
 def _mapping(*, ko16_quote="clone: c16"):
     return [
-        {"column": "WT_a", "arm": "reference", "biological_unit": "WT1", "time_point": "day 0",
-         "evidence": [{"source": "sample_record", "quote": "culture: WT1"}]},
-        {"column": "WT_b", "arm": "reference", "biological_unit": "WT2", "time_point": "day 0",
-         "evidence": [{"source": "sample_record", "quote": "culture: WT2"}]},
-        {"column": "KO_c5", "arm": "test", "biological_unit": "c5", "time_point": "day 0",
-         "evidence": [{"source": "sample_record", "quote": "clone: c5"}]},
-        {"column": "KO_c16", "arm": "test", "biological_unit": "c16", "time_point": "day 0",
-         "evidence": [{"source": "sample_record", "quote": ko16_quote}]},
+        {
+            "column": "WT_a",
+            "arm": "reference",
+            "biological_unit": "WT1",
+            "time_point": "day 0",
+            "evidence": [{"source": "sample_record", "quote": "culture: WT1"}],
+        },
+        {
+            "column": "WT_b",
+            "arm": "reference",
+            "biological_unit": "WT2",
+            "time_point": "day 0",
+            "evidence": [{"source": "sample_record", "quote": "culture: WT2"}],
+        },
+        {
+            "column": "KO_c5",
+            "arm": "test",
+            "biological_unit": "c5",
+            "time_point": "day 0",
+            "evidence": [{"source": "sample_record", "quote": "clone: c5"}],
+        },
+        {
+            "column": "KO_c16",
+            "arm": "test",
+            "biological_unit": "c16",
+            "time_point": "day 0",
+            "evidence": [{"source": "sample_record", "quote": ko16_quote}],
+        },
         {"column": "KO_c5_d7", "arm": "excluded", "evidence": [{"source": "sample_record", "quote": "time: day 7"}]},
     ]
 
@@ -113,37 +136,98 @@ async def _stage2_study(session, admin_user):
     org = await session.get(Organization, admin_user.organization_id)
     org.lit_validation_autonomy = "autonomous"
     for path in ("notebooks/de_normalized_limma.ipynb", "notebooks/de_bulk_deseq2.ipynb"):
-        session.add(TemplateNotebook(organization_id=admin_user.organization_id, name=path, category="differential_expression",
-                                     notebook_path=path, parameters_json={}, is_builtin=True))
+        session.add(
+            TemplateNotebook(
+                organization_id=admin_user.organization_id,
+                name=path,
+                category="differential_expression",
+                notebook_path=path,
+                parameters_json={},
+                is_builtin=True,
+            )
+        )
     study = ValidationStudy(
-        organization_id=admin_user.organization_id, requested_by_user_id=admin_user.id, source_accession="GSE555001",
-        intended_route="deposit", state="acquiring_processed",
+        organization_id=admin_user.organization_id,
+        requested_by_user_id=admin_user.id,
+        source_accession="GSE555001",
+        intended_route="deposit",
+        state="acquiring_processed",
         evidence_json={"route": "deposit", "assessment": {"at": "x"}},
     )
     session.add(study)
     await session.flush()
-    predicate = {"significance": {"kind": "pvalue", "operator": "<", "value": 0.01, "adjustment": None},
-                 "effect": {"kind": "none"}, "direction": "up",
-                 "count": {"relation": "=", "value": 1.0, "tolerance": None, "entity": "gene"}, "status": "resolved"}
+    predicate = {
+        "significance": {"kind": "pvalue", "operator": "<", "value": 0.01, "adjustment": None},
+        "effect": {"kind": "none"},
+        "direction": "up",
+        "count": {"relation": "=", "value": 1.0, "tolerance": None, "entity": "gene"},
+        "status": "resolved",
+    }
     plan = await ReproductionPlanService.create_plan(
-        session, study, admin_user.id, accessions=["GSE555001"], pipeline_key="nf-core/rnaseq",
+        session,
+        study,
+        admin_user.id,
+        accessions=["GSE555001"],
+        pipeline_key="nf-core/rnaseq",
         differential_design={
-            "contrasts": [{"name": "KO vs WT", "assay": "bulk RNA-seq", "test_condition": "SAMD1 KO",
-                           "reference_condition": "WT", "test_samples": [], "reference_samples": [], "cutoffs": _P}],
+            "contrasts": [
+                {
+                    "name": "KO vs WT",
+                    "assay": "bulk RNA-seq",
+                    "test_condition": "SAMD1 KO",
+                    "reference_condition": "WT",
+                    "test_samples": [],
+                    "reference_samples": [],
+                    "cutoffs": _P,
+                }
+            ],
             "selected_contrast": {"contrast_index": 0, "decided_by": "claim_selection"},
         },
-        reported_experiments=[{"id": "e2", "assay": "bulk RNA-seq", "status": "extracted", "workflow": "nf-core/rnaseq",
-                               "reference": {"assembly": {"status": "usable", "resolved": "GRCm38"},
-                                             "annotation": {"status": "unavailable", "stated": "GENCODE M23"}}}],
-        analysis_selection={"current": {"revision": 1, "reported_experiment_id": "e2", "claim_index": 0,
-                                        "check": "processed_reanalysis", "contrast_index": 0, "workflow": "nf-core/rnaseq",
-                                        "predicate": predicate, "predicate_words": "SAMD1 KO versus WT, P < 0.01, up",
-                                        "decided_by": "model", "reason": "the authors' table", "confidence": 0.8},
-                            "history": [], "candidates": [], "unassessed": []},
+        reported_experiments=[
+            {
+                "id": "e2",
+                "assay": "bulk RNA-seq",
+                "status": "extracted",
+                "workflow": "nf-core/rnaseq",
+                "reference": {
+                    "assembly": {"status": "usable", "resolved": "GRCm38"},
+                    "annotation": {"status": "unavailable", "stated": "GENCODE M23"},
+                },
+            }
+        ],
+        analysis_selection={
+            "current": {
+                "revision": 1,
+                "reported_experiment_id": "e2",
+                "claim_index": 0,
+                "check": "processed_reanalysis",
+                "contrast_index": 0,
+                "workflow": "nf-core/rnaseq",
+                "predicate": predicate,
+                "predicate_words": "SAMD1 KO versus WT, P < 0.01, up",
+                "decided_by": "model",
+                "reason": "the authors' table",
+                "confidence": 0.8,
+            },
+            "history": [],
+            "candidates": [],
+            "unassessed": [],
+        },
     )
     await ReproductionPlanService.add_comparison_targets(
-        session, plan, [{"metric_key": "", "claim_text": "1 gene was up in SAMD1 KO (P < 0.01)", "claimed_value": 1.0,
-                         "contrast_index": 0, "reported_experiment_id": "e2", "cutoffs": _P, "direction": "up"}],
+        session,
+        plan,
+        [
+            {
+                "metric_key": "",
+                "claim_text": "1 gene was up in SAMD1 KO (P < 0.01)",
+                "claimed_value": 1.0,
+                "contrast_index": 0,
+                "reported_experiment_id": "e2",
+                "cutoffs": _P,
+                "direction": "up",
+            }
+        ],
     )
     await session.flush()
     return study
@@ -156,9 +240,18 @@ async def _acquire(session, study, storage):
 
 
 @pytest.mark.asyncio
-async def test_the_input_its_mapping_and_the_authors_table_are_chosen_together_and_acquired(session, admin_user, monkeypatch):
-    client = _Client({"primary_matrix": _MATRIX, "author_table": _TABLE, "mapping": _mapping(), "reason": "day 0 ESC",
-                      "confidence": 0.8})
+async def test_the_input_its_mapping_and_the_authors_table_are_chosen_together_and_acquired(
+    session, admin_user, monkeypatch
+):
+    client = _Client(
+        {
+            "primary_matrix": _MATRIX,
+            "author_table": _TABLE,
+            "mapping": _mapping(),
+            "reason": "day 0 ESC",
+            "confidence": 0.8,
+        }
+    )
     _patch(monkeypatch, client)
     study = await _stage2_study(session, admin_user)
     storage = _Storage()
@@ -179,7 +272,9 @@ async def test_the_input_its_mapping_and_the_authors_table_are_chosen_together_a
 
 
 @pytest.mark.asyncio
-async def test_a_validated_mapping_rewrites_the_contrast_and_the_comparison_needs_no_person(session, admin_user, monkeypatch):
+async def test_a_validated_mapping_rewrites_the_contrast_and_the_comparison_needs_no_person(
+    session, admin_user, monkeypatch
+):
     client = _Client({"primary_matrix": _MATRIX, "author_table": _TABLE, "mapping": _mapping(), "reason": "r"})
     _patch(monkeypatch, client)
     study = await _stage2_study(session, admin_user)
@@ -205,9 +300,16 @@ async def test_a_validated_mapping_rewrites_the_contrast_and_the_comparison_need
 
 
 @pytest.mark.asyncio
-async def test_an_unresolved_mapping_holds_keeps_the_input_and_resume_re_enters_mapping(session, admin_user, monkeypatch):
+async def test_an_unresolved_mapping_holds_keeps_the_input_and_resume_re_enters_mapping(
+    session, admin_user, monkeypatch
+):
     client = _Client(
-        {"primary_matrix": _MATRIX, "author_table": _TABLE, "mapping": _mapping(ko16_quote="clone: c99"), "reason": "r"},
+        {
+            "primary_matrix": _MATRIX,
+            "author_table": _TABLE,
+            "mapping": _mapping(ko16_quote="clone: c99"),
+            "reason": "r",
+        },
         {"mapping": _mapping(), "reason": "read again", "confidence": 0.7},
     )
     _patch(monkeypatch, client)

@@ -199,8 +199,9 @@ async def reconcile(
     revisions = _apply(
         targets,
         decisions,
-        workflow_for=lambda t: (experiment_by_id(plan, t.reported_experiment_id) or {}).get("workflow")
-        or plan.pipeline_key,
+        workflow_for=lambda t: (
+            (experiment_by_id(plan, t.reported_experiment_id) or {}).get("workflow") or plan.pipeline_key
+        ),
     )
     _mark_cutoff_disagreements(targets, on_issue)
     if decisions and all(d.get("bound_by") == BINDING_FAILED for d in decisions):

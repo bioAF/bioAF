@@ -23,15 +23,35 @@ _P = [{"kind": "pvalue", "operator": "<", "value": 0.01}]
 _COLUMNS = ["WT1", "WT2", "KO1", "KO2"]
 _DESIGN = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "claim_selection"},
-    "contrasts": [{"name": "KO vs WT", "test_condition": "KO", "reference_condition": "WT", "cutoffs": _P,
-                   "test_samples": ["KO1", "KO2"], "reference_samples": ["WT1", "WT2"],
-                   "units": {"KO1": "k1", "KO2": "k2", "WT1": "w1", "WT2": "w2"}}],
+    "contrasts": [
+        {
+            "name": "KO vs WT",
+            "test_condition": "KO",
+            "reference_condition": "WT",
+            "cutoffs": _P,
+            "test_samples": ["KO1", "KO2"],
+            "reference_samples": ["WT1", "WT2"],
+            "units": {"KO1": "k1", "KO2": "k2", "WT1": "w1", "WT2": "w2"},
+        }
+    ],
 }
-_PREDICATE = {"significance": {"kind": "pvalue", "operator": "<", "value": 0.01, "adjustment": None},
-              "effect": {"kind": "none"}, "direction": "up",
-              "count": {"relation": "=", "value": 2.0, "tolerance": None, "entity": "gene"}, "status": "resolved"}
-_SELECTION = {"current": {"revision": 2, "claim_index": 0, "check": "processed_reanalysis", "contrast_index": 0,
-                          "predicate": _PREDICATE, "predicate_words": "KO versus WT, P < 0.01, up, no fold-change requirement"}}
+_PREDICATE = {
+    "significance": {"kind": "pvalue", "operator": "<", "value": 0.01, "adjustment": None},
+    "effect": {"kind": "none"},
+    "direction": "up",
+    "count": {"relation": "=", "value": 2.0, "tolerance": None, "entity": "gene"},
+    "status": "resolved",
+}
+_SELECTION = {
+    "current": {
+        "revision": 2,
+        "claim_index": 0,
+        "check": "processed_reanalysis",
+        "contrast_index": 0,
+        "predicate": _PREDICATE,
+        "predicate_words": "KO versus WT, P < 0.01, up, no fold-change requirement",
+    }
+}
 _AUTHOR_TABLE = (
     "gene\tlog2FoldChange\tpvalue\tpadj\n"
     "g1\t1.5\t0.001\t0.02\n"
@@ -51,11 +71,23 @@ class _Storage:
 
 @pytest_asyncio.fixture
 async def deposit(session, admin_user):
-    template = TemplateNotebook(organization_id=admin_user.organization_id, name="limma", category="differential_expression",
-                                notebook_path="notebooks/de_normalized_limma.ipynb", parameters_json={}, is_builtin=True)
-    matrix = File(organization_id=admin_user.organization_id, filename="GSE1_norm.txt", storage_uri="s3://x/m.tsv",
-                  file_type="table", source_type="external_deposit", artifact_type="deposited_matrix",
-                  uploader_user_id=admin_user.id)
+    template = TemplateNotebook(
+        organization_id=admin_user.organization_id,
+        name="limma",
+        category="differential_expression",
+        notebook_path="notebooks/de_normalized_limma.ipynb",
+        parameters_json={},
+        is_builtin=True,
+    )
+    matrix = File(
+        organization_id=admin_user.organization_id,
+        filename="GSE1_norm.txt",
+        storage_uri="s3://x/m.tsv",
+        file_type="table",
+        source_type="external_deposit",
+        artifact_type="deposited_matrix",
+        uploader_user_id=admin_user.id,
+    )
     session.add_all([template, matrix])
     await session.flush()
     return matrix
@@ -64,11 +96,22 @@ async def deposit(session, admin_user):
 async def _study(session, admin_user, matrix, *, autonomous=True, author_table=True, design=None):
     org = await session.get(Organization, admin_user.organization_id)
     org.lit_validation_autonomy = "autonomous" if autonomous else "assisted"
-    files = [{"file_id": matrix.id, "filename": "GSE1_norm.txt", "storage_uri": "s3://x/m.tsv", "artifact_type": "deposited_matrix"}]
+    files = [
+        {
+            "file_id": matrix.id,
+            "filename": "GSE1_norm.txt",
+            "storage_uri": "s3://x/m.tsv",
+            "artifact_type": "deposited_matrix",
+        }
+    ]
     if author_table:
-        files.append({"filename": "GSE1_DESeq2.txt", "storage_uri": "s3://x/t.tsv", "artifact_type": "deposited_result_table"})
+        files.append(
+            {"filename": "GSE1_DESeq2.txt", "storage_uri": "s3://x/t.tsv", "artifact_type": "deposited_result_table"}
+        )
     study = ValidationStudy(
-        organization_id=admin_user.organization_id, requested_by_user_id=admin_user.id, state="inspecting_deposit",
+        organization_id=admin_user.organization_id,
+        requested_by_user_id=admin_user.id,
+        state="inspecting_deposit",
         evidence_json={
             "route": "deposit",
             "deposit": {"files": files},
@@ -79,7 +122,11 @@ async def _study(session, admin_user, matrix, *, autonomous=True, author_table=T
     session.add(study)
     await session.flush()
     plan = await ReproductionPlanService.create_plan(
-        session, study, admin_user.id, pipeline_key="nf-core/rnaseq", differential_design=design or _DESIGN,
+        session,
+        study,
+        admin_user.id,
+        pipeline_key="nf-core/rnaseq",
+        differential_design=design or _DESIGN,
         analysis_selection=_SELECTION,
     )
     await session.flush()
@@ -123,9 +170,17 @@ async def test_assisted_mode_still_waits_for_a_person_to_confirm_the_table(sessi
 
 @pytest.mark.asyncio
 async def test_confirmed_technical_groups_reach_the_template_aligned_to_the_arms(session, admin_user, deposit):
-    design = {**_DESIGN, "contrasts": [{**_DESIGN["contrasts"][0], "test_samples": ["KO1", "KO1b", "KO2"],
-                                        "units": {"KO1": "k1", "KO1b": "k1", "KO2": "k2", "WT1": "w1", "WT2": "w2"},
-                                        "technical_groups": {"KO1": "k1s", "KO1b": "k1s"}}]}
+    design = {
+        **_DESIGN,
+        "contrasts": [
+            {
+                **_DESIGN["contrasts"][0],
+                "test_samples": ["KO1", "KO1b", "KO2"],
+                "units": {"KO1": "k1", "KO1b": "k1", "KO2": "k2", "WT1": "w1", "WT2": "w2"},
+                "technical_groups": {"KO1": "k1s", "KO1b": "k1s"},
+            }
+        ],
+    }
     study, plan = await _study(session, admin_user, deposit, author_table=False, design=design)
     decision = await resolve_level3_from_deposit(session, study, plan, evidence=study.evidence_json)
     assert decision.inputs["parameters"]["technical_group_labels"] == "k1s,k1s,KO2,WT1,WT2"
@@ -140,8 +195,11 @@ def _set(*entities):
 
 
 def test_the_concordance_is_filtered_by_the_claims_direction_and_the_count_sits_beside_it():
-    level3 = {"kind": "gene", "predicate": _PREDICATE,
-              "paper_finding_set": _set(("g1", "up"), ("g2", "up"), ("g3", "down")).to_dict()}
+    level3 = {
+        "kind": "gene",
+        "predicate": _PREDICATE,
+        "paper_finding_set": _set(("g1", "up"), ("g2", "up"), ("g3", "down")).to_dict(),
+    }
     ours = _set(("g1", "up"), ("g2", "up"), ("g5", "down"))
     result = score_reproduction(level3, ours, universe=100)
     assert result["concordance"]["paper_n"] == 2  # the down gene is not the claim's

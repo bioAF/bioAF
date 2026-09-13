@@ -25,7 +25,9 @@ async def _enable_lit_validation(session):
 
 
 async def _seed(session, user) -> int:
-    study = await ValidationStudyService.create_study(session, user.organization_id, user.id, source_accession="GSE555001")
+    study = await ValidationStudyService.create_study(
+        session, user.organization_id, user.id, source_accession="GSE555001"
+    )
     plan = await ReproductionPlanService.create_plan(
         session,
         study,
@@ -54,7 +56,9 @@ async def test_the_page_the_json_and_the_markdown_state_the_same_claims(session,
     # The JSON export carries the same projection.
     data = await ProvenanceDataGatherer.gather_validation_study(session, study_id, admin_user.organization_id)
     report = JsonRenderer.render("validation_study", data, "admin@test.com")
-    exported = report["entity"]["report_summary"]["claims"] if "entity" in report else report["report_summary"]["claims"]
+    exported = (
+        report["entity"]["report_summary"]["claims"] if "entity" in report else report["report_summary"]["claims"]
+    )
 
     # The markdown renders from it.
     markdown = MarkdownRenderer.render("validation_study", report)

@@ -61,7 +61,9 @@ def _rows(text: str) -> list[list[str]]:
     if not lines:
         return []
     delimiter = "\t" if "\t" in lines[0] else ","
-    return [[c.strip().strip('"') for c in row] for row in csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)]
+    return [
+        [c.strip().strip('"') for c in row] for row in csv.reader(io.StringIO("\n".join(lines)), delimiter=delimiter)
+    ]
 
 
 def _first(header: list[str], names: tuple[str, ...]) -> int | None:
@@ -104,27 +106,48 @@ def read_table(text: str, *, contrast_name: str | None = None, interpretation: d
     "evidence": [...], "reason": str | None}``."""
     rows = _rows(text)
     if not rows:
-        return {"rows": [], "columns": {}, "headerless": False, "candidate_roles": None, "scale": None,
-                "orientation": None, "evidence": [], "reason": "the table is empty"}
+        return {
+            "rows": [],
+            "columns": {},
+            "headerless": False,
+            "candidate_roles": None,
+            "scale": None,
+            "orientation": None,
+            "evidence": [],
+            "reason": "the table is empty",
+        }
     confirmed = (interpretation or {}).get("columns")
     headerless = _headerless(rows)
     if headerless and not confirmed:
-        return {"rows": [], "columns": {}, "headerless": True, "candidate_roles": _candidate_roles(rows), "scale": None,
-                "orientation": None, "evidence": [],
-                "reason": "the table is headerless, and no legend, README, methods statement or recorded confirmation "
-                "establishes which column is which"}
+        return {
+            "rows": [],
+            "columns": {},
+            "headerless": True,
+            "candidate_roles": _candidate_roles(rows),
+            "scale": None,
+            "orientation": None,
+            "evidence": [],
+            "reason": "the table is headerless, and no legend, README, methods statement or recorded confirmation "
+            "establishes which column is which",
+        }
     if confirmed:
         header = [f"column {i}" for i in range(max(len(r) for r in rows))] if headerless else rows[0]
         body = rows if headerless else rows[1:]
         index = {role: confirmed.get(role) for role in ("id", "lfc", "pvalue", "padj")}
     else:
         header, body = rows[0], rows[1:]
-        index = {"id": _first(header, _ID_NAMES), "lfc": None, "pvalue": _first(header, _PVAL_NAMES),
-                 "padj": _first(header, _PADJ_NAMES)}
+        index = {
+            "id": _first(header, _ID_NAMES),
+            "lfc": None,
+            "pvalue": _first(header, _PVAL_NAMES),
+            "padj": _first(header, _PADJ_NAMES),
+        }
         lowered = [h.lower() for h in header]
         index["lfc"] = next((i for i, h in enumerate(lowered) if any(w in h for w in _LOG_WORDS)), None)
         if index["lfc"] is None:
-            index["lfc"] = next((i for i, h in enumerate(lowered) if any(w in _squash(h) for w in ("foldchange",))), None)
+            index["lfc"] = next(
+                (i for i, h in enumerate(lowered) if any(w in _squash(h) for w in ("foldchange",))), None
+            )
         if contrast_name:
             key = contrast_name.strip().lower()
             for i, h in enumerate(lowered):
@@ -158,6 +181,7 @@ def read_table(text: str, *, contrast_name: str | None = None, interpretation: d
 
     parsed = []
     for row in body:
+
         def _cell(role):
             i = index.get(role)
             return row[i] if isinstance(i, int) and i < len(row) else None
@@ -170,13 +194,23 @@ def read_table(text: str, *, contrast_name: str | None = None, interpretation: d
                 "padj": _number(_cell("padj") or ""),
             }
         )
-    return {"rows": parsed, "columns": columns, "headerless": headerless, "candidate_roles": None, "scale": scale,
-            "orientation": orientation, "evidence": evidence, "reason": None}
+    return {
+        "rows": parsed,
+        "columns": columns,
+        "headerless": headerless,
+        "candidate_roles": None,
+        "scale": scale,
+        "orientation": orientation,
+        "evidence": evidence,
+        "reason": None,
+    }
 
 
 def _header_orientation(name: str) -> dict | None:
     """The arms a ratio's header names, in order: ``log2(KO/WT)`` or ``KO_vs_WT_log2FC``."""
-    match = re.search(r"([A-Za-z0-9][\w.\- ]*?)\s*(?:/|_vs_|\.vs\.| vs\.? | versus )\s*([A-Za-z0-9][\w.\-]*)", name or "")
+    match = re.search(
+        r"([A-Za-z0-9][\w.\- ]*?)\s*(?:/|_vs_|\.vs\.| vs\.? | versus )\s*([A-Za-z0-9][\w.\-]*)", name or ""
+    )
     if not match:
         return None
     return {"numerator": match.group(1).strip(" (_"), "denominator": match.group(2).strip(" )_")}
@@ -243,7 +277,9 @@ def check_claim(
     if not count:
         return _done(NOT_CHECKABLE, "the claim states no count to check against the table")
 
-    reading = read_table(table.get("text") or "", contrast_name=(contrast or {}).get("name"), interpretation=interpretation)
+    reading = read_table(
+        table.get("text") or "", contrast_name=(contrast or {}).get("name"), interpretation=interpretation
+    )
     record["columns"] = reading["columns"]
     if reading["reason"]:
         record["candidate_roles"] = reading["candidate_roles"]
@@ -257,9 +293,13 @@ def check_claim(
 
     significance = predicate.get("significance") or {}
     if significance.get("kind") == "pvalue" and not reading["columns"].get("pvalue"):
-        return _done(NOT_CHECKABLE, "the table has no P-value column, and bioAF does not substitute the adjusted P value")
+        return _done(
+            NOT_CHECKABLE, "the table has no P-value column, and bioAF does not substitute the adjusted P value"
+        )
     if significance.get("kind") == "padj" and not reading["columns"].get("padj"):
-        return _done(NOT_CHECKABLE, "the table has no adjusted P-value column, and bioAF does not substitute the raw P value")
+        return _done(
+            NOT_CHECKABLE, "the table has no adjusted P-value column, and bioAF does not substitute the raw P value"
+        )
 
     rows = reading["rows"]
     lfcs = [r["lfc"] for r in rows if r["lfc"] is not None]
@@ -274,7 +314,10 @@ def check_claim(
         scale = None  # ruled out: a linear fold change is never negative
         record["assumptions"].append("the column has negative values, so it cannot be a linear fold change")
     if needs_scale and scale != "log2":
-        return _done(UNRESOLVED, "the table's effect scale is not established by its header, a legend, the methods or a confirmation")
+        return _done(
+            UNRESOLVED,
+            "the table's effect scale is not established by its header, a legend, the methods or a confirmation",
+        )
 
     orientation = _orientation_for(reading["orientation"], contrast)
     record["rows_tested"] = len(rows)
@@ -285,7 +328,10 @@ def check_claim(
     if needs_orientation and orientation is None:
         flipped = {"up": "down", "down": "up"}[direction]
         as_stated, reversed_ = _count(predicate), _count({**predicate, "direction": flipped})
-        test, reference = (contrast or {}).get("test_condition") or "test", (contrast or {}).get("reference_condition") or "reference"
+        test, reference = (
+            (contrast or {}).get("test_condition") or "test",
+            (contrast or {}).get("reference_condition") or "reference",
+        )
         record["candidates"] = [
             {"interpretation": f"the table is {test} over {reference}", "count": as_stated["count"]},
             {"interpretation": f"the table is {reference} over {test}", "count": reversed_["count"]},
@@ -296,9 +342,11 @@ def check_claim(
             "the table's ratio orientation is not established by its header, a legend, the methods or a confirmation, "
             "and the contrast's arm names describe the claim, not the table",
         )
-    applied = predicate if orientation != "reference_over_test" else {
-        **predicate, "direction": {"up": "down", "down": "up"}.get(direction, direction)
-    }
+    applied = (
+        predicate
+        if orientation != "reference_over_test"
+        else {**predicate, "direction": {"up": "down", "down": "up"}.get(direction, direction)}
+    )
     result = _count(applied)
     record.update(
         rows_passing=result["count"],
@@ -346,22 +394,32 @@ def claim_predicates(targets: list, plan) -> list[dict]:
     contrasts = design.get("contrasts") or []
     found = []
     for index, target in enumerate(targets):
-        claim = target if isinstance(target, dict) else {
-            "claim_text": target.claim_text,
-            "claimed_value": target.claimed_value,
-            "output_type": target.output_type,
-            "direction": target.direction,
-            "contrast_index": target.contrast_index,
-            "cutoffs": target.cutoffs,
-            "threshold": target.threshold,
-            "threshold_kind": target.threshold_kind,
-            "count_relation": getattr(target, "count_relation", None),
-            "tolerance": target.tolerance,
-            "significance_unresolved": target.unresolved_reason,
-        }
+        claim = (
+            target
+            if isinstance(target, dict)
+            else {
+                "claim_text": target.claim_text,
+                "claimed_value": target.claimed_value,
+                "output_type": target.output_type,
+                "direction": target.direction,
+                "contrast_index": target.contrast_index,
+                "cutoffs": target.cutoffs,
+                "threshold": target.threshold,
+                "threshold_kind": target.threshold_kind,
+                "count_relation": getattr(target, "count_relation", None),
+                "tolerance": target.tolerance,
+                "significance_unresolved": target.unresolved_reason,
+            }
+        )
         position = claim.get("contrast_index")
         if not isinstance(position, int) or not 0 <= position < len(contrasts):
             continue
         contrast = contrasts[position]
-        found.append({"claim_index": index, "predicate": build_predicate(claim, contrast=contrast, design=design), "contrast": contrast})
+        found.append(
+            {
+                "claim_index": index,
+                "predicate": build_predicate(claim, contrast=contrast, design=design),
+                "contrast": contrast,
+            }
+        )
     return found

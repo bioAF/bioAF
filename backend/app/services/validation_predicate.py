@@ -57,7 +57,14 @@ RELATIONS = ("=", ">", ">=", "<", "<=", "approx")
 ADJUSTMENTS = ("BH", "Bonferroni", "q-value", "FDR unspecified")
 _RAW_ADJUSTMENT = {"fdr": "FDR unspecified", "q": "q-value", "qvalue": "q-value", "q-value": "q-value"}
 _ENTITIES = {"gene_set_size": "gene", "region_set_size": "region", "peak_set_size": "peak"}
-_RELATION_WORDS = {"=": "exactly", ">": "more than", ">=": "at least", "<": "fewer than", "<=": "at most", "approx": "about"}
+_RELATION_WORDS = {
+    "=": "exactly",
+    ">": "more than",
+    ">=": "at least",
+    "<": "fewer than",
+    "<=": "at most",
+    "approx": "about",
+}
 
 
 def adjustment_of(raw: dict) -> str | None:
@@ -135,7 +142,9 @@ def build_predicate(
         value = effect_cutoff.get("value")
         if isinstance(value, (int, float)) and value > 1:
             effect = {"kind": "abs_log2fc", "operator": effect_cutoff["operator"], "value": math.log2(float(value))}
-            assumptions.append(f"the stated {describe_cutoff(effect_cutoff)} is applied as |log2FC| {effect_cutoff['operator']} {math.log2(float(value)):g}")
+            assumptions.append(
+                f"the stated {describe_cutoff(effect_cutoff)} is applied as |log2FC| {effect_cutoff['operator']} {math.log2(float(value)):g}"
+            )
         else:
             effect = None
     else:
@@ -172,9 +181,15 @@ def build_predicate(
     elif significance is None and count is not None:
         status, reason = NOT_CHECKABLE, "the claim states no significance cutoff, and bioAF supplies none"
     elif significance is not None and significance["operator"] not in ("<", "<="):
-        status, reason = NOT_CHECKABLE, f"the significance cutoff ({describe_cutoff(significance)}) does not bound a P value from above"
+        status, reason = (
+            NOT_CHECKABLE,
+            f"the significance cutoff ({describe_cutoff(significance)}) does not bound a P value from above",
+        )
     elif effect is None and significance is not None and not _complete_statement(claim, contrast):
-        status, reason = UNRESOLVED, "the comparison's fold-change requirement is not stated, and bioAF does not supply one"
+        status, reason = (
+            UNRESOLVED,
+            "the comparison's fold-change requirement is not stated, and bioAF does not supply one",
+        )
 
     return {
         "contrast_index": (claim or {}).get("contrast_index"),

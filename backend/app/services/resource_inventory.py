@@ -139,7 +139,9 @@ def build_resource_inventory(
             "role": supplement.get("role"),
             "resolved": bool(supplement.get("resolved")),
         }
-    deposits_by_key = {_key(d.get("accession")): d for d in deposits or [] if isinstance(d, dict) and d.get("accession")}
+    deposits_by_key = {
+        _key(d.get("accession")): d for d in deposits or [] if isinstance(d, dict) and d.get("accession")
+    }
     for key, deposit in deposits_by_key.items():
         row = rows.get(key) or _row(deposit.get("accession"), deposit.get("archive"))
         if row is not None and not row["found_by"]:

@@ -48,7 +48,9 @@ _DEPENDENTS = {
     # The input decides what was inspected and associated; the author results only when the input was
     # the result table itself, which stage 3 records on the input.
     "input": frozenset(REVISION_SCOPED) | {ANALYSIS_RUN},
-    "sample_mapping": frozenset({"deposit_metadata_association", "level3", "level3_result", "classification_result", ANALYSIS_RUN}),
+    "sample_mapping": frozenset(
+        {"deposit_metadata_association", "level3", "level3_result", "classification_result", ANALYSIS_RUN}
+    ),
     "predicate": frozenset(
         {"level3", "level3_result", "classification_result", "author_consistency", FINDING_CLAIM, ANALYSIS_RUN}
     ),
@@ -140,7 +142,9 @@ def stale_artifacts(study, plan) -> list[str]:
     if revision is None:
         return []
     stamps = (study.evidence_json or {}).get("artifact_revisions") or {}
-    return sorted(k for k, v in stamps.items() if isinstance(v, int) and v < revision and k in (study.evidence_json or {}))
+    return sorted(
+        k for k, v in stamps.items() if isinstance(v, int) and v < revision and k in (study.evidence_json or {})
+    )
 
 
 def sync_revisions(study, plan) -> list[str]:
