@@ -22,7 +22,7 @@ def _record() -> dict:
 class TestTheGuard:
     def test_the_record_was_measured_under_the_current_prompt_and_schema(self):
         """Fails whenever the extraction's system prompt or schema changes. Re-measure (the script
-        `backend/scripts/measure_read_budget.py`, run where the organisation's model is configured),
+        `python -m app.cli.measure_read_budget`, run where the organisation's model is configured),
         then update `app/services/read_measurements/extraction.json`."""
         assert _record()["fingerprint"] == budget.extraction_fingerprint()
 
