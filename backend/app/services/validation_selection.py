@@ -139,11 +139,7 @@ async def select_analysis(
         )
         answer = decision.data if decision.ok else {}
         picked = next(
-            (
-                p
-                for p in pairs
-                if p["claim_index"] == answer.get("claim_index") and p["check"] == answer.get("check")
-            ),
+            (p for p in pairs if p["claim_index"] == answer.get("claim_index") and p["check"] == answer.get("check")),
             None,
         )
         if picked is not None:
@@ -157,7 +153,9 @@ async def select_analysis(
             confidence = None
     elif pairs:
         chosen, decided_by = pairs[0], "proposal"
-        reason = "proposed for a person to confirm at the gate: it has an authors' table and the fewest open requirements"
+        reason = (
+            "proposed for a person to confirm at the gate: it has an authors' table and the fewest open requirements"
+        )
         confidence = None
 
     current = None
@@ -169,13 +167,19 @@ async def select_analysis(
         workflow = experiment.get("workflow")
         if contrast_index is not None and 0 <= contrast_index < len(contrasts):
             strategy = (library_strategies or {}).get(experiment.get("id"), library_strategy)
-            status, why = contrast_compatibility(contrasts[contrast_index], pipeline_key=workflow, library_strategy=strategy)
+            status, why = contrast_compatibility(
+                contrasts[contrast_index], pipeline_key=workflow, library_strategy=strategy
+            )
             if status == INCOMPATIBLE:
                 refusal = {"outcome": "no_compatible_contrast", "reason": why}
         if refusal is None:
             from app.services.validation_predicate import build_predicate, predicate_words
 
-            contrast = contrasts[contrast_index] if contrast_index is not None and 0 <= contrast_index < len(contrasts) else None
+            contrast = (
+                contrasts[contrast_index]
+                if contrast_index is not None and 0 <= contrast_index < len(contrasts)
+                else None
+            )
             predicate = build_predicate(target, contrast=contrast) if contrast is not None else None
             reference = experiment.get("reference") or {}
             current = {

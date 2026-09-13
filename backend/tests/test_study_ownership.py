@@ -17,7 +17,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.reproduction_plan import ReproductionPlan
-from app.models.validation_study import ValidationStudy
 from app.services import validation_ownership as own
 from app.services.validation_study_service import ValidationStudyService
 
@@ -258,8 +257,10 @@ class TestOneActivePlanWithItsHistoryKept:
         await session.flush()
 
         rows = (
-            await session.execute(select(ReproductionPlan).where(ReproductionPlan.validation_study_id == study.id))
-        ).scalars().all()
+            (await session.execute(select(ReproductionPlan).where(ReproductionPlan.validation_study_id == study.id)))
+            .scalars()
+            .all()
+        )
         assert len(rows) == 2
         assert [r for r in rows if r.superseded_at is not None]
 
@@ -295,9 +296,7 @@ class TestOneActivePlanWithItsHistoryKept:
         session.add(active)
         await session.flush()
         session.add(
-            ComparisonTarget(
-                reproduction_plan_id=active.id, metric_key="x", threshold=1.5, threshold_kind="abs_log2fc"
-            )
+            ComparisonTarget(reproduction_plan_id=active.id, metric_key="x", threshold=1.5, threshold_kind="abs_log2fc")
         )
         study.reproduction_plan_id = active.id
         await session.flush()

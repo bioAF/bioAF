@@ -35,7 +35,18 @@ SCALAR = "scalar"
 SAMPLE_COUNT = "sample_count"
 
 _SET_OUTPUTS = ("gene_set_size", "region_set_size", "peak_set_size")
-_SAMPLE_WORDS = ("sample", "biops", "patient", "donor", "embryo", "subject", "individual", "participant", "mice", "animal")
+_SAMPLE_WORDS = (
+    "sample",
+    "biops",
+    "patient",
+    "donor",
+    "embryo",
+    "subject",
+    "individual",
+    "participant",
+    "mice",
+    "animal",
+)
 _MATRIX_KINDS = ("matrix_counts", "matrix_normalized")
 _TABLE_KINDS = ("de_table", "da_table")
 
@@ -70,7 +81,9 @@ def _linked_deposits(experiment: dict | None, resources: list[dict], deposits: l
     by_id = {str(d.get("accession") or "").upper(): d for d in deposits if isinstance(d, dict)}
     experiment_id = (experiment or {}).get("id")
     linked = [
-        r for r in resources if experiment_id in (r.get("reported_experiment_ids") or []) and r.get("type") == "sequencing_data"
+        r
+        for r in resources
+        if experiment_id in (r.get("reported_experiment_ids") or []) and r.get("type") == "sequencing_data"
     ]
     if not linked and not any(r.get("reported_experiment_ids") for r in resources):
         linked = [r for r in resources if r.get("type") == "sequencing_data"]
@@ -114,7 +127,9 @@ def _raw_reads(deposits: list[dict]) -> tuple[str, str, str | None]:
         return UNAVAILABLE, "the paper names no deposit holding this experiment's reads", "raw_reads"
     answers = [d.get("raw_data") for d in deposits]
     reachable = [
-        d for d in deposits if d.get("raw_data") == "yes" and d.get("supported") == "yes" and d.get("access") != "controlled"
+        d
+        for d in deposits
+        if d.get("raw_data") == "yes" and d.get("supported") == "yes" and d.get("access") != "controlled"
     ]
     if reachable:
         return AVAILABLE, None, None
@@ -131,7 +146,9 @@ def _raw_reads(deposits: list[dict]) -> tuple[str, str, str | None]:
     return UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing"
 
 
-def _raw_route(target: dict, experiment: dict | None, deposits: list[dict], contrast: dict | None, *, kind: str) -> dict:
+def _raw_route(
+    target: dict, experiment: dict | None, deposits: list[dict], contrast: dict | None, *, kind: str
+) -> dict:
     """Reads, a workflow, a usable reference and a predicate. A requirement known to be absent decides
     before one not yet established: an unavailable reference closes the route before the deposit is
     listed."""
@@ -206,9 +223,13 @@ def evaluate_checks(
                 else _check(pred_status, pred_reason, "predicate")
             )
         elif linked and not listed:
-            consistency = _check(UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing")
+            consistency = _check(
+                UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing"
+            )
         else:
-            consistency = _check(UNAVAILABLE, "no result table is published for this claim's experiment", "result_table")
+            consistency = _check(
+                UNAVAILABLE, "no result table is published for this claim's experiment", "result_table"
+            )
 
         if matrices:
             processed = (
@@ -217,7 +238,9 @@ def evaluate_checks(
                 else _check(pred_status, pred_reason, "predicate")
             )
         elif (linked and not listed) or not linked and not deposits and not resources:
-            processed = _check(UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing")
+            processed = _check(
+                UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing"
+            )
         else:
             processed = _check(UNAVAILABLE, "no processed matrix holding both arms is published", "processed_matrix")
         raw = _raw_route(target, experiment, linked, contrast, kind=kind)
@@ -232,12 +255,18 @@ def evaluate_checks(
         registered = [d for d in deposits if d.get("registered_samples")]
         metadata = [s for s in rows if s.get("role") == "sample_metadata" and s.get("resolved")]
         consistency = (
-            _check(AVAILABLE, f"{registered[0].get('accession')} registers {registered[0].get('registered_samples')} samples", None)
+            _check(
+                AVAILABLE,
+                f"{registered[0].get('accession')} registers {registered[0].get('registered_samples')} samples",
+                None,
+            )
             if registered
             else (
                 _check(AVAILABLE, f"{metadata[0].get('label')} lists the samples", None)
                 if metadata
-                else _check(UNRESOLVED, "no sample metadata table or registered sample list is established", "sample_metadata")
+                else _check(
+                    UNRESOLVED, "no sample metadata table or registered sample list is established", "sample_metadata"
+                )
             )
         )
         none = _check(UNAVAILABLE, "no analysis computes a count of samples", "not_applicable")
@@ -262,7 +291,10 @@ def evaluate_checks(
         QC_METRIC: qc,
         AUTHOR_RESULTS: consistency,
         PROCESSED_REANALYSIS: _check(UNAVAILABLE, "bioAF computes no QC metric from processed files", "not_applicable"),
-        RAW_REANALYSIS: {**qc, "reason": f"the same run as the QC metric comparison; not a separate check ({qc['reason'] or qc['status']})"},
+        RAW_REANALYSIS: {
+            **qc,
+            "reason": f"the same run as the QC metric comparison; not a separate check ({qc['reason'] or qc['status']})",
+        },
     }
 
 

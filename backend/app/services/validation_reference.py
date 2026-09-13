@@ -320,8 +320,8 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
             assembly.update(
                 status=UNRESOLVED,
                 reason=(
-                    f"the paper states {first['assembly']} (\"{assembly['quote'] or stated_assembly}\") and an "
-                    f"annotation release that belongs to {from_release} (\"{annotation['quote'] or stated_annotation}\")"
+                    f'the paper states {first["assembly"]} ("{assembly["quote"] or stated_assembly}") and an '
+                    f'annotation release that belongs to {from_release} ("{annotation["quote"] or stated_annotation}")'
                 ),
             )
         elif first["historical"] or first["assembly"] not in available:
@@ -358,7 +358,9 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
         elif resolved_assembly and label in offered:
             annotation.update(status=USABLE, resolved=label)
         else:
-            supplies = f"bioAF supplies {', '.join(offered)} for {resolved_assembly}" if offered else "bioAF supplies none"
+            supplies = (
+                f"bioAF supplies {', '.join(offered)} for {resolved_assembly}" if offered else "bioAF supplies none"
+            )
             annotation.update(
                 status=UNAVAILABLE,
                 reason=f"the paper states {label}; {supplies}, and never swaps one release for another",

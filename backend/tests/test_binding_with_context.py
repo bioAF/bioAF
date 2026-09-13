@@ -76,7 +76,11 @@ _RESOURCES = [
 
 def test_a_claim_is_bound_with_its_passage_legend_methods_experiment_resources_and_cutoffs():
     context = binding_context(
-        {"claim_text": "we called many peaks", "source_locator": "Fig. 1G", "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}]},
+        {
+            "claim_text": "we called many peaks",
+            "source_locator": "Fig. 1G",
+            "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}],
+        },
         passage="In knockout cells we called many peaks, mostly at promoters.",
         sections=_jats_sections(_JATS),
         experiment=_EXPERIMENT,
@@ -134,7 +138,11 @@ def test_the_binding_keeps_population_aggregation_and_denominator_with_their_quo
             denominator={"value": None, "quote": None},
         )
     )
-    assert facts["population"] == {"value": "the knockout ChIP-seq sample", "scope": "one_sample", "quote": "in the KO ChIP"}
+    assert facts["population"] == {
+        "value": "the knockout ChIP-seq sample",
+        "scope": "one_sample",
+        "quote": "in the KO ChIP",
+    }
     assert facts["aggregation"]["value"] == "per_sample"
     assert facts["denominator"]["value"] is None
 
@@ -308,10 +316,22 @@ def _target(**over):
     from types import SimpleNamespace
 
     fields = dict(
-        metric_key="total_sequences", claim_text="reads per sample", bound_key="total_sequences", bound_by="model",
-        binding_reason="r", binding_confidence=0.9, binding_facts={**_facts(), "match": {"ok": True}},
-        aggregation="per_sample", sample_subset=None, qc_stage=None, direction=None, threshold=None,
-        threshold_kind=None, output_type=None, measurement_basis=None, reported_experiment_id="e1",
+        metric_key="total_sequences",
+        claim_text="reads per sample",
+        bound_key="total_sequences",
+        bound_by="model",
+        binding_reason="r",
+        binding_confidence=0.9,
+        binding_facts={**_facts(), "match": {"ok": True}},
+        aggregation="per_sample",
+        sample_subset=None,
+        qc_stage=None,
+        direction=None,
+        threshold=None,
+        threshold_kind=None,
+        output_type=None,
+        measurement_basis=None,
+        reported_experiment_id="e1",
     )
     fields.update(over)
     return SimpleNamespace(**fields)
@@ -321,8 +341,13 @@ def test_reconciliation_that_reads_one_sample_unbinds_with_the_reason():
     from app.services.validation_reconciliation import _apply
 
     target = _target()
-    decision = {"claim_index": 0, "bound_key": "total_sequences", "reason": "the S2 table says one sample",
-                "confidence": 0.8, "facts": _facts(scope="one_sample")}
+    decision = {
+        "claim_index": 0,
+        "bound_key": "total_sequences",
+        "reason": "the S2 table says one sample",
+        "confidence": 0.8,
+        "facts": _facts(scope="one_sample"),
+    }
     revisions = _apply([target], [decision], workflow_for=lambda t: "nf-core/rnaseq")
     assert target.bound_key is None
     assert target.binding_facts["proposed_key"] == "total_sequences"
@@ -334,8 +359,13 @@ def test_reconciliation_never_overwrites_a_stated_aggregation_with_not_stated():
     from app.services.validation_reconciliation import _apply
 
     target = _target()
-    decision = {"claim_index": 0, "bound_key": None, "reason": "r", "confidence": 0.5,
-                "facts": _facts(aggregation="not_stated")}
+    decision = {
+        "claim_index": 0,
+        "bound_key": None,
+        "reason": "r",
+        "confidence": 0.5,
+        "facts": _facts(aggregation="not_stated"),
+    }
     _apply([target], [decision], workflow_for=lambda t: "nf-core/rnaseq")
     assert target.aggregation == "per_sample"
     assert target.bound_key == "total_sequences"

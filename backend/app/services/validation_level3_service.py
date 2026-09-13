@@ -560,7 +560,11 @@ async def _identified_ground_truth(
         return None, None, "assisted"
     current = ((plan.analysis_selection_json or {}).get("current")) or {}
     table = next(
-        (f for f in (evidence.get("deposit") or {}).get("files") or [] if f.get("artifact_type") == "deposited_result_table"),
+        (
+            f
+            for f in (evidence.get("deposit") or {}).get("files") or []
+            if f.get("artifact_type") == "deposited_result_table"
+        ),
         None,
     )
     if table is None:

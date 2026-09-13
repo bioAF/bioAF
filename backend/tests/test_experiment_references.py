@@ -23,7 +23,15 @@ from app.services.validation_reference import (
 _SUPPLIED = supplied_references()
 
 
-def _ref(assembly=None, annotation=None, *, organism=None, pipeline="nf-core/rnaseq", assembly_quote=None, annotation_quote=None):
+def _ref(
+    assembly=None,
+    annotation=None,
+    *,
+    organism=None,
+    pipeline="nf-core/rnaseq",
+    assembly_quote=None,
+    annotation_quote=None,
+):
     experiment = {
         "organism": organism,
         "reference": {
@@ -151,12 +159,22 @@ def test_an_experiments_reference_blocker_names_the_experiment_and_the_part():
     from app.services.validation_reference import experiment_reference_blocker
 
     usable = {"status": "usable", "resolved": "GRCm38"}
-    unavailable = {"status": "unavailable", "stated": "GENCODE M23",
-                   "reason": "the paper states GENCODE M23; bioAF supplies Ensembl 102 for GRCm38, and never swaps one release for another"}
-    experiment = {"id": "e2", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq",
-                  "reference": {"assembly": usable, "annotation": unavailable}}
+    unavailable = {
+        "status": "unavailable",
+        "stated": "GENCODE M23",
+        "reason": "the paper states GENCODE M23; bioAF supplies Ensembl 102 for GRCm38, and never swaps one release for another",
+    }
+    experiment = {
+        "id": "e2",
+        "assay": "bulk RNA-seq",
+        "workflow": "nf-core/rnaseq",
+        "reference": {"assembly": usable, "annotation": unavailable},
+    }
     blocker = experiment_reference_blocker(experiment)
     assert "e2" in blocker and "GENCODE M23" in blocker
     assert "Checks that need no reference are unaffected" in blocker
-    fine = {**experiment, "reference": {"assembly": usable, "annotation": {"status": "usable", "resolved": "Ensembl 102"}}}
+    fine = {
+        **experiment,
+        "reference": {"assembly": usable, "annotation": {"status": "usable", "resolved": "Ensembl 102"}},
+    }
     assert experiment_reference_blocker(fine) is None

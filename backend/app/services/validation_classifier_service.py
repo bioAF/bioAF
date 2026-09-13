@@ -558,7 +558,12 @@ _COMPUTED: dict[str, tuple[str, str, str, tuple[tuple[str, str, str, str], ...]]
             ("nf-core/atacseq", _LIBRARIES, "mean_over_samples", "mapped_reads"),
         ),
     ),
-    "total_samples": ("the samples the run's QC reports (pre-merge libraries for ChIP-seq and ATAC-seq)", "count_over_run", "none", ()),
+    "total_samples": (
+        "the samples the run's QC reports (pre-merge libraries for ChIP-seq and ATAC-seq)",
+        "count_over_run",
+        "none",
+        (),
+    ),
     "cell_count": (_FIRST_SAMPLE, "first_sample", "none", ()),
     "total_genes_detected": (_FIRST_SAMPLE, "first_sample", "none", ()),
     "median_genes_per_cell": (_FIRST_SAMPLE + " (its cells)", "first_sample", "none", ()),
@@ -594,7 +599,9 @@ def _declared(spec: MetricSpec) -> MetricSpec:
     population, aggregation, denominator, by_workflow = _COMPUTED.get(
         spec.key, (_ALL_SAMPLES, "mean_over_samples", "none", ())
     )
-    return replace(spec, population=population, aggregation=aggregation, denominator=denominator, by_workflow=by_workflow)
+    return replace(
+        spec, population=population, aggregation=aggregation, denominator=denominator, by_workflow=by_workflow
+    )
 
 
 _SPECS = tuple(_declared(spec) for spec in _SPECS)

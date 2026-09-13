@@ -32,8 +32,13 @@ _RECORDS = [
     {"geo_accession": "GSM4", "title": "KO Cl16", "condition": "genotype: SAMD1 KO; clone: Cl16; time: day 0"},
     {"geo_accession": "GSM5", "title": "KO Cl5 d7", "condition": "genotype: SAMD1 KO; clone: Cl5; time: day 7"},
 ]
-_CONTRAST = {"name": "KO vs WT", "test_condition": "SAMD1 KO", "reference_condition": "WT",
-             "test_samples": [], "reference_samples": []}
+_CONTRAST = {
+    "name": "KO vs WT",
+    "test_condition": "SAMD1 KO",
+    "reference_condition": "WT",
+    "test_samples": [],
+    "reference_samples": [],
+}
 _CLAIM = {"claim_text": "257 genes were up in KO (P < 0.01)", "claimed_value": 257, "direction": "up"}
 
 
@@ -64,9 +69,7 @@ async def test_a_preview_is_the_header_and_five_rows_streamed_and_capped():
     import random
 
     rng = random.Random(7)
-    body = "gene\tWT rep1\tKO Cl5\n" + "\n".join(
-        f"g{i}\t{rng.random():.6f}\t{rng.random():.6f}" for i in range(50_000)
-    )
+    body = "gene\tWT rep1\tKO Cl5\n" + "\n".join(f"g{i}\t{rng.random():.6f}\t{rng.random():.6f}" for i in range(50_000))
     compressed = gzip.compress(body.encode())
     asked = {}
 
@@ -118,9 +121,15 @@ _COLUMNS = ["WT-1", "WT-2", "KO Cl5 repl1", "KO Cl16", "KO Cl5 d7"]
 
 
 def _row(column, arm, unit, *, evidence=None, group=None, time="day 0"):
-    return {"column": column, "arm": arm, "biological_unit": unit, "biological_sample": f"{unit} {time}",
-            "technical_group": group, "time_point": time,
-            "evidence": evidence if evidence is not None else [{"source": "sample_record", "quote": "genotype: SAMD1 KO"}]}
+    return {
+        "column": column,
+        "arm": arm,
+        "biological_unit": unit,
+        "biological_sample": f"{unit} {time}",
+        "technical_group": group,
+        "time_point": time,
+        "evidence": evidence if evidence is not None else [{"source": "sample_record", "quote": "genotype: SAMD1 KO"}],
+    }
 
 
 def _mapping():
@@ -173,8 +182,12 @@ def test_a_trailing_number_is_never_replicate_identity_on_its_own():
 def test_a_technical_group_needs_evidence_beyond_a_name_pattern():
     mapping = _mapping()
     mapping[0]["technical_group"] = "t1"
-    mapping[1] = {**mapping[1], "biological_unit": "WT culture 1", "technical_group": "t1",
-                  "evidence": [{"source": "column_name", "quote": "WT-1"}]}
+    mapping[1] = {
+        **mapping[1],
+        "biological_unit": "WT culture 1",
+        "technical_group": "t1",
+        "evidence": [{"source": "column_name", "quote": "WT-1"}],
+    }
     result = _validate(mapping)
     assert result["status"] == "unresolved"
     assert any("technical" in r for r in result["reasons"])
@@ -221,12 +234,26 @@ async def _stream(url, max_bytes):
 
 @pytest.mark.asyncio
 async def test_the_model_proposes_the_file_the_mapping_and_the_authors_table_together():
-    client = _Client({"primary_matrix": "GSE1_counts.txt.gz", "mapping": _mapping(),
-                      "author_table": "GSE1_DESeq2_ESC.txt.gz", "reason": "the ESC counts", "confidence": 0.8})
+    client = _Client(
+        {
+            "primary_matrix": "GSE1_counts.txt.gz",
+            "mapping": _mapping(),
+            "author_table": "GSE1_DESeq2_ESC.txt.gz",
+            "reason": "the ESC counts",
+            "confidence": 0.8,
+        }
+    )
     choice = await choose_input(
-        _ENTRIES, stream=_stream, claim=_CLAIM, predicate_words="SAMD1 KO versus WT, P < 0.01, up",
-        contrast=_CONTRAST, experiment={"id": "e2", "assay": "bulk RNA-seq"}, sample_records=_RECORDS,
-        client=client, model="m", api_key=None,
+        _ENTRIES,
+        stream=_stream,
+        claim=_CLAIM,
+        predicate_words="SAMD1 KO versus WT, P < 0.01, up",
+        contrast=_CONTRAST,
+        experiment={"id": "e2", "assay": "bulk RNA-seq"},
+        sample_records=_RECORDS,
+        client=client,
+        model="m",
+        api_key=None,
     )
     assert choice["primary_matrix"] == "GSE1_counts.txt.gz"
     assert choice["author_table"] == "GSE1_DESeq2_ESC.txt.gz"
@@ -242,8 +269,16 @@ async def test_the_model_proposes_the_file_the_mapping_and_the_authors_table_tog
 async def test_a_file_the_deposit_does_not_hold_is_refused():
     client = _Client({"primary_matrix": "invented.txt", "mapping": [], "author_table": None, "reason": "r"})
     choice = await choose_input(
-        _ENTRIES, stream=_stream, claim=_CLAIM, predicate_words="p", contrast=_CONTRAST, experiment={},
-        sample_records=_RECORDS, client=client, model="m", api_key=None,
+        _ENTRIES,
+        stream=_stream,
+        claim=_CLAIM,
+        predicate_words="p",
+        contrast=_CONTRAST,
+        experiment={},
+        sample_records=_RECORDS,
+        client=client,
+        model="m",
+        api_key=None,
     )
     assert choice["primary_matrix"] is None
     assert "invented.txt" in choice["reason"]
@@ -253,7 +288,15 @@ async def test_a_file_the_deposit_does_not_hold_is_refused():
 async def test_a_result_table_is_never_the_matrix():
     client = _Client({"primary_matrix": "GSE1_DESeq2_ESC.txt.gz", "mapping": [], "author_table": None, "reason": "r"})
     choice = await choose_input(
-        _ENTRIES, stream=_stream, claim=_CLAIM, predicate_words="p", contrast=_CONTRAST, experiment={},
-        sample_records=_RECORDS, client=client, model="m", api_key=None,
+        _ENTRIES,
+        stream=_stream,
+        claim=_CLAIM,
+        predicate_words="p",
+        contrast=_CONTRAST,
+        experiment={},
+        sample_records=_RECORDS,
+        client=client,
+        model="m",
+        api_key=None,
     )
     assert choice["primary_matrix"] is None

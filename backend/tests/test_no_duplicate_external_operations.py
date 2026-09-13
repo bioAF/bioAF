@@ -81,9 +81,7 @@ class TestTheIdentityExistsBeforeTheDispatch:
 
 class TestARestartAdoptsRatherThanRelaunches:
     @pytest.mark.asyncio
-    async def test_an_autonomous_organization_adopts_the_running_operation(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_an_autonomous_organization_adopts_the_running_operation(self, session, admin_user, monkeypatch):
         """The crash window: dispatched, and the identifier never landed."""
         spy = _LaunchSpy()
         monkeypatch.setattr(PipelineRunService, "launch_run", spy)

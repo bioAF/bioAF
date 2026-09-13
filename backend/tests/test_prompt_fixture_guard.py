@@ -88,7 +88,14 @@ def _prompts() -> dict[str, str]:
     prompts["claim selection"] = "\n".join(
         selection_prompt(
             [{"claim_text": "a claim", "reported_experiment_id": "e1"}],
-            [{"claim_index": 0, "check": "processed_reanalysis", "status": "unresolved", "requirement": "sample_mapping"}],
+            [
+                {
+                    "claim_index": 0,
+                    "check": "processed_reanalysis",
+                    "status": "unresolved",
+                    "requirement": "sample_mapping",
+                }
+            ],
             [{"id": "e1", "assay": "bulk RNA-seq"}],
         )
     )

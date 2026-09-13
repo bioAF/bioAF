@@ -79,7 +79,15 @@ def test_where_each_resource_was_found_is_kept():
     resources = _inventory(
         scanned=[{"identifier": "GSE555001", "archive": "geo"}],
         extracted_accessions=["GSE555001"],
-        supplements=[{"label": "Supplemental Table S1", "filename": "t1.xlsx", "kind": "attachment", "role": "results_table", "resolved": True}],
+        supplements=[
+            {
+                "label": "Supplemental Table S1",
+                "filename": "t1.xlsx",
+                "kind": "attachment",
+                "role": "results_table",
+                "resolved": True,
+            }
+        ],
     )
     by_id = {r["identifier"]: r for r in resources}
     assert set(by_id["GSE555001"]["found_by"]) == {"text_scan", "model"}
@@ -139,7 +147,14 @@ def test_resources_link_to_the_experiments_that_name_them():
 def test_repository_metadata_links_a_deposit_the_paper_did_not_place():
     resources = _inventory(
         scanned=[{"identifier": "GSE555001", "archive": "geo"}],
-        deposits=[{"accession": "GSE555001", "archive": "geo", "exists": "yes", "listing": {"library_strategies": ["ChIP-Seq"]}}],
+        deposits=[
+            {
+                "accession": "GSE555001",
+                "archive": "geo",
+                "exists": "yes",
+                "listing": {"library_strategies": ["ChIP-Seq"]},
+            }
+        ],
         experiments=[
             {"id": "e1", "assay": "ChIP-seq", "workflow": "nf-core/chipseq", "resources": []},
             {"id": "e2", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq", "resources": []},
@@ -150,7 +165,9 @@ def test_repository_metadata_links_a_deposit_the_paper_did_not_place():
 
 
 def test_an_unlinked_resource_stays_listed_and_says_so():
-    [pdb] = _inventory(scanned=[{"identifier": "7ABC", "archive": "pdb"}], experiments=[{"id": "e1", "assay": "ChIP-seq"}])
+    [pdb] = _inventory(
+        scanned=[{"identifier": "7ABC", "archive": "pdb"}], experiments=[{"id": "e1", "assay": "ChIP-seq"}]
+    )
     assert pdb["reported_experiment_ids"] == []
     assert pdb["linked_by"] is None
 
@@ -160,7 +177,9 @@ def test_the_report_carries_one_row_per_resource():
         model_resources=[{"identifier": "PXD099001", "type": "proteomics_data", "role": "the proteome"}],
         scanned=[{"identifier": "GSE555001", "archive": "geo"}],
     )
-    summary = summarize(study={"state": "classified"}, evidence={}, plan={"resources": resources}, targets=[], issues=[])
+    summary = summarize(
+        study={"state": "classified"}, evidence={}, plan={"resources": resources}, targets=[], issues=[]
+    )
     rows = {row["identifier"]: row for row in summary["resources"]}
     assert rows["PXD099001"]["type_label"] == "Proteomics data"
     assert rows["PXD099001"]["retrievable_label"] == "No"

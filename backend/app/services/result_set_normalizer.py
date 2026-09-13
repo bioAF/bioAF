@@ -355,7 +355,14 @@ def missing_measure(fs: FindingSet) -> str | None:
 
 
 def _passes(
-    sig: float, lfc: float, *, padj_threshold, significance_operator, lfc_threshold, effect_operator, significance_kind="padj"
+    sig: float,
+    lfc: float,
+    *,
+    padj_threshold,
+    significance_operator,
+    lfc_threshold,
+    effect_operator,
+    significance_kind="padj",
 ) -> bool:
     """change_7.5 section 3.1: the predicate is applied in one function, whoever filters. Entities keep
     their direction here; concordance filters by it."""

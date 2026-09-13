@@ -17,8 +17,15 @@ _CONTRAST = {"name": "KO vs WT", "test_condition": "KO", "reference_condition": 
 
 
 def _claim(value, direction, **over):
-    return {"claim_text": f"{value} genes were {direction}", "claimed_value": value, "output_type": "gene_set_size",
-            "direction": direction, "contrast_index": 0, "cutoffs": [_P], **over}
+    return {
+        "claim_text": f"{value} genes were {direction}",
+        "claimed_value": value,
+        "output_type": "gene_set_size",
+        "direction": direction,
+        "contrast_index": 0,
+        "cutoffs": [_P],
+        **over,
+    }
 
 
 def _check(claim, text, **kw):
@@ -93,8 +100,13 @@ def test_a_headerless_table_is_unresolved_with_candidate_roles_and_numbers_never
 
 def test_a_confirmed_interpretation_of_a_headerless_table_produces_the_count():
     headerless = "g1\t1.2\t0.001\t0.2\ng2\t-2.0\t0.004\t0.3\ng3\t0.5\t0.5\t0.9\n"
-    confirmation = {"columns": {"id": 0, "lfc": 1, "pvalue": 2}, "orientation": "test_over_reference",
-                    "effect_scale": "log2", "confirmed_by": "a person", "at": "2026-09-12"}
+    confirmation = {
+        "columns": {"id": 0, "lfc": 1, "pvalue": 2},
+        "orientation": "test_over_reference",
+        "effect_scale": "log2",
+        "confirmed_by": "a person",
+        "at": "2026-09-12",
+    }
     record = _check(_claim(1, "up"), headerless, interpretation=confirmation)
     assert record["outcome"] == "agree"
     assert record["rows_passing"] == 1
@@ -146,14 +158,22 @@ def test_the_report_carries_each_claims_consistency_and_the_level_3_result_attac
 
     claim = _claim(2, "up")
     predicate = build_predicate(claim, contrast=_CONTRAST)
-    record = {**check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
-              "claim_index": 0}
+    record = {
+        **check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
+        "claim_index": 0,
+    }
     evidence = {
         "author_consistency": {"records": [record]},
         "level3": {"claim_index": 0, "source": "deposit", "contrast": "KO vs WT"},
-        "level3_result": {"concordance": {"verdict": "reproduced"},
-                          "claim_count": {"count": 2, "status": "holds", "words": "2 against the claim's exactly 2",
-                                          "label": "Reanalysis count, from a different method than the paper's"}},
+        "level3_result": {
+            "concordance": {"verdict": "reproduced"},
+            "claim_count": {
+                "count": 2,
+                "status": "holds",
+                "words": "2 against the claim's exactly 2",
+                "label": "Reanalysis count, from a different method than the paper's",
+            },
+        },
     }
     plan = {"differential_design": {"contrasts": [_CONTRAST]}}
     summary = summarize(study={"state": "comparing"}, evidence=evidence, plan=plan, targets=[claim], issues=[])
@@ -171,10 +191,17 @@ def test_a_single_results_supplement_answers_the_claims_it_was_checked_for():
 
     claim = _claim(2, "up")
     predicate = build_predicate(claim, contrast=_CONTRAST)
-    record = {**check_claim(claim, predicate, {"name": "s3.txt", "text": _ORIENTED, "source": "supplement"},
-                            contrast=_CONTRAST), "claim_index": 0}
-    evidence = {"supplements": [{"label": "S3", "filename": "s3.txt", "role": "results_table", "resolved": True,
-                                 "consistency": [record]}]}
+    record = {
+        **check_claim(
+            claim, predicate, {"name": "s3.txt", "text": _ORIENTED, "source": "supplement"}, contrast=_CONTRAST
+        ),
+        "claim_index": 0,
+    }
+    evidence = {
+        "supplements": [
+            {"label": "S3", "filename": "s3.txt", "role": "results_table", "resolved": True, "consistency": [record]}
+        ]
+    }
     plan = {"differential_design": {"contrasts": [_CONTRAST]}}
     summary = summarize(study={"state": "classified"}, evidence=evidence, plan=plan, targets=[claim], issues=[])
     assert summary["claims"][0]["consistency"]["table"] == "s3.txt"
@@ -186,13 +213,23 @@ def test_the_markdown_renders_each_claim_from_the_projection():
     from app.services.provenance.markdown_renderer import _append_each_claim
     from app.services.validation_report_summary import summarize
 
-    claim = {**_claim(2, "up"), "checks": {"author_results": {"status": "available", "reason": "t.txt", "requirement": None}}}
+    claim = {
+        **_claim(2, "up"),
+        "checks": {"author_results": {"status": "available", "reason": "t.txt", "requirement": None}},
+    }
     predicate = build_predicate(claim, contrast=_CONTRAST)
-    record = {**check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
-              "claim_index": 0}
+    record = {
+        **check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
+        "claim_index": 0,
+    }
     plan = {"differential_design": {"contrasts": [_CONTRAST]}}
-    summary = summarize(study={"state": "comparing"}, evidence={"author_consistency": {"records": [record]}}, plan=plan,
-                        targets=[claim], issues=[])
+    summary = summarize(
+        study={"state": "comparing"},
+        evidence={"author_consistency": {"records": [record]}},
+        plan=plan,
+        targets=[claim],
+        issues=[],
+    )
     parts: list[str] = []
     _append_each_claim(parts, summary)
     text = "\n".join(parts)

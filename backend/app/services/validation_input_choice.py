@@ -87,7 +87,13 @@ async def preview_file(url: str, filename: str, *, stream) -> dict:
     delimiter = "\t" if lines and "\t" in lines[0] else ","
     header = [c.strip().strip('"') for c in lines[0].split(delimiter)] if lines else []
     rows = [[c.strip().strip('"') for c in ln.split(delimiter)] for ln in lines[1:]]
-    preview = {"filename": filename, "header": header, "rows": rows, "truncated": truncated or len(lines) > PREVIEW_ROWS, "error": None}
+    preview = {
+        "filename": filename,
+        "header": header,
+        "rows": rows,
+        "truncated": truncated or len(lines) > PREVIEW_ROWS,
+        "error": None,
+    }
     # The cap is per file: long headers (hundreds of single-cell barcodes) are clipped, never the rule.
     while len(str(preview)) > PREVIEW_BYTES and (preview["rows"] or len(preview["header"]) > 2):
         if preview["rows"]:
@@ -103,7 +109,10 @@ def _identifiers(pick: str, records: list[dict]) -> set[str]:
     wanted = str(pick or "").strip()
     found = {wanted}
     for record in records or []:
-        ids = {str(record.get(k) or "").strip() for k in ("geo_accession", "title", "experiment_accession", "sample_accession")}
+        ids = {
+            str(record.get(k) or "").strip()
+            for k in ("geo_accession", "title", "experiment_accession", "sample_accession")
+        }
         if wanted in ids:
             found |= ids
     return {i for i in found if i}
@@ -126,7 +135,9 @@ def deterministic_choice(previews: list[dict], *, contrast: dict, sample_records
         columns = list(preview.get("header") or [])[1:]
         mapping = []
         for column in columns:
-            arm = next((a for a, picks in arms.items() if any(column in _identifiers(p, sample_records) for p in picks)), None)
+            arm = next(
+                (a for a, picks in arms.items() if any(column in _identifiers(p, sample_records) for p in picks)), None
+            )
             record = _record_for(column, sample_records)
             unit = (record or {}).get("geo_accession") or column
             mapping.append(
@@ -138,9 +149,7 @@ def deterministic_choice(previews: list[dict], *, contrast: dict, sample_records
                     "technical_group": None,
                     "time_point": None,
                     "evidence": [{"source": "exact_identifier", "quote": column}],
-                    "assumption": (
-                        "each deposited sample record is read as its own biological unit" if arm else None
-                    ),
+                    "assumption": ("each deposited sample record is read as its own biological unit" if arm else None),
                 }
             )
         if any(r["arm"] == "test" for r in mapping) and any(r["arm"] == "reference" for r in mapping):
@@ -161,7 +170,9 @@ def _normalized(text: str) -> str:
     return " ".join(str(text or "").lower().split())
 
 
-def validate_mapping(mapping: list[dict], *, columns: list[str], sample_records: list[dict], texts: list[str] | None = None) -> dict:
+def validate_mapping(
+    mapping: list[dict], *, columns: list[str], sample_records: list[dict], texts: list[str] | None = None
+) -> dict:
     """Accept a proposed mapping only when the evidence supports every assignment.
 
     Returns ``{"status": "accepted" | "unresolved", "reasons": [...], "mapping": rows}``."""
@@ -201,7 +212,9 @@ def validate_mapping(mapping: list[dict], *, columns: list[str], sample_records:
             continue
         for item in evidence:
             if _normalized(item["quote"]) not in corpus:
-                reasons.append(f"column {column} cites \"{item['quote']}\", which is not in the sample records, the column names or the text given")
+                reasons.append(
+                    f'column {column} cites "{item["quote"]}", which is not in the sample records, the column names or the text given'
+                )
         if arm == "excluded":
             continue
         unit = str(row.get("biological_unit") or "").strip()
@@ -220,7 +233,9 @@ def validate_mapping(mapping: list[dict], *, columns: list[str], sample_records:
 
     for group, members in groups.items():
         if any(m["_sources"] <= {"column_name"} for m in members):
-            reasons.append(f"technical group {group} rests on a name pattern, which never confirms a technical replicate")
+            reasons.append(
+                f"technical group {group} rests on a name pattern, which never confirms a technical replicate"
+            )
         for field, words in (("arm", "arms"), ("biological_unit", "biological units"), ("time_point", "time points")):
             if len({str(m.get(field) or "") for m in members}) > 1:
                 reasons.append(f"technical group {group} spans two {words}")
@@ -274,7 +289,9 @@ def build_input_prompt(
     shown = []
     for preview in previews:
         rows = "\n".join("    " + "\t".join(row) for row in preview.get("rows") or [])
-        shown.append(f"  {preview['filename']}\n    " + "\t".join(preview.get("header") or []) + ("\n" + rows if rows else ""))
+        shown.append(
+            f"  {preview['filename']}\n    " + "\t".join(preview.get("header") or []) + ("\n" + rows if rows else "")
+        )
     payload = (
         f"The paper's claim: {claim.get('claim_text')}\n"
         f"Its statistical definition: {predicate_words or 'not stated'}\n"
@@ -329,7 +346,9 @@ async def choose_input(
         return {**base, "reason": "the deposit lists no matrix a reanalysis could read"}
 
     chosen = deterministic_choice(
-        [by_name[e.filename] for e in matrices if e.filename in by_name], contrast=contrast, sample_records=sample_records
+        [by_name[e.filename] for e in matrices if e.filename in by_name],
+        contrast=contrast,
+        sample_records=sample_records,
     )
     author_table = tables[0].filename if len(tables) == 1 else None
     if chosen is None:
@@ -384,7 +403,9 @@ async def choose_input(
     }
 
 
-def design_from_mapping(design: dict, mapping: list[dict], *, contrast_index: int | None) -> tuple[dict, str, str | None]:
+def design_from_mapping(
+    design: dict, mapping: list[dict], *, contrast_index: int | None
+) -> tuple[dict, str, str | None]:
     """Rewrite the SELECTED contrast from a validated mapping: its arms, each column's biological unit
     and technical group, and a declared pairing carried by unit. ``(design, status, reason)`` with
     status ``ok``, ``unsupported`` (the design cannot be modelled as the evidence describes it) or
@@ -412,7 +433,11 @@ def design_from_mapping(design: dict, mapping: list[dict], *, contrast_index: in
         if row.get("technical_group"):
             groups.setdefault(str(row["technical_group"]), []).append(row)
     for group, members in groups.items():
-        for field, words in (("arm", "conditions"), ("biological_unit", "biological units"), ("time_point", "time points")):
+        for field, words in (
+            ("arm", "conditions"),
+            ("biological_unit", "biological units"),
+            ("time_point", "time points"),
+        ):
             if len({str(m.get(field) or "") for m in members}) > 1:
                 problems.append(f"technical group {group} spans two {words}")
 
@@ -420,7 +445,9 @@ def design_from_mapping(design: dict, mapping: list[dict], *, contrast_index: in
     by_unit: dict[tuple[str, str], dict[str, set]] = {}
     for row in rows:
         key = (row["arm"], str(row.get("biological_unit")))
-        sample = str(row.get("biological_sample") or f"{row.get('biological_unit')}|{row['arm']}|{row.get('time_point')}")
+        sample = str(
+            row.get("biological_sample") or f"{row.get('biological_unit')}|{row['arm']}|{row.get('time_point')}"
+        )
         entry = by_unit.setdefault(key, {"samples": set(), "ungrouped": set()})
         entry["samples"].add(sample)
         if not row.get("technical_group"):
@@ -496,7 +523,14 @@ async def propose_mapping(
     if not decision.ok:
         if on_issue:
             on_issue(decision.as_issue(impact="degraded"))
-        return {"mapping": [], "mapping_validation": {"status": "unresolved", "reasons": ["the mapping decision could not be read"], "mapping": []}}
+        return {
+            "mapping": [],
+            "mapping_validation": {
+                "status": "unresolved",
+                "reasons": ["the mapping decision could not be read"],
+                "mapping": [],
+            },
+        }
     data = fenced_json(decision.text) or {}
     mapping = [r for r in data.get("mapping") or [] if isinstance(r, dict)]
     validation = validate_mapping(
@@ -535,7 +569,7 @@ def associations_from_mapping(mapping: list[dict], contrast: dict) -> list[dict]
     rows = []
     for row in mapping or []:
         evidence = "; ".join(
-            f"{e.get('source')}: \"{e.get('quote')}\"" for e in row.get("evidence") or [] if isinstance(e, dict)
+            f'{e.get("source")}: "{e.get("quote")}"' for e in row.get("evidence") or [] if isinstance(e, dict)
         )
         rows.append(
             {
