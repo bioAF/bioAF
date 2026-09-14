@@ -12,7 +12,7 @@
  * owner's sign-off).
  */
 
-import type { ReportSummary } from "@/lib/validationReport";
+import type { ReportResource, ReportSummary } from "@/lib/validationReport";
 
 const ABILITY_CLASS: Record<string, string> = {
   yes: "bg-emerald-50 text-emerald-700",
@@ -29,8 +29,15 @@ function Ability({ value, label }: { value: string | null; label: string | null 
   );
 }
 
-export function ResourceInventory({ summary }: { summary: ReportSummary | null | undefined }) {
-  const rows = summary?.resources ?? [];
+export function ResourceInventory({
+  summary,
+  include,
+}: {
+  summary: ReportSummary | null | undefined;
+  // plan_8_2 section 4.2: the rows to show here; the rest are grouped compactly elsewhere in the section.
+  include?: (row: ReportResource) => boolean;
+}) {
+  const rows = (summary?.resources ?? []).filter((row) => !include || include(row));
   if (rows.length === 0) return null;
   return (
     <div className="overflow-x-auto">

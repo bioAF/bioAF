@@ -13,7 +13,7 @@
  * Rendered from the report projection. The labels are the backend's, pending the owner's sign-off.
  */
 
-import type { ClaimCheck, ClaimConsistency, ClaimList, ReportSummary } from "@/lib/validationReport";
+import type { ClaimCheck, ClaimConsistency, ClaimList, ReportClaim, ReportSummary } from "@/lib/validationReport";
 
 import { TableConfirmation } from "./TableConfirmation";
 
@@ -83,21 +83,144 @@ const DECIDED_BY: Record<string, string> = {
   human: "chosen by a person at the gate",
 };
 
+// plan_8_2 section 4.2: one claim, with its experiment, predicate, checks, consistency and result. The Findings
+// section nests it under its finding; the anchor `claim-{index}` is the same wherever it is rendered.
+export function ClaimItem({
+  claim,
+  index,
+  studyId,
+  onChanged,
+}: {
+  claim: ReportClaim;
+  index: number;
+  studyId?: number;
+  onChanged?: (updated: unknown) => void;
+}) {
+  return (
+    <li id={`claim-${index}`} data-testid={`claim-${index}`} className="text-sm">
+      <p className="text-gray-800">{claim.description}</p>
+      <p className="text-xs text-gray-500">
+        {claim.experiment ? `Experiment ${claim.experiment.id}${claim.experiment.assay ? ` (${claim.experiment.assay})` : ""}` : "Not linked to an experiment"}
+        {claim.contrast ? `; ${claim.contrast}` : ""}
+        {claim.cutoff ? `; ${claim.cutoff}` : ""}
+      </p>
+      {claim.predicate && <p className="text-xs text-gray-600">{claim.predicate}</p>}
+      {claim.cutoff_source?.kind === "methods" && claim.cutoff_source.quote && (
+        <p data-testid="cutoff-source" className="text-xs text-gray-500">
+          Cutoff from the methods: &quot;{claim.cutoff_source.quote}&quot;
+        </p>
+      )}
+      {claim.selection && (
+        <p className="mt-1 text-xs">
+          <span className={claim.selection.status === "selected" ? "font-medium text-emerald-700" : "text-gray-600"}>
+            {claim.selection.label}
+          </span>
+          {claim.selection.check_label && <span className="text-gray-600">: {claim.selection.check_label}</span>}
+          {claim.selection.status === "unassessed" && claim.selection.reason && (
+            <span className="text-gray-500"> ({claim.selection.reason})</span>
+          )}
+        </p>
+      )}
+      <ul className="mt-1 space-y-0.5" data-testid="claim-checks">
+        {(claim.checks ?? []).map((check) => (
+          <CheckRow key={check.key} check={check} />
+        ))}
+      </ul>
+      {claim.consistency && (
+        <div className="mt-1 text-xs">
+          <span className={CONSISTENCY_CLASS[claim.consistency.outcome ?? ""] ?? "text-gray-700"}>
+            {claim.consistency.label ??
+              (claim.consistency.check_state_label
+                ? `Consistency with the authors' results: ${claim.consistency.check_state_label}`
+                : null)}
+          </span>
+          {claim.consistency.table && <span className="text-gray-500"> ({claim.consistency.table})</span>}
+          {claim.consistency.method !== "published_list_count" &&
+            claim.consistency.rows_passing !== null &&
+            claim.consistency.rows_passing !== undefined && (
+              <span className="text-gray-500">
+                {" "}
+                {claim.consistency.rows_passing} of {claim.consistency.rows_tested} rows pass
+              </span>
+            )}
+          {claim.consistency.reason && <p className="text-gray-500">{claim.consistency.reason}</p>}
+          {claim.consistency.method === "published_list_count" && claim.consistency.list && (
+            <ListCount consistency={claim.consistency} list={claim.consistency.list} />
+          )}
+          {claim.consistency.interpretation?.source === "confirmation" && (
+            <p data-testid="consistency-interpretation" className="text-gray-500">
+              Table read as {claim.consistency.interpretation.evidence.join("; ")}
+            </p>
+          )}
+          {studyId !== undefined &&
+            onChanged &&
+            claim.consistency.outcome === "unresolved" &&
+            claim.consistency.table &&
+            claim.contrast && (
+              <TableConfirmation
+                studyId={studyId}
+                table={claim.consistency.table}
+                contrast={claim.contrast}
+                columnsCount={claim.consistency.columns_count}
+                candidateRoles={claim.consistency.candidate_roles}
+                onChanged={onChanged}
+              />
+            )}
+          {claim.consistency.superseded && (
+            <p data-testid="consistency-superseded" className="text-gray-500">
+              Superseded comparison, not current evidence: {claim.consistency.superseded.label}
+              {claim.consistency.superseded.reason ? ` (${claim.consistency.superseded.reason})` : ""}
+            </p>
+          )}
+          {claim.consistency.candidates.length > 0 && (
+            <ul className="ml-4 list-disc text-gray-500">
+              {claim.consistency.candidates.map((candidate, i) => (
+                <li key={i}>
+                  {candidate.interpretation}: {candidate.count ?? "not counted"}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {claim.result && (
+        <p className="mt-1 text-xs text-gray-700">
+          {claim.result.tier}: {claim.result.verdict ?? "no concordance"}
+          {claim.result.count && (
+            <span className="text-gray-500">
+              ; {claim.result.count.label}: {claim.result.count.words}
+            </span>
+          )}
+        </p>
+      )}
+    </li>
+  );
+}
+
+type ClaimSelectionPart = "selection" | "experiments" | "claims" | "history";
+const ALL_PARTS: ClaimSelectionPart[] = ["selection", "experiments", "claims", "history"];
+
 export function ClaimSelection({
   summary,
   studyId,
   onChanged,
+  parts = ALL_PARTS,
 }: {
   summary: ReportSummary | null | undefined;
   // plan_8_2 section 3.1: given, an unresolved check against a table offers the recorded confirmation.
   studyId?: number;
   onChanged?: (updated: unknown) => void;
+  // plan_8_2 section 4.2: which parts to render. The report shows the selection and experiments under
+  // Checks performed, the claims under their findings, and the history under Run diagnostics.
+  parts?: ClaimSelectionPart[];
 }) {
-  const experiments = summary?.experiments ?? [];
-  const selection = summary?.selection ?? null;
-  const claims = (summary?.claims ?? []).filter((claim) => (claim.checks ?? []).length > 0 || claim.selection);
-  const history = summary?.selection_history ?? [];
-  if (experiments.length === 0 && !selection && claims.length === 0) return null;
+  const experiments = parts.includes("experiments") ? (summary?.experiments ?? []) : [];
+  const selection = parts.includes("selection") ? (summary?.selection ?? null) : null;
+  const claims = parts.includes("claims")
+    ? (summary?.claims ?? []).filter((claim) => (claim.checks ?? []).length > 0 || claim.selection)
+    : [];
+  const history = parts.includes("history") ? (summary?.selection_history ?? []) : [];
+  if (experiments.length === 0 && !selection && claims.length === 0 && history.length === 0) return null;
 
   return (
     <div className="space-y-4">
@@ -151,103 +274,7 @@ export function ClaimSelection({
         <ol className="space-y-3">
           {summary?.claims.map((claim, index) =>
             (claim.checks ?? []).length > 0 || claim.selection ? (
-              <li key={index} id={`claim-${index}`} data-testid={`claim-${index}`} className="text-sm">
-                <p className="text-gray-800">{claim.description}</p>
-                <p className="text-xs text-gray-500">
-                  {claim.experiment ? `Experiment ${claim.experiment.id}${claim.experiment.assay ? ` (${claim.experiment.assay})` : ""}` : "Not linked to an experiment"}
-                  {claim.contrast ? `; ${claim.contrast}` : ""}
-                  {claim.cutoff ? `; ${claim.cutoff}` : ""}
-                </p>
-                {claim.predicate && <p className="text-xs text-gray-600">{claim.predicate}</p>}
-                {claim.cutoff_source?.kind === "methods" && claim.cutoff_source.quote && (
-                  <p data-testid="cutoff-source" className="text-xs text-gray-500">
-                    Cutoff from the methods: &quot;{claim.cutoff_source.quote}&quot;
-                  </p>
-                )}
-                {claim.selection && (
-                  <p className="mt-1 text-xs">
-                    <span className={claim.selection.status === "selected" ? "font-medium text-emerald-700" : "text-gray-600"}>
-                      {claim.selection.label}
-                    </span>
-                    {claim.selection.check_label && <span className="text-gray-600">: {claim.selection.check_label}</span>}
-                    {claim.selection.status === "unassessed" && claim.selection.reason && (
-                      <span className="text-gray-500"> ({claim.selection.reason})</span>
-                    )}
-                  </p>
-                )}
-                <ul className="mt-1 space-y-0.5" data-testid="claim-checks">
-                  {(claim.checks ?? []).map((check) => (
-                    <CheckRow key={check.key} check={check} />
-                  ))}
-                </ul>
-                {claim.consistency && (
-                  <div className="mt-1 text-xs">
-                    <span className={CONSISTENCY_CLASS[claim.consistency.outcome ?? ""] ?? "text-gray-700"}>
-                      {claim.consistency.label ??
-                        (claim.consistency.check_state_label
-                          ? `Consistency with the authors' results: ${claim.consistency.check_state_label}`
-                          : null)}
-                    </span>
-                    {claim.consistency.table && <span className="text-gray-500"> ({claim.consistency.table})</span>}
-                    {claim.consistency.method !== "published_list_count" &&
-                      claim.consistency.rows_passing !== null &&
-                      claim.consistency.rows_passing !== undefined && (
-                        <span className="text-gray-500">
-                          {" "}
-                          {claim.consistency.rows_passing} of {claim.consistency.rows_tested} rows pass
-                        </span>
-                      )}
-                    {claim.consistency.reason && <p className="text-gray-500">{claim.consistency.reason}</p>}
-                    {claim.consistency.method === "published_list_count" && claim.consistency.list && (
-                      <ListCount consistency={claim.consistency} list={claim.consistency.list} />
-                    )}
-                    {claim.consistency.interpretation?.source === "confirmation" && (
-                      <p data-testid="consistency-interpretation" className="text-gray-500">
-                        Table read as {claim.consistency.interpretation.evidence.join("; ")}
-                      </p>
-                    )}
-                    {studyId !== undefined &&
-                      onChanged &&
-                      claim.consistency.outcome === "unresolved" &&
-                      claim.consistency.table &&
-                      claim.contrast && (
-                        <TableConfirmation
-                          studyId={studyId}
-                          table={claim.consistency.table}
-                          contrast={claim.contrast}
-                          columnsCount={claim.consistency.columns_count}
-                          candidateRoles={claim.consistency.candidate_roles}
-                          onChanged={onChanged}
-                        />
-                      )}
-                    {claim.consistency.superseded && (
-                      <p data-testid="consistency-superseded" className="text-gray-500">
-                        Superseded comparison, not current evidence: {claim.consistency.superseded.label}
-                        {claim.consistency.superseded.reason ? ` (${claim.consistency.superseded.reason})` : ""}
-                      </p>
-                    )}
-                    {claim.consistency.candidates.length > 0 && (
-                      <ul className="ml-4 list-disc text-gray-500">
-                        {claim.consistency.candidates.map((candidate, i) => (
-                          <li key={i}>
-                            {candidate.interpretation}: {candidate.count ?? "not counted"}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                )}
-                {claim.result && (
-                  <p className="mt-1 text-xs text-gray-700">
-                    {claim.result.tier}: {claim.result.verdict ?? "no concordance"}
-                    {claim.result.count && (
-                      <span className="text-gray-500">
-                        ; {claim.result.count.label}: {claim.result.count.words}
-                      </span>
-                    )}
-                  </p>
-                )}
-              </li>
+              <ClaimItem key={index} claim={claim} index={index} studyId={studyId} onChanged={onChanged} />
             ) : null,
           )}
         </ol>

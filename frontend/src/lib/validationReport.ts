@@ -276,6 +276,8 @@ export interface ScorecardItem {
   check_causes?: ScorecardCheckCause[];
   experiment_ids?: string[];
   resource_statements?: string[];
+  // plan_8_2 section 4.2: the shared reason this finding's reason is stated in, once.
+  shared_reason?: string | null;
 }
 
 export type ScorecardDepth = "independent" | "consistency";
@@ -370,6 +372,9 @@ export interface ValidationScorecardData extends CompactScorecard {
   excluded_items: ScorecardItem[];
   unresolved_importance: { finding_id: string; description: string | null; problem: string | null }[];
   resource_statements?: ResourceStatement[];
+  // plan_8_2 section 4.2: why a blank score is blank, and what the card counts, each in its own unit.
+  score_note?: string | null;
+  units?: { key: string; count: number; label: string }[];
 }
 
 export interface CompletionFact {
@@ -378,6 +383,56 @@ export interface CompletionFact {
   value: Tristate;
   value_label: string;
   reason: string | null;
+}
+
+// plan_8_2 section 4.2 (approved 2026-09-14): the four sections' summaries and counts, from the projection.
+export interface ReportCount {
+  label: string;
+  tone: "ok" | "bad" | "warn" | null;
+}
+
+export interface CompactResource {
+  identifier: string | null;
+  type: string | null;
+  archive: string | null;
+  link: string | null;
+  limitation: string | null;
+}
+
+export interface ReportSections {
+  findings: {
+    summary: string;
+    counts: ReportCount[];
+    groups: { key: string; label: string; finding_ids: string[] }[];
+    shared_reasons: { id: string; text: string; cause_label: string | null; finding_ids: string[] }[];
+    open: string[];
+    ungrouped_claims: number[];
+  };
+  data: {
+    summary: string;
+    counts: ReportCount[];
+    unsupported: { resources: CompactResource[]; note: string };
+    sample_records: CompactResource[];
+  };
+  checks: {
+    summary: string;
+    counts: ReportCount[];
+    rows: { key: string; label: string; claims: number; available: number; unresolved: number; unavailable: number }[];
+  };
+  diagnostics: {
+    summary: string;
+    counts: ReportCount[];
+    checks: {
+      check_id: string | null;
+      kind: string | null;
+      state: string | null;
+      activity: string | null;
+      revision: number | null;
+      retry_count: number;
+      terminal_reason: string | null;
+      outcome_revision: number | null;
+    }[];
+  };
 }
 
 export interface ReportApplicability {
@@ -400,6 +455,8 @@ export interface ReportSummary {
   recovery?: ReportRecovery | null;
   // plan_8_2 section 4.1: whether bioAF's current methods apply, per experiment.
   applicability?: ReportApplicability | null;
+  // plan_8_2 section 4.2: the four sections. Absent from a report written before them.
+  sections?: ReportSections | null;
   attempt: { status: "attempted" | "not_attempted"; executed: string[]; acquired: string[] };
   headline: {
     key: "reproduction_not_attempted" | "could_not_reproduce" | "verdict" | "in_progress" | "not_applicable";

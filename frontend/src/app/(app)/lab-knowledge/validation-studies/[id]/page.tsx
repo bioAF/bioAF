@@ -50,6 +50,12 @@ import { ValidationScorecard } from "@/components/validation/ValidationScorecard
 import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
 import { InventoryRetryNotice } from "@/components/validation/InventoryRetryNotice";
 import { RecoveryNotice } from "@/components/validation/RecoveryNotice";
+import { ReportSection, useDisclosureLinks } from "@/components/validation/ReportSection";
+import { ReportFindings } from "@/components/validation/ReportFindings";
+import { ReportDataAndCode } from "@/components/validation/ReportDataAndCode";
+import { usePermissions } from "@/hooks/usePermissions";
+import type { ReportSections } from "@/lib/validationReport";
+import { NOT_SET } from "@/lib/placeholders";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -147,6 +153,9 @@ export default function ValidationStudyPage() {
   const [study, setStudy] = useState<ValidationStudy | null>(null);
   const [loading, setLoading] = useState(true);
   const { flags, loading: betaLoading } = useBetaFeatures();
+  const { canAccess } = usePermissions();
+  // plan_8_2 section 4.2: a link to a finding or claim opens the disclosures around it.
+  useDisclosureLinks(!!study);
 
   const refresh = useCallback(async () => {
     try {
@@ -226,6 +235,109 @@ export default function ValidationStudyPage() {
   const blockerRows = allBlockerRows.filter((b) => b.kind !== "not_applicable");
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
+  const sections = summary?.sections ?? null;
+
+  // The study's outcome (headline, classification, its summary sentences), at the top of the scorecard.
+  const outcome = (
+    <div className="space-y-2">
+      {summary?.scorecard && (
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Outcome</h3>
+      )}
+      <ValidationStudyOutcome
+        state={study.state}
+        confidence={study.confidence}
+        classification={study.classification}
+        failureReason={study.failure_reason}
+        summary={summary}
+      />
+      {/* plan_8_1 section 1.4: a classification a failed read produced is not about the paper. */}
+      {summary?.read_failure?.classification_note && (
+        <p className="text-sm text-gray-700" data-testid="classification-from-failed-read">
+          {summary.read_failure.classification_note}
+        </p>
+      )}
+    </div>
+  );
+
+  // plan_8_2 section 4.2: the controls a study waits on sit together under the scorecard while their state
+  // holds. Each is the same control as before; none is removed.
+  const canPick = study.state === "acquiring_processed" && !plan7.deposit_selection;
+  const hasDeposit = !!(plan7.deposit_inventory || plan7.deposit_selection || plan7.deposit_failed);
+  const speciesBlocking = !!plan7.precompute_checks?.species_matches?.blocking && !plan7.species_override;
+  const approver = canAccess("lit_validation", "approve");
+  const requester = canAccess("lit_validation", "request");
+  const actionsVisible =
+    study.state === "requested" ||
+    (approver &&
+      [
+        "plan_ready",
+        "acquiring_data",
+        "acquiring_processed",
+        "inspecting_deposit",
+        "classified",
+        "error",
+        "comparing",
+      ].includes(study.state));
+  const decisionsVisible =
+    (requester && (!!summary?.scorecard?.inventory_retry || !!summary?.recovery?.available)) ||
+    ["error", "samples_mismatch", "plan_ready"].includes(study.state) ||
+    (canPick && hasDeposit) ||
+    speciesBlocking ||
+    actionsVisible;
+  const depositPanel = hasDeposit ? (
+    <DepositPanel
+      evidence={plan7}
+      // A person picks only while the study is waiting for one. After acquisition the
+      // choice is made and re-offering it would suggest it could still be changed.
+      canPick={canPick}
+      onPick={async (selection: DepositSelection) => {
+        await api.post(`/api/validation-studies/${study.id}/deposit-selection`, selection);
+        await refresh();
+      }}
+    />
+  ) : null;
+  const precomputePanel = plan7.precompute_checks ? (
+    <PrecomputeChecksPanel
+      checks={plan7.precompute_checks}
+      override={plan7.species_override ?? null}
+      onOverride={async (reason) => {
+        await api.post(`/api/validation-studies/${study.id}/override-species`, { reason });
+        await refresh();
+      }}
+    />
+  ) : null;
+  const studyActions = (
+    <ValidationStudyActions
+      study={{
+        id: study.id,
+        state: study.state,
+        evidence: {
+          awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval,
+          // Threading these through is what makes the gate capability-aware. Passing only
+          // `awaiting_refetch_approval` left `capabilities` null on every study, so plan_7
+          // step 15's availability notes could never render and the modal offered three
+          // equal-looking routes, which is the defect step 13 exists to remove.
+          // Narrowed to the two answers the route chooser reads. The checklist's fuller
+          // `Capabilities` shape carries `code_sources`, which the chooser has no use for.
+          capabilities: plan7.capabilities
+            ? {
+                preprocessed_data: plan7.capabilities.preprocessed_data,
+                raw_data: plan7.capabilities.raw_data,
+              }
+            : null,
+          route_blocked: plan7.route_blocked ?? null,
+          awaiting_choice: plan7.awaiting_choice ?? null,
+          awaiting_adoption: plan7.awaiting_adoption ?? null,
+        },
+        plan: { deposit_conflict: plan?.deposit_conflict ?? null },
+        resume: summary?.resume ?? null,
+        intended_route: study.intended_route ?? null,
+        activity: study.activity ?? null,
+      }}
+      onChanged={(updated) => setStudy(updated as ValidationStudy)}
+      suggestedClassification={study.evidence?.classification_result?.classification}
+    />
+  );
 
   return (
     <>
@@ -273,15 +385,33 @@ export default function ValidationStudyPage() {
           )}
         </div>
 
-        {/* plan_8 section 6: the Validation Scorecard leads the report; everything below is its detail. */}
-        {summary?.scorecard && (
-          <div className="mb-6">
-            <ValidationScorecard scorecard={summary.scorecard} />
-            {summary.scorecard.inventory_retry && (
+        {/* plan_8_2 section 4.2 (approved 2026-09-14): the scorecard, with the outcome in it, leads; a strip of
+            the decisions the study is waiting on follows; then four sections, each with its summary. */}
+        {summary?.scorecard ? (
+          <div className="mb-4">
+            <ValidationScorecard scorecard={summary.scorecard} variant="summary" header={outcome} />
+          </div>
+        ) : (
+          <section className="mb-6">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
+            {outcome}
+          </section>
+        )}
+
+        {decisionsVisible && (
+          <section
+            aria-labelledby="needs-a-decision-heading"
+            data-testid="needs-a-decision"
+            className="mb-4 space-y-3 rounded-lg border border-gray-200 bg-surface p-4"
+          >
+            <h2 id="needs-a-decision-heading" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Needs a decision
+            </h2>
+            {summary?.scorecard?.inventory_retry && (
               <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
             )}
             {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
-            {summary.recovery?.available && (
+            {summary?.recovery?.available && (
               <RecoveryNotice
                 studyId={study.id}
                 onChanged={(updated) => setStudy(updated as ValidationStudy)}
@@ -289,330 +419,269 @@ export default function ValidationStudyPage() {
                 affectedCount={summary?.recovery?.affected_count}
               />
             )}
-          </div>
+            {study.state === "error" && (
+              <RetryNotice
+                studyId={study.id}
+                failureReason={study.failure_reason}
+                readFailed={!!summary?.read_failure}
+                reapAfter={study.evidence?.fetch_reap_after as string | undefined}
+                dataDeleted={!!study.evidence?.fetch_reaped}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              />
+            )}
+            {study.state === "samples_mismatch" && (
+              <SamplesMismatchNotice
+                studyId={study.id}
+                failureReason={study.failure_reason}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              />
+            )}
+            {study.state === "plan_ready" && plan?.deposit_conflict && (
+              <DepositConflictNotice
+                studyId={study.id}
+                conflict={plan.deposit_conflict}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              />
+            )}
+            {study.state === "plan_ready" && (
+              <PipelineInstallNotice
+                pipelineKey={plan?.pipeline_key}
+                pipelineVersion={plan?.pipeline_version}
+                registryName={plan?.pipeline_registry_name}
+                installed={plan?.pipeline_installed}
+                onInstalled={refresh}
+              />
+            )}
+            {study.state === "plan_ready" && (
+              <Level3Gate
+                studyId={study.id}
+                design={plan?.differential_design}
+                claim={plan?.finding_claim}
+                supportedFindingKinds={plan?.supported_finding_kinds}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+              />
+            )}
+            {canPick && depositPanel}
+            {speciesBlocking && precomputePanel}
+            {studyActions}
+          </section>
         )}
+        {!decisionsVisible && studyActions}
 
-        <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
-          <ValidationStudyOutcome
-            state={study.state}
-            confidence={study.confidence}
-            classification={study.classification}
-            failureReason={study.failure_reason}
-            summary={summary}
-          />
-          {/* plan_8_1 section 1.4: a classification a failed read produced is not about the paper. */}
-          {summary?.read_failure?.classification_note && (
-            <p className="mt-2 text-sm text-gray-700" data-testid="classification-from-failed-read">
-              {summary.read_failure.classification_note}
-            </p>
+        <ReportSection
+          id="findings"
+          title="Findings"
+          summary={sections?.findings.summary}
+          counts={sections?.findings.counts ?? []}
+          defaultOpen
+        >
+          {summary ? (
+            <ReportFindings
+              summary={summary}
+              studyId={study.id}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
+          ) : (
+            <p className="text-sm text-gray-600">The findings are established when the paper is read.</p>
           )}
-        </section>
+        </ReportSection>
 
-        {study.evidence?.classification_result && (
-          <section className="mb-6">
+        <ReportSection
+          id="data"
+          title="Data and code"
+          summary={sections?.data.summary}
+          counts={sections?.data.counts ?? []}
+        >
+          {summary && (
+            <ReportDataAndCode summary={summary}>
+              {plan7.capabilities && (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-xs font-medium text-gray-700">What this paper has</summary>
+                  <div className="mt-2">
+                    <CapabilityChecklist capabilities={plan7.capabilities} rows={summary?.capability_rows} />
+                  </div>
+                </details>
+              )}
+              {((plan7.supplements && plan7.supplements.length > 0) || (summary?.artifacts?.length ?? 0) > 0) && (
+                <div>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    What the paper attached
+                  </h3>
+                  <SupplementInventory supplements={plan7.supplements} summary={summary} />
+                </div>
+              )}
+              {!canPick && hasDeposit && (
+                <div>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Deposited data</h3>
+                  {depositPanel}
+                </div>
+              )}
+            </ReportDataAndCode>
+          )}
+        </ReportSection>
+
+        <ReportSection
+          id="checks"
+          title="Checks performed"
+          summary={sections?.checks.summary}
+          counts={sections?.checks.counts ?? []}
+        >
+          {(sections?.checks.rows.length ?? 0) > 0 && <ChecksTable rows={sections?.checks.rows ?? []} />}
+          {(summary?.selection || (summary?.experiments?.length ?? 0) > 0) && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">What this run checks</h3>
+              <ClaimSelection summary={summary} parts={["selection", "experiments"]} />
+            </div>
+          )}
+          {study.evidence?.classification_result && (
             <ValidationVerdictPanel
               result={study.evidence.classification_result}
               level3Skipped={study.evidence.level3_skipped}
               level3Failed={study.evidence.level3_failed}
             />
-          </section>
-        )}
-
-        {plan7.capabilities && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              What this paper has
-            </h2>
-            <CapabilityChecklist capabilities={plan7.capabilities} rows={summary?.capability_rows} />
-          </section>
-        )}
-
-        {/* change_7.5 section 2.1: every resource the paper names, and what bioAF can do with it. */}
-        {(summary?.resources?.length ?? 0) > 0 && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Resources the paper names
-            </h2>
-            <ResourceInventory summary={summary} />
-          </section>
-        )}
-
-        {/* change_7.5 sections 2.2 to 2.6: the experiments, each claim's four checks, and the one
-            claim and check this run selected. */}
-        {(summary?.selection || (summary?.experiments?.length ?? 0) > 0) && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              What this run checks
-            </h2>
-            <ClaimSelection
-              summary={summary}
-              studyId={study.id}
-              onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            />
-          </section>
-        )}
-
-        {plan7.completion && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              What could and could not be established
-            </h2>
-            <CompletionSummary completion={plan7.completion} summary={summary} />
-            {/* change_7.3 section 10 item 13: whether reconciliation ran and on what, and whether the
-                assessment's statements were checked against each other at all. */}
-            {summary?.reconciliation?.label && (
-              <p className="mt-2 text-xs text-gray-600">{summary.reconciliation.label}.</p>
-            )}
-            {summary?.consistency?.label && (
-              <p className="text-xs text-gray-600">{summary.consistency.label}.</p>
-            )}
-          </section>
-        )}
-
-        {((plan7.supplements && plan7.supplements.length > 0) || (summary?.artifacts?.length ?? 0) > 0) && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              What the paper attached
-            </h2>
-            <SupplementInventory supplements={plan7.supplements} summary={summary} />
-          </section>
-        )}
-
-        {plan7.precompute_checks && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Checks before spending compute
-            </h2>
-            <PrecomputeChecksPanel
-              checks={plan7.precompute_checks}
-              override={plan7.species_override ?? null}
-              onOverride={async (reason) => {
-                await api.post(`/api/validation-studies/${study.id}/override-species`, { reason });
-                await refresh();
-              }}
-            />
-          </section>
-        )}
-
-        {(plan7.deposit_inventory || plan7.deposit_selection || plan7.deposit_failed) && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Deposited data
-            </h2>
-            <DepositPanel
-              evidence={plan7}
-              // A person picks only while the study is waiting for one. After acquisition the
-              // choice is made and re-offering it would suggest it could still be changed.
-              canPick={study.state === "acquiring_processed" && !plan7.deposit_selection}
-              onPick={async (selection: DepositSelection) => {
-                await api.post(`/api/validation-studies/${study.id}/deposit-selection`, selection);
-                await refresh();
-              }}
-            />
-          </section>
-        )}
-
-        {plan && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              Reproduction plan
-            </h2>
-            <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
-              <Field label="Pipeline">
-                {plan.pipeline_key
-                  ? `${plan.pipeline_key}${plan.pipeline_version ? ` ${plan.pipeline_version}` : ""}`
-                  : "-"}
-              </Field>
-              <Field label="Reference genome">{plan.reference_genome || "-"}</Field>
-              <Field label="Accessions">
-                {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "-"}
-              </Field>
-              <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
-            </dl>
-            {plan.ai_decisions && plan.ai_decisions.length > 0 && (
-              <AiDecisionList decisions={plan.ai_decisions} testedCount={summary?.claim_counts?.tested ?? 0} />
-            )}
-            {(blockerRows.length > 0 || notApplying.length > 0) && (
-              <div className="mt-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
-                <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
-                  {/* plan_8_1 section 1.4: the projection's blockers, so a failed read's statements
-                      about the paper stay withheld; the sentence withheld sits in a collapsed detail. */}
-                  {blockerRows.map((b, i) =>
-                    b.withheld ? (
-                      <li key={i} data-testid="blocker-withheld">
-                        {b.text}
-                        <TechnicalDetails detail={{ withheld: b.withheld }} summary="Withheld statement" />
-                      </li>
-                    ) : (
-                      <li key={i}>{b.text}</li>
-                    ),
-                  )}
-                  {notApplying.length > 0 && (
-                    <li data-testid="blockers-not-applying" className="text-gray-600">
-                      {notApplying.length} {notApplying.length === 1 ? "requirement that does" : "requirements that do"}{" "}
-                      not apply: {notApplying[0].text.replace(/^Does not apply: /, "")}
-                      <TechnicalDetails
-                        detail={{ requirements: notApplying.map((b) => b.withheld) }}
-                        summary="Requirements that do not apply"
-                      />
-                    </li>
-                  )}
-                </ul>
-                {/* change_7.3 section 6: a blocker is a reading of the prose until inspected evidence
-                    settles it, and it must not read as an established fact about the paper. */}
-                {summary?.blockers?.some((b) => b.provisional) && (
-                  <p className="mt-1 text-xs text-gray-500" data-testid="blockers-provisional">
-                    Provisional: {PROVISIONAL_NOTE}.
-                  </p>
-                )}
-              </div>
-            )}
-          </section>
-        )}
-
-        {study.state === "plan_ready" && plan?.deposit_conflict && (
-          <section className="mb-6">
-            <DepositConflictNotice
-              studyId={study.id}
-              conflict={plan.deposit_conflict}
-              onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            />
-          </section>
-        )}
-
-        {study.state === "error" && (
-          <section className="mb-6">
-            <RetryNotice
-              studyId={study.id}
-              failureReason={study.failure_reason}
-              readFailed={!!summary?.read_failure}
-              reapAfter={study.evidence?.fetch_reap_after as string | undefined}
-              dataDeleted={!!study.evidence?.fetch_reaped}
-              onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            />
-          </section>
-        )}
-
-        {study.state === "samples_mismatch" && (
-          <section className="mb-6">
-            <SamplesMismatchNotice
-              studyId={study.id}
-              failureReason={study.failure_reason}
-              onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            />
-          </section>
-        )}
-
-        {study.state === "plan_ready" && (
-          <section className="mb-6">
-            <PipelineInstallNotice
-              pipelineKey={plan?.pipeline_key}
-              pipelineVersion={plan?.pipeline_version}
-              registryName={plan?.pipeline_registry_name}
-              installed={plan?.pipeline_installed}
-              onInstalled={refresh}
-            />
-          </section>
-        )}
-
-        {study.state === "plan_ready" && (
-          <section className="mb-6">
-            <Level3Gate
-              studyId={study.id}
-              design={plan?.differential_design}
-              claim={plan?.finding_claim}
-              supportedFindingKinds={plan?.supported_finding_kinds}
-              onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            />
-          </section>
-        )}
-
-        {study.evidence?.level3_result && (
-          <section className="mb-6">
+          )}
+          {study.evidence?.level3_result && (
             <Level3ResultPanel
               result={study.evidence.level3_result}
               contrast={plan?.differential_design?.contrasts?.[0]?.name ?? undefined}
             />
-          </section>
-        )}
+          )}
+          {plan7.completion && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                What could and could not be established
+              </h3>
+              <CompletionSummary completion={plan7.completion} summary={summary} />
+              {/* change_7.3 section 10 item 13: whether reconciliation ran and on what, and whether the
+                  assessment's statements were checked against each other at all. */}
+              {summary?.reconciliation?.label && (
+                <p className="mt-2 text-xs text-gray-600">{summary.reconciliation.label}.</p>
+              )}
+              {summary?.consistency?.label && <p className="text-xs text-gray-600">{summary.consistency.label}.</p>}
+            </div>
+          )}
+          {plan7.precompute_checks && !speciesBlocking && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Checks before spending compute
+              </h3>
+              {precomputePanel}
+            </div>
+          )}
+          {plan && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Reproduction plan</h3>
+              <dl className="grid grid-cols-1 gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
+                <Field label="Pipeline">
+                  {plan.pipeline_key
+                    ? `${plan.pipeline_key}${plan.pipeline_version ? ` ${plan.pipeline_version}` : ""}`
+                    : "-"}
+                </Field>
+                <Field label="Reference genome">{plan.reference_genome || "-"}</Field>
+                <Field label="Accessions">
+                  {plan.accessions && plan.accessions.length > 0 ? plan.accessions.join(", ") : "-"}
+                </Field>
+                <Field label="Mapping confidence">{plan.mapping_confidence || "-"}</Field>
+              </dl>
+              {plan.ai_decisions && plan.ai_decisions.length > 0 && (
+                <AiDecisionList decisions={plan.ai_decisions} testedCount={summary?.claim_counts?.tested ?? 0} />
+              )}
+              {(blockerRows.length > 0 || notApplying.length > 0) && (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
+                  <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
+                    {/* plan_8_1 section 1.4: the projection's blockers, so a failed read's statements
+                        about the paper stay withheld; the sentence withheld sits in a collapsed detail. */}
+                    {blockerRows.map((b, i) =>
+                      b.withheld ? (
+                        <li key={i} data-testid="blocker-withheld">
+                          {b.text}
+                          <TechnicalDetails detail={{ withheld: b.withheld }} summary="Withheld statement" />
+                        </li>
+                      ) : (
+                        <li key={i}>{b.text}</li>
+                      ),
+                    )}
+                    {notApplying.length > 0 && (
+                      <li data-testid="blockers-not-applying" className="text-gray-600">
+                        {notApplying.length} {notApplying.length === 1 ? "requirement that does" : "requirements that do"}{" "}
+                        not apply: {notApplying[0].text.replace(/^Does not apply: /, "")}
+                        <TechnicalDetails
+                          detail={{ requirements: notApplying.map((b) => b.withheld) }}
+                          summary="Requirements that do not apply"
+                        />
+                      </li>
+                    )}
+                  </ul>
+                  {/* change_7.3 section 6: a blocker is a reading of the prose until inspected evidence
+                      settles it, and it must not read as an established fact about the paper. */}
+                  {summary?.blockers?.some((b) => b.provisional) && (
+                    <p className="mt-1 text-xs text-gray-500" data-testid="blockers-provisional">
+                      Provisional: {PROVISIONAL_NOTE}.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          <div>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Evidence</h3>
+            <ValidationEvidenceTable evidence={study.evidence} attemptStatus={summary?.attempt?.status ?? null} />
+          </div>
+          {/* plan_7 step 19 part 2's sibling: what the deposit and its metadata led us to expect,
+              against what the acquired data turned out to be. */}
+          {(plan7.deposit_inspection ||
+            plan7.precompute_checks ||
+            (study.state === "classified" && summary && !summary.comparisons.performed)) && (
+            <div>
+              {/* change_7.3 section 10 item 9: a heading that promises a comparison stays for runs that
+                  compared something. Where nothing was compared, it says so and why. */}
+              {summary && !summary.comparisons.performed ? (
+                <>
+                  <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    {summary.comparisons.label}
+                  </h3>
+                  <p className="mb-2 text-xs text-gray-600">
+                    {summary.comparisons.reason
+                      ? `${summary.comparisons.reason.charAt(0).toUpperCase()}${summary.comparisons.reason.slice(1)}.`
+                      : null}
+                  </p>
+                </>
+              ) : (
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  What we expected, and what we saw
+                </h3>
+              )}
+              <ExpectedVsObserved evidence={plan7} />
+            </div>
+          )}
+          {(plan7.code_resolution || plan7.code_execution) && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                The authors&apos; code
+              </h3>
+              <CodeSection evidence={plan7} />
+            </div>
+          )}
+        </ReportSection>
 
-        <section className="mb-6">
-          <ValidationStudyActions
-            study={{
-              id: study.id,
-              state: study.state,
-              evidence: {
-                awaiting_refetch_approval: !!study.evidence?.awaiting_refetch_approval,
-                // Threading these through is what makes the gate capability-aware. Passing only
-                // `awaiting_refetch_approval` left `capabilities` null on every study, so plan_7
-                // step 15's availability notes could never render and the modal offered three
-                // equal-looking routes, which is the defect step 13 exists to remove.
-                // Narrowed to the two answers the route chooser reads. The checklist's fuller
-                // `Capabilities` shape carries `code_sources`, which the chooser has no use for.
-                capabilities: plan7.capabilities
-                  ? {
-                      preprocessed_data: plan7.capabilities.preprocessed_data,
-                      raw_data: plan7.capabilities.raw_data,
-                    }
-                  : null,
-                route_blocked: plan7.route_blocked ?? null,
-                awaiting_choice: plan7.awaiting_choice ?? null,
-                awaiting_adoption: plan7.awaiting_adoption ?? null,
-              },
-              plan: { deposit_conflict: plan?.deposit_conflict ?? null },
-              resume: summary?.resume ?? null,
-              intended_route: study.intended_route ?? null,
-              activity: study.activity ?? null,
-            }}
-            onChanged={(updated) => setStudy(updated as ValidationStudy)}
-            suggestedClassification={study.evidence?.classification_result?.classification}
-          />
-        </section>
-
-        <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Evidence</h2>
-          <ValidationEvidenceTable evidence={study.evidence} attemptStatus={summary?.attempt?.status ?? null} />
-        </section>
-
-        {/* plan_7 step 19 part 2's sibling: what the deposit and its metadata led us to expect,
-            against what the acquired data turned out to be. The metric comparison above is not
-            rebuilt; this is the second comparison it has no home for. */}
-        {(plan7.deposit_inspection ||
-          plan7.precompute_checks ||
-          (study.state === "classified" && summary && !summary.comparisons.performed)) && (
-          <section className="mb-6">
-            {/* change_7.3 section 10 item 9: a heading that promises a comparison stays for runs that
-                compared something. Where nothing was compared, it says so and why. */}
-            {summary && !summary.comparisons.performed ? (
-              <>
-                <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-gray-500">
-                  {summary.comparisons.label}
-                </h2>
-                <p className="mb-2 text-xs text-gray-600">
-                  {summary.comparisons.reason ? `${summary.comparisons.reason.charAt(0).toUpperCase()}${summary.comparisons.reason.slice(1)}.` : null}
-                </p>
-              </>
-            ) : (
-              <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-                What we expected, and what we saw
-              </h2>
-            )}
-            <ExpectedVsObserved evidence={plan7} />
-          </section>
-        )}
-
-        {(plan7.code_resolution || plan7.code_execution) && (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
-              The authors&apos; code
-            </h2>
-            <CodeSection evidence={plan7} />
-          </section>
-        )}
-
-        <ValidationIssuesSection issues={study.issues ?? []} />
+        <ReportSection
+          id="diagnostics"
+          title="Run diagnostics"
+          summary={sections?.diagnostics.summary}
+          counts={sections?.diagnostics.counts ?? []}
+        >
+          {(sections?.diagnostics.checks.length ?? 0) > 0 && (
+            <CheckRecordsTable rows={sections?.diagnostics.checks ?? []} />
+          )}
+          {(summary?.selection_history?.length ?? 0) > 0 && (
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Selection history</h3>
+              <ClaimSelection summary={summary} parts={["history"]} />
+            </div>
+          )}
+          <ValidationIssuesSection issues={study.issues ?? []} />
+        </ReportSection>
       </main>
     </>
   );
@@ -623,6 +692,66 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <dt className="text-xs uppercase tracking-wide text-gray-500">{label}</dt>
       <dd className="text-gray-800">{children}</dd>
+    </div>
+  );
+}
+
+// plan_8_2 section 4.2: each check bioAF has, how many claims it applies to, and what it found.
+function ChecksTable({ rows }: { rows: ReportSections["checks"]["rows"] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm" data-testid="checks-table">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <th scope="col" className="py-1 pr-4 font-medium">Check</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Claims</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Available</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Unresolved</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Unavailable</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} className="border-t border-gray-100">
+              <td className="py-1.5 pr-4 text-gray-800">{row.label}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.claims}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.available}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.unresolved}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.unavailable}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// plan_8_2 section 4.2: the check records, with their retries, revisions and terminal reasons.
+function CheckRecordsTable({ rows }: { rows: ReportSections["diagnostics"]["checks"] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm" data-testid="check-records-table">
+        <thead>
+          <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+            <th scope="col" className="py-1 pr-4 font-medium">Check record</th>
+            <th scope="col" className="py-1 pr-4 font-medium">State</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Revision</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Retries</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Ended because</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={row.check_id ?? i} className="border-t border-gray-100 align-top">
+              <td className="py-1.5 pr-4 font-mono text-xs">{row.check_id}</td>
+              <td className="py-1.5 pr-4">{row.activity ?? row.state}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.revision}</td>
+              <td className="py-1.5 pr-4 tabular-nums">{row.retry_count}</td>
+              <td className="py-1.5 pr-4 text-xs text-gray-600">{row.terminal_reason ?? NOT_SET}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

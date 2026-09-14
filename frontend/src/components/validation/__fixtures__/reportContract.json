@@ -128,12 +128,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -174,7 +169,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "No reproduction plan was read for this study.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": []
       }
     },
@@ -472,12 +467,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -518,7 +508,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "bioAF could not read the paper into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a bioAF limitation; read the paper again.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": []
       }
     },
@@ -698,12 +688,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -744,7 +729,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "bioAF could not read the paper into findings: the model's answer was cut off at its token limit. This is a bioAF limitation; read the paper again.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": []
       }
     },
@@ -1471,12 +1456,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -1525,7 +1505,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "Score unavailable for this historical report.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": [
           0,
           1,
@@ -1719,12 +1699,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -1769,7 +1744,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "No reproduction plan was read for this study.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": []
       }
     },
@@ -1998,12 +1973,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -2225,12 +2195,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -2275,7 +2240,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "No reproduction plan was read for this study.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": []
       }
     },
@@ -4414,12 +4379,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 0,
@@ -4983,12 +4943,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 2,
@@ -5292,12 +5247,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -5338,7 +5288,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "bioAF could not group the paper's claims into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: bioAF could not reach the language model.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": [
           0
         ]
@@ -7297,12 +7247,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 14,
@@ -7738,29 +7683,13 @@
       "title": "Validation Scorecard",
       "total_count": 0,
       "unassessed_items": [],
-      "units": [
-        {
-          "count": 0,
-          "key": "findings_conclusive",
-          "label": "findings conclusive"
-        },
-        {
-          "count": 0,
-          "key": "findings_inconclusive",
-          "label": "findings inconclusive"
-        }
-      ],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 1,
@@ -8230,10 +8159,6 @@
           {
             "label": "2 agree",
             "tone": "ok"
-          },
-          {
-            "label": "Comparisons not performed",
-            "tone": null
           }
         ],
         "rows": [
@@ -8289,7 +8214,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "The importance of F1 is not established: its quote is not in the paper's text.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": [
           0,
           1
@@ -8497,12 +8422,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -8992,12 +8912,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 2,
@@ -9558,10 +9473,6 @@
           {
             "label": "2 agree",
             "tone": "ok"
-          },
-          {
-            "label": "Comparisons not performed",
-            "tone": null
           }
         ],
         "rows": [
@@ -10736,12 +10647,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 2,
@@ -11713,12 +11619,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [
           {
             "available": 5,
@@ -12504,7 +12405,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "Score unavailable for this historical report.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": [
           0,
           1,
@@ -13258,12 +13159,7 @@
     },
     "sections": {
       "checks": {
-        "counts": [
-          {
-            "label": "Comparisons not performed",
-            "tone": null
-          }
-        ],
+        "counts": [],
         "rows": [],
         "summary": "No check has run."
       },
@@ -13312,7 +13208,7 @@
         "groups": [],
         "open": [],
         "shared_reasons": [],
-        "summary": "Score unavailable for this historical report.",
+        "summary": "The findings are not established.",
         "ungrouped_claims": [
           0,
           1,
