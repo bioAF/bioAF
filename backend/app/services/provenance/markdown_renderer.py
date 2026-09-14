@@ -629,6 +629,51 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     )
     parts.append("")
 
+    # plan_8_2 section 4.2 (approved 2026-09-14): the four sections, each leading with the summary and counts the
+    # page shows. Nothing collapsed on screen is omitted here; the earlier sections nest under their section.
+    sections = summary.get("sections") or {}
+    _open_section(parts, "Findings", sections.get("findings"))
+    _append_findings(parts, summary)
+    _nested(parts, _append_each_claim, summary)
+    # Level 3: differential-finding concordance (ADR-069). Only present when the reproducing step ran.
+    _nested(parts, _append_level3_concordance, plan, evidence)
+
+    _open_section(parts, "Data and code", sections.get("data"))
+    _nested(parts, _append_resources, summary)
+    _append_unsupported_resources(parts, sections.get("data") or {})
+    _nested(parts, _append_capability_checklist, evidence.get("capabilities") or {}, summary)
+    _nested(parts, _append_supplement_inventory, evidence.get("supplements") or [], summary)
+
+    _open_section(parts, "Checks performed", sections.get("checks"))
+    _append_check_rows(parts, sections.get("checks") or {})
+    _nested(parts, _append_reproduction_plan, plan, summary)
+    _nested(parts, _append_computed_vs_claimed, plan, summary, result)
+    _nested(parts, _append_what_was_not_attempted, plan, evidence, result, summary=summary)
+    _nested(parts, _append_completion, evidence.get("completion") or {}, summary)
+    _nested(parts, _append_precompute_checks, evidence.get("precompute_checks") or {})
+    _nested(parts, _append_code_section, evidence)
+
+    _open_section(parts, "Run diagnostics", sections.get("diagnostics"))
+    _append_check_records(parts, sections.get("diagnostics") or {})
+    _nested(parts, _append_issues, entity.get("issues") or [])
+    _nested(parts, _append_provenance_chain, entity, paper)
+    _nested(parts, _append_build_provenance, entity.get("build_provenance") or {})
+    _nested(parts, _append_audit_trail, report.get("audit_trail", []))
+    return "\n".join(parts)
+
+
+# What each outcome means to a reader, in plain language. The token itself says nothing to a
+# scientist, and a refusal is the one an administrator can actually do something about.
+# change_7.3 section 11: one vocabulary, worded once in the report projection.
+_ISSUE_OUTCOME_LABEL = ISSUE_OUTCOME_LABELS
+
+_ISSUE_IMPACT_LABEL = {
+    "degraded": "continued with a fallback",
+    "blocked": "produced nothing",
+}
+
+
+def _append_reproduction_plan(parts: list[str], plan: dict[str, Any], summary: dict[str, Any]) -> None:
     # Reproduction Plan
     parts.append("## Reproduction Plan")
     parts.append("")
@@ -671,6 +716,10 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
         parts.append("**Requirements that do not apply to this paper:** " + "; ".join(not_applying))
         parts.append("")
 
+
+def _append_computed_vs_claimed(
+    parts: list[str], plan: dict[str, Any], summary: dict[str, Any], result: dict[str, Any]
+) -> None:
     # Computed vs Claimed (E2 evidence)
     parts.append("## Computed vs Claimed")
     parts.append("")
@@ -725,14 +774,8 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
             parts.append("No comparison targets.")
         parts.append("")
 
-    # change_7.5 section 4.3: each claim, its experiment, predicate, four checks and results, and the
-    # resources the paper names, from the same projection the page renders.
-    _append_each_claim(parts, summary)
-    _append_resources(parts, summary)
 
-    # Level 3: differential-finding concordance (ADR-069). Only present when the reproducing step ran.
-    _append_level3_concordance(parts, plan, evidence)
-
+def _append_provenance_chain(parts: list[str], entity: dict[str, Any], paper: dict[str, Any]) -> None:
     # Provenance Chain (A3 link: paper -> experiment -> runs)
     parts.append("## Provenance Chain")
     parts.append("")
@@ -756,28 +799,124 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
     parts.append(_table(["Step", "Entity"], chain_rows))
     parts.append("")
 
-    _append_capability_checklist(parts, evidence.get("capabilities") or {}, summary)
-    _append_supplement_inventory(parts, evidence.get("supplements") or [], summary)
-    _append_what_was_not_attempted(parts, plan, evidence, result, summary=summary)
-    _append_completion(parts, evidence.get("completion") or {}, summary)
-    _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
-    _append_code_section(parts, evidence)
-    _append_issues(parts, entity.get("issues") or [])
-    _append_build_provenance(parts, entity.get("build_provenance") or {})
 
-    _append_audit_trail(parts, report.get("audit_trail", []))
-    return "\n".join(parts)
+def _nested(parts: list[str], append, *args, **kwargs) -> None:
+    """plan_8_2 section 4.2: an earlier section, rendered as before one heading level down, under its section."""
+    import re
+
+    inner: list[str] = []
+    append(inner, *args, **kwargs)
+    parts.extend(re.sub(r"^(#{2,5}) ", r"#\1 ", line) if isinstance(line, str) else line for line in inner)
 
 
-# What each outcome means to a reader, in plain language. The token itself says nothing to a
-# scientist, and a refusal is the one an administrator can actually do something about.
-# change_7.3 section 11: one vocabulary, worded once in the report projection.
-_ISSUE_OUTCOME_LABEL = ISSUE_OUTCOME_LABELS
+def _open_section(parts: list[str], title: str, section: dict[str, Any] | None) -> None:
+    """One of the report's four sections: its heading, then the summary and counts the page shows."""
+    section = section or {}
+    parts.append(f"## {title}")
+    parts.append("")
+    if section.get("summary"):
+        parts.append(section["summary"])
+        parts.append("")
+    counts = [str(c.get("label")) for c in section.get("counts") or [] if isinstance(c, dict) and c.get("label")]
+    if counts:
+        parts.append("Counts: " + "; ".join(counts))
+        parts.append("")
 
-_ISSUE_IMPACT_LABEL = {
-    "degraded": "continued with a fallback",
-    "blocked": "produced nothing",
-}
+
+def _append_findings(parts: list[str], summary: dict[str, Any]) -> None:
+    """The findings grouped by experiment; a reason several findings share, stated once."""
+    section = (summary.get("sections") or {}).get("findings") or {}
+    card = summary.get("scorecard") or {}
+    items = {
+        i.get("finding_id"): i
+        for key in ("assessed_items", "unassessed_items", "excluded_items")
+        for i in card.get(key) or []
+        if isinstance(i, dict)
+    }
+    shared = section.get("shared_reasons") or []
+    if shared:
+        parts.append("### Shared reasons")
+        parts.append("")
+        for reason in shared:
+            cause = f" ({reason['cause_label']})" if reason.get("cause_label") else ""
+            affects = ", ".join(reason.get("finding_ids") or [])
+            parts.append(f"- **{reason.get('id')}**{cause}: {reason.get('text')} Affects {affects}.")
+        parts.append("")
+    for group in section.get("groups") or []:
+        parts.append(f"### {group.get('label')}")
+        parts.append("")
+        for finding_id in group.get("finding_ids") or []:
+            item = items.get(finding_id) or {}
+            status = item.get("status_label") or "--"
+            if item.get("cause_label"):
+                status = f"{status}: {item['cause_label']}"
+            line = f"- {finding_id} ({item.get('category_label') or '--'}) {item.get('description') or '--'}: {status}"
+            if item.get("shared_reason"):
+                line += f"; see {item['shared_reason']}"
+            elif item.get("reason"):
+                line += f". {item['reason']}"
+            parts.append(line)
+        parts.append("")
+
+
+def _append_unsupported_resources(parts: list[str], data: dict[str, Any]) -> None:
+    """Resources bioAF has no adapter for, and sample records, each group once with its links."""
+    unsupported = (data.get("unsupported") or {}).get("resources") or []
+    if unsupported:
+        parts.append("### Resources bioAF has no adapter for")
+        parts.append("")
+        for row in unsupported:
+            link = f" ({row['link']})" if row.get("link") else ""
+            limitation = f": {row['limitation']}" if row.get("limitation") else ""
+            parts.append(f"- {row.get('identifier')}{link}{limitation}")
+        if (data.get("unsupported") or {}).get("note"):
+            parts.append("")
+            parts.append(data["unsupported"]["note"])
+        parts.append("")
+    samples = data.get("sample_records") or []
+    if samples:
+        parts.append("### Sample records")
+        parts.append("")
+        parts.extend(f"- {row.get('identifier')}: {row.get('limitation') or '--'}" for row in samples)
+        parts.append("")
+
+
+def _append_check_rows(parts: list[str], checks: dict[str, Any]) -> None:
+    """Each check bioAF has, how many claims it applies to, and what it found."""
+    rows = checks.get("rows") or []
+    if rows:
+        parts.append(
+            _table(
+                ["Check", "Claims", "Available", "Unresolved", "Unavailable"],
+                [
+                    [r.get("label"), r.get("claims"), r.get("available"), r.get("unresolved"), r.get("unavailable")]
+                    for r in rows
+                ],
+            )
+        )
+        parts.append("")
+
+
+def _append_check_records(parts: list[str], diagnostics: dict[str, Any]) -> None:
+    """The check records, with their retries, revisions and terminal reasons."""
+    rows = diagnostics.get("checks") or []
+    if rows:
+        parts.append(
+            _table(
+                ["Check record", "State", "Revision", "Retries", "Ended because"],
+                [
+                    [
+                        r.get("check_id"),
+                        r.get("activity") or r.get("state"),
+                        r.get("revision"),
+                        r.get("retry_count"),
+                        r.get("terminal_reason") or "--",
+                    ]
+                    for r in rows
+                ],
+            )
+        )
+        parts.append("")
 
 
 def _append_build_provenance(parts: list[str], provenance: dict[str, Any]) -> None:
@@ -1445,7 +1584,10 @@ def _scorecard_item(item: dict[str, Any], statements: dict[str, dict] | None = N
     if item.get("cause_label"):
         status = f"{status}: {item['cause_label']}"
     line = f"- **{status}** ({item.get('category_label')}, {item.get('finding_id')}): {item.get('description') or '--'}"
-    if item.get("reason"):
+    if item.get("shared_reason"):
+        # plan_8_2 section 4.2: a reason several findings share is stated once, under Findings.
+        line += f". Reason: see {item['shared_reason']} under Findings"
+    elif item.get("reason"):
         line += f". {item['reason']}"
     lines = [line]
     if item.get("rationale"):
@@ -1516,6 +1658,14 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
         )
     )
     parts.append("")
+    # plan_8_2 section 4.2: why a blank score is blank, and what the card counts, each in its own unit.
+    if card.get("score_note"):
+        parts.append(f"{card['score_note']}.")
+        parts.append("")
+    units = [f"{u.get('count')} {u.get('label')}" for u in card.get("units") or [] if isinstance(u, dict)]
+    if units:
+        parts.append("Counts: " + "; ".join(units))
+        parts.append("")
     # plan_8_1 section 2.3: a provisional scope says why, as the page does.
     if card.get("provisional_note"):
         parts.append(f"Provisional: {card['provisional_note']}")
