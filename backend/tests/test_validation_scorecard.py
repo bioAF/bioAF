@@ -356,6 +356,8 @@ class TestTheCompactForm:
             "reason": None,
             "cause": None,
             "cause_label": None,
+            # plan_8_2 section 1.4 (flagged change): the checks' activity; a card built without records has none.
+            "activity": None,
             # plan_8_1 section 4.5: the depth, which a version 1 record does not carry.
             "depth_label": None,
             "independent_count": None,

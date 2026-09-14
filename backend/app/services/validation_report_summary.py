@@ -287,7 +287,7 @@ def summarize(
         "issue_count": len(issues or []),
         # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
         "scorecard": scorecard_projection(
-            study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues
+            study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
         ),
     }
 
@@ -295,13 +295,21 @@ def summarize(
 _ACTIVE_STATES_TERMINAL = ("classified", "plan_declined", "error")
 
 
-def _live_outcomes(*, study: dict, evidence: dict, plan: dict, targets: list[dict], claims: list[dict] | None) -> dict:
-    """Each finding's outcome, normalized from the study's current evidence."""
+def _live_outcomes(
+    *,
+    study: dict,
+    evidence: dict,
+    plan: dict,
+    targets: list[dict],
+    claims: list[dict] | None,
+    checks: list[dict] | None = None,
+) -> dict:
+    """Each finding's outcome, normalized from the study's current evidence and its check records."""
     from app.services.validation_finding_outcomes import finding_outcomes
 
     if claims is None:
         contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
-        consistency = {i: _claim_consistency(i, t, contrasts, evidence) for i, t in enumerate(targets)}
+        consistency = {i: _claim_consistency(i, t, contrasts, evidence, checks=checks) for i, t in enumerate(targets)}
     else:
         consistency = {i: c.get("consistency") for i, c in enumerate(claims)}
     return finding_outcomes(
@@ -313,22 +321,99 @@ def _current_selection_revision(plan: dict):
     return ((plan.get("analysis_selection") or {}).get("current") or {}).get("revision")
 
 
-def _usable_record(study: dict, evidence: dict, plan: dict) -> dict | None:
-    """The outcomes recorded when the study concluded, while the revisions they were read under hold. A
-    record keeps the rubric version its inventory was established under (plan_8_1 section 4.1)."""
+# plan_8_2 section 1.4: the evidence a scorecard's outcomes are read from. A change to any of it, to the plan,
+# to a contributing check's outcome, or to the rubric, binding or decoder version, invalidates the record.
+_SCORED_EVIDENCE = (
+    "level3",
+    "level3_result",
+    "level3_failed",
+    "level3_skipped",
+    "classification_result",
+    "comparison_targets",
+    "completion",
+    "author_consistency",
+    "author_table_unbound",
+    "supplements",
+    "artifact_revisions",
+    "table_confirmations",
+)
+_SCORED_PLAN = ("finding_inventory", "differential_design", "analysis_selection", "reported_experiments", "resources")
+
+
+def projection_provenance(plan: dict, evidence: dict, checks: list[dict] | None) -> dict:
+    """Everything a scorecard's outcomes were read from, as revisions and fingerprints."""
+    from app.services.table_decoding import DECODER_VERSION
+    from app.services.validation_check_queue import fingerprint
+    from app.services.validation_table_binding import BINDING_VERSION
+
+    inventory = plan.get("finding_inventory") or {}
+    return {
+        "rubric_version": inventory.get("rubric_version") or 1,
+        "inventory_revision": inventory.get("revision"),
+        "analysis_selection_revision": _current_selection_revision(plan),
+        "binding_version": BINDING_VERSION,
+        "decoder_version": DECODER_VERSION,
+        "plan": fingerprint({key: plan.get(key) for key in _SCORED_PLAN}),
+        "evidence": fingerprint({key: (evidence or {}).get(key) for key in _SCORED_EVIDENCE}),
+        "checks": sorted(
+            [c.get("check_id"), c.get("revision"), c.get("outcome_revision") or 0, c.get("state")] for c in checks or []
+        ),
+    }
+
+
+def provenance_fingerprint(provenance: dict) -> str:
+    from app.services.validation_check_queue import fingerprint
+
+    return fingerprint(provenance)
+
+
+def _usable_record(study: dict, evidence: dict, plan: dict, checks: list[dict] | None = None) -> dict | None:
+    """The outcomes recorded for a concluded study, while everything they were read from holds (plan_8_2
+    section 1.4): the plan and inventory, the rubric, the binding and decoder versions, the evidence and
+    every contributing check's outcome revision. A record keeps the rubric version its inventory was
+    established under (plan_8_1 section 4.1). A record without that provenance is not reused."""
     record = evidence.get("scorecard_record")
     if study.get("state") != "classified" or not isinstance(record, dict):
         return None
     if not isinstance(record.get("outcomes"), dict):
         return None
-    inventory = plan.get("finding_inventory") or {}
-    if (
-        record.get("rubric_version") != (inventory.get("rubric_version") or 1)
-        or record.get("inventory_revision") != inventory.get("revision")
-        or record.get("analysis_selection_revision") != _current_selection_revision(plan)
-    ):
+    if record.get("provenance_fingerprint") != provenance_fingerprint(projection_provenance(plan, evidence, checks)):
         return None
     return record
+
+
+# plan_8_2 section 1.4: the check queue's work, as the scorecard shows it. Labels pending the owner's sign-off.
+_ACTIVITY_WORDS = (
+    ("running", "running"),
+    ("pending", "pending"),
+    ("retrying", "retrying"),
+    ("unresolved", "could not conclude"),
+    ("blocked", "blocked"),
+)
+
+
+def check_activity(checks: list[dict] | None) -> dict:
+    """What the study's checks are doing: counts by activity, the checks completed, and a line saying so.
+    Checks are counted as checks, never as findings."""
+    from app.services.validation_check_queue import activity_of
+
+    counts = {"pending": 0, "retrying": 0, "running": 0, "done": 0, "unresolved": 0, "blocked": 0}
+    for check in checks or []:
+        activity = activity_of(check)
+        if activity in counts:
+            counts[activity] += 1
+    parts = [
+        f"{counts[key]} {'check' if counts[key] == 1 else 'checks'} {words}"
+        for key, words in _ACTIVITY_WORDS
+        if counts[key]
+    ]
+    return {
+        "counts": counts,
+        "completed": counts["done"] + counts["unresolved"] + counts["blocked"],
+        "total": sum(counts.values()),
+        "under_way": counts["pending"] + counts["retrying"] + counts["running"],
+        "label": "; ".join(parts) or None,
+    }
 
 
 def scorecard_projection(
@@ -339,8 +424,13 @@ def scorecard_projection(
     targets: list[dict] | None,
     claims: list[dict] | None = None,
     issues: list[dict] | None = None,
+    checks: list[dict] | None = None,
 ) -> dict:
     """plan_8: the scorecard for one study, from its finding inventory and its outcomes.
+
+    plan_8_2 section 1.4: ``checks`` are the study's check records. The record of a concluded study is read
+    while its provenance holds; the card carries the checks' activity, so work still under way after
+    classification is shown, never hidden behind a concluded status.
 
     A plan read before the inventory existed gets no score: its evidence cannot be associated with
     reviewed findings, and nothing is inferred from its classification. A concluded study reads the
@@ -369,12 +459,14 @@ def scorecard_projection(
             return build_scorecard(None, {}, in_progress=in_progress)
         reason = "The paper has not been read yet." if in_progress else "No reproduction plan was read for this study."
         return build_scorecard({"status": "unresolved", "reason": reason}, {}, in_progress=in_progress)
-    record = _usable_record(study, evidence, plan)
+    record = _usable_record(study, evidence, plan, checks)
     try:
         if record is not None:
             outcomes = record["outcomes"]
         else:
-            outcomes = _live_outcomes(study=study, evidence=evidence, plan=plan, targets=targets, claims=claims)
+            outcomes = _live_outcomes(
+                study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, checks=checks
+            )
         card = build_scorecard(
             inventory,
             outcomes,
@@ -384,6 +476,8 @@ def scorecard_projection(
         # Which selection's evidence the outcomes were read from, beside the inventory and rubric revisions.
         card["analysis_selection_revision"] = _current_selection_revision(plan)
         card["outcomes_recorded_at"] = record.get("at") if record is not None else None
+        card["projection_revision"] = record.get("projection_revision") if record is not None else None
+        card["activity"] = check_activity(checks)
         return card
     except ScorecardInvariantError:
         # A breach is a defect in the records, never a number on screen. The details go to the log.
@@ -435,10 +529,20 @@ def _read_failure_projection(failure: dict | None, study: dict) -> dict | None:
     }
 
 
-async def record_scorecard(session, study) -> None:
-    """plan_8 section 4: store a concluding study's outcome records with the revisions they were read
-    under, so a later change to how evidence is normalized cannot rewrite its score. The record it
-    replaces is kept in ``scorecard_history``."""
+async def _plan_checks(session, study, plan) -> list[dict]:
+    from app.services.validation_check_queue import record_dict, records_for
+
+    return [
+        record_dict(r)
+        for r in await records_for(session, study.id)
+        if str(r.check_id or "").startswith(f"plan:{plan.id}:")
+    ]
+
+
+async def compute_scorecard_record(session, study) -> dict | None:
+    """plan_8_2 section 1.4: a concluded study's scorecard record, built from its committed evidence and
+    check records, with the provenance that says what it was built from. None when there is nothing to
+    score (no plan or no inventory) or the records breach an invariant (logged)."""
     import logging
     from datetime import datetime, timezone
 
@@ -446,15 +550,11 @@ async def record_scorecard(session, study) -> None:
 
     from app.models.comparison_target import ComparisonTarget
     from app.services.validation_assessment import active_plan
-    from app.services.validation_scorecard import (
-        ScorecardInvariantError,
-        build_scorecard,
-        compact_scorecard,
-    )
+    from app.services.validation_scorecard import ScorecardInvariantError, build_scorecard, compact_scorecard
 
     plan = await active_plan(session, study)
     if plan is None or not isinstance(plan.finding_inventory_json, dict):
-        return
+        return None
     rows = (
         (
             await session.execute(
@@ -469,9 +569,15 @@ async def record_scorecard(session, study) -> None:
     plan_dict = plan_projection(plan)
     evidence = dict(study.evidence_json or {})
     projected = {**study_projection(study), "state": "classified"}
+    checks = await _plan_checks(session, study, plan)
     try:
         outcomes = _live_outcomes(
-            study=projected, evidence=evidence, plan=plan_dict, targets=[target_dict(t) for t in rows], claims=None
+            study=projected,
+            evidence=evidence,
+            plan=plan_dict,
+            targets=[target_dict(t) for t in rows],
+            claims=None,
+            checks=checks,
         )
         card = build_scorecard(
             plan.finding_inventory_json,
@@ -480,19 +586,82 @@ async def record_scorecard(session, study) -> None:
         )
     except ScorecardInvariantError:
         logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
-        return
-    previous = evidence.get("scorecard_record")
-    if isinstance(previous, dict):
-        evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [previous]
-    evidence["scorecard_record"] = {
+        return None
+    provenance = projection_provenance(plan_dict, evidence, checks)
+    return {
         "rubric_version": plan.finding_inventory_json.get("rubric_version") or 1,
         "inventory_revision": plan.finding_inventory_json.get("revision"),
         "analysis_selection_revision": _current_selection_revision(plan_dict),
         "outcomes": outcomes,
         "compact": compact_scorecard(card),
         "at": datetime.now(timezone.utc).isoformat(),
+        "provenance": provenance,
+        "provenance_fingerprint": provenance_fingerprint(provenance),
     }
-    study.evidence_json = evidence
+
+
+def _newer(stored: dict, candidate: dict) -> bool:
+    """Whether the stored record was built from a later outcome of some check than the candidate was."""
+    ours = {row[0]: (row[1] or 0, row[2] or 0) for row in (candidate.get("provenance") or {}).get("checks") or []}
+    for row in (stored.get("provenance") or {}).get("checks") or []:
+        mine = ours.get(row[0])
+        if mine is not None and (row[1] or 0, row[2] or 0) > mine:
+            return True
+    return False
+
+
+async def publish_scorecard_record(session, study, record: dict | None, *, reason: str, force: bool = False) -> bool:
+    """plan_8_2 section 1.4: store a scorecard record, keeping the one it replaces in history with why.
+
+    The study row is locked while the record is compared and written, so two completions cannot interleave,
+    and a record built from an older outcome of any check than the stored one is never published over it.
+    ``force`` publishes a record built from the same provenance too (a study concluding again). Returns
+    whether the record was published."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select
+
+    from app.models.validation_study import ValidationStudy
+
+    if record is None:
+        return False
+    locked = (
+        await session.execute(
+            select(ValidationStudy)
+            .where(ValidationStudy.id == study.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    evidence = dict(locked.evidence_json or {})
+    previous = evidence.get("scorecard_record")
+    if isinstance(previous, dict):
+        if not force and previous.get("provenance_fingerprint") == record.get("provenance_fingerprint"):
+            return False
+        if _newer(previous, record):
+            return False
+        evidence["scorecard_history"] = list(evidence.get("scorecard_history") or []) + [
+            {**previous, "superseded_at": datetime.now(timezone.utc).isoformat(), "superseded_because": reason}
+        ]
+    evidence["scorecard_record"] = {
+        **record,
+        "projection_revision": int((previous or {}).get("projection_revision") or 0) + 1,
+    }
+    locked.evidence_json = evidence
+    if locked is not study:
+        study.evidence_json = evidence
+    await session.flush()
+    return True
+
+
+async def record_scorecard(session, study, *, reason: str = "the study concluded", force: bool = True) -> None:
+    """plan_8 section 4: store a concluding study's outcome records with what they were read from, so a
+    later change to how evidence is normalized cannot rewrite its score. plan_8_2 section 1.4: called again
+    whenever a contributing check or its evidence changes; the record it replaces is kept in
+    ``scorecard_history`` with the reason."""
+    await publish_scorecard_record(
+        session, study, await compute_scorecard_record(session, study), reason=reason, force=force
+    )
 
 
 def _resources(plan: dict) -> list[dict]:
@@ -1716,6 +1885,24 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
         reading_issues.setdefault(issue.validation_study_id, []).append(
             {"step": issue.step, "outcome": issue.outcome, "impact": issue.impact}
         )
+    # plan_8_2 section 1.4: the check records the report reads, in one more query whatever the number.
+    from app.models.validation_check_record import ValidationCheckRecord
+    from app.services.validation_check_queue import record_dict
+
+    checks: dict[int, list[dict]] = {}
+    if plans:
+        for record in (
+            (
+                await session.execute(
+                    select(ValidationCheckRecord)
+                    .where(ValidationCheckRecord.reproduction_plan_id.in_([p.id for p in plans]))
+                    .order_by(ValidationCheckRecord.id)
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            checks.setdefault(record.reproduction_plan_id, []).append(record_dict(record))
     compact: dict[int, dict] = {}
     for study in studies:
         plan = by_pointer.get(study.reproduction_plan_id) if study.reproduction_plan_id else by_study.get(study.id)
@@ -1725,6 +1912,7 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
             plan=plan_projection(plan) if plan is not None else {},
             targets=targets.get(plan.id, []) if plan is not None else [],
             issues=reading_issues.get(study.id, []),
+            checks=checks.get(plan.id, []) if plan is not None else [],
         )
         compact[study.id] = compact_scorecard(card)
     return compact

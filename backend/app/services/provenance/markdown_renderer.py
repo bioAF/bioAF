@@ -1469,6 +1469,10 @@ def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
     if card.get("in_progress"):
         parts.append(f"**{card.get('in_progress_label') or 'In progress'}.** Updated only from committed evidence.")
         parts.append("")
+    # plan_8_2 section 1.4: checks still under way, or that could not conclude, as the page states them.
+    if (card.get("activity") or {}).get("label"):
+        parts.append(f"Checks: {card['activity']['label']}")
+        parts.append("")
     if card.get("status") in ("unavailable", "not_established", "not_applicable"):
         parts.append(f"**{card.get('status_label')}**" + (f" {card['reason']}" if card.get("reason") else ""))
         parts.append("")

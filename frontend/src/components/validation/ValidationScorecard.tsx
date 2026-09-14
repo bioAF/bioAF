@@ -248,6 +248,12 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </div>
       </dl>
 
+      {/* plan_8_2 section 1.4: the checks' activity, which a concluded status never hides. */}
+      {card.activity?.label && (
+        <p data-testid="scorecard-activity" className="mt-3 text-sm text-gray-700">
+          Checks: {card.activity.label}
+        </p>
+      )}
       {unestablished && card.reason && <p className="mt-3 text-sm text-gray-700">{card.reason}</p>}
       {/* plan_8_1 section 2.3: a provisional scope says why its total may fall. */}
       {card.provisional_note && (

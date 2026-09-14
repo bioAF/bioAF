@@ -51,6 +51,8 @@ export function ScorecardCompact({ scorecard }: { scorecard: CompactScorecard | 
       {scorecard.in_progress && scorecard.in_progress_label && (
         <div className="text-xs text-gray-600">{scorecard.in_progress_label}</div>
       )}
+      {/* plan_8_2 section 1.4: checks still under way, or that could not conclude, beside any status. */}
+      {scorecard.activity?.label && <div className="text-xs text-gray-600">{scorecard.activity.label}</div>}
     </div>
   );
 }

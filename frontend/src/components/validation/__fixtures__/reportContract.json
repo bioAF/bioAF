@@ -1608,6 +1608,514 @@
     ],
     "version": 1
   },
+  "scorecard_checks_under_way": {
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [
+        "reproduction notebook"
+      ],
+      "status": "attempted"
+    },
+    "blockers": [],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; 1 tested.",
+      "mapped": 0,
+      "tested": 1,
+      "total": 2
+    },
+    "claims": [
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Differs from the authors' results",
+          "outcome": "disagree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 120,
+          "rows_tested": null,
+          "source": null,
+          "superseded": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes up",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "provisional": true,
+        "result": {
+          "count": null,
+          "ground_truth": null,
+          "tier": "Deposited data",
+          "verdict": "agree"
+        },
+        "selection": {
+          "check_label": "Reanalysis of processed data",
+          "label": "Selected for this run",
+          "reason": null,
+          "status": "selected"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 257
+      },
+      {
+        "basis": "paper_text",
+        "checks": [
+          {
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "reason": "the sample mapping is established when the input is chosen",
+            "status": "unresolved",
+            "status_label": "Unresolved"
+          }
+        ],
+        "consistency": {
+          "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
+          "candidates": [],
+          "columns": {},
+          "count_range": null,
+          "duplicates_disagreeing": [],
+          "label": "Consistent with the authors' deposited results",
+          "outcome": "agree",
+          "reason": null,
+          "rows_missing": null,
+          "rows_passing": 524,
+          "rows_tested": null,
+          "source": null,
+          "superseded": null,
+          "table": "deseq2.txt.gz"
+        },
+        "contrast": "KO vs WT",
+        "cutoff": "P < 0.01",
+        "description": "genes down",
+        "experiment": {
+          "assay": "bulk RNA-seq",
+          "id": "e1"
+        },
+        "mapping": {
+          "bound_key": null,
+          "confidence": null,
+          "decided_by": "alias_table",
+          "explanation": "No mapping decision was recorded for this claim.",
+          "label": "Not mapped",
+          "metric_key": null,
+          "model": null,
+          "reason": null,
+          "status": "unmapped"
+        },
+        "population": null,
+        "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "provisional": true,
+        "result": null,
+        "selection": {
+          "check_label": null,
+          "label": "Not assessed in this run",
+          "reason": "not selected for this run",
+          "status": "unassessed"
+        },
+        "stage": null,
+        "unit": null,
+        "unresolved_reason": null,
+        "value": 524
+      }
+    ],
+    "code_sources": [],
+    "comparisons": {
+      "label": null,
+      "performed": true,
+      "reason": null
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [
+      {
+        "basis": "paper_text",
+        "cutoff": "P < 0.01",
+        "name": "KO vs WT",
+        "provisional": true,
+        "status": "unassessed"
+      }
+    ],
+    "experiments": [
+      {
+        "assay": "bulk RNA-seq",
+        "id": "e1",
+        "reference": [
+          {
+            "established_from": null,
+            "part": "assembly",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          }
+        ],
+        "status": null,
+        "workflow": "nf-core/rnaseq"
+      }
+    ],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 1,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": true
+    },
+    "figures": 0,
+    "headline": {
+      "key": "could_not_reproduce",
+      "label": "Could Not Reproduce"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": null,
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "activity": {
+        "completed": 1,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 1,
+          "retrying": 1,
+          "running": 0,
+          "unresolved": 1
+        },
+        "label": "1 check pending; 1 check retrying; 1 check could not conclude",
+        "total": 3,
+        "under_way": 2
+      },
+      "analysis_selection_revision": 1,
+      "assessed_count": 1,
+      "assessed_items": [
+        {
+          "analysis_selection_revision": 1,
+          "assessment_method": null,
+          "category": "primary",
+          "category_label": "Primary",
+          "cause": null,
+          "cause_label": null,
+          "check_causes": [],
+          "claim_indices": [
+            0,
+            1
+          ],
+          "comparison_criteria": {
+            "rule": "all_required_subchecks",
+            "subchecks": [
+              "Concordance with the authors' result set under the claim's statistical definition: supported when the overlap is enriched beyond chance (p <= 0.05) and at least half of the authors' findings are recovered in the same direction; a discrepancy when the overlap is no better than chance or none is recovered in the same direction.",
+              "Consistency with the authors' own result table at the claim's predicate: supported when the table agrees with the claim, a discrepancy when it does not. This shows the paper's text agrees with its own results; it is not an independent assessment."
+            ],
+            "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+          },
+          "concerns": [
+            {
+              "kind": "text_disagrees",
+              "text": "the paper's text disagrees with its own table"
+            }
+          ],
+          "depth": "consistency",
+          "depth_label": "Consistency only",
+          "description": "Loss of the gene deregulates hundreds of genes",
+          "experiment_ids": [
+            "e1"
+          ],
+          "finding_id": "F1",
+          "governing": {
+            "evidence": [
+              "level3_result",
+              "author_results (deseq2.txt.gz)"
+            ],
+            "method": null
+          },
+          "importance_decided_by": "model",
+          "importance_problem": null,
+          "importance_status": "validated",
+          "locator": null,
+          "method_label": null,
+          "proposed_category": null,
+          "quote": "genes up",
+          "rationale": "The main conclusion.",
+          "reason": "240 of 257 of the authors' findings recovered in the same direction (overlap enrichment p = 1.0e-20). Consistent with the authors' deposited results (deseq2.txt.gz)",
+          "resource_statements": [
+            "GSE144396",
+            "GSE999999"
+          ],
+          "status": "supported",
+          "status_label": "Supported",
+          "subchecks": [
+            {
+              "authority": {
+                "excluded": [],
+                "governing": [
+                  "deseq2.txt.gz"
+                ],
+                "sources": [
+                  {
+                    "outcome": "disagree",
+                    "reason": null,
+                    "source": null,
+                    "table": "deseq2.txt.gz",
+                    "version_status": null
+                  }
+                ]
+              },
+              "claim_index": 0,
+              "depth": "independent",
+              "method": "processed_reanalysis",
+              "reason": "240 of 257 of the authors' findings recovered in the same direction (overlap enrichment p = 1.0e-20).",
+              "status": "supported"
+            },
+            {
+              "authority": {
+                "excluded": [],
+                "governing": [
+                  "deseq2.txt.gz"
+                ],
+                "sources": [
+                  {
+                    "outcome": "agree",
+                    "reason": null,
+                    "source": null,
+                    "table": "deseq2.txt.gz",
+                    "version_status": null
+                  }
+                ]
+              },
+              "claim_index": 1,
+              "depth": "consistency",
+              "method": "author_results",
+              "reason": "Consistent with the authors' deposited results (deseq2.txt.gz)",
+              "status": "supported"
+            }
+          ],
+          "supporting_checks": [
+            {
+              "kind": "author_results",
+              "text": "Differs from the authors' results (deseq2.txt.gz)"
+            },
+            {
+              "kind": "author_results",
+              "text": "Consistent with the authors' deposited results (deseq2.txt.gz)"
+            }
+          ],
+          "supporting_evidence_ids": [
+            "level3_result",
+            "author_results (deseq2.txt.gz)"
+          ],
+          "weight": 2
+        }
+      ],
+      "assessed_weight": 2,
+      "cause": null,
+      "cause_label": null,
+      "consistency_count": 1,
+      "depth_label": "1 consistency only; 0 independently assessed",
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": 100,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "independent_count": 0,
+      "indicators": [],
+      "inventory_retry": false,
+      "inventory_revision": 1,
+      "inventory_status": "established",
+      "messages": [
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "concern",
+          "text": "Concern on a primary finding: Loss of the gene deregulates hundreds of genes: the paper's text disagrees with its own table"
+        },
+        {
+          "findings": [
+            "F1"
+          ],
+          "kind": "resource_contradicted",
+          "text": "Resource statement contradicted: GSE999999 (the registry holds no record under the identifier the paper gives)"
+        }
+      ],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 0,
+      "projection_revision": null,
+      "provisional": false,
+      "provisional_note": null,
+      "reason": null,
+      "resource_statements": [
+        {
+          "access": "public",
+          "archive": "geo",
+          "checks": [
+            {
+              "detail": "the registry holds the record the paper names",
+              "field": "registered",
+              "outcome": "verified",
+              "outcome_label": "Verified"
+            },
+            {
+              "detail": "the paper describes bulk RNA-seq; the record registers RNA-Seq",
+              "field": "assay",
+              "outcome": "verified",
+              "outcome_label": "Verified"
+            }
+          ],
+          "experiment_ids": [
+            "e1"
+          ],
+          "identifier": "GSE144396",
+          "outcome": "verified",
+          "outcome_label": "Verified"
+        },
+        {
+          "access": "unknown",
+          "archive": "geo",
+          "checks": [
+            {
+              "detail": "the registry holds no record under the identifier the paper gives",
+              "field": "registered",
+              "outcome": "contradicted",
+              "outcome_label": "Contradicted"
+            }
+          ],
+          "experiment_ids": [
+            "e1"
+          ],
+          "identifier": "GSE999999",
+          "outcome": "contradicted",
+          "outcome_label": "Contradicted"
+        }
+      ],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
+      "scope_label": "1 / 1 assessed",
+      "score": 100.0,
+      "score_label": "100 / 100",
+      "score_status_label": null,
+      "status": "scored",
+      "status_label": null,
+      "summary": "One primary finding supported.",
+      "supported_count": 1,
+      "supported_weight": 2,
+      "title": "Validation Scorecard",
+      "total_count": 1,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": {
+      "check": "processed_reanalysis",
+      "check_label": "Reanalysis of processed data",
+      "claim_index": 0,
+      "confidence": null,
+      "decided_by": null,
+      "experiment_id": null,
+      "reason": null,
+      "revision": 1,
+      "superseded_revisions": 0,
+      "workflow": null
+    },
+    "selection_history": [],
+    "summary": [
+      "Reproduction was attempted and reached no verdict.",
+      "Whether raw data are deposited could not be established.",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and 1 scientific claim(s) were tested."
+    ],
+    "version": 1
+  },
   "scorecard_groff": {
     "artifacts": [
       {
@@ -2495,6 +3003,20 @@
       }
     ],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 0,
       "assessed_items": [],
@@ -2643,6 +3165,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
@@ -3178,6 +3701,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 1,
       "assessed_items": [
@@ -3273,6 +3810,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
@@ -3477,6 +4015,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": null,
       "assessed_items": [],
@@ -3501,6 +4053,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": "bioAF could not group the paper's claims into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: bioAF could not reach the language model.",
@@ -4486,6 +5039,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 2,
       "assessed_items": [
@@ -4664,6 +5231,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
@@ -5563,6 +6131,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 0,
       "assessed_items": [],
@@ -5658,6 +6240,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": "Every finding in the reviewed inventory is a technical prerequisite or descriptive check.",
@@ -5951,6 +6534,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": 1,
       "assessed_count": null,
       "assessed_items": [],
@@ -5975,6 +6572,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": "The importance of F1 is not established: its quote is not in the paper's text.",
@@ -6125,6 +6723,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": null,
       "assessed_items": [],
@@ -6149,6 +6761,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": null,
       "primary_unassessed_count": null,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": "The findings are being established.",
@@ -6378,6 +6991,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 1,
       "assessed_items": [
@@ -6486,6 +7113,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": true,
       "provisional_note": "The total includes 1 finding whose importance is not established; it falls by one for each that proves technical.",
       "reason": null,
@@ -6840,6 +7468,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": 1,
       "assessed_count": 0,
       "assessed_items": [],
@@ -6877,6 +7519,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 1,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
@@ -7230,6 +7873,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": 1,
       "assessed_count": 1,
       "assessed_items": [
@@ -7387,6 +8044,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
@@ -7671,6 +8329,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 2,
       "assessed_items": [
@@ -7836,6 +8508,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 0,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": true,
       "provisional_note": "The total includes 1 finding whose importance is not established; it falls by one for each that proves technical.",
       "reason": null,
@@ -8266,6 +8939,20 @@
     },
     "retrieval_failures": [],
     "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
       "analysis_selection_revision": null,
       "assessed_count": 5,
       "assessed_items": [
@@ -8654,6 +9341,7 @@
       "outcomes_recorded_at": null,
       "primary_discrepancy_count": 1,
       "primary_unassessed_count": 0,
+      "projection_revision": null,
       "provisional": false,
       "provisional_note": null,
       "reason": null,
