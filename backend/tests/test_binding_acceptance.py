@@ -290,6 +290,9 @@ class TestASingleTable:
         (record,) = await queue.records_for(session, study.id)
         assert record.state == queue.DONE and record.outcome_json["outcome"] == "agree"
         assert record.outcome_json["binding"]["evidence"][0]["kind"] == "columns"
+        # The binding names the exact bytes it was made from.
+        served = fetch.blobs[_BASE + "GSE999001_results.txt.gz"]
+        assert record.outcome_json["binding"]["source"]["checksum"] == __import__("hashlib").sha256(served).hexdigest()
 
     @pytest.mark.asyncio
     async def test_a_single_table_for_another_contrast_is_rejected_without_being_downloaded(self, session, admin_user):

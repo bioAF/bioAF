@@ -625,14 +625,19 @@ async def publish_scorecard_record(session, study, record: dict | None, *, reaso
 
     if record is None:
         return False
-    locked = (
-        await session.execute(
-            select(ValidationStudy)
-            .where(ValidationStudy.id == study.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
+    rows = (
+        (
+            await session.execute(
+                select(ValidationStudy)
+                .where(ValidationStudy.id == study.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
         )
-    ).scalar_one()
+        .scalars()
+        .all()
+    )
+    locked = rows[0] if rows else study
     evidence = dict(locked.evidence_json or {})
     previous = evidence.get("scorecard_record")
     if isinstance(previous, dict):
@@ -650,7 +655,6 @@ async def publish_scorecard_record(session, study, record: dict | None, *, reaso
     locked.evidence_json = evidence
     if locked is not study:
         study.evidence_json = evidence
-    await session.flush()
     return True
 
 

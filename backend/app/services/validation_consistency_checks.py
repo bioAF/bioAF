@@ -585,6 +585,8 @@ async def _run_one(run: _Run, record) -> int:
         await queue.start(run.session, record, url=url, shared_download=True, decoding=run.decodings.get(url))
     # plan_8_2 section 1.1: the table's columns are in hand; its binding to this claim's contrast is
     # completed from them before any predicate is applied.
+    # The binding names the exact bytes it was made from.
+    table = {**table, "checksum": (run.decodings.get(url) or {}).get("source_checksum")}
     bound = _bind_with_columns(run, table, item, run.texts[url])
     if not binding.established(bound):
         _note_attempt(record, seconds=round(time.monotonic() - started, 3))
