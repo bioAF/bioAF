@@ -652,7 +652,13 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
         parts.append("")
     # plan_8_1 section 1.4: the projection's blockers, so a failed read's withheld statements stay withheld.
     projected = [b for b in summary.get("blockers") or [] if isinstance(b, dict)]
+    # plan_8_2 section 4.1: requirements that do not apply to a paper outside bioAF's methods are kept whole,
+    # on their own line, and never listed as blockers.
+    not_applying = [str(b.get("withheld")) for b in projected if b.get("kind") == "not_applicable"]
+    projected = [b for b in projected if b.get("kind") != "not_applicable"]
     blockers = [b.get("text") for b in projected] if projected else list(plan.get("blockers") or [])
+    if not_applying and not projected:
+        blockers = []
     if blockers:
         provisional = any(b.get("provisional") for b in projected)
         parts.append(
@@ -660,6 +666,9 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
             + "; ".join(str(b) for b in blockers)
             + (" (provisional: from the paper text only; not checked against the attachments)" if provisional else "")
         )
+        parts.append("")
+    if not_applying:
+        parts.append("**Requirements that do not apply to this paper:** " + "; ".join(not_applying))
         parts.append("")
 
     # Computed vs Claimed (E2 evidence)
@@ -749,7 +758,7 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     _append_capability_checklist(parts, evidence.get("capabilities") or {}, summary)
     _append_supplement_inventory(parts, evidence.get("supplements") or [], summary)
-    _append_what_was_not_attempted(parts, plan, evidence, result)
+    _append_what_was_not_attempted(parts, plan, evidence, result, summary=summary)
     _append_completion(parts, evidence.get("completion") or {}, summary)
     _append_precompute_checks(parts, evidence.get("precompute_checks") or {})
     _append_code_section(parts, evidence)
@@ -1079,7 +1088,12 @@ def _cutoff(target: dict[str, Any]) -> str:
 
 
 def _append_what_was_not_attempted(
-    parts: list[str], plan: dict[str, Any], evidence: dict[str, Any], result: dict[str, Any]
+    parts: list[str],
+    plan: dict[str, Any],
+    evidence: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    summary: dict[str, Any] | None = None,
 ) -> None:
     """Say plainly what this run did NOT do, so nothing has to be inferred from an absence.
 
@@ -1098,7 +1112,14 @@ def _append_what_was_not_attempted(
 
     parts.append("## What This Run Did Not Attempt")
     parts.append("")
-    if not selected:
+    outside = ((summary or {}).get("applicability") or {}).get("status") == "not_applicable"
+    if not selected and outside:
+        # plan_8_2 section 4.1: there was nothing within bioAF's methods to select.
+        parts.append(
+            "- No eligible finding was identified for bioAF's current validation methods, so no published result "
+            "was put under test."
+        )
+    elif not selected:
         parts.append(
             "- No finding was selected from this paper, so no specific published result was put "
             "under test. bioAF does not yet choose among a paper's findings automatically."

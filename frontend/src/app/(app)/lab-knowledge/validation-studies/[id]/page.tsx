@@ -216,10 +216,14 @@ export default function ValidationStudyPage() {
   const plan7 = (study.evidence ?? {}) as Plan7Evidence;
   const summary = study.report_summary ?? null;
   // plan_8_1 section 1.4: the projection's blockers when the report carries them, else the plan's own.
-  const blockerRows: { text: string; withheld?: string }[] =
+  const allBlockerRows: { text: string; kind?: string | null; withheld?: string }[] =
     summary?.blockers && summary.blockers.length > 0
       ? summary.blockers
       : (plan?.blockers ?? []).map((text) => ({ text }));
+  // plan_8_2 section 4.1: requirements that do not apply to a paper outside bioAF's methods are one collapsed
+  // detail, never a list of blockers.
+  const notApplying = allBlockerRows.filter((b) => b.kind === "not_applicable");
+  const blockerRows = allBlockerRows.filter((b) => b.kind !== "not_applicable");
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
 
@@ -278,7 +282,12 @@ export default function ValidationStudyPage() {
             )}
             {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
             {summary.recovery?.available && (
-              <RecoveryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
+              <RecoveryNotice
+                studyId={study.id}
+                onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                restate={summary?.recovery?.restate}
+                affectedCount={summary?.recovery?.affected_count}
+              />
             )}
           </div>
         )}
@@ -424,7 +433,7 @@ export default function ValidationStudyPage() {
             {plan.ai_decisions && plan.ai_decisions.length > 0 && (
               <AiDecisionList decisions={plan.ai_decisions} testedCount={summary?.claim_counts?.tested ?? 0} />
             )}
-            {blockerRows.length > 0 && (
+            {(blockerRows.length > 0 || notApplying.length > 0) && (
               <div className="mt-3">
                 <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Blockers</p>
                 <ul className="mt-1 list-inside list-disc text-sm text-gray-700">
@@ -439,6 +448,16 @@ export default function ValidationStudyPage() {
                     ) : (
                       <li key={i}>{b.text}</li>
                     ),
+                  )}
+                  {notApplying.length > 0 && (
+                    <li data-testid="blockers-not-applying" className="text-gray-600">
+                      {notApplying.length} {notApplying.length === 1 ? "requirement that does" : "requirements that do"}{" "}
+                      not apply: {notApplying[0].text.replace(/^Does not apply: /, "")}
+                      <TechnicalDetails
+                        detail={{ requirements: notApplying.map((b) => b.withheld) }}
+                        summary="Requirements that do not apply"
+                      />
+                    </li>
                   )}
                 </ul>
                 {/* change_7.3 section 6: a blocker is a reading of the prose until inspected evidence

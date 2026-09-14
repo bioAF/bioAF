@@ -77,7 +77,13 @@ async def test_read_and_plan_early_exits_missing_data(session, admin_user, monke
 
 
 @pytest.mark.asyncio
-async def test_read_and_plan_early_exits_not_reproducible(session, admin_user, monkeypatch):
+async def test_read_and_plan_early_exits_an_unmappable_assay_as_outside_bioafs_methods(
+    session, admin_user, monkeypatch
+):
+    # plan_8_2 section 4.1 and decision 4: an assay bioAF has no method for, with no claim bioAF can check,
+    # is outside bioAF's methods: the existing inconclusive classification, never not_reproducible.
+    from app.services.validation_applicability import NO_ELIGIBLE
+
     _patch_llm(monkeypatch, _UNMAPPABLE)
     study = await _requested(session, admin_user)
     study = await ValidationDriverService.read_and_plan(
@@ -85,7 +91,8 @@ async def test_read_and_plan_early_exits_not_reproducible(session, admin_user, m
     )
     await session.commit()
     assert study.state == "classified"
-    assert study.classification == "not_reproducible"
+    assert study.classification == "inconclusive"
+    assert study.failure_reason.startswith(NO_ELIGIBLE)
 
 
 @pytest.mark.asyncio

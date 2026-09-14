@@ -241,9 +241,9 @@ class TestThroughTheRead:
         self,
         session,
         admin_user,
-        llm,
-        quiet_discovery,
-        europe_pmc_text,  # noqa: F811
+        llm,  # noqa: F811
+        quiet_discovery,  # noqa: F811
+        europe_pmc_text,
     ):
         from app.services.validation_assessment import claimed_predicates
         from app.services.validation_study_service import ValidationStudyService
@@ -268,9 +268,9 @@ class TestThroughTheRead:
         self,
         session,
         admin_user,
-        llm,
-        quiet_discovery,
-        europe_pmc_text,  # noqa: F811
+        llm,  # noqa: F811
+        quiet_discovery,  # noqa: F811
+        europe_pmc_text,
     ):
         from app.services.validation_report_summary import report_summary_for
         from app.services.validation_study_service import ValidationStudyService
@@ -422,10 +422,10 @@ class TestThroughTheRecovery:
         }
         await session.flush()
         # Both checks were decided under the current binding rules, so neither is affected on its own.
-        for record in await consistency.enqueue(session, study, plan):
+        for check in await consistency.enqueue(session, study, plan):
             await queue.finish(
                 session,
-                record,
+                check,
                 state=queue.UNRESOLVED,
                 outcome={"outcome": "unresolved", "binding": {"version": BINDING_VERSION, "status": "candidate"}},
                 terminal_reason=queue.BINDING,

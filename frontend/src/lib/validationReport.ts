@@ -111,6 +111,7 @@ export interface ReportClaim {
 export interface ReportRecovery {
   available: boolean;
   affected_count: number;
+  restate?: { from: string; to: string } | null;
   last: { at: string | null; actor: number | null; reason: string | null; requeued: number | null } | null;
 }
 
@@ -379,11 +380,31 @@ export interface CompletionFact {
   reason: string | null;
 }
 
+export interface ReportApplicability {
+  status: "applicable" | "partial" | "not_applicable" | "undetermined";
+  statement: string | null;
+  limitation: string | null;
+  experiments: {
+    id: string | null;
+    assay: string | null;
+    workflow: string | null;
+    claims: number;
+    eligible_claims: number;
+    supported: boolean;
+  }[];
+  eligible_claims: number;
+}
+
 export interface ReportSummary {
   version: number;
   recovery?: ReportRecovery | null;
+  // plan_8_2 section 4.1: whether bioAF's current methods apply, per experiment.
+  applicability?: ReportApplicability | null;
   attempt: { status: "attempted" | "not_attempted"; executed: string[]; acquired: string[] };
-  headline: { key: "reproduction_not_attempted" | "could_not_reproduce" | "verdict" | "in_progress"; label: string | null };
+  headline: {
+    key: "reproduction_not_attempted" | "could_not_reproduce" | "verdict" | "in_progress" | "not_applicable";
+    label: string | null;
+  };
   summary: string[];
   facts: Record<string, unknown>;
   limitations: ReportLimitation[];

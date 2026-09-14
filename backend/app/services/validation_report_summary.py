@@ -179,11 +179,14 @@ EXECUTION_LABELS = {
 
 # Section 10, items 1 and 2: the headline follows the attempt, never the bucket alone.
 HEADLINE_NOT_ATTEMPTED = "reproduction_not_attempted"
+HEADLINE_NOT_APPLICABLE = "not_applicable"
 HEADLINE_COULD_NOT_REPRODUCE = "could_not_reproduce"
 HEADLINE_VERDICT = "verdict"
 HEADLINE_IN_PROGRESS = "in_progress"
 HEADLINE_LABELS = {
     HEADLINE_NOT_ATTEMPTED: "Reproduction not attempted",
+    # plan_8_2 section 4.1, pending the owner's sign-off.
+    HEADLINE_NOT_APPLICABLE: "Outside bioAF's current validation methods",
     HEADLINE_COULD_NOT_REPRODUCE: "Could Not Reproduce",
 }
 _VERDICT_CLASSIFICATIONS = ("validated", "partially_reproduced", "not_validated")
@@ -261,11 +264,14 @@ def summarize(
     limitations = _limitations(completion, uninspected=uninspected)
     claims, counts = _claims(targets, plan, evidence, checks=checks)
     reconciliation = _reconciliation(evidence)
-    headline = _headline(study, attempt)
     # plan_8_1 section 1.4: the one rule, applied to this study's current plan.
+    from app.services.validation_applicability import applicability
     from app.services.validation_read_failure import read_failure
 
     failure = read_failure(evidence, issues=issues, claim_count=len(targets))
+    # plan_8_2 section 4.1: applicability governs the whole report. A failed read establishes none.
+    applies = None if failure else applicability(plan, targets)
+    headline = _headline(study, attempt, applies)
     completion_facts = _completion_facts(completion, evidence, study, uninspected=uninspected)
     acquired = any(f["key"] == "input_acquired" and f["value"] == "yes" for f in completion_facts)
     facts = _facts(evidence, artifacts, attempt, counts, acquired=acquired)
@@ -274,7 +280,8 @@ def summarize(
         "version": 1,
         "attempt": attempt,
         "headline": headline,
-        "summary": _summary_lines(headline, facts),
+        "summary": _summary_lines(headline, facts, applies),
+        "applicability": applies,
         "facts": facts,
         "limitations": limitations,
         "retrieval_failures": failures,
@@ -289,7 +296,7 @@ def summarize(
         "selection_history": _selection_history(evidence),
         "claims": claims,
         "claim_counts": counts,
-        "blockers": _blockers(plan, evidence, failure=failure),
+        "blockers": _blockers(plan, evidence, failure=failure, applies=applies),
         "read_failure": _read_failure_projection(failure, study),
         "contrasts": _contrasts(plan, evidence),
         "reconciliation": reconciliation,
@@ -304,7 +311,7 @@ def summarize(
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
         # plan_8_2 section 2.1: whether an on-request recovery would change anything, and the last one run.
-        "recovery": _recovery(evidence, checks),
+        "recovery": _recovery(evidence, checks, study, applies),
         # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
         "scorecard": scorecard_projection(
             study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
@@ -312,10 +319,11 @@ def summarize(
     }
 
 
-def _recovery(evidence: dict, checks: list[dict] | None) -> dict:
+def _recovery(evidence: dict, checks: list[dict] | None, study: dict, applies: dict | None) -> dict:
+    from app.services.validation_applicability import restatement
     from app.services.validation_recovery import recovery_projection
 
-    return recovery_projection(evidence, checks or [])
+    return recovery_projection(evidence, checks or [], restate=restatement(study, applies))
 
 
 _ACTIVE_STATES_TERMINAL = ("classified", "plan_declined", "error")
@@ -1114,7 +1122,7 @@ def _basis(evidence: dict) -> str:
     return (evidence.get("assessment") or {}).get("basis") or "paper_text"
 
 
-def _blockers(plan: dict, evidence: dict, *, failure: dict | None = None) -> list[dict]:
+def _blockers(plan: dict, evidence: dict, *, failure: dict | None = None, applies: dict | None = None) -> list[dict]:
     """Section 6: a blocker is a reading of the prose, provisional until inspected evidence settles it.
 
     plan_8_1 section 1.4: on a plan from a failed read, the bioAF-limitation blocker leads, and every
@@ -1127,6 +1135,23 @@ def _blockers(plan: dict, evidence: dict, *, failure: dict | None = None) -> lis
         {"text": str(b), "kind": kinds.get(str(b)), "basis": basis, "provisional": basis != "inspected_evidence"}
         for b in plan.get("blockers") or []
     ]
+    if failure is None and (applies or {}).get("status") == "not_applicable":
+        # plan_8_2 section 4.1: a paper outside bioAF's methods fails none of the sequencing, nf-core or
+        # reference requirements. The limitation leads; each stored blocker is kept, withheld as not applying.
+        from app.services.validation_applicability import OUTSIDE_METHODS, REQUIREMENT_DOES_NOT_APPLY
+
+        head = {"text": applies["limitation"], "kind": OUTSIDE_METHODS, "basis": basis, "provisional": False}
+        withheld = [
+            {
+                "text": REQUIREMENT_DOES_NOT_APPLY,
+                "kind": "not_applicable",
+                "withheld": r["text"],
+                "basis": basis,
+                "provisional": False,
+            }
+            for r in rows
+        ]
+        return [head, *withheld]
     if failure is None:
         return rows
     from app.services.validation_read_failure import BIOAF_LIMITATION, NOT_ESTABLISHED_BLOCKER, read_failure_blocker
@@ -1171,9 +1196,12 @@ def _contrasts(plan: dict, evidence: dict) -> list[dict]:
     ]
 
 
-def _headline(study: dict, attempt: dict) -> dict:
+def _headline(study: dict, attempt: dict, applies: dict | None = None) -> dict:
     if study.get("state") != "classified":
         return {"key": HEADLINE_IN_PROGRESS, "label": None}
+    if attempt["status"] != ATTEMPTED and (applies or {}).get("status") == "not_applicable":
+        # plan_8_2 section 4.1: a paper outside bioAF's methods, never a reproduction that failed to start.
+        return {"key": HEADLINE_NOT_APPLICABLE, "label": HEADLINE_LABELS[HEADLINE_NOT_APPLICABLE]}
     if attempt["status"] != ATTEMPTED:
         return {"key": HEADLINE_NOT_ATTEMPTED, "label": HEADLINE_LABELS[HEADLINE_NOT_ATTEMPTED]}
     if study.get("classification") in _VERDICT_CLASSIFICATIONS:
@@ -1800,16 +1828,21 @@ def _count_word(n: int) -> str:
     return _NUMBER_WORDS.get(n, str(n))
 
 
-def _summary_lines(headline: dict, facts: dict) -> list[str]:
+def _summary_lines(headline: dict, facts: dict, applies: dict | None = None) -> list[str]:
     """Sentences generated from the facts above, never from a template per paper."""
     lines: list[str] = []
-    if headline["key"] == HEADLINE_NOT_ATTEMPTED:
+    if headline["key"] == HEADLINE_NOT_APPLICABLE:
+        # plan_8_2 section 4.1: what applies, and nothing about sequencing reads the paper never needed.
+        lines.extend(p for p in (applies["statement"], applies.get("limitation")) if p)
+    elif headline["key"] == HEADLINE_NOT_ATTEMPTED:
         lines.append("Reproduction not attempted.")
     elif headline["key"] == HEADLINE_COULD_NOT_REPRODUCE:
         lines.append("Reproduction was attempted and reached no verdict.")
 
     raw = facts["raw_data"]
-    if raw["deposited"] == "yes":
+    if headline["key"] == HEADLINE_NOT_APPLICABLE:
+        pass
+    elif raw["deposited"] == "yes":
         access = " under controlled access" if "controlled" in raw["access"] else ""
         if raw["available_to_bioaf"] == "no":
             lines.append(f"Raw data are deposited{access} and were unavailable to bioAF in this attempt.")
@@ -1908,6 +1941,7 @@ def study_projection(study) -> dict:
 def plan_projection(plan) -> dict:
     """The plan fields the projection reads."""
     return {
+        "pipeline_key": plan.pipeline_key,
         "blockers": plan.blockers_json,
         "blocker_kinds": plan.blocker_kinds_json,
         "differential_design": plan.differential_design_json,

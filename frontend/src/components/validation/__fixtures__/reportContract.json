@@ -1,5 +1,6 @@
 {
   "attempted_no_verdict": {
+    "applicability": null,
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -69,7 +70,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -183,6 +185,7 @@
     },
     "headline": {
       "could_not_reproduce": "Could Not Reproduce",
+      "not_applicable": "Outside bioAF's current validation methods",
       "reproduction_not_attempted": "Reproduction not attempted"
     },
     "issue_outcome": {
@@ -277,6 +280,7 @@
     }
   },
   "failed_read": {
+    "applicability": null,
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -356,7 +360,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -419,6 +424,7 @@
     "version": 1
   },
   "failed_read_legacy": {
+    "applicability": null,
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -526,7 +532,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -590,6 +597,13 @@
     "version": 1
   },
   "groff_failed": {
+    "applicability": {
+      "eligible_claims": 0,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "undetermined"
+    },
     "artifacts": [
       {
         "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
@@ -1214,7 +1228,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -1301,6 +1316,7 @@
     "version": 1
   },
   "mapping_unresolved": {
+    "applicability": null,
     "artifacts": [],
     "attempt": {
       "acquired": [
@@ -1412,7 +1428,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -1475,7 +1492,223 @@
     ],
     "version": 1
   },
+  "outside_methods": {
+    "applicability": {
+      "eligible_claims": 0,
+      "experiments": [
+        {
+          "assay": "qRT-PCR",
+          "claims": 0,
+          "eligible_claims": 0,
+          "id": "e1",
+          "supported": false,
+          "workflow": null
+        }
+      ],
+      "limitation": "bioAF has no validation method for qRT-PCR (experiment e1).",
+      "statement": "No eligible findings were identified for bioAF's current validation methods. This does not establish that the paper contains no quantitative analysis.",
+      "status": "not_applicable"
+    },
+    "artifacts": [],
+    "attempt": {
+      "acquired": [],
+      "executed": [],
+      "status": "not_attempted"
+    },
+    "blockers": [
+      {
+        "basis": "paper_text",
+        "kind": "outside_methods",
+        "provisional": false,
+        "text": "bioAF has no validation method for qRT-PCR (experiment e1)."
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_applicable",
+        "provisional": false,
+        "text": "Does not apply: bioAF has no validation method for this paper's experiments, so this is not a requirement the paper fails.",
+        "withheld": "No data accession or repository deposit is named in the paper."
+      },
+      {
+        "basis": "paper_text",
+        "kind": "not_applicable",
+        "provisional": false,
+        "text": "Does not apply: bioAF has no validation method for this paper's experiments, so this is not a requirement the paper fails.",
+        "withheld": "no nf-core equivalent for method: qRT-PCR"
+      }
+    ],
+    "capability_rows": [],
+    "checks": [],
+    "checks_completed": [],
+    "checks_not_completed": [],
+    "claim_counts": {
+      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "mapped": 0,
+      "tested": 0,
+      "total": 0
+    },
+    "claims": [],
+    "code_sources": [],
+    "comparisons": {
+      "label": "Comparisons not performed",
+      "performed": false,
+      "reason": "reproduction was not attempted, so no claim was compared"
+    },
+    "completion_facts": [],
+    "consistency": {
+      "checked": false,
+      "label": "Consistency not checked",
+      "pairs": [],
+      "unresolved": []
+    },
+    "contrasts": [],
+    "experiments": [
+      {
+        "assay": "qRT-PCR",
+        "id": "e1",
+        "reference": [
+          {
+            "established_from": null,
+            "part": "assembly",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          },
+          {
+            "established_from": null,
+            "part": "annotation",
+            "reason": null,
+            "resolved": null,
+            "stated": null,
+            "status": null,
+            "status_label": null
+          }
+        ],
+        "status": null,
+        "workflow": null
+      }
+    ],
+    "facts": {
+      "attachments": {
+        "failed": 0,
+        "identified": 0,
+        "not_attempted": 0,
+        "retrieved": 0
+      },
+      "claims_tested": 0,
+      "inputs_acquired": false,
+      "raw_data": {
+        "access": [],
+        "available_to_bioaf": "unknown",
+        "deposited": "unknown"
+      },
+      "reproduction_attempted": false
+    },
+    "figures": 0,
+    "headline": {
+      "key": "not_applicable",
+      "label": "Outside bioAF's current validation methods"
+    },
+    "index_pages": 0,
+    "issue_count": 0,
+    "limitations": [],
+    "read_failure": null,
+    "reconciliation": {
+      "basis": null,
+      "label": null,
+      "reason": null,
+      "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": true,
+      "last": null,
+      "restate": {
+        "from": "missing_data",
+        "to": "inconclusive"
+      }
+    },
+    "resources": [],
+    "resume": {
+      "label": "Review and resume",
+      "requirements": []
+    },
+    "retrieval_failures": [],
+    "scorecard": {
+      "activity": {
+        "completed": 0,
+        "counts": {
+          "blocked": 0,
+          "done": 0,
+          "pending": 0,
+          "retrying": 0,
+          "running": 0,
+          "unresolved": 0
+        },
+        "label": null,
+        "total": 0,
+        "under_way": 0
+      },
+      "analysis_selection_revision": null,
+      "assessed_count": 0,
+      "assessed_items": [],
+      "assessed_weight": 0,
+      "cause": null,
+      "cause_label": null,
+      "consistency_count": null,
+      "depth_label": null,
+      "discrepant_count": 0,
+      "discrepant_weight": 0,
+      "display_score": null,
+      "excluded_items": [],
+      "explanation": "The score measures agreement among assessed findings, with primary findings weighted twice as much as supporting findings. Scope counts assessed findings out of the total.",
+      "in_progress": false,
+      "in_progress_label": null,
+      "independent_count": null,
+      "indicators": [],
+      "inventory_retry": false,
+      "inventory_revision": null,
+      "inventory_status": "not_applicable",
+      "messages": [],
+      "outcomes_recorded_at": null,
+      "primary_discrepancy_count": 0,
+      "primary_unassessed_count": 0,
+      "projection_revision": null,
+      "provisional": false,
+      "provisional_note": null,
+      "reason": "no computational finding",
+      "resource_statements": [],
+      "rubric_label": "weighted rubric version 2",
+      "rubric_version": 2,
+      "scope_label": null,
+      "score": null,
+      "score_label": null,
+      "score_status_label": null,
+      "status": "not_applicable",
+      "status_label": "Not applicable",
+      "summary": null,
+      "supported_count": 0,
+      "supported_weight": 0,
+      "title": "Validation Scorecard",
+      "total_count": 0,
+      "unassessed_items": [],
+      "unresolved_importance": [],
+      "version": 1
+    },
+    "selection": null,
+    "selection_history": [],
+    "summary": [
+      "No eligible findings were identified for bioAF's current validation methods. This does not establish that the paper contains no quantitative analysis.",
+      "bioAF has no validation method for qRT-PCR (experiment e1).",
+      "No supplementary attachments were identified.",
+      "No analysis inputs were acquired and no scientific claims were tested."
+    ],
+    "version": 1
+  },
   "reference_unavailable": {
+    "applicability": null,
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -1583,7 +1816,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -1647,6 +1881,22 @@
     "version": 1
   },
   "scorecard_checks_under_way": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [
+        {
+          "assay": "bulk RNA-seq",
+          "claims": 2,
+          "eligible_claims": 2,
+          "id": "e1",
+          "supported": true,
+          "workflow": "nf-core/rnaseq"
+        }
+      ],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -1909,7 +2159,8 @@
     "recovery": {
       "affected_count": 1,
       "available": true,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -2178,6 +2429,22 @@
     "version": 1
   },
   "scorecard_groff": {
+    "applicability": {
+      "eligible_claims": 3,
+      "experiments": [
+        {
+          "assay": "bulk RNA-seq",
+          "claims": 8,
+          "eligible_claims": 3,
+          "id": "e1",
+          "supported": true,
+          "workflow": "nf-core/rnaseq"
+        }
+      ],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [
       {
         "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
@@ -3053,7 +3320,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -3585,6 +3853,13 @@
     "version": 1
   },
   "scorecard_in_progress": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -3781,7 +4056,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -4003,6 +4279,13 @@
     "version": 1
   },
   "scorecard_inventory_failed": {
+    "applicability": {
+      "eligible_claims": 0,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "undetermined"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -4101,7 +4384,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -4180,6 +4464,13 @@
     "version": 1
   },
   "scorecard_long": {
+    "applicability": {
+      "eligible_claims": 14,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -5144,7 +5435,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -6110,6 +6402,13 @@
     "version": 1
   },
   "scorecard_not_applicable": {
+    "applicability": {
+      "eligible_claims": 1,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -6242,7 +6541,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -6404,6 +6704,13 @@
     "version": 1
   },
   "scorecard_not_established": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -6666,7 +6973,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -6763,6 +7071,13 @@
     "version": 1
   },
   "scorecard_pending": {
+    "applicability": {
+      "eligible_claims": 0,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "undetermined"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -6861,7 +7176,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -6940,6 +7256,13 @@
     "version": 1
   },
   "scorecard_provisional": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -7136,7 +7459,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -7372,6 +7696,13 @@
     "version": 1
   },
   "scorecard_samd1": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -7634,7 +7965,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -7798,6 +8130,22 @@
     "version": 1
   },
   "scorecard_samd1_v2": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [
+        {
+          "assay": "bulk RNA-seq",
+          "claims": 2,
+          "eligible_claims": 2,
+          "id": "e1",
+          "supported": true,
+          "workflow": "nf-core/rnaseq"
+        }
+      ],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -8060,7 +8408,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -8329,6 +8678,13 @@
     "version": 1
   },
   "scorecard_score_pending": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -8525,7 +8881,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -8757,6 +9114,13 @@
     "version": 1
   },
   "scorecard_scored": {
+    "applicability": {
+      "eligible_claims": 5,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -9145,7 +9509,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {
@@ -9600,6 +9965,30 @@
     "version": 1
   },
   "stage2_selection": {
+    "applicability": {
+      "eligible_claims": 2,
+      "experiments": [
+        {
+          "assay": "ChIP-seq",
+          "claims": 1,
+          "eligible_claims": 0,
+          "id": "e1",
+          "supported": true,
+          "workflow": "nf-core/chipseq"
+        },
+        {
+          "assay": "bulk RNA-seq",
+          "claims": 2,
+          "eligible_claims": 2,
+          "id": "e2",
+          "supported": true,
+          "workflow": "nf-core/rnaseq"
+        }
+      ],
+      "limitation": null,
+      "statement": null,
+      "status": "applicable"
+    },
     "artifacts": [],
     "attempt": {
       "acquired": [],
@@ -9988,7 +10377,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [
       {
@@ -10156,6 +10546,13 @@
     "version": 1
   },
   "study_34_legacy": {
+    "applicability": {
+      "eligible_claims": 0,
+      "experiments": [],
+      "limitation": null,
+      "statement": null,
+      "status": "undetermined"
+    },
     "artifacts": [
       {
         "filename": "supp_gr.252981.119_Supplemental_Materials_.docx",
@@ -10788,7 +11185,8 @@
     "recovery": {
       "affected_count": 0,
       "available": false,
-      "last": null
+      "last": null,
+      "restate": null
     },
     "resources": [],
     "resume": {

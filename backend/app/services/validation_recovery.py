@@ -17,6 +17,9 @@ the same services a read and the check queue use:
   Checks bound under the current rules are left as they are.
 - **refresh_projection**: the claims' capabilities and the scorecard are rebuilt from the evidence, the
   prior scorecard kept in history.
+- **restate_outcome** (section 4.1 and decision 4): a paper outside bioAF's methods that an early exit
+  classified ``missing_data`` or ``not_reproducible`` is restated as ``inconclusive``, with the applicability
+  statement as its reason. The old classification and reason are kept in history.
 
 A recovery never launches a workflow and asks no model. A reanalysis whose input the earlier decoder
 refused is listed as needing a new run, which follows the approval gate. The prior plan revision,
@@ -122,15 +125,17 @@ def _unbound_supplement_comparisons(evidence: dict) -> int:
     )
 
 
-def recovery_projection(evidence: dict, checks: list[dict]) -> dict:
-    """What the report shows about recovery: whether one would change anything, and the last one run."""
+def recovery_projection(evidence: dict, checks: list[dict], *, restate: dict | None = None) -> dict:
+    """What the report shows about recovery: whether one would change anything, and the last one run.
+    ``restate`` is a classification an early exit gave a paper outside bioAF's methods (section 4.1)."""
     affected = [c for c in checks or [] if why_affected(c)]
     pmcid = bool((evidence or {}).get("pmcid"))
     unbound = _unbound_supplement_comparisons(evidence or {})
     history = (evidence or {}).get("recovery_history") or []
     last = history[-1] if history else None
     return {
-        "available": bool(affected) or (pmcid and unbound > 0),
+        "available": bool(affected) or (pmcid and unbound > 0) or bool(restate),
+        "restate": restate,
         "affected_count": len(affected),
         "last": (
             {k: last.get(k) for k in ("at", "actor", "reason", "requeued", "build")} if isinstance(last, dict) else None
@@ -148,6 +153,25 @@ async def _plan_and_records(session, study):
         r for r in await queue.records_for(session, study.id) if str(r.check_id or "").startswith(f"plan:{plan.id}:")
     ]
     return plan, records
+
+
+async def _restatement(session, study, plan) -> tuple[dict | None, dict | None]:
+    """The classification to restate for a paper outside bioAF's methods, and its applicability."""
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_applicability import applicability, restatement
+    from app.services.validation_report_summary import plan_projection, study_projection, target_dict
+
+    if plan is None:
+        return None, None
+    targets = (
+        (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+        .scalars()
+        .all()
+    )
+    found = applicability(plan_projection(plan), [target_dict(t) for t in targets])
+    return restatement(study_projection(study), found), found
 
 
 async def preview_recovery(session, study) -> dict:
@@ -200,6 +224,18 @@ async def preview_recovery(session, study) -> dict:
                 "label": f"Re-evaluate {len(affected)} consistency {'check' if len(affected) == 1 else 'checks'}",
                 "detail": "Each is superseded, its outcome kept whole in history, and re-evaluated by the check queue "
                 "within bioAF's limits for checks before approval. Checks bound under the current rules are not rerun.",
+            }
+        )
+    restate, found = await _restatement(session, study, plan)
+    if restate:
+        actions.append(
+            {
+                "kind": "restate_outcome",
+                "label": "Restate the outcome under bioAF's applicability rules",
+                "detail": f"The study is classified {restate['from']} because no sequencing accession or supported "
+                f"workflow was found. {found['statement']} {found.get('limitation') or ''} It is restated as "
+                f"{restate['to']}; the classification {restate['from']} and its reason are kept in the study's "
+                "history.",
             }
         )
     if actions:
@@ -305,6 +341,7 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
         "requeued": 0,
         "fetched_passages": 0,
         "cutoffs_changed": 0,
+        "restated": None,
         "rechecked_supplements": False,
         "affected_checks": preview["affected_checks"],
         "needs_approval": preview["needs_approval"],
@@ -364,12 +401,21 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
     result["created"] = sum(1 for r in ensured if r.id not in before)
 
     await refresh_claim_capabilities(session, study, plan)
+    if "restate_outcome" in kinds:
+        from app.services.validation_applicability import outcome_reason
+
+        restate, found = await _restatement(session, study, plan)
+        if restate:
+            study.classification = restate["to"]
+            study.failure_reason = outcome_reason(found)
+            result["restated"] = restate
     entry = {
         "id": recovery_id,
         "at": _now(),
         "actor": user_id,
         "build": current_build(),
-        "reason": "re-evaluation under bioAF's current binding and decoding rules",
+        "reason": "re-evaluation under bioAF's current binding, decoding and applicability rules",
+        "restated": result["restated"],
         "actions": sorted(kinds),
         "affected_checks": preview["affected_checks"],
         "needs_approval": preview["needs_approval"],
