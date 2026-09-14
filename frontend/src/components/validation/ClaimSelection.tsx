@@ -15,6 +15,8 @@
 
 import type { ClaimCheck, ClaimConsistency, ClaimList, ReportSummary } from "@/lib/validationReport";
 
+import { TableConfirmation } from "./TableConfirmation";
+
 const STATUS_CLASS: Record<string, string> = {
   available: "bg-emerald-50 text-emerald-700",
   unavailable: "bg-gray-100 text-gray-600",
@@ -81,7 +83,16 @@ const DECIDED_BY: Record<string, string> = {
   human: "chosen by a person at the gate",
 };
 
-export function ClaimSelection({ summary }: { summary: ReportSummary | null | undefined }) {
+export function ClaimSelection({
+  summary,
+  studyId,
+  onChanged,
+}: {
+  summary: ReportSummary | null | undefined;
+  // plan_8_2 section 3.1: given, an unresolved check against a table offers the recorded confirmation.
+  studyId?: number;
+  onChanged?: (updated: unknown) => void;
+}) {
   const experiments = summary?.experiments ?? [];
   const selection = summary?.selection ?? null;
   const claims = (summary?.claims ?? []).filter((claim) => (claim.checks ?? []).length > 0 || claim.selection);
@@ -190,6 +201,25 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                     {claim.consistency.method === "published_list_count" && claim.consistency.list && (
                       <ListCount consistency={claim.consistency} list={claim.consistency.list} />
                     )}
+                    {claim.consistency.interpretation?.source === "confirmation" && (
+                      <p data-testid="consistency-interpretation" className="text-gray-500">
+                        Table read as {claim.consistency.interpretation.evidence.join("; ")}
+                      </p>
+                    )}
+                    {studyId !== undefined &&
+                      onChanged &&
+                      claim.consistency.outcome === "unresolved" &&
+                      claim.consistency.table &&
+                      claim.contrast && (
+                        <TableConfirmation
+                          studyId={studyId}
+                          table={claim.consistency.table}
+                          contrast={claim.contrast}
+                          columnsCount={claim.consistency.columns_count}
+                          candidateRoles={claim.consistency.candidate_roles}
+                          onChanged={onChanged}
+                        />
+                      )}
                     {claim.consistency.superseded && (
                       <p data-testid="consistency-superseded" className="text-gray-500">
                         Superseded comparison, not current evidence: {claim.consistency.superseded.label}

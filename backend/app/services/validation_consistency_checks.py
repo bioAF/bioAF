@@ -113,15 +113,11 @@ def competitors_for(table: dict, position: int | None, contrasts: list[dict], re
 
 
 def confirmation_for(evidence: dict, table: dict, contrast: dict | None) -> dict | None:
-    """A person's recorded confirmation that this table reports this contrast, if one was recorded."""
-    for entry in (evidence or {}).get("table_confirmations") or []:
-        if (
-            isinstance(entry, dict)
-            and entry.get("table") == table.get("name")
-            and entry.get("contrast") == (contrast or {}).get("name")
-        ):
-            return entry
-    return None
+    """A person's recorded confirmation of how this table reads for this contrast (plan_8_2 section 3.1): the
+    latest recorded, or None."""
+    from app.services.validation_table_confirmations import latest
+
+    return latest(evidence, table.get("name"), (contrast or {}).get("name"))
 
 
 def choose_table(
@@ -204,6 +200,7 @@ async def enqueue(session, study, plan, *, skip: set | None = None, reason: str 
     from app.models.comparison_target import ComparisonTarget
     from app.services.validation_author_consistency import claim_predicates
     from app.services.validation_predicate import predicate_identity, predicate_words
+    from app.services.validation_table_confirmations import fingerprint_of
 
     evidence = study.evidence_json or {}
     targets = list(
@@ -273,6 +270,11 @@ async def enqueue(session, study, plan, *, skip: set | None = None, reason: str 
             "binding_version": BINDING_VERSION,
             "decoder_version": DECODER_VERSION,
         }
+        # plan_8_2 section 3.1: a recorded confirmation of how the table reads is a dependency, so recording
+        # one re-evaluates this check. Absent, the dependencies are exactly what they were.
+        confirmed = confirmation_for(evidence, table, item["contrast"]) if table else None
+        if confirmed:
+            dependencies["confirmation"] = fingerprint_of(confirmed)
         records.append(
             await queue.ensure_record(session, study, plan, target, queue.AUTHOR_RESULTS, dependencies, reason=reason)
         )
@@ -463,6 +465,9 @@ async def _run_one(run: _Run, record) -> int:
         if held is not None and held.get("predicate_fingerprint") not in (None, deps.get("predicate_fingerprint")):
             # Compared at a predicate the claim no longer has: not this check's outcome.
             held = None
+        if held is not None and deps.get("confirmation"):
+            # Compared before a person recorded how the table reads (plan_8_2 section 3.1).
+            held = None
         if held is not None:
             if binding.established(held.get("binding")):
                 return await _conclude(
@@ -611,18 +616,18 @@ async def _run_one(run: _Run, record) -> int:
             },
             terminal_reason=queue.BINDING,
         )
+    from app.services.validation_table_confirmations import interpretation_of
+
     candidate = candidate_for(run.study.evidence_json or {}, table)
+    confirmed = confirmation_for(run.study.evidence_json or {}, candidate, item["contrast"])
     result = check_claim(
         {},
         item["predicate"],
         {"name": table.get("name"), "text": run.texts[url], "source": table.get("source")},
         contrast=item["contrast"],
+        interpretation=interpretation_of(confirmed),
         selector=bound.get("selector"),
-        list_evidence=binding.list_evidence(
-            candidate,
-            item["predicate"],
-            confirmation=confirmation_for(run.study.evidence_json or {}, candidate, item["contrast"]),
-        ),
+        list_evidence=binding.list_evidence(candidate, item["predicate"], confirmation=confirmed),
     )
     result.pop("predicate", None)
     result["identified_by"] = deps.get("identified_by")

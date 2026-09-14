@@ -1739,6 +1739,10 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
             )
             if list_count:
                 lines.extend(f"  - {line}" for line in _list_count_lines(consistency))
+            interpretation = consistency.get("interpretation") or {}
+            if interpretation.get("source") == "confirmation" and interpretation.get("evidence"):
+                # plan_8_2 section 3.1: a reading a person recorded, with who recorded it and why.
+                lines.append(f"  - Table read as {'; '.join(interpretation['evidence'])}")
             for candidate in consistency.get("candidates") or []:
                 lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
             # plan_8_2 section 1.1: a comparison made before bindings, kept whole and never current evidence.

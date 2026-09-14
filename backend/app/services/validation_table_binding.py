@@ -308,7 +308,8 @@ def bind(
     if contradiction is not None and not (confirmation or {}).get("resolves_conflict"):
         return _result(REJECTED, table, contrast, reason=contradiction)
 
-    if confirmation:
+    # plan_8_2 section 3.1: a confirmation of a table's columns alone does not say which contrast it reports.
+    if confirmation and confirmation.get("reports_contrast", True):
         evidence = [
             {
                 "kind": "confirmation",
