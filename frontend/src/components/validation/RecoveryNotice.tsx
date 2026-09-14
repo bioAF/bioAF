@@ -33,7 +33,18 @@ interface RecoveryPreview {
   needs_approval: { check_id: string; why: string }[];
 }
 
-export function RecoveryNotice({ studyId, onChanged }: { studyId: number; onChanged: (updated: unknown) => void }) {
+export function RecoveryNotice({
+  studyId,
+  onChanged,
+  restate,
+  affectedCount,
+}: {
+  studyId: number;
+  onChanged: (updated: unknown) => void;
+  // plan_8_2 section 4.1 and decision 4: an outcome an early exit gave a paper outside bioAF's methods.
+  restate?: { from: string; to: string } | null;
+  affectedCount?: number;
+}) {
   const { canAccess } = usePermissions();
   const [preview, setPreview] = useState<RecoveryPreview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,10 +92,18 @@ export function RecoveryNotice({ studyId, onChanged }: { studyId: number; onChan
 
   return (
     <div className="mt-3 rounded border border-gray-200 bg-gray-50 p-3" data-testid="recovery-notice">
-      <p className="text-sm text-gray-700">
-        Some of this study&apos;s checks were made under rules bioAF has since replaced. Their earlier results are
-        shown as pending re-evaluation.
-      </p>
+      {(!restate || (affectedCount ?? 0) > 0) && (
+        <p className="text-sm text-gray-700">
+          Some of this study&apos;s checks were made under rules bioAF has since replaced. Their earlier results are
+          shown as pending re-evaluation.
+        </p>
+      )}
+      {restate && (
+        <p className="text-sm text-gray-700">
+          This study was classified {restate.from} under rules bioAF has since replaced. Its outcome can be restated
+          as {restate.to}.
+        </p>
+      )}
       {preview ? (
         <div className="mt-2 space-y-2">
           <ul className="list-disc space-y-1 pl-5 text-sm text-gray-800">

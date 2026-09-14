@@ -272,10 +272,26 @@ async def _contract() -> dict:
             ),
         ],
     )
+    # plan_8_2 section 4.1: a paper outside bioAF's methods (study 46's shape), before its recovery.
+    outside_methods = summarize(
+        study={"state": "classified", "classification": "missing_data"},
+        evidence={},
+        plan={
+            "reported_experiments": [{"id": "e1", "assay": "qRT-PCR", "workflow": None}],
+            "blockers": [
+                "No data accession or repository deposit is named in the paper.",
+                "no nf-core equivalent for method: qRT-PCR",
+            ],
+            "finding_inventory": {"status": "not_applicable", "findings": [], "reason": "no computational finding"},
+        },
+        targets=[],
+        issues=[],
+    )
     return json.loads(
         json.dumps(
             {
                 "enums": enum_labels(),
+                "outside_methods": outside_methods,
                 "scorecard_checks_under_way": under_way,
                 "scorecard_samd1_v2": samd1_v2,
                 "stage2_selection": stage2,

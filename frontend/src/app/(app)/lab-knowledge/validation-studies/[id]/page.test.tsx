@@ -269,3 +269,39 @@ describe("the on-request recovery", () => {
     expect(screen.queryByTestId("recovery-notice")).not.toBeInTheDocument();
   });
 });
+
+// plan_8_2 section 4.1: a paper outside bioAF's methods (study 46's shape). The labels are pending the
+// owner's sign-off.
+describe("a paper outside bioAF's methods", () => {
+  function outside() {
+    return {
+      ...study(),
+      id: 46,
+      classification: "missing_data",
+      plan: {
+        pipeline_key: null,
+        blockers: ["No data accession or repository deposit is named in the paper.", "no nf-core equivalent for method: qRT-PCR"],
+        ai_decisions: [],
+      },
+      report_summary: contract.outside_methods,
+    };
+  }
+
+  test("leads with what applies and says nothing about sequencing reads", async () => {
+    mockGet.mockResolvedValue(outside());
+    render(<ValidationStudyPage />);
+    expect(await screen.findByText("Outside bioAF's current validation methods")).toBeInTheDocument();
+    expect(screen.getAllByText(/No eligible findings were identified for bioAF's current validation methods/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/raw sequencing reads/)).not.toBeInTheDocument();
+  });
+
+  test("lists the unsupported assay once, and keeps the requirements that do not apply in one collapsed detail", async () => {
+    mockGet.mockResolvedValue(outside());
+    render(<ValidationStudyPage />);
+    await screen.findByText("Outside bioAF's current validation methods");
+    expect(screen.getAllByText("bioAF has no validation method for qRT-PCR (experiment e1).").length).toBeGreaterThan(0);
+    const grouped = screen.getByTestId("blockers-not-applying");
+    expect(grouped).toHaveTextContent("2 requirements that do not apply");
+    expect(screen.queryAllByTestId("blocker-withheld")).toHaveLength(0);
+  });
+});

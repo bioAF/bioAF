@@ -55,6 +55,20 @@ export function ValidationStudyOutcome({
   if (state === "classified" && !summary && attempt === "not_attempted") {
     return <ValidationStatusBadge confidence={confidence} classification={classification} attempt="not_attempted" />;
   }
+  if (state === "classified" && summary?.headline?.key === "not_applicable") {
+    // plan_8_2 section 4.1: a paper outside bioAF's methods, never a reproduction that failed to start. The
+    // headline and sentences are the backend's, pending the owner's sign-off.
+    return (
+      <div className="space-y-2">
+        <span
+          className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass("validationTone", "neutral")}`}
+        >
+          {summary.headline.label}
+        </span>
+        {summary.summary?.length > 0 && <p className="text-sm text-gray-700">{summary.summary.join(" ")}</p>}
+      </div>
+    );
+  }
   if (state === "classified" && summary?.headline?.key === "reproduction_not_attempted") {
     // change_7.3 section 10 item 1: "Reproduction not attempted", followed by the limitations that
     // actually stood in the way, rather than "Could Not Reproduce" beside a bucket name.

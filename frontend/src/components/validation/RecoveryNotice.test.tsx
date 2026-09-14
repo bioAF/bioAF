@@ -74,3 +74,11 @@ test("a person who may only view the study sees no control", () => {
   const { container } = render(<RecoveryNotice studyId={5} onChanged={jest.fn()} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+// plan_8_2 section 4.1 and decision 4: a paper outside bioAF's methods, classified by an early exit.
+test("says the outcome can be restated when that is what the recovery would do", () => {
+  render(<RecoveryNotice studyId={46} onChanged={jest.fn()} restate={{ from: "missing_data", to: "inconclusive" }} affectedCount={0} />);
+  expect(screen.getByText(/classified missing_data under rules bioAF has since replaced/)).toBeInTheDocument();
+  expect(screen.getByText(/can be restated as inconclusive/)).toBeInTheDocument();
+  expect(screen.queryByText(/pending re-evaluation/)).not.toBeInTheDocument();
+});

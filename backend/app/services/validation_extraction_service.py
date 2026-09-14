@@ -1839,7 +1839,9 @@ class ValidationExtractionService:
                 # a pinned launch still refuses rather than aligning against its seed.
                 reference_genome = _normalize_reference_genome(raw_genome)
             blocker = reference_blocker(reference)
-            if blocker:
+            # plan_8_2 section 4.1: a missing reference blocks only operations that need it, and with no
+            # workflow for the assay there is no raw-reads operation to block.
+            if blocker and mapping.pipeline_key:
                 blockers.append(blocker)
             # A paper that ran several assays names a build per assay, and only one of them can be
             # what this run aligns against. Say which was taken and which were not.
@@ -1860,7 +1862,7 @@ class ValidationExtractionService:
                 else _normalize_reference_genome(assembly.get("stated"))
             )
             blocker = experiment_reference_blocker(plan_experiment)
-            if blocker:
+            if blocker and plan_experiment.get("workflow"):
                 blockers.append(blocker)
 
         if design and contrasts:

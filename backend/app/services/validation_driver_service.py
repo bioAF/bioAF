@@ -925,10 +925,37 @@ class ValidationDriverService:
             blockers = plan.blockers_json or []
             if blockers:
                 study.failure_reason = "; ".join(blockers)
+            outside = await ValidationDriverService._outside_methods(session, plan, classification)
+            if outside is not None:
+                # plan_8_2 section 4.1 and decision 4: a paper outside bioAF's methods is not missing data.
+                from app.services.validation_applicability import outcome_reason
+
+                classification = "inconclusive"
+                study.failure_reason = outcome_reason(outside)
             return await ValidationStudyService.transition(
                 session, study.id, org_id, user_id, "classified", classification=classification
             )
         return await ValidationStudyService.transition(session, study.id, org_id, user_id, "plan_ready")
+
+    @staticmethod
+    async def _outside_methods(session: AsyncSession, plan, classification: str) -> dict | None:
+        """The applicability of a paper an early exit would call missing data or not reproducible, when no
+        experiment or claim of it is within bioAF's methods; None otherwise."""
+        from sqlalchemy import select
+
+        from app.models.comparison_target import ComparisonTarget
+        from app.services.validation_applicability import NOT_APPLICABLE, RESTATABLE, applicability
+        from app.services.validation_report_summary import plan_projection, target_dict
+
+        if classification not in RESTATABLE:
+            return None
+        targets = (
+            (await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id)))
+            .scalars()
+            .all()
+        )
+        found = applicability(plan_projection(plan), [target_dict(t) for t in targets])
+        return found if (found or {}).get("status") == NOT_APPLICABLE else None
 
     @staticmethod
     async def _resume_inventory(
