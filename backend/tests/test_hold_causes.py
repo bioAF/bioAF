@@ -418,7 +418,7 @@ class TestDownload:
         def too_large(filename, raw):
             raise deposit_acquisition.DepositTooLargeError("the selected deposit files total 3.0 GB, over the limit")
 
-        monkeypatch.setattr(deposit_acquisition, "decode_deposit", too_large)
+        monkeypatch.setattr(deposit_acquisition, "decode_deposit_table", too_large)
         study = await _study(session, admin_user, evidence=_chosen())
 
         await ValidationDriverService._handle_acquiring_processed(

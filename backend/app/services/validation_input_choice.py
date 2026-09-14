@@ -29,7 +29,6 @@ evidence does not state holds. Unresolved means hold, with the proposal and its 
 from __future__ import annotations
 
 import re
-import zlib
 
 from app.services.llm_decision import confidence_of, decide, fenced_json
 
@@ -56,19 +55,13 @@ def input_candidates(entries) -> dict:
     return {"matrices": matrices, "tables": tables, "not_analyzable": rest}
 
 
-def _decode_partial(raw: bytes) -> tuple[str, bool]:
-    """Text from the first bytes of a file, gzip or plain. A truncated gzip stream is decoded as far as
-    it goes; nothing waits for the rest."""
-    if raw[:2] == b"\x1f\x8b":
-        decoder = zlib.decompressobj(wbits=zlib.MAX_WBITS | 32)
-        try:
-            data = decoder.decompress(raw, PREVIEW_BYTES * 4)
-        except zlib.error:
-            data = b""
-        truncated = not decoder.eof
-    else:
-        data, truncated = raw, True
-    return data.decode("utf-8", errors="replace"), truncated
+def _decode_partial(raw: bytes) -> tuple[str | None, bool, str | None]:
+    """``(text, truncated, error)`` from the first bytes of a file. plan_8_2 section 1.2: the shared
+    decoder's order (compression, a byte-order mark, strict decoding), over a prefix. A truncated gzip
+    stream is decoded as far as it goes; nothing waits for the rest."""
+    from app.services.table_decoding import decode_prefix
+
+    return decode_prefix(raw, max_bytes=PREVIEW_BYTES * 4)
 
 
 async def preview_file(url: str, filename: str, *, stream) -> dict:
@@ -79,7 +72,9 @@ async def preview_file(url: str, filename: str, *, stream) -> dict:
         raw = await stream(url, STREAM_BYTES)
     except Exception as exc:  # noqa: BLE001 - a preview that could not be read is recorded, not raised
         return {"filename": filename, "header": [], "rows": [], "truncated": True, "error": str(exc)[:200]}
-    text, truncated = _decode_partial(raw or b"")
+    text, truncated, error = _decode_partial(raw or b"")
+    if text is None:
+        return {"filename": filename, "header": [], "rows": [], "truncated": True, "error": error}
     lines = text.splitlines()
     if truncated and lines and not text.endswith("\n"):
         lines = lines[:-1]  # a partial last line is not a row
