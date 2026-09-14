@@ -13,7 +13,7 @@
  * Rendered from the report projection. The labels are the backend's, pending the owner's sign-off.
  */
 
-import type { ClaimCheck, ReportSummary } from "@/lib/validationReport";
+import type { ClaimCheck, ClaimConsistency, ClaimList, ReportSummary } from "@/lib/validationReport";
 
 const STATUS_CLASS: Record<string, string> = {
   available: "bg-emerald-50 text-emerald-700",
@@ -38,6 +38,30 @@ function CheckRow({ check }: { check: ClaimCheck }) {
       <Status status={check.status} label={check.status_label} />
       {check.reason && <span className="text-gray-500">{check.reason}</span>}
     </li>
+  );
+}
+
+// plan_8_2 section 3.2: what a count of the authors' published list counted, the passage naming the file as
+// the list, and what the count does not check.
+function ListCount({ consistency, list }: { consistency: ClaimConsistency; list: ClaimList }) {
+  const subgroup = list.subgroup?.definition
+    ? ` ${list.subgroup.definition}${list.subgroup.field ? ` (field ${list.subgroup.field})` : ""}`
+    : "";
+  const missing = consistency.rows_missing
+    ? `; ${consistency.rows_missing} ${consistency.rows_missing === 1 ? "row" : "rows"} with no identifier excluded`
+    : "";
+  return (
+    <div data-testid="consistency-list" className="text-gray-500">
+      {consistency.rows_passing !== null && consistency.rows_passing !== undefined && (
+        <p>
+          {consistency.rows_passing} distinct identifiers{subgroup} among {consistency.rows_tested} rows{missing}
+        </p>
+      )}
+      {list.evidence?.text && <p>The paper names this file as the list: &quot;{list.evidence.text}&quot;</p>}
+      {consistency.assumptions.map((assumption) => (
+        <p key={assumption}>{assumption}</p>
+      ))}
+    </div>
   );
 }
 
@@ -149,13 +173,18 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                           : null)}
                     </span>
                     {claim.consistency.table && <span className="text-gray-500"> ({claim.consistency.table})</span>}
-                    {claim.consistency.rows_passing !== null && claim.consistency.rows_passing !== undefined && (
-                      <span className="text-gray-500">
-                        {" "}
-                        {claim.consistency.rows_passing} of {claim.consistency.rows_tested} rows pass
-                      </span>
-                    )}
+                    {claim.consistency.method !== "published_list_count" &&
+                      claim.consistency.rows_passing !== null &&
+                      claim.consistency.rows_passing !== undefined && (
+                        <span className="text-gray-500">
+                          {" "}
+                          {claim.consistency.rows_passing} of {claim.consistency.rows_tested} rows pass
+                        </span>
+                      )}
                     {claim.consistency.reason && <p className="text-gray-500">{claim.consistency.reason}</p>}
+                    {claim.consistency.method === "published_list_count" && claim.consistency.list && (
+                      <ListCount consistency={claim.consistency} list={claim.consistency.list} />
+                    )}
                     {claim.consistency.superseded && (
                       <p data-testid="consistency-superseded" className="text-gray-500">
                         Superseded comparison, not current evidence: {claim.consistency.superseded.label}

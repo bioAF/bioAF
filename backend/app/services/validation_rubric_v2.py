@@ -76,16 +76,29 @@ def _source_view(source: dict) -> dict:
     return {
         "table": source.get("table"),
         "source": source.get("source"),
+        "method": source.get("method"),
         "outcome": source.get("outcome"),
         "version_status": source.get("version_status"),
         "reason": source.get("reason"),
     }
 
 
+_LIST_COUNT = "published_list_count"
+
+
 def _source_words(source: dict) -> str:
     words = source.get("reason") or source.get("label") or source.get("outcome") or ""
     table = source.get("table")
+    # plan_8_2 decision 3: a count of a published list says so, never a check of its selection threshold.
+    if source.get("method") == _LIST_COUNT:
+        words = f"list count: {words}"
     return f"{words} ({table})" if table and table not in str(words) else str(words)
+
+
+def _source_evidence(source: dict) -> str:
+    if source.get("method") == _LIST_COUNT:
+        return f"published list count ({source.get('table')})"
+    return f"author_results ({source.get('table')})"
 
 
 def govern_claim(index: int, independent: list[dict | None], sources: list[dict | None]) -> dict | None:
@@ -155,12 +168,13 @@ def govern_claim(index: int, independent: list[dict | None], sources: list[dict 
     if conclusive_sources:
         status = next(iter(source_statuses))
         reason = "; ".join(_source_words(s) for s in conclusive_sources) or None
+        method = _LIST_COUNT if all(s.get("method") == _LIST_COUNT for s in conclusive_sources) else "author_results"
         return _claim(
             status,
             depth=CONSISTENCY,
-            method="author_results",
+            method=method,
             reason=reason,
-            evidence=[f"author_results ({s.get('table')})" for s in conclusive_sources],
+            evidence=[_source_evidence(s) for s in conclusive_sources],
         )
     if attempts:
         # Attempted independently and inconclusive: that is the claim's result, as in version 1.

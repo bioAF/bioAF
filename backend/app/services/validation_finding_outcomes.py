@@ -558,7 +558,7 @@ def finding_outcomes(
     inventory established with weighted rubric version 2 (plan_8_1 stage 4), that check governs a claim
     no independent assessment settles, at consistency depth.
     """
-    from app.services.validation_report_summary import CLAIM_CHECK_LABELS
+    from app.services.validation_report_summary import CLAIM_CHECK_LABELS, METHOD_LABELS
     from app.services.validation_rubric_v2 import govern_claim
 
     ev = _Evidence([t for t in targets or [] if isinstance(t, dict)], plan or {}, evidence or {}, study or {})
@@ -597,7 +597,7 @@ def finding_outcomes(
             "inventory_revision": inventory.get("revision"),
             "analysis_selection_revision": ev.revision,
             **outcome,
-            "method_label": CLAIM_CHECK_LABELS.get(method) if method else None,
+            "method_label": (METHOD_LABELS.get(method) or CLAIM_CHECK_LABELS.get(method)) if method else None,
             "supporting_checks": supporting,
             "comparison_criteria": {
                 "rule": (finding.get("criteria") or {}).get("rule"),

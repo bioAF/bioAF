@@ -211,3 +211,80 @@ describe("a comparison pending re-evaluation", () => {
     expect(superseded.innerHTML).not.toContain("text-red-700");
   });
 });
+
+// plan_8_2 section 3.2 and decision 3: a count of the authors' published list, never a validation of its
+// selection. The labels are pending the owner's sign-off.
+describe("a count of the authors' published list", () => {
+  const withList = (list: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    ({
+      ...stage2,
+      claims: stage2.claims.map((claim, i) =>
+        i === 0
+          ? {
+              ...claim,
+              consistency: {
+                outcome: "agree",
+                label: "List count agrees with the authors' published list",
+                method: "published_list_count",
+                reason: "146 against the claim's exactly 146",
+                table: "S3_XX-v-XY_siggenes.txt",
+                source: "supplement",
+                rows_tested: 194,
+                rows_passing: 146,
+                rows_missing: 0,
+                count_range: [146, 146],
+                candidates: [],
+                assumptions: [
+                  "A count of the authors' published list; it does not check the statistical procedure that selected the list.",
+                ],
+                binding: null,
+                superseded: null,
+                list,
+                ...extra,
+              },
+            }
+          : claim,
+      ),
+    }) as unknown as ReportSummary;
+
+  it("says what was counted and what the count does not check, never as rows passing a test", () => {
+    render(
+      <ClaimSelection
+        summary={withList({
+          evidence: {
+            text: "We identified 194 significantly differentially expressed genes (Supplemental File S3).",
+            source: "paper_text",
+          },
+          dedup: "distinct identifier",
+          missing: "rows with no identifier are excluded and reported",
+          subgroup: { definition: "located on chromosome X or Y", field: "chr", unmapped: 0, chromosomes: ["X", "Y"] },
+        })}
+      />,
+    );
+    const row = within(screen.getByTestId("claim-0"));
+    expect(row.getByText("List count agrees with the authors' published list")).toBeInTheDocument();
+    const list = row.getByTestId("consistency-list");
+    expect(list).toHaveTextContent("146 distinct identifiers located on chromosome X or Y (field chr) among 194 rows");
+    expect(list).toHaveTextContent(/The paper names this file as the list: "We identified 194 significantly/);
+    expect(list).toHaveTextContent(/does not check the statistical procedure that selected the list/);
+    expect(row.queryByText(/rows pass/)).not.toBeInTheDocument();
+  });
+
+  it("counts a whole list without a subgroup", () => {
+    render(
+      <ClaimSelection
+        summary={withList(
+          {
+            evidence: { text: "Listed in Supplemental File S3.", source: "legend" },
+            dedup: "distinct identifier",
+            missing: "rows with no identifier are excluded and reported",
+            subgroup: null,
+          },
+          { rows_passing: 194, rows_missing: 2 },
+        )}
+      />,
+    );
+    const list = within(screen.getByTestId("claim-0")).getByTestId("consistency-list");
+    expect(list).toHaveTextContent("194 distinct identifiers among 194 rows; 2 rows with no identifier excluded");
+  });
+});

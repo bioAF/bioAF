@@ -433,3 +433,46 @@ def binding_reason(bound: dict | None) -> str:
     detail = (bound or {}).get("reason")
     head = NOT_THIS_CONTRAST if (bound or {}).get("status") == REJECTED else UNBOUND
     return f"{head}: {detail}" if detail else head
+
+
+# plan_8_2 section 3.2: evidence that a table is the claim's complete selected list, not its universe or a part.
+_ABBREVIATIONS = ("fig.", "figs.", "e.g.", "i.e.", "et al.", "vs.", "no.", "suppl.", "ref.", "refs.", "approx.")
+_PARTIAL_WORDS = ("top ", "selected ", "examples", "representative", "a subset", "subset of", "shortlist")
+
+
+def sentences(text: str) -> list[str]:
+    """A passage's sentences, not split after an abbreviation ("Fig. S2C", "et al.")."""
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z(])", _normalized(text))
+    joined: list[str] = []
+    for part in parts:
+        if joined and joined[-1].lower().endswith(_ABBREVIATIONS):
+            joined[-1] = f"{joined[-1]} {part}"
+        else:
+            joined.append(part)
+    return [s for s in joined if s]
+
+
+def _numbers(text: str) -> set[float]:
+    return {float(n.replace(",", "")) for n in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", text or "")}
+
+
+def list_evidence(table: dict, predicate: dict, *, confirmation: dict | None = None) -> dict | None:
+    """The sentence that establishes ``table`` as the claim's complete selected list, or None.
+
+    A recorded confirmation that says so establishes it. Otherwise a verified passage citing the table must
+    state the claim's own count in the sentence that cites it. A sentence calling the file a part of the
+    list ("the top N", "selected", "examples") establishes that it is not the complete list."""
+    if (confirmation or {}).get("selected_list"):
+        return {"text": confirmation.get("note") or "a recorded confirmation", "source": "confirmation"}
+    value = ((predicate or {}).get("count") or {}).get("value")
+    if value is None:
+        return None
+    for passage in table.get("passages") or []:
+        if not isinstance(passage, dict) or not _cites(passage.get("text") or "", table):
+            continue
+        for sentence in sentences(passage["text"]):
+            if not _cites(sentence, table) or float(value) not in _numbers(sentence):
+                continue
+            partial = next((w.strip() for w in _PARTIAL_WORDS if w in sentence.lower()), None)
+            return {"text": sentence, "source": passage.get("source"), "partial": partial}
+    return None

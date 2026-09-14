@@ -1657,6 +1657,29 @@ def _append_projected_attachments(parts: list[str], summary: dict[str, Any]) -> 
         parts.append("")
 
 
+def _list_count_lines(consistency: dict) -> list[str]:
+    """plan_8_2 section 3.2: what a count of the authors' published list counted, the passage naming the file
+    as the list, and what the count does not check. Mirrors the claim row on the study page."""
+    listing = consistency.get("list") or {}
+    lines = []
+    if consistency.get("rows_passing") is not None:
+        subgroup = listing.get("subgroup") or {}
+        within = ""
+        if subgroup.get("definition"):
+            within = f" {subgroup['definition']}" + (f" (field {subgroup['field']})" if subgroup.get("field") else "")
+        missing = consistency.get("rows_missing")
+        excluded = f"; {missing} {'row' if missing == 1 else 'rows'} with no identifier excluded" if missing else ""
+        lines.append(
+            f"{consistency['rows_passing']} distinct identifiers{within} among {consistency.get('rows_tested')} "
+            f"rows{excluded}"
+        )
+    passage = (listing.get("evidence") or {}).get("text")
+    if passage:
+        lines.append(f'The paper names this file as the list: "{passage}"')
+    lines.extend(consistency.get("assumptions") or [])
+    return lines
+
+
 def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
     """change_7.5 section 4.3: every claim as the projection states it. Absent for a report whose
     claims carry no checks (a plan read before stage 2)."""
@@ -1699,16 +1722,19 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
                 f"{' (' + check['reason'] + ')' if check.get('reason') else ''}"
             )
         consistency = claim.get("consistency") or {}
+        list_count = consistency.get("method") == "published_list_count"
         if consistency:
             counts = (
                 f"; {consistency.get('rows_passing')} of {consistency.get('rows_tested')} rows pass"
-                if consistency.get("rows_passing") is not None
+                if consistency.get("rows_passing") is not None and not list_count
                 else ""
             )
             lines.append(
                 f"- {consistency.get('label')} ({consistency.get('table') or 'no table'}{counts})"
                 f"{': ' + consistency['reason'] if consistency.get('reason') else ''}"
             )
+            if list_count:
+                lines.extend(f"  - {line}" for line in _list_count_lines(consistency))
             for candidate in consistency.get("candidates") or []:
                 lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
             # plan_8_2 section 1.1: a comparison made before bindings, kept whole and never current evidence.
