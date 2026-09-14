@@ -66,6 +66,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -348,6 +353,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -512,6 +522,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -1188,6 +1203,11 @@
       "reason": "r",
       "status": "performed"
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -1381,6 +1401,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -1546,6 +1571,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -1851,6 +1881,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 1,
+      "available": true,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -2973,6 +3008,11 @@
       "reason": "r",
       "status": "performed"
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -3694,6 +3734,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -4007,6 +4052,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -5031,6 +5081,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -6124,6 +6179,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -6527,6 +6587,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -6715,6 +6780,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -6983,6 +7053,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -7461,6 +7536,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [],
     "resume": {
       "label": "Review and resume",
@@ -7865,6 +7945,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -8321,6 +8406,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -8931,6 +9021,11 @@
       "label": null,
       "reason": null,
       "status": null
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {
@@ -9758,6 +9853,11 @@
       "reason": null,
       "status": null
     },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
+    },
     "resources": [
       {
         "analyzable": "yes",
@@ -10544,6 +10644,11 @@
       "label": "Reconciliation not performed: no attachments were inspected",
       "reason": "no attachments were inspected",
       "status": "not_performed"
+    },
+    "recovery": {
+      "affected_count": 0,
+      "available": false,
+      "last": null
     },
     "resources": [],
     "resume": {

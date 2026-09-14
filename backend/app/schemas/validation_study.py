@@ -32,6 +32,12 @@ class InventoryRetryRequest(BaseModel):
     full_text: str | None = None
 
 
+class RecoveryRequest(BaseModel):
+    """plan_8_2 section 2.1: the preview the person saw, so a recovery never does what was not shown."""
+
+    preview_fingerprint: str | None = None
+
+
 class DeclineRequest(BaseModel):
     reason: str | None = None
 

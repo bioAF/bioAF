@@ -49,6 +49,7 @@ import { ResourceInventory } from "@/components/validation/ResourceInventory";
 import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
 import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
 import { InventoryRetryNotice } from "@/components/validation/InventoryRetryNotice";
+import { RecoveryNotice } from "@/components/validation/RecoveryNotice";
 
 // Before the paper is read there is no reproduction plan/evidence to report on, so the F3 export
 // control is hidden until the study has advanced past the pre-comprehension states.
@@ -274,6 +275,10 @@ export default function ValidationStudyPage() {
             <ValidationScorecard scorecard={summary.scorecard} />
             {summary.scorecard.inventory_retry && (
               <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
+            )}
+            {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
+            {summary.recovery?.available && (
+              <RecoveryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
             )}
           </div>
         )}

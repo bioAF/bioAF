@@ -105,6 +105,13 @@ export interface ReportClaim {
   } | null;
 }
 
+// plan_8_2 section 2.1: whether an on-request recovery would change anything, and the last one run.
+export interface ReportRecovery {
+  available: boolean;
+  affected_count: number;
+  last: { at: string | null; actor: number | null; reason: string | null; requeued: number | null } | null;
+}
+
 export interface ClaimConsistency {
   outcome: "agree" | "disagree" | "unresolved" | "not_checkable" | "pending_re_evaluation" | null;
   label: string | null;
@@ -352,6 +359,7 @@ export interface CompletionFact {
 
 export interface ReportSummary {
   version: number;
+  recovery?: ReportRecovery | null;
   attempt: { status: "attempted" | "not_attempted"; executed: string[]; acquired: string[] };
   headline: { key: "reproduction_not_attempted" | "could_not_reproduce" | "verdict" | "in_progress"; label: string | null };
   summary: string[];

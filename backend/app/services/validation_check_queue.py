@@ -129,8 +129,9 @@ def check_id_for(plan_id: int, target_id: int, kind: str) -> str:
     return f"plan:{plan_id}:claim:{target_id}:{kind}"
 
 
-def _snapshot(record: ValidationCheckRecord) -> dict:
+def _snapshot(record: ValidationCheckRecord, *, reason: str | None = None) -> dict:
     return {
+        "superseded_because": reason,
         "revision": record.revision,
         "state": SUPERSEDED,
         "prior_state": record.state,
@@ -144,8 +145,10 @@ def _snapshot(record: ValidationCheckRecord) -> dict:
     }
 
 
-def _supersede(record: ValidationCheckRecord, dependencies: dict, *, analysis_key: str | None) -> None:
-    record.history_json = list(record.history_json or []) + [_snapshot(record)]
+def _supersede(
+    record: ValidationCheckRecord, dependencies: dict, *, analysis_key: str | None, reason: str | None = None
+) -> None:
+    record.history_json = list(record.history_json or []) + [_snapshot(record, reason=reason)]
     record.revision = int(record.revision or 1) + 1
     record.dependencies_json = dependencies
     record.dependencies_fingerprint = fingerprint(dependencies)
@@ -169,7 +172,15 @@ async def records_for(session, study_id: int, *, kind: str | None = None) -> lis
 
 
 async def ensure_record(
-    session, study, plan, target, kind: str, dependencies: dict, *, analysis_key: str | None = None
+    session,
+    study,
+    plan,
+    target,
+    kind: str,
+    dependencies: dict,
+    *,
+    analysis_key: str | None = None,
+    reason: str | None = None,
 ) -> ValidationCheckRecord:
     """The current record for this plan, claim and check, created pending, or superseded to a new
     revision when what it depends on changed. Unchanged dependencies leave it as it is."""
@@ -196,9 +207,16 @@ async def ensure_record(
         await session.flush()
         return record
     if record.dependencies_fingerprint != fingerprint(dependencies) or record.analysis_key != analysis_key:
-        _supersede(record, dependencies, analysis_key=analysis_key)
+        _supersede(record, dependencies, analysis_key=analysis_key, reason=reason or "what it depends on changed")
         await session.flush()
     return record
+
+
+async def supersede(session, record: ValidationCheckRecord, *, reason: str) -> None:
+    """plan_8_2 section 2.1: re-evaluate a record whose dependencies did not change (a recovery). The
+    revision it replaces is kept whole in ``history`` with the reason."""
+    _supersede(record, dict(record.dependencies_json or {}), analysis_key=record.analysis_key, reason=reason)
+    await session.flush()
 
 
 async def invalidate(session, study_id: int, dependency: str, value) -> list[ValidationCheckRecord]:
