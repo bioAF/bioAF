@@ -194,8 +194,17 @@ class TestTheProjection:
         assert card["rubric_label"] == "weighted rubric version 1"
 
     def test_a_record_kept_under_version_one_stays_usable_for_its_inventory(self):
+        from app.services.validation_report_summary import projection_provenance, provenance_fingerprint
+
         plan = _plan_projection(1)
-        record = {"rubric_version": 1, "inventory_revision": 1, "analysis_selection_revision": 2, "outcomes": {}}
+        # plan_8_2 section 1.4 (flagged change): a record is reused only while its provenance holds.
+        record = {
+            "rubric_version": 1,
+            "inventory_revision": 1,
+            "analysis_selection_revision": 2,
+            "outcomes": {},
+            "provenance_fingerprint": provenance_fingerprint(projection_provenance(plan, {}, None)),
+        }
         assert _usable_record({"state": "classified"}, {"scorecard_record": record}, plan) is record
 
     def test_a_record_kept_under_another_version_than_its_inventory_is_not_used(self):
