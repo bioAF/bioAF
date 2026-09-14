@@ -276,7 +276,7 @@ def summarize(
     acquired = any(f["key"] == "input_acquired" and f["value"] == "yes" for f in completion_facts)
     facts = _facts(evidence, artifacts, attempt, counts, acquired=acquired)
 
-    return {
+    projection = {
         "version": 1,
         "attempt": attempt,
         "headline": headline,
@@ -317,6 +317,12 @@ def summarize(
             study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
         ),
     }
+    # plan_8_2 section 4.2: the scorecard names its units, and the four sections their summaries and counts.
+    from app.services.validation_report_sections import sections, units
+
+    projection["scorecard"]["units"] = units(projection["scorecard"], claims=claims, applicability=applies)
+    projection["sections"] = sections(projection, checks=checks, issues=issues)
+    return projection
 
 
 def _recovery(evidence: dict, checks: list[dict] | None, study: dict, applies: dict | None) -> dict:

@@ -83,6 +83,8 @@ IN_PROGRESS_LABEL = "In progress"
 # plan_8_1 section 2.3, pending the owner's sign-off.
 PROVISIONAL_SUFFIX = " (provisional)"
 SCORE_PENDING_LABEL = "Score pending importance review"
+# plan_8_2 section 4.2 (approved 2026-09-14): why a blank score is blank, when no finding is conclusive.
+NO_CONCLUSIVE_LABEL = "No finding has a conclusive assessment yet"
 IMPORTANCE_NOT_ESTABLISHED_LABEL = "Importance not established"
 
 _NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
@@ -167,6 +169,8 @@ def _empty(status: str, *, inventory: dict | None, reason: str | None, in_progre
         "provisional": False,
         "provisional_note": None,
         "score_status_label": None,
+        # plan_8_2 section 4.2: why a blank score is blank, beside the score (never in its place).
+        "score_note": None,
         # plan_8_1 section 2.1: the findings could not be established, and grouping them again may.
         "inventory_retry": False,
         # plan_8_1 section 4.5: under version 2, how deep the assessed findings were checked, beside the scope.
@@ -216,6 +220,20 @@ def _depth(outcome: dict, status: str, version: int) -> str | None:
     return depth if depth in DEPTH_LABELS else INDEPENDENT_DEPTH
 
 
+def dedupe_clauses(text: str | None) -> str | None:
+    """``text`` with each "; "-separated clause kept once, in order. A finding whose claims share a check
+    gave the same clause once per claim."""
+    if not text:
+        return text
+    clauses: list[str] = []
+    for clause in text.split("; "):
+        key = clause.strip().rstrip(".")
+        if key and key not in [c.strip().rstrip(".") for c in clauses]:
+            clauses.append(clause)
+    joined = "; ".join(clauses)
+    return joined if joined.endswith(".") or not text.endswith(".") else f"{joined}."
+
+
 def _item(finding: dict, outcome: dict, weight: int | None, version: int = 1) -> dict:
     status = outcome.get("status") or NOT_ATTEMPTED
     depth = _depth(outcome, status, version)
@@ -246,7 +264,8 @@ def _item(finding: dict, outcome: dict, weight: int | None, version: int = 1) ->
         "claim_indices": list(finding.get("claim_indices") or []),
         "status": status,
         "status_label": STATUS_LABELS[status],
-        "reason": outcome.get("reason"),
+        # plan_8_2 section 4.2: a reason states each clause once, including one recorded before that rule.
+        "reason": dedupe_clauses(outcome.get("reason")),
         "cause": outcome.get("cause"),
         "cause_label": outcome.get("cause_label"),
         "assessment_method": outcome.get("assessment_method"),
@@ -518,6 +537,7 @@ def build_scorecard(
         display_score=shown,
         score_label=f"{shown} / 100" if shown is not None else None,
         score_status_label=SCORE_PENDING_LABEL if withheld else None,
+        score_note=None if (withheld or assessed) else NO_CONCLUSIVE_LABEL,
         scope_label=f"{len(assessed)} / {len(scoreable)} assessed" + (PROVISIONAL_SUFFIX if provisional else ""),
         provisional=provisional,
         provisional_note=(
