@@ -12,7 +12,7 @@
  * Rendered from the backend's projection. The frontend computes no metric and words no status.
  */
 
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import { Card } from "@/components/ui/Card";
 import { NOT_SET } from "@/lib/placeholders";
@@ -56,26 +56,34 @@ function scopeLabel(card: ValidationScorecardData): string {
   return `Assessed scope: ${card.assessed_count} of ${card.total_count} findings assessed`;
 }
 
+/** A finding's status, cause, depth and category, in the text-and-colour vocabulary. */
+export function FindingBadges({ item }: { item: ScorecardItem }) {
+  return (
+    <>
+      <span
+        className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${statusBadgeClass("validationFinding", item.status)}`}
+      >
+        <span aria-hidden="true">{STATUS_ICON[item.status] ?? "•"}</span>
+        <span>{item.status_label}</span>
+      </span>
+      {item.cause_label && <span className="text-xs font-medium text-gray-700">{item.cause_label}</span>}
+      {/* plan_8_1 section 4.5: every assessed item shows its depth. */}
+      {item.depth_label && (
+        <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs font-medium text-gray-800">
+          {item.depth_label}
+        </span>
+      )}
+      <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-700">{item.category_label}</span>
+    </>
+  );
+}
+
 function FindingRow({ item, statements }: { item: ScorecardItem; statements?: Map<string, ResourceStatement> }) {
   const evidence = item.claim_indices?.[0];
-  const governing = item.depth ? (item.governing?.evidence ?? []) : [];
   return (
     <li className="py-2 text-sm">
       <div className="flex flex-wrap items-baseline gap-2">
-        <span
-          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${statusBadgeClass("validationFinding", item.status)}`}
-        >
-          <span aria-hidden="true">{STATUS_ICON[item.status] ?? "•"}</span>
-          <span>{item.status_label}</span>
-        </span>
-        {item.cause_label && <span className="text-xs font-medium text-gray-700">{item.cause_label}</span>}
-        {/* plan_8_1 section 4.5: every assessed item shows its depth. */}
-        {item.depth_label && (
-          <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs font-medium text-gray-800">
-            {item.depth_label}
-          </span>
-        )}
-        <span className="rounded border border-gray-300 px-1.5 py-0.5 text-xs text-gray-700">{item.category_label}</span>
+        <FindingBadges item={item} />
         <span className="text-gray-900">{item.description ?? item.finding_id}</span>
         {evidence !== undefined && (
           <a href={`#claim-${evidence}`} className="text-xs text-bioaf-700 hover:underline">
@@ -84,6 +92,17 @@ function FindingRow({ item, statements }: { item: ScorecardItem; statements?: Ma
         )}
       </div>
       {item.reason && <p className="mt-0.5 text-xs text-gray-600">{item.reason}</p>}
+      <FindingExtras item={item} statements={statements} />
+    </li>
+  );
+}
+
+/** Everything about a finding beneath its reason: governing evidence, concerns, per-check causes, resource
+ * statements, supporting checks and why it has its importance. */
+export function FindingExtras({ item, statements }: { item: ScorecardItem; statements?: Map<string, ResourceStatement> }) {
+  const governing = item.depth ? (item.governing?.evidence ?? []) : [];
+  return (
+    <>
       {governing.length > 0 && (
         <p className="mt-0.5 text-xs text-gray-600">Governing evidence: {governing.join(", ")}</p>
       )}
@@ -118,7 +137,7 @@ function FindingRow({ item, statements }: { item: ScorecardItem; statements?: Ma
       {item.importance_problem && (
         <p className="mt-0.5 text-xs text-gray-600">Importance not established: {item.importance_problem}</p>
       )}
-    </li>
+    </>
   );
 }
 
@@ -161,7 +180,7 @@ function FindingList({
   );
 }
 
-function ResourceStatements({ statements }: { statements: ResourceStatement[] }) {
+export function ResourceStatements({ statements }: { statements: ResourceStatement[] }) {
   if (statements.length === 0) return null;
   return (
     <div data-testid="scorecard-resource-statements" className="mt-4">
@@ -200,7 +219,18 @@ function ResourceStatements({ statements }: { statements: ResourceStatement[] })
   );
 }
 
-export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorecardData | null | undefined }) {
+export function ValidationScorecard({
+  scorecard,
+  variant = "full",
+  header,
+}: {
+  scorecard: ValidationScorecardData | null | undefined;
+  // plan_8_2 section 4.2: "summary" is the compact card at the top of the report; its findings are shown in
+  // the Findings section and its resource statements under Data and code.
+  variant?: "full" | "summary";
+  // The study's outcome (headline and classification), at the top of the card.
+  header?: ReactNode;
+}) {
   if (!scorecard) return null;
   const card = scorecard;
   const statements = new Map((card.resource_statements ?? []).map((s) => [s.identifier, s]));
@@ -213,15 +243,18 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
   if (card.status === "unavailable") {
     return (
       <Card title={card.title} actions={inProgress || undefined}>
+        {header && <div className="mb-3">{header}</div>}
         <p className="text-sm text-gray-700">{card.status_label}</p>
       </Card>
     );
   }
+  const units = card.units ?? [];
 
   const unestablished =
     card.status === "not_established" || card.status === "not_applicable" || card.status === "pending";
   return (
     <Card title={card.title} actions={inProgress || undefined}>
+      {header && <div className="mb-4">{header}</div>}
       <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div>
           <dd data-testid="scorecard-score" aria-label={scoreLabel(card)} className={METRIC_VALUE}>
@@ -233,6 +266,12 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
               ))}
           </dd>
           <dt className="text-xs uppercase tracking-wide text-gray-500">Overall score</dt>
+          {/* plan_8_2 section 4.2: why a blank score is blank. */}
+          {card.score_note && (
+            <dd data-testid="scorecard-score-note" className="text-xs text-gray-600">
+              {card.score_note}
+            </dd>
+          )}
         </div>
         <div>
           <dd data-testid="scorecard-scope" aria-label={scopeLabel(card)} className={METRIC_VALUE}>
@@ -248,6 +287,16 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </div>
       </dl>
 
+      {/* plan_8_2 section 4.2: what the card counts, each in its own unit; findings are never checks. */}
+      {units.length > 0 && (
+        <ul data-testid="scorecard-units" className="mt-3 flex flex-wrap gap-x-5 gap-y-1 border-t border-gray-100 pt-3">
+          {units.map((unit) => (
+            <li key={unit.key} className="text-sm text-gray-700">
+              <span className="font-semibold tabular-nums text-ink">{unit.count}</span> {unit.label}
+            </li>
+          ))}
+        </ul>
+      )}
       {/* plan_8_2 section 1.4: the checks' activity, which a concluded status never hides. */}
       {card.activity?.label && (
         <p data-testid="scorecard-activity" className="mt-3 text-sm text-gray-700">
@@ -315,15 +364,24 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </details>
       )}
 
-      <FindingList title="Assessed" items={card.assessed_items} testId="scorecard-assessed" statements={statements} />
-      <FindingList
-        title="Not assessed / unresolved"
-        items={card.unassessed_items}
-        testId="scorecard-unassessed"
-        statements={statements}
-      />
+      {variant === "full" && (
+        <>
+          <FindingList
+            title="Assessed"
+            items={card.assessed_items}
+            testId="scorecard-assessed"
+            statements={statements}
+          />
+          <FindingList
+            title="Not assessed / unresolved"
+            items={card.unassessed_items}
+            testId="scorecard-unassessed"
+            statements={statements}
+          />
+        </>
+      )}
 
-      {card.excluded_items.length > 0 && (
+      {variant === "full" && card.excluded_items.length > 0 && (
         <details data-testid="scorecard-excluded" className="mt-4 text-sm">
           <summary className="cursor-pointer text-xs font-medium text-gray-700">
             Not scored: technical prerequisites and descriptive checks ({card.excluded_items.length})
@@ -336,7 +394,7 @@ export function ValidationScorecard({ scorecard }: { scorecard: ValidationScorec
         </details>
       )}
 
-      <ResourceStatements statements={card.resource_statements ?? []} />
+      {variant === "full" && <ResourceStatements statements={card.resource_statements ?? []} />}
     </Card>
   );
 }

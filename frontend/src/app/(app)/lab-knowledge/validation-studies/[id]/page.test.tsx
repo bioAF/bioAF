@@ -4,7 +4,7 @@
  * The study is Groff on the current build with the attachment bundle failing: nothing executed, the
  * raw reads sit under controlled access in an archive bioAF cannot read, and no claim was compared.
  */
-import { act, render, screen, waitFor } from "@/testing/renderWithProviders";
+import { act, fireEvent, render, screen, waitFor, within } from "@/testing/renderWithProviders";
 
 import contract from "@/components/validation/__fixtures__/reportContract.json";
 import ValidationStudyPage from "./page";
@@ -303,5 +303,52 @@ describe("a paper outside bioAF's methods", () => {
     const grouped = screen.getByTestId("blockers-not-applying");
     expect(grouped).toHaveTextContent("2 requirements that do not apply");
     expect(screen.queryAllByTestId("blocker-withheld")).toHaveLength(0);
+  });
+});
+
+// plan_8_2 section 4.2 (approved 2026-09-14): the scorecard and a strip of decisions, then four sections.
+describe("the report's layout", () => {
+  function groff() {
+    return {
+      ...study(),
+      report_summary: {
+        ...contract.scorecard_groff,
+        recovery: { available: true, affected_count: 8, restate: null, last: null },
+      },
+    };
+  }
+
+  test("opens on the scorecard, with the outcome and its units in it, then a strip of decisions", async () => {
+    mockGet.mockResolvedValue(groff());
+    render(<ValidationStudyPage />);
+    const card = await screen.findByRole("region", { name: "Validation Scorecard" });
+    expect(within(card).getByTestId("scorecard-units")).toBeInTheDocument();
+    expect(within(card).queryByTestId("scorecard-unassessed")).not.toBeInTheDocument();
+    const decisions = screen.getByTestId("needs-a-decision");
+    expect(within(decisions).getByRole("heading", { name: "Needs a decision" })).toBeInTheDocument();
+    expect(within(decisions).getByRole("button", { name: "Review the re-evaluation" })).toBeInTheDocument();
+  });
+
+  test("then Findings, open, and three collapsed sections, each with its summary", async () => {
+    mockGet.mockResolvedValue(groff());
+    render(<ValidationStudyPage />);
+    const findings = await screen.findByTestId("report-section-findings");
+    expect(findings).toHaveAttribute("open");
+    expect(within(findings).getByText(contract.scorecard_groff.sections.findings.summary)).toBeInTheDocument();
+    for (const id of ["data", "checks", "diagnostics"]) {
+      expect(screen.getByTestId(`report-section-${id}`)).not.toHaveAttribute("open");
+    }
+    expect(screen.getByRole("heading", { name: "Data and code" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Checks performed" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Run diagnostics" })).toBeInTheDocument();
+  });
+
+  test("a link to a finding opens it", async () => {
+    Element.prototype.scrollIntoView = jest.fn();
+    mockGet.mockResolvedValue(groff());
+    render(<ValidationStudyPage />);
+    const shared = await screen.findByTestId("shared-reason-R1");
+    fireEvent.click(within(shared).getByRole("link", { name: "F2" }));
+    expect(document.getElementById("finding-F2")).toHaveAttribute("open");
   });
 });

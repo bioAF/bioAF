@@ -40,7 +40,7 @@ def units(card: dict, *, claims: list[dict], applicability: dict | None) -> list
             )
         ]
     found: list[dict] = []
-    if card.get("total_count") is not None and card.get("assessed_count") is not None:
+    if card.get("total_count") and card.get("assessed_count") is not None:
         assessed, total = card["assessed_count"], card["total_count"]
         found.append(_unit("findings_conclusive", assessed, "finding conclusive", "findings conclusive"))
         found.append(_unit("findings_inconclusive", total - assessed, "finding inconclusive", "findings inconclusive"))
@@ -160,7 +160,8 @@ def _findings(card: dict, claims: list[dict], experiments: list[dict], applicabi
     if (applicability or {}).get("status") == "not_applicable":
         summary = " ".join(p for p in (applicability.get("limitation"), applicability.get("statement")) if p)
     elif card.get("total_count") is None:
-        summary = card.get("reason") or card.get("status_label") or "The findings are not established."
+        # The scorecard above says why; the section does not repeat it.
+        summary = "The findings are being established." if card.get("status") == "pending" else "The findings are not established."
     else:
         total, assessed = card["total_count"], card.get("assessed_count") or 0
         summary = f"{_n(total, 'finding')} scored, {assessed} assessed."
@@ -308,9 +309,6 @@ def _checks(summary: dict) -> dict:
             if n:
                 tone = {"agree": "ok", "differ": "bad", "unresolved": "warn"}.get(w)
                 counts.append({"label": f"{n} {w}", "tone": tone})
-    comparisons = summary.get("comparisons") or {}
-    if comparisons and not comparisons.get("performed") and comparisons.get("label"):
-        counts.append({"label": comparisons["label"], "tone": None})
     return {"summary": sentence.strip() or "No check has run.", "counts": counts, "rows": rows}
 
 
