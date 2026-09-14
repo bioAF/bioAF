@@ -373,7 +373,9 @@ def _from_checks(claims: list[int], ev: _Evidence) -> dict:
             )
         reason = next((ev.unassessed.get(i) for i in claims if ev.unassessed.get(i)), None)
         return _unassessed(NOT_ATTEMPTED, None, reason or "not selected for this run")
-    detail = "; ".join(f"{CLAIM_CHECK_LABELS.get(key, key)}: {c.get('reason') or c.get('status')}" for key, c in found)
+    # A finding's claims often share a check: its reason is stated once (plan_8_2 section 4.2).
+    parts = [f"{CLAIM_CHECK_LABELS.get(key, key)}: {c.get('reason') or c.get('status')}" for key, c in found]
+    detail = "; ".join(dict.fromkeys(parts))
     unresolved = [c for _key, c in found if c.get("status") == "unresolved"]
     if unresolved:
         return _unassessed(UNRESOLVED, _cause_of_check(unresolved[0]), detail)

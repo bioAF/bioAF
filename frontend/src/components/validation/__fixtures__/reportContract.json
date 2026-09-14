@@ -112,6 +112,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -121,8 +122,61 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "No reproduction plan was read for this study.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -402,6 +456,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -411,8 +466,61 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "bioAF could not read the paper into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: the answer was cut off at its token limit of 32,000 output tokens. This is a bioAF limitation; read the paper again.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -574,6 +682,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -583,8 +692,61 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 issue",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 1 issue recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "bioAF could not read the paper into findings: the model's answer was cut off at its token limit. This is a bioAF limitation; read the paper again.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -1293,6 +1455,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "unavailable",
       "status_label": "Score unavailable for this historical report.",
@@ -1302,8 +1465,78 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "0 of 4 attachments retrieved",
+            "tone": null
+          },
+          {
+            "label": "1 code source",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "0 of 4 attachments retrieved. 1 code source.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "3 limitations",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "Score unavailable for this historical report.",
+        "ungrouped_claims": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -1470,6 +1703,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -1479,8 +1713,65 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 limitation",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "No reproduction plan was read for this study.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -1685,6 +1976,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_applicable",
       "status_label": "Not applicable",
@@ -1694,8 +1986,67 @@
       "title": "Validation Scorecard",
       "total_count": 0,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 1,
+          "key": "experiments_outside_methods",
+          "label": "experiment outside bioAF's methods"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "bioAF has no validation method for qRT-PCR (experiment e1). No eligible findings were identified for bioAF's current validation methods. This does not establish that the paper contains no quantitative analysis.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -1858,6 +2209,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -1867,8 +2219,65 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 limitation",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "No reproduction plan was read for this study.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -2395,6 +2804,7 @@
       "scope_label": "1 / 1 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -2404,8 +2814,151 @@
       "title": "Validation Scorecard",
       "total_count": 1,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 1,
+          "key": "findings_conclusive",
+          "label": "finding conclusive"
+        },
+        {
+          "count": 0,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        },
+        {
+          "count": 1,
+          "key": "checks_without_conclusion",
+          "label": "check completed without a conclusion"
+        },
+        {
+          "count": 2,
+          "key": "checks_under_way",
+          "label": "checks under way"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "2 consistency checks",
+            "tone": null
+          },
+          {
+            "label": "1 agree",
+            "tone": "ok"
+          },
+          {
+            "label": "1 differ",
+            "tone": "bad"
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 0,
+            "unresolved": 2
+          }
+        ],
+        "summary": "This run checks claim 1 by Reanalysis of processed data. 2 consistency checks against the authors' results: 1 agree, 1 differ."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [
+          {
+            "activity": "pending",
+            "check_id": "plan:1:claim:9001:author_results",
+            "kind": "author_results",
+            "outcome_revision": 0,
+            "retry_count": 0,
+            "revision": 1,
+            "state": "pending",
+            "terminal_reason": null
+          },
+          {
+            "activity": "retrying",
+            "check_id": "plan:1:claim:9002:author_results",
+            "kind": "author_results",
+            "outcome_revision": 0,
+            "retry_count": 1,
+            "revision": 1,
+            "state": "pending",
+            "terminal_reason": null
+          },
+          {
+            "activity": "unresolved",
+            "check_id": "plan:1:claim:9003:author_results",
+            "kind": "author_results",
+            "outcome_revision": 1,
+            "retry_count": 3,
+            "revision": 1,
+            "state": "unresolved",
+            "terminal_reason": "retries_exhausted"
+          }
+        ],
+        "counts": [
+          {
+            "label": "3 check records",
+            "tone": null
+          },
+          {
+            "label": "1 retrying",
+            "tone": "warn"
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "3 check records; 0 errors; 1 retrying; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 supported",
+            "tone": "ok"
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1"
+            ],
+            "key": "e1",
+            "label": "Experiment e1: bulk RNA-seq (nf-core/rnaseq)"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "1 finding scored, 1 assessed. 1 supported, 0 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": "processed_reanalysis",
@@ -3447,7 +4000,7 @@
           "proposed_category": null,
           "quote": null,
           "rationale": "They describe the data set and establish no finding.",
-          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; QC metric comparison: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access); Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+          "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no analysis computes a count of samples; Reanalysis from raw reads: no analysis computes a count of samples; QC metric comparison: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
           "status": "blocked",
           "status_label": "Blocked",
@@ -3525,6 +4078,7 @@
       "scope_label": "0 / 4 assessed",
       "score": null,
       "score_label": null,
+      "score_note": "No finding has a conclusive assessment yet",
       "score_status_label": null,
       "status": "not_assessed",
       "status_label": null,
@@ -3594,6 +4148,7 @@
           "rationale": "The paper's main conclusion rests on it.",
           "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
@@ -3670,6 +4225,7 @@
           "rationale": "It qualifies the main conclusion.",
           "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
@@ -3746,6 +4302,7 @@
           "rationale": "It qualifies the main conclusion.",
           "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
@@ -3822,6 +4379,7 @@
           "rationale": "It qualifies the main conclusion.",
           "reason": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "blocked",
           "status_label": "Blocked",
           "subchecks": [
@@ -3839,8 +4397,160 @@
           "weight": 1
         }
       ],
+      "units": [
+        {
+          "count": 0,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 4,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 8,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 8,
+            "unresolved": 0
+          },
+          {
+            "available": 3,
+            "claims": 8,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 5,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 8,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 8,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 8,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 8,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "0 of 4 attachments retrieved",
+            "tone": null
+          },
+          {
+            "label": "1 code source",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "0 of 4 attachments retrieved. 1 code source.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "3 limitations",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "3 supporting",
+            "tone": null
+          },
+          {
+            "label": "4 blocked",
+            "tone": null
+          },
+          {
+            "label": "1 technical, not scored",
+            "tone": null
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1",
+              "F2",
+              "F3",
+              "F4"
+            ],
+            "key": "e1",
+            "label": "Experiment e1: bulk RNA-seq (nf-core/rnaseq)"
+          },
+          {
+            "finding_ids": [
+              "F5"
+            ],
+            "key": "excluded",
+            "label": "Not scored: technical prerequisites and descriptive checks"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [
+          {
+            "cause_label": "Access required",
+            "finding_ids": [
+              "F1",
+              "F2",
+              "F3",
+              "F4"
+            ],
+            "id": "R1",
+            "text": "Access required; no negative scientific conclusion. Reanalysis of processed data: no processed matrix holding both arms is published; Reanalysis from raw reads: EGAS00001003667 holds the reads, and bioAF cannot acquire them (controlled access). Consistency with the authors' results: No result table is published for this claim's experiment."
+          }
+        ],
+        "summary": "4 findings scored, 0 assessed. 1 reason shared by several findings is stated once.",
+        "ungrouped_claims": []
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -4185,6 +4895,7 @@
       "scope_label": "1 / 2 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -4255,8 +4966,131 @@
           "weight": 1
         }
       ],
+      "units": [
+        {
+          "count": 1,
+          "key": "findings_conclusive",
+          "label": "finding conclusive"
+        },
+        {
+          "count": 1,
+          "key": "findings_inconclusive",
+          "label": "finding inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 supporting",
+            "tone": null
+          },
+          {
+            "label": "1 supported",
+            "tone": "ok"
+          },
+          {
+            "label": "1 not attempted",
+            "tone": null
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1",
+              "F2"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "2 findings scored, 1 assessed. 1 supported, 0 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -4442,6 +5276,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -4451,8 +5286,63 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "bioAF could not group the paper's claims into findings: the answer was cut off at its token limit of 16,000 output tokens; the recovery attempt failed too: bioAF could not reach the language model.",
+        "ungrouped_claims": [
+          0
+        ]
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -5647,6 +6537,7 @@
       "scope_label": "2 / 14 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -5700,6 +6591,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -5760,6 +6652,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -5820,6 +6713,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -5880,6 +6774,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -5940,6 +6835,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6000,6 +6896,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6060,6 +6957,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6120,6 +7018,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6180,6 +7079,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6240,6 +7140,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6300,6 +7201,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6360,6 +7262,7 @@
           "rationale": "Its role in the paper's conclusions.",
           "reason": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity.",
           "resource_statements": [],
+          "shared_reason": "R1",
           "status": "not_attempted",
           "status_label": "Not attempted",
           "subchecks": [
@@ -6377,8 +7280,163 @@
           "weight": 1
         }
       ],
+      "units": [
+        {
+          "count": 2,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 12,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 14,
+            "claims": 14,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 14,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 14,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 14,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 14,
+            "unresolved": 0
+          },
+          {
+            "available": 14,
+            "claims": 14,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "13 supporting",
+            "tone": null
+          },
+          {
+            "label": "2 supported",
+            "tone": "ok"
+          },
+          {
+            "label": "12 not attempted",
+            "tone": null
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1",
+              "F2",
+              "F3",
+              "F4",
+              "F5",
+              "F6",
+              "F7",
+              "F8",
+              "F9",
+              "F10",
+              "F11",
+              "F12",
+              "F13",
+              "F14"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [
+          {
+            "cause_label": null,
+            "finding_ids": [
+              "F3",
+              "F4",
+              "F5",
+              "F6",
+              "F7",
+              "F8",
+              "F9",
+              "F10",
+              "F11",
+              "F12",
+              "F13",
+              "F14"
+            ],
+            "id": "R1",
+            "text": "Not selected for this run; its checks are available. Consistency with the authors' results: No deposited or attached file measures this quantity."
+          }
+        ],
+        "summary": "14 findings scored, 2 assessed. 2 supported, 0 discrepant. 1 reason shared by several findings is stated once.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -6670,6 +7728,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_applicable",
       "status_label": "Not applicable",
@@ -6679,8 +7738,118 @@
       "title": "Validation Scorecard",
       "total_count": 0,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 0,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 0,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 1,
+            "claims": 1,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 1,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 1,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 1,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 1,
+            "unresolved": 0
+          },
+          {
+            "available": 1,
+            "claims": 1,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 technical, not scored",
+            "tone": null
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1"
+            ],
+            "key": "excluded",
+            "label": "Not scored: technical prerequisites and descriptive checks"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "0 findings scored, 0 assessed.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -7031,6 +8200,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "not_established",
       "status_label": "Scope not established",
@@ -7040,6 +8210,7 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [
         {
           "description": "Loss of the gene deregulates hundreds of genes",
@@ -7048,6 +8219,82 @@
         }
       ],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "2 consistency checks",
+            "tone": null
+          },
+          {
+            "label": "2 agree",
+            "tone": "ok"
+          },
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 0,
+            "unresolved": 2
+          }
+        ],
+        "summary": "This run checks claim 1 by Reanalysis of processed data. 2 consistency checks against the authors' results: 2 agree."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 limitation",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "The importance of F1 is not established: its quote is not in the paper's text.",
+        "ungrouped_claims": [
+          0,
+          1
+        ]
+      }
     },
     "selection": {
       "check": "processed_reanalysis",
@@ -7234,6 +8481,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "pending",
       "status_label": null,
@@ -7243,8 +8491,63 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "The findings are being established.",
+        "ungrouped_claims": [
+          0
+        ]
+      }
     },
     "selection": null,
     "selection_history": [],
@@ -7601,6 +8904,7 @@
       "scope_label": "1 / 2 assessed (provisional)",
       "score": 100.0,
       "score_label": "100 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -7671,8 +8975,131 @@
           "weight": null
         }
       ],
+      "units": [
+        {
+          "count": 1,
+          "key": "findings_conclusive",
+          "label": "finding conclusive"
+        },
+        {
+          "count": 1,
+          "key": "findings_inconclusive",
+          "label": "finding inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 importance not established",
+            "tone": "warn"
+          },
+          {
+            "label": "1 supported",
+            "tone": "ok"
+          },
+          {
+            "label": "1 not attempted",
+            "tone": null
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1",
+              "F2"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "2 findings scored, 1 assessed. 1 supported, 0 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -8036,6 +9463,7 @@
       "scope_label": "0 / 1 assessed",
       "score": null,
       "score_label": null,
+      "score_note": "No finding has a conclusive assessment yet",
       "score_status_label": null,
       "status": "not_assessed",
       "status_label": null,
@@ -8105,8 +9533,110 @@
           "weight": 2
         }
       ],
+      "units": [
+        {
+          "count": 0,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 1,
+          "key": "findings_inconclusive",
+          "label": "finding inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "2 consistency checks",
+            "tone": null
+          },
+          {
+            "label": "2 agree",
+            "tone": "ok"
+          },
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 0,
+            "unresolved": 2
+          }
+        ],
+        "summary": "This run checks claim 1 by Reanalysis of processed data. 2 consistency checks against the authors' results: 2 agree."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 limitation",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 unresolved",
+            "tone": "warn"
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "1 finding scored, 0 assessed.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": "processed_reanalysis",
@@ -8644,6 +10174,7 @@
       "scope_label": "1 / 1 assessed",
       "score": 100.0,
       "score_label": "100 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -8653,8 +10184,106 @@
       "title": "Validation Scorecard",
       "total_count": 1,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 1,
+          "key": "findings_conclusive",
+          "label": "finding conclusive"
+        },
+        {
+          "count": 0,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "2 consistency checks",
+            "tone": null
+          },
+          {
+            "label": "1 agree",
+            "tone": "ok"
+          },
+          {
+            "label": "1 differ",
+            "tone": "bad"
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 0,
+            "unresolved": 2
+          }
+        ],
+        "summary": "This run checks claim 1 by Reanalysis of processed data. 2 consistency checks against the authors' results: 1 agree, 1 differ."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 supported",
+            "tone": "ok"
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1"
+            ],
+            "key": "e1",
+            "label": "Experiment e1: bulk RNA-seq (nf-core/rnaseq)"
+          }
+        ],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "1 finding scored, 1 assessed. 1 supported, 0 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": "processed_reanalysis",
@@ -9080,6 +10709,7 @@
       "scope_label": "2 / 2 assessed (provisional)",
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": "Score pending importance review",
       "status": "scored",
       "status_label": null,
@@ -9089,8 +10719,133 @@
       "title": "Validation Scorecard",
       "total_count": 2,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 2,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 0,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 2,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 2,
+            "unresolved": 0
+          },
+          {
+            "available": 2,
+            "claims": 2,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "1 importance not established",
+            "tone": "warn"
+          },
+          {
+            "label": "1 supported",
+            "tone": "ok"
+          },
+          {
+            "label": "1 discrepant",
+            "tone": "bad"
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F1",
+              "F2"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [
+          "F2"
+        ],
+        "shared_reasons": [],
+        "summary": "2 findings scored, 2 assessed. 1 supported, 1 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -9931,6 +11686,7 @@
       "scope_label": "5 / 5 assessed",
       "score": 66.66666666666667,
       "score_label": "67 / 100",
+      "score_note": null,
       "score_status_label": null,
       "status": "scored",
       "status_label": null,
@@ -9940,8 +11696,136 @@
       "title": "Validation Scorecard",
       "total_count": 5,
       "unassessed_items": [],
+      "units": [
+        {
+          "count": 5,
+          "key": "findings_conclusive",
+          "label": "findings conclusive"
+        },
+        {
+          "count": 0,
+          "key": "findings_inconclusive",
+          "label": "findings inconclusive"
+        }
+      ],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [
+          {
+            "available": 5,
+            "claims": 5,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 0,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 5,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 5,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 5,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 5,
+            "unresolved": 0
+          },
+          {
+            "available": 5,
+            "claims": 5,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 0,
+            "unresolved": 0
+          }
+        ],
+        "summary": "No claim is checked by this run: no claim can be checked on the requested route."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "The paper names no deposit, supplement or code.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [
+          {
+            "label": "1 primary",
+            "tone": null
+          },
+          {
+            "label": "4 supporting",
+            "tone": null
+          },
+          {
+            "label": "4 supported",
+            "tone": "ok"
+          },
+          {
+            "label": "1 discrepant",
+            "tone": "bad"
+          }
+        ],
+        "groups": [
+          {
+            "finding_ids": [
+              "F5",
+              "F1",
+              "F2",
+              "F3",
+              "F4"
+            ],
+            "key": "none",
+            "label": "Not linked to an experiment"
+          }
+        ],
+        "open": [
+          "F5"
+        ],
+        "shared_reasons": [],
+        "summary": "5 findings scored, 5 assessed. 4 supported, 1 discrepant.",
+        "ungrouped_claims": []
+      }
     },
     "selection": {
       "check": null,
@@ -10501,6 +12385,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "unavailable",
       "status_label": "Score unavailable for this historical report.",
@@ -10510,8 +12395,122 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "1 consistency check",
+            "tone": null
+          },
+          {
+            "label": "1 unresolved",
+            "tone": "warn"
+          }
+        ],
+        "rows": [
+          {
+            "available": 0,
+            "claims": 3,
+            "key": "qc_metric",
+            "label": "QC metric comparison",
+            "unavailable": 3,
+            "unresolved": 0
+          },
+          {
+            "available": 2,
+            "claims": 3,
+            "key": "author_results",
+            "label": "Consistency with the authors' results",
+            "unavailable": 1,
+            "unresolved": 0
+          },
+          {
+            "available": 0,
+            "claims": 3,
+            "key": "processed_reanalysis",
+            "label": "Reanalysis of processed data",
+            "unavailable": 1,
+            "unresolved": 2
+          },
+          {
+            "available": 0,
+            "claims": 3,
+            "key": "raw_reanalysis",
+            "label": "Reanalysis from raw reads",
+            "unavailable": 3,
+            "unresolved": 0
+          }
+        ],
+        "summary": "This run checks claim 2 by Reanalysis of processed data on nf-core/rnaseq. 1 consistency check against the authors' results: 1 unresolved."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "1 deposit",
+            "tone": null
+          },
+          {
+            "label": "1 readable",
+            "tone": "ok"
+          },
+          {
+            "label": "1 without an adapter",
+            "tone": null
+          },
+          {
+            "label": "no code",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "2 resources: 1 deposit (1 bioAF reads), 1 bioAF has no adapter for. No code is linked.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": [
+            {
+              "archive": "pride",
+              "identifier": "PXD099001",
+              "limitation": "bioAF has no PRIDE adapter, and no check reads proteomics data",
+              "link": "https://www.ebi.ac.uk/pride/archive/projects/PXD099001",
+              "type": "proteomics_data"
+            }
+          ]
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "Score unavailable for this historical report.",
+        "ungrouped_claims": [
+          0,
+          1,
+          2
+        ]
+      }
     },
     "selection": {
       "check": "processed_reanalysis",
@@ -11243,6 +13242,7 @@
       "scope_label": null,
       "score": null,
       "score_label": null,
+      "score_note": null,
       "score_status_label": null,
       "status": "unavailable",
       "status_label": "Score unavailable for this historical report.",
@@ -11252,8 +13252,78 @@
       "title": "Validation Scorecard",
       "total_count": null,
       "unassessed_items": [],
+      "units": [],
       "unresolved_importance": [],
       "version": 1
+    },
+    "sections": {
+      "checks": {
+        "counts": [
+          {
+            "label": "Comparisons not performed",
+            "tone": null
+          }
+        ],
+        "rows": [],
+        "summary": "No check has run."
+      },
+      "data": {
+        "counts": [
+          {
+            "label": "0 of 4 attachments retrieved",
+            "tone": null
+          },
+          {
+            "label": "1 code source",
+            "tone": null
+          }
+        ],
+        "sample_records": [],
+        "summary": "0 of 4 attachments retrieved. 1 code source.",
+        "unsupported": {
+          "note": "bioAF has no adapter for these, and no check reads them; they are listed, not held against the paper.",
+          "resources": []
+        }
+      },
+      "diagnostics": {
+        "checks": [],
+        "counts": [
+          {
+            "label": "0 check records",
+            "tone": null
+          },
+          {
+            "label": "0 errors",
+            "tone": null
+          },
+          {
+            "label": "1 limitation",
+            "tone": null
+          },
+          {
+            "label": "0 issues",
+            "tone": null
+          }
+        ],
+        "summary": "0 check records; 0 errors; 0 issues recorded."
+      },
+      "findings": {
+        "counts": [],
+        "groups": [],
+        "open": [],
+        "shared_reasons": [],
+        "summary": "Score unavailable for this historical report.",
+        "ungrouped_claims": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ]
+      }
     },
     "selection": null,
     "selection_history": [],
