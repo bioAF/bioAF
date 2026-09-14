@@ -863,11 +863,20 @@ class ValidationDriverService:
                         await assert_held(session, claim)
                         await session.commit()
 
-                    ran += await consistency.run_pending(
+                    concluded = await consistency.run_pending(
                         session, study, plan, fetcher=fetcher, max_checks=per_study, checkpoint=checkpoint
                     )
+                    ran += concluded
                     await assert_held(session, claim)
                     await session.commit()
+                    if concluded and study.state == "classified":
+                        # plan_8_2 section 1.4: a concluded study's scorecard follows its checks, rebuilt
+                        # from what was just committed, the record it replaces kept in history.
+                        from app.services.validation_report_summary import record_scorecard
+
+                        await record_scorecard(session, study, reason="a contributing check completed", force=False)
+                        await assert_held(session, claim)
+                        await session.commit()
                     served += 1
             except Exception:
                 logger.exception("validation study %d: consistency checks failed", study_id)

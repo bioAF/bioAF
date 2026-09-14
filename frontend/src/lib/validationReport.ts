@@ -291,6 +291,16 @@ export interface CompactScorecard {
   depth_label?: string | null;
   independent_count?: number | null;
   consistency_count?: number | null;
+  // plan_8_2 section 1.4: the study's checks by what the queue is doing with them. Checks, never findings.
+  activity?: CheckActivity | null;
+}
+
+export interface CheckActivity {
+  counts: { pending: number; retrying: number; running: number; done: number; unresolved: number; blocked: number };
+  completed: number;
+  total: number;
+  under_way: number;
+  label: string | null;
 }
 
 export interface ValidationScorecardData extends CompactScorecard {

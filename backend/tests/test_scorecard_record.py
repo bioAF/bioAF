@@ -41,13 +41,13 @@ async def test_concluding_a_study_records_its_outcomes_and_their_revisions(sessi
 
 
 @pytest.mark.asyncio
-async def test_the_report_reads_the_record_while_its_revisions_hold(session, admin_user):
+async def test_the_report_reads_the_record_while_its_revisions_hold(session, admin_user, monkeypatch):
     study = await _conclude(session, admin_user)
-    # The comparison evidence goes away; a concluded study's score does not move with it.
-    evidence = dict(study.evidence_json)
-    evidence.pop("classification_result")
-    study.evidence_json = evidence
-    await session.flush()
+    # plan_8_2 section 1.4 (flagged change): removing evidence is now an evidence change, which rebuilds the
+    # record. A change to how the same evidence is normalized is what must not move a concluded score.
+    from app.services import validation_finding_outcomes
+
+    monkeypatch.setattr(validation_finding_outcomes, "finding_outcomes", lambda *a, **k: {})
     card = (await report_summary_for(session, study, admin_user.organization_id))["scorecard"]
     assert card["score_label"] == "67 / 100"
     assert card["outcomes_recorded_at"] == study.evidence_json["scorecard_record"]["at"]
@@ -92,4 +92,7 @@ async def test_concluding_again_keeps_the_record_it_replaces(session, admin_user
         session, study.id, admin_user.organization_id, admin_user.id, "classified", classification="inconclusive"
     )
     await session.flush()
-    assert study.evidence_json["scorecard_history"] == [first]
+    # plan_8_2 section 1.4 (flagged change): a history entry also says when and why it was superseded.
+    (entry,) = study.evidence_json["scorecard_history"]
+    assert {k: v for k, v in entry.items() if k not in ("superseded_at", "superseded_because")} == first
+    assert entry["superseded_because"] == "the study concluded"

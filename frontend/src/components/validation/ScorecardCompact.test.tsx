@@ -32,3 +32,15 @@ test("the list shows the depth beside the scope under version 2", () => {
   expect(screen.getByText("1 / 1 assessed")).toBeInTheDocument();
   expect(screen.getByText("1 consistency only; 0 independently assessed")).toBeInTheDocument();
 });
+
+// plan_8_2 section 1.4: a concluded study's checks still under way, in the report's own words.
+test("the list shows the checks still under way beside a concluded study's score", () => {
+  const card = contract.scorecard_checks_under_way.scorecard as unknown as CompactScorecard;
+  render(<ScorecardCompact scorecard={card} />);
+  expect(screen.getByText("1 check pending; 1 check retrying; 1 check could not conclude")).toBeInTheDocument();
+});
+
+test("a card whose checks are all settled shows no activity line", () => {
+  render(<ScorecardCompact scorecard={contract.scorecard_samd1_v2.scorecard as unknown as CompactScorecard} />);
+  expect(screen.queryByText(/check pending|checks pending/)).not.toBeInTheDocument();
+});

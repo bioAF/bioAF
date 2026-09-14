@@ -573,6 +573,8 @@ _COMPACT_KEYS = (
     "reason",
     "cause",
     "cause_label",
+    # plan_8_2 section 1.4: the checks still under way, the same words the report shows.
+    "activity",
     # plan_8_1 section 4.5: the list shows the fraction and the number independently assessed.
     "depth_label",
     "independent_count",

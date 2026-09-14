@@ -281,3 +281,19 @@ describe("weighted rubric version 2", () => {
     expect(screen.queryByTestId("scorecard-resource-statements")).not.toBeInTheDocument();
   });
 });
+
+// plan_8_2 section 1.4: pending, retrying and terminal unresolved checks are told apart, beside the score.
+describe("the checks under way", () => {
+  it("states each kind of check activity with its count, as checks and never as findings", () => {
+    render(<ValidationScorecard scorecard={card("scorecard_checks_under_way")} />);
+    expect(screen.getByTestId("scorecard-activity")).toHaveTextContent(
+      "1 check pending; 1 check retrying; 1 check could not conclude",
+    );
+    expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("1 / 1 assessed");
+  });
+
+  it("shows no activity line when no check is recorded", () => {
+    render(<ValidationScorecard scorecard={card("scorecard_scored")} />);
+    expect(screen.queryByTestId("scorecard-activity")).not.toBeInTheDocument();
+  });
+});

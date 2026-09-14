@@ -237,10 +237,46 @@ async def _contract() -> dict:
         targets=samd1_v2_targets,
         issues=[],
     )
+
+    # plan_8_2 section 1.4: a concluded study whose checks are still under way (one pending, one retrying,
+    # one that could not conclude). The records are the queue's own shape.
+    def _check(n: int, state: str, retries: int, outcome=None, terminal=None) -> dict:
+        return {
+            "check_id": f"plan:1:claim:{9000 + n}:author_results",
+            "kind": "author_results",
+            "comparison_target_id": 9000 + n,
+            "revision": 1,
+            "state": state,
+            "retry_count": retries,
+            "terminal_reason": terminal,
+            "outcome": outcome,
+            "outcome_revision": 1 if outcome else 0,
+            "dependencies": {},
+        }
+
+    under_way = summarize(
+        study={"state": "classified", "classification": "inconclusive"},
+        evidence=samd1_v2_evidence,
+        plan=samd1_v2_plan,
+        targets=samd1_v2_targets,
+        issues=[],
+        checks=[
+            _check(1, "pending", 0),
+            _check(2, "pending", 1),
+            _check(
+                3,
+                "unresolved",
+                3,
+                {"outcome": "unresolved", "reason": "the authors' table could not be retrieved in 3 attempts"},
+                "retries_exhausted",
+            ),
+        ],
+    )
     return json.loads(
         json.dumps(
             {
                 "enums": enum_labels(),
+                "scorecard_checks_under_way": under_way,
                 "scorecard_samd1_v2": samd1_v2,
                 "stage2_selection": stage2,
                 "groff_failed": groff,
