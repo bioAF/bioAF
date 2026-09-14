@@ -20,8 +20,6 @@ indistinguishable from a paper that deposited nothing. Refusing by name is the h
 
 from __future__ import annotations
 
-import gzip
-import io
 import logging
 
 logger = logging.getLogger("bioaf.deposit_acquisition")
@@ -41,8 +39,12 @@ class UnreadableDepositError(Exception):
 
     Carries the FILENAME and the format, because this reaches a scientist at the C1 gate and
     "GSE213770_DMR.xls.gz is a legacy Excel file bioAF cannot read" is actionable where "could not
-    parse" is not.
+    parse" is not. ``decoded`` is the shared decoder's account of the failure, with its provenance.
     """
+
+    def __init__(self, message: str, *, decoded=None):
+        super().__init__(message)
+        self.decoded = decoded
 
 
 class DepositTooLargeError(Exception):
@@ -53,8 +55,11 @@ def sniff_format(data: bytes) -> str:
     """What this payload actually is: ``gzip``, ``xlsx``, ``xls``, ``text`` or ``binary``.
 
     From the magic bytes. Depositors mislabel in both directions (a BIFF file named `.xls.gz`, a TSV
-    named `.xls`), so the extension is a hint and the bytes are the evidence.
+    named `.xls`), so the extension is a hint and the bytes are the evidence. plan_8_2 section 1.2: a
+    byte-order mark names the text's encoding, so UTF-16 and UTF-32 tables are text, never binary.
     """
+    from app.services.table_decoding import _MARKS
+
     if not data:
         return "binary"
     if data.startswith(_GZIP_MAGIC):
@@ -63,6 +68,8 @@ def sniff_format(data: bytes) -> str:
         return "xls"
     if data.startswith(_ZIP_MAGIC):
         return "xlsx"
+    if any(data.startswith(mark) for mark, _encoding in _MARKS):
+        return "text"
     # A table is text. Decode strictly rather than with errors="replace": the whole point is to
     # notice binary rather than turn it into plausible-looking nonsense.
     try:
@@ -73,88 +80,47 @@ def sniff_format(data: bytes) -> str:
 
 
 def _xls_to_tsv(data: bytes, filename: str) -> str:
-    """First worksheet of a legacy BIFF .xls as TSV.
-
-    xlrd 2.x reads ONLY .xls: it deliberately dropped .xlsx support, which makes it the exact
-    complement of openpyxl rather than an alternative to it. GSE213770's differential-methylation
-    table is one of these, and until xlrd was added it was refused by name.
-    """
-    import xlrd
+    """First worksheet of a legacy BIFF .xls as TSV (``table_decoding.xls_to_tsv``)."""
+    from app.services.table_decoding import WorkbookError, xls_to_tsv
 
     try:
-        book = xlrd.open_workbook(file_contents=data)
-    except Exception as exc:  # noqa: BLE001 - a corrupt workbook is a deposit problem, not a crash
-        raise UnreadableDepositError(f"{filename} is a legacy Excel file that could not be opened: {exc}") from exc
-
-    if not book.nsheets:
-        raise UnreadableDepositError(f"{filename} is a legacy Excel file with no worksheets")
-    sheet = book.sheet_by_index(0)
-
-    lines: list[str] = []
-    for r in range(sheet.nrows):
-        cells = []
-        for value in sheet.row_values(r):
-            # xlrd returns every number as a float, so an integer count would render as "5.0" and
-            # step 6 would measure the matrix as normalized rather than as counts. Integral floats
-            # are written back as integers for exactly that reason.
-            if isinstance(value, float) and value.is_integer():
-                cells.append(str(int(value)))
-            else:
-                cells.append("" if value is None else str(value))
-        if any(c.strip() for c in cells):
-            lines.append("\t".join(cells))
-    if not lines:
-        raise UnreadableDepositError(f"{filename} is a legacy Excel file with no rows")
-    return "\n".join(lines) + "\n"
+        return xls_to_tsv(data, filename)
+    except WorkbookError as exc:
+        raise UnreadableDepositError(str(exc)) from exc
 
 
 def _xlsx_to_tsv(data: bytes, filename: str) -> str:
-    """First worksheet of an .xlsx as TSV. openpyxl is already a dependency (requirements.txt)."""
-    from openpyxl import load_workbook
+    """First worksheet of an .xlsx as TSV (``table_decoding.xlsx_to_tsv``)."""
+    from app.services.table_decoding import WorkbookError, xlsx_to_tsv
 
     try:
-        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-    except Exception as exc:  # noqa: BLE001 - a corrupt workbook is a deposit problem, not a crash
-        raise UnreadableDepositError(f"{filename} is an Excel file that could not be opened: {exc}") from exc
-
-    ws = wb.worksheets[0] if wb.worksheets else None
-    if ws is None:
-        raise UnreadableDepositError(f"{filename} is an Excel file with no worksheets")
-
-    lines: list[str] = []
-    for row in ws.iter_rows(values_only=True):
-        if row is None:
-            continue
-        cells = ["" if c is None else str(c) for c in row]
-        if any(c.strip() for c in cells):
-            lines.append("\t".join(cells))
-    if not lines:
-        raise UnreadableDepositError(f"{filename} is an Excel file with no rows")
-    return "\n".join(lines) + "\n"
+        return xlsx_to_tsv(data, filename)
+    except WorkbookError as exc:
+        raise UnreadableDepositError(str(exc)) from exc
 
 
 def decode_deposit(filename: str, raw: bytes) -> tuple[str, str]:
     """Turn a downloaded deposit file into (text, format), or refuse with a reason.
 
-    Gunzips first, because a `.gz` wrapper hides the real format underneath and that is exactly how
-    a BIFF spreadsheet came to be read as text.
+    plan_8_2 section 1.2: the one decoder every consumer shares (``table_decoding.decode_table``).
+    Compression first, because a `.gz` wrapper hides the real format underneath and that is exactly how
+    a BIFF spreadsheet came to be read as text; then a byte-order mark; then strict UTF-8.
     """
-    data = raw
-    fmt = sniff_format(data)
-    if fmt == "gzip":
-        try:
-            data = gzip.decompress(data)
-        except Exception as exc:  # noqa: BLE001
-            raise UnreadableDepositError(f"{filename} could not be decompressed: {exc}") from exc
-        fmt = sniff_format(data)
+    decoded = decode_deposit_table(filename, raw)
+    return decoded.text, decoded.format
 
-    if fmt == "text":
-        return data.decode("utf-8", errors="replace"), "text"
-    if fmt == "xlsx":
-        return _xlsx_to_tsv(data, filename), "xlsx"
-    if fmt == "xls":
-        return _xls_to_tsv(data, filename), "xls"
-    raise UnreadableDepositError(f"{filename} is not a readable table (format looks binary)")
+
+def decode_deposit_table(filename: str, raw: bytes):
+    """The decoded table with its provenance. A payload past the decompression limit raises
+    ``DepositTooLargeError``; any other failure ``UnreadableDepositError`` naming the file and why."""
+    from app.services.table_decoding import TOO_LARGE, decode_table
+
+    decoded = decode_table(raw, filename)
+    if not decoded.ok:
+        if decoded.reason_kind == TOO_LARGE:
+            raise DepositTooLargeError(decoded.reason)
+        raise UnreadableDepositError(decoded.reason, decoded=decoded)
+    return decoded
 
 
 def total_download_bytes(entries) -> int | None:

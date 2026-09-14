@@ -1571,9 +1571,20 @@ class ValidationDriverService:
                     resource=filename,
                     location=url,
                 )
+            # plan_8_2 section 1.2: the one decoder every consumer shares, recording what it decoded from.
             try:
-                text, fmt = deposit_acquisition.decode_deposit(filename, raw)
+                decoded = deposit_acquisition.decode_deposit_table(filename, raw)
             except deposit_acquisition.UnreadableDepositError as exc:
+                if artifact_type == "deposited_result_table":
+                    # The table arrived and could not be interpreted. That costs the comparison its
+                    # ground truth and never the matrix acquired beside it.
+                    evidence["author_table_failed"] = {
+                        "filename": filename,
+                        "reason": str(exc),
+                        "arrived": True,
+                        "decoding": exc.decoded.provenance() if exc.decoded is not None else None,
+                    }
+                    continue
                 return await ValidationDriverService._hold_deposit(
                     session, study, evidence, str(exc), cause=INPUT_UNREADABLE, resource=filename
                 )
@@ -1581,6 +1592,7 @@ class ValidationDriverService:
                 return await ValidationDriverService._hold_deposit(
                     session, study, evidence, str(exc), cause=RESOURCE_LIMIT, resource=filename
                 )
+            text, fmt = decoded.text, decoded.format
 
             # Stored DECODED, so step 8's notebook reads a table rather than re-deriving the format
             # from magic bytes inside R.
@@ -1615,6 +1627,7 @@ class ValidationDriverService:
                     "bytes": len(raw),
                     "format": fmt,
                     "artifact_type": artifact_type,
+                    "decoding": decoded.provenance(),
                 }
             )
 

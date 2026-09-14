@@ -20,13 +20,19 @@ name, count, cutoff or sample label from it may reach production behaviour.
 - `normalized_counts_header.tsv`: the header row of `GSE144396_RNA-Seq_NormalizedCounts.txt.gz` as
   study 37's inspection recorded it (an unnamed index column, then `WT-1` .. `WT-4`, `KO Cl5 repl1`,
   `KO Cl5 repl2`, `KO Cl16`, `KO Cl33`).
+- `GSE144396_RNA-Seq_DeSeq2.txt.gz`: the deposited undifferentiated author table, byte for byte as GEO
+  serves it (downloaded 2026-09-14, sha256 `4692db0a730dd34427035a29df70b89e5c0ffd05b2d0b12df7611b7a1535a6d9`).
+  gzip-compressed UTF-16 little-endian with a byte-order mark and CRLF line ends: seven named columns
+  and 31,067 rows. plan_8_2 section 1.2's decoding regression: acquisition called it binary, and the
+  consistency worker decoded it as UTF-8 into NUL characters that PostgreSQL rejected (study 44).
 
 ## Bounds
 
 - No paper text: the kept passages, the reconciliation revisions and the pre-compute checks' reasoning
   are left out.
 - No people: requester and approver are left out.
-- No deposited data: tests that need matrix values synthesize them under the real header, and say so.
+- Deposited data only where a decoding regression needs the real bytes (the author table above); tests
+  that need matrix values synthesize them under the real header, and say so.
 
 ## What is not here yet
 

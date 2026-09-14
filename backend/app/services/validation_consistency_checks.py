@@ -24,9 +24,9 @@ from __future__ import annotations
 import logging
 import re
 import time
-import zlib
 
 from app.services import validation_check_queue as queue
+from app.services.table_decoding import TOO_LARGE, decode_table
 
 logger = logging.getLogger("bioaf.validation_consistency_checks")
 
@@ -196,16 +196,6 @@ async def enqueue(session, study, plan) -> list:
     return records
 
 
-def _decompress(blob: bytes, name: str, limit: int) -> bytes:
-    if blob[:2] == b"\x1f\x8b" or str(name).endswith(".gz"):
-        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
-        out = decompressor.decompress(blob, limit + 1)
-        if len(out) > limit or decompressor.unconsumed_tail:
-            raise OverflowError("decompressed")
-        return out
-    return blob
-
-
 def _spent(records) -> tuple[int, float]:
     """Bytes downloaded and seconds spent by this study's checks before approval, from their attempts."""
     seen: dict[str, int] = {}
@@ -346,26 +336,21 @@ async def run_pending(session, study, plan, *, fetcher=None, limits: dict | None
                 )
                 concluded += 1
                 continue
-            try:
-                texts[url] = _decompress(blob, table.get("name") or "", limits["decompressed_bytes"]).decode(
-                    "utf-8", errors="replace"
-                )
-            except OverflowError:
-                await queue.finish(
-                    session, record, state=queue.UNRESOLVED, outcome={"outcome": "unresolved", "reason": LIMIT_REASON}
-                )
-                concluded += 1
-                continue
-            except (OSError, EOFError, zlib.error) as exc:
+            # plan_8_2 section 1.2: the decoder acquisition and supplement inspection use. A table that
+            # arrived and could not be interpreted is unresolved and says so; nothing is replaced.
+            decoded = decode_table(blob, table.get("name") or "", max_decompressed_bytes=limits["decompressed_bytes"])
+            _note_attempt(record, decoding=decoded.provenance())
+            if not decoded.ok:
+                reason = LIMIT_REASON if decoded.reason_kind == TOO_LARGE else decoded.reason
                 await queue.finish(
                     session,
                     record,
                     state=queue.UNRESOLVED,
-                    outcome={"outcome": "unresolved", "reason": "the authors' table arrived but could not be opened"},
-                    error=str(exc)[:300],
+                    outcome={"outcome": "unresolved", "reason": reason, "decoding": decoded.provenance()},
                 )
                 concluded += 1
                 continue
+            texts[url] = decoded.text
         else:
             await queue.start(session, record, url=url, shared_download=True)
         result = check_claim(

@@ -488,11 +488,16 @@ def classify_supplement(filename: str, blob: bytes) -> str:
 
 
 def _decode(blob: bytes) -> str | None:
-    try:
-        text = blob.decode("utf-8")
-    except (UnicodeDecodeError, AttributeError):
+    """plan_8_2 section 1.2: the one decoder acquisition and consistency use (compression, a byte-order
+    mark, then strict UTF-8), so a supplement is the same table whichever of them reads it."""
+    from app.services.table_decoding import decode_table
+
+    if not isinstance(blob, (bytes, bytearray)):
         return None
-    return text if text.strip() else None
+    decoded = decode_table(bytes(blob))
+    if not decoded.ok or decoded.format != "text":
+        return None
+    return decoded.text if decoded.text.strip() else None
 
 
 def _looks_like_code(text: str) -> bool:

@@ -364,11 +364,26 @@ def check_claim(
 
 def supplement_consistency(blob: bytes, filename: str, predicates: list[dict]) -> list[dict]:
     """Each claim checked against one results supplement while its bytes are in hand. The rows are
-    never kept: the record holds counts, the columns used and the outcome. Never raises."""
-    try:
-        text = blob.decode("utf-8")
-    except (UnicodeDecodeError, AttributeError):
-        return []
+    never kept: the record holds counts, the columns used and the outcome. Never raises.
+
+    plan_8_2 section 1.2: decoded by the shared decoder. A table that arrived and could not be
+    interpreted gives each claim an unresolved record saying so, with the decoding's provenance."""
+    from app.services.table_decoding import decode_table
+
+    decoded = decode_table(blob if isinstance(blob, (bytes, bytearray)) else b"", filename)
+    if not decoded.ok:
+        return [
+            {
+                "table": filename,
+                "source": "supplement",
+                "outcome": UNRESOLVED,
+                "reason": decoded.reason,
+                "decoding": decoded.provenance(),
+                "claim_index": item.get("claim_index"),
+            }
+            for item in predicates or []
+        ]
+    text = decoded.text
     records = []
     for item in predicates or []:
         try:
@@ -382,7 +397,7 @@ def supplement_consistency(blob: bytes, filename: str, predicates: list[dict]) -
         except Exception:  # noqa: BLE001 - one unreadable table never costs the inventory
             continue
         record.pop("predicate", None)
-        records.append({**record, "claim_index": item.get("claim_index")})
+        records.append({**record, "decoding": decoded.provenance(), "claim_index": item.get("claim_index")})
     return records
 
 
