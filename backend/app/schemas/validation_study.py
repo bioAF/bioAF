@@ -38,6 +38,20 @@ class RecoveryRequest(BaseModel):
     preview_fingerprint: str | None = None
 
 
+class TableConfirmationRequest(BaseModel):
+    """plan_8_2 section 3.1: how one of the study's tables reads for one contrast, and the evidence for it.
+    ``columns`` maps a role (``id``, ``lfc``, ``pvalue``, ``padj``) to a column number counting from 0."""
+
+    table: str
+    contrast: str
+    reports_contrast: bool = False
+    columns: dict[str, int] | None = None
+    effect_scale: str | None = None
+    orientation: str | None = None
+    selected_list: bool = False
+    note: str = ""
+
+
 class DeclineRequest(BaseModel):
     reason: str | None = None
 

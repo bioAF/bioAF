@@ -144,6 +144,16 @@ export interface ClaimConsistency {
   // plan_8_2 section 3.2: a count of the authors' published list, and the passage naming the file as the list.
   method?: string | null;
   list?: ClaimList | null;
+  // plan_8_2 section 3.1: the reading the comparison applied, and what each column of an unread table could be.
+  interpretation?: {
+    source: string | null;
+    version: number | null;
+    columns: Record<string, string | null>;
+    effect_scale: string | null;
+    evidence: string[];
+  } | null;
+  candidate_roles?: Partial<Record<"id" | "lfc" | "pvalue" | "padj", number[]>> | null;
+  columns_count?: number | null;
 }
 
 export interface ClaimList {

@@ -336,7 +336,11 @@ export default function ValidationStudyPage() {
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
               What this run checks
             </h2>
-            <ClaimSelection summary={summary} />
+            <ClaimSelection
+              summary={summary}
+              studyId={study.id}
+              onChanged={(updated) => setStudy(updated as ValidationStudy)}
+            />
           </section>
         )}
 

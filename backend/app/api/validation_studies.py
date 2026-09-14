@@ -34,6 +34,7 @@ from app.schemas.validation_study import (
     ReadRequest,
     RecoveryRequest,
     ReproductionPlanResponse,
+    TableConfirmationRequest,
     SampleManifestResponse,
     ValidationStudyRequest,
     ValidationStudyResponse,
@@ -434,6 +435,104 @@ async def run_recovery(
         await session.commit()
     response = await _study_response(session, study, org_id)
     return {"recovery": result, **response.model_dump(mode="json")}
+
+
+@router.post("/{study_id}/table-confirmations")
+async def record_table_confirmation(
+    study_id: int,
+    data: TableConfirmationRequest,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """plan_8_2 section 3.1: record how one of the study's tables reads for one contrast (that it reports the
+    contrast, its column roles, effect scale, orientation, or that it is the claim's complete list), with the
+    evidence it rests on. Re-evaluates only that contrast's checks. 422 for a table or contrast the study
+    does not have, or a confirmation that states no evidence; 409 while the study is being read or held."""
+    from app.services.validation_assessment import active_plan
+    from app.services.validation_consistency_checks import candidate_tables
+    from app.services.validation_ownership import owned
+    from app.services.validation_table_confirmations import (
+        ConfirmationRefused,
+        confirmation_entry,
+        record_confirmation,
+    )
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    async with owned(session, study.id, holder="api") as own:
+        if own is None:
+            raise HTTPException(409, "Another worker is working on this study. Try again when it finishes.")
+        await session.refresh(study)
+        if study.state in ("requested", "acquiring_text", "reading"):
+            raise HTTPException(409, "The study is being read. Record the confirmation once the read has finished.")
+        plan = await active_plan(session, study)
+        contrasts = [c for c in ((plan.differential_design_json or {}) if plan else {}).get("contrasts") or []]
+        position = next(
+            (i for i, c in enumerate(contrasts) if isinstance(c, dict) and c.get("name") == data.contrast), None
+        )
+        if plan is None or position is None:
+            raise HTTPException(422, "This study has no contrast by that name.")
+        evidence = study.evidence_json or {}
+        experiment = next(
+            (
+                e
+                for e in plan.reported_experiments_json or []
+                if isinstance(e, dict) and e.get("id") == contrasts[position].get("reported_experiment_id")
+            ),
+            None,
+        )
+        tables = candidate_tables(
+            {"contrast_index": position},
+            experiment=experiment,
+            resources=[r for r in plan.resources_json or [] if isinstance(r, dict)],
+            deposits=[d for d in (evidence.get("capabilities") or {}).get("deposits") or [] if isinstance(d, dict)],
+            supplements=[s for s in evidence.get("supplements") or [] if isinstance(s, dict)],
+        )
+        if data.table not in {t.get("name") for t in tables}:
+            raise HTTPException(422, "This study lists no results table by that name for the contrast.")
+        try:
+            entry = confirmation_entry(
+                table=data.table,
+                contrast=data.contrast,
+                reports_contrast=data.reports_contrast,
+                columns=data.columns,
+                effect_scale=data.effect_scale,
+                orientation=data.orientation,
+                selected_list=data.selected_list,
+                note=data.note,
+                confirmed_by=str(current_user.get("email") or f"user {user_id}"),
+                at=datetime.now(timezone.utc).isoformat(),
+            )
+        except ConfirmationRefused as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await record_confirmation(
+            session, study, plan, entry, reason=f"a person recorded how {data.table} reads for {data.contrast}"
+        )
+        await log_action(
+            session,
+            user_id,
+            "validation_study",
+            study.id,
+            "table_confirmation",
+            details={
+                k: entry[k]
+                for k in (
+                    "table",
+                    "contrast",
+                    "reports_contrast",
+                    "columns",
+                    "effect_scale",
+                    "orientation",
+                    "selected_list",
+                    "note",
+                    "version",
+                )
+            },
+        )
+        await session.commit()
+    response = await _study_response(session, study, org_id)
+    return {"confirmation": entry, **response.model_dump(mode="json")}
 
 
 @router.put("/{study_id}/differential-design", response_model=ValidationStudyResponse)

@@ -893,6 +893,11 @@ def _consistency_row(record: dict) -> dict:
         "assumptions": record.get("assumptions") or [],
         "binding": _binding_view(record.get("binding")),
         "superseded": None,
+        # plan_8_2 section 3.1: the reading the comparison applied and what establishes it, and for a table
+        # whose columns are not established, what each could be, so a person can record how it reads.
+        "interpretation": _interpretation_row(record.get("interpretation")),
+        "candidate_roles": record.get("candidate_roles"),
+        "columns_count": record.get("columns_count"),
     }
     superseded = record.get("superseded")
     if isinstance(superseded, dict):
@@ -900,6 +905,18 @@ def _consistency_row(record: dict) -> dict:
     if _used_unbound_table(record):
         return _pending(row, record)
     return row
+
+
+def _interpretation_row(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "source": value.get("source"),
+        "version": value.get("version"),
+        "columns": value.get("columns") or {},
+        "effect_scale": value.get("effect_scale"),
+        "evidence": list(value.get("evidence") or []),
+    }
 
 
 def _binding_view(value) -> dict | None:

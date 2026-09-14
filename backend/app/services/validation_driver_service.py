@@ -2123,8 +2123,9 @@ class ValidationDriverService:
         authors' table, at its own predicate. Never raises; the rows are never kept."""
         from app.models.comparison_target import ComparisonTarget
         from app.services.validation_author_consistency import check_claim, claim_predicates, unbound_record
-        from app.services.validation_consistency_checks import bind_table_text
+        from app.services.validation_consistency_checks import bind_table_text, confirmation_for
         from app.services.validation_table_binding import established as binding_established
+        from app.services.validation_table_confirmations import interpretation_of
 
         table = next(
             (
@@ -2166,11 +2167,13 @@ class ValidationDriverService:
                     {**unbound_record(table.get("filename"), "deposit", bound), "claim_index": item["claim_index"]}
                 )
                 continue
+            # plan_8_2 section 3.1: a person's recorded confirmation of how the table reads, when there is one.
             record = check_claim(
                 {},
                 item["predicate"],
                 {"name": table.get("filename"), "text": text, "source": "deposit"},
                 contrast=item["contrast"],
+                interpretation=interpretation_of(confirmation_for(evidence, candidate, item["contrast"])),
                 selector=bound.get("selector"),
             )
             record.pop("predicate", None)

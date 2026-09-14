@@ -128,11 +128,13 @@ def read_table(
         }
     confirmed = (interpretation or {}).get("columns")
     headerless = _headerless(rows)
+    width = max(len(r) for r in rows)
     if headerless and not confirmed:
         return {
             "rows": [],
             "columns": {},
             "headerless": True,
+            "width": width,
             "candidate_roles": _candidate_roles(rows),
             "scale": None,
             "orientation": None,
@@ -141,9 +143,16 @@ def read_table(
             "establishes which column is which",
         }
     if confirmed:
-        header = [f"column {i}" for i in range(max(len(r) for r in rows))] if headerless else rows[0]
+        header = [f"column {i + 1}" for i in range(width)] if headerless else rows[0]
         body = rows if headerless else rows[1:]
         index = {role: confirmed.get(role) for role in ("id", "lfc", "pvalue", "padj")}
+        beyond = next((role for role, i in index.items() if isinstance(i, int) and i >= width), None)
+        if beyond:
+            return _rejected(
+                headerless,
+                f"the recorded interpretation names column {index[beyond] + 1} for the {_ROLE_WORDS[beyond]}, but the "
+                f"table has {width} columns, so the interpretation is rejected",
+            )
     else:
         header, body = rows[0], rows[1:]
         index = {
@@ -206,6 +215,16 @@ def read_table(
                 "padj": _number(_cell("padj") or ""),
             }
         )
+    if confirmed:
+        # plan_8_2 section 3.1: values can reject an interpretation, never establish one.
+        for role in ("pvalue", "padj"):
+            values = [r[role] for r in parsed if r[role] is not None]
+            if values and (min(values) < 0 or max(values) > 1):
+                return _rejected(
+                    headerless,
+                    f"the recorded interpretation reads {columns[role]} as the {_ROLE_WORDS[role]}, but it holds values "
+                    "outside 0 to 1, so the interpretation is rejected",
+                )
     return {
         "rows": parsed,
         "columns": columns,
@@ -215,6 +234,67 @@ def read_table(
         "orientation": orientation,
         "evidence": evidence,
         "reason": None,
+    }
+
+
+_ROLE_WORDS = {"id": "identifier", "lfc": "fold change", "pvalue": "P value", "padj": "adjusted P value"}
+# plan_8_2 section 3.1: the version of how a table's interpretation is recorded on a comparison.
+INTERPRETATION_VERSION = 1
+
+
+def _rejected(headerless: bool, reason: str) -> dict:
+    return {
+        "rows": [],
+        "columns": {},
+        "headerless": headerless,
+        "rejected": True,
+        "candidate_roles": None,
+        "scale": None,
+        "orientation": None,
+        "evidence": [],
+        "reason": reason,
+    }
+
+
+def _needed_columns(predicate: dict) -> list[str]:
+    """The columns a check of this predicate reads, in words."""
+    needed = ["the identifier"]
+    effect = (predicate or {}).get("effect") or {}
+    if effect.get("kind") == "abs_log2fc" or (predicate or {}).get("direction") in ("up", "down"):
+        needed.append("the fold change")
+    kind = ((predicate or {}).get("significance") or {}).get("kind")
+    if kind:
+        needed.append(f"the {_ROLE_WORDS[kind]}")
+    return needed
+
+
+def _headerless_reason(width: int | None, predicate: dict) -> str:
+    """What a headerless table lacks for this check: never a deficiency of the table itself."""
+    needed = _needed_columns(predicate)
+    words = needed[0] if len(needed) == 1 else f"{', '.join(needed[:-1])} and {needed[-1]}"
+    return (
+        f"the table is headerless, and nothing bioAF holds (a legend, README, methods statement or recorded "
+        f"confirmation) says which of its {width} columns holds {words}; a person who knows can record it"
+    )
+
+
+def _interpretation_view(reading: dict, interpretation: dict | None) -> dict:
+    """The interpretation a comparison applied, with what establishes it, recorded beside the result."""
+    evidence = list(reading["evidence"])
+    if interpretation:
+        evidence.insert(
+            0,
+            f"recorded by {interpretation.get('confirmed_by') or 'a person'}"
+            f"{': ' + interpretation['note'] if interpretation.get('note') else ''}",
+        )
+    return {
+        "version": INTERPRETATION_VERSION,
+        "source": "confirmation" if interpretation else "header",
+        "confirmation_version": (interpretation or {}).get("version"),
+        "columns": reading["columns"],
+        "effect_scale": reading["scale"],
+        "orientation": reading["orientation"],
+        "evidence": evidence,
     }
 
 
@@ -309,7 +389,13 @@ def check_claim(
         )
     if reading["reason"]:
         record["candidate_roles"] = reading["candidate_roles"]
-        return _done(UNRESOLVED if reading["headerless"] else NOT_CHECKABLE, reading["reason"])
+        if reading.get("rejected"):
+            return _done(UNRESOLVED, reading["reason"])
+        if reading["headerless"]:
+            record["columns_count"] = reading.get("width")
+            return _done(UNRESOLVED, _headerless_reason(reading.get("width"), predicate))
+        return _done(NOT_CHECKABLE, reading["reason"])
+    record["interpretation"] = _interpretation_view(reading, interpretation)
     if interpretation:
         record["assumptions"].append(
             f"the table's interpretation was confirmed by {interpretation.get('confirmed_by') or 'a person'}"
