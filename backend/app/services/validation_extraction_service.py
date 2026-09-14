@@ -1794,6 +1794,7 @@ class ValidationExtractionService:
             api_key=cfg.api_key,
             library_strategies=strategies,
             on_issue=issues.append,
+            methods=(study.evidence_json or {}).get("methods_cutoffs"),
         )
         current = selection.get("current")
         plan_experiment = experiment_by_id.get((current or {}).get("reported_experiment_id")) or _fallback_experiment(

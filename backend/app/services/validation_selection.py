@@ -119,11 +119,13 @@ async def select_analysis(
     library_strategies: dict | None = None,
     on_issue=None,
     previous: dict | None = None,
+    methods: dict | None = None,
 ) -> dict:
     """The selection record. ``current`` is None when nothing on the route can be checked.
 
     ``library_strategies`` is what each experiment's own dataset declares itself to be, by experiment
-    id; ``library_strategy`` applies to an experiment it does not name."""
+    id; ``library_strategy`` applies to an experiment it does not name. ``methods`` is the study's recorded
+    methods sentences (plan_8_2 section 3.1), from which a claim that states no cutoff may inherit one."""
     from app.services.contrast_selection import INCOMPATIBLE, contrast_compatibility
 
     pairs = rank_candidates(candidate_pairs(targets, checks, route=route), checks)
@@ -173,6 +175,7 @@ async def select_analysis(
             if status == INCOMPATIBLE:
                 refusal = {"outcome": "no_compatible_contrast", "reason": why}
         if refusal is None:
+            from app.services.validation_methods_cutoffs import inherited_cutoffs
             from app.services.validation_predicate import build_predicate, predicate_words
 
             contrast = (
@@ -180,7 +183,15 @@ async def select_analysis(
                 if contrast_index is not None and 0 <= contrast_index < len(contrasts)
                 else None
             )
-            predicate = build_predicate(target, contrast=contrast) if contrast is not None else None
+            inherited = inherited_cutoffs(
+                target.get("reported_experiment_id") or (contrast or {}).get("reported_experiment_id"),
+                experiments=experiments,
+                contrasts=contrasts,
+                recorded=methods,
+            )
+            predicate = (
+                build_predicate(target, contrast=contrast, inherited=inherited) if contrast is not None else None
+            )
             reference = experiment.get("reference") or {}
             current = {
                 "revision": ((previous or {}).get("current") or {}).get("revision", 0) + 1,

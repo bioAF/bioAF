@@ -288,3 +288,27 @@ describe("a count of the authors' published list", () => {
     expect(list).toHaveTextContent("194 distinct identifiers among 194 rows; 2 rows with no identifier excluded");
   });
 });
+
+// plan_8_2 section 3.1 and decision 2: a cutoff inherited from the methods names the sentence it came from.
+// The label is pending the owner's sign-off.
+describe("a cutoff inherited from the methods", () => {
+  const withSource = (cutoff_source: Record<string, unknown> | null) =>
+    ({
+      ...stage2,
+      claims: stage2.claims.map((claim, i) =>
+        i === 0 ? { ...claim, predicate: "KO versus WT, adjusted P < 0.05, either direction", cutoff_source } : claim,
+      ),
+    }) as unknown as ReportSummary;
+
+  it("quotes the methods sentence beside the predicate", () => {
+    const quote = "Genes with an adjusted P value < 0.05 were considered differentially expressed.";
+    render(<ClaimSelection summary={withSource({ kind: "methods", quote })} />);
+    const source = within(screen.getByTestId("claim-0")).getByTestId("cutoff-source");
+    expect(source).toHaveTextContent(`Cutoff from the methods: "${quote}"`);
+  });
+
+  it("says nothing more for a cutoff the claim states itself", () => {
+    render(<ClaimSelection summary={withSource({ kind: "claim" })} />);
+    expect(within(screen.getByTestId("claim-0")).queryByTestId("cutoff-source")).not.toBeInTheDocument();
+  });
+});

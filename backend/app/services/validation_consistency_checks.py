@@ -228,7 +228,7 @@ async def enqueue(session, study, plan, *, skip: set | None = None, reason: str 
     input_table = (evidence.get("deposit_selection") or {}).get("author_table")
 
     records = []
-    for item in claim_predicates(targets, plan):
+    for item in claim_predicates(targets, plan, evidence=evidence):
         target = targets[item["claim_index"]]
         if skip and target.id in skip:
             continue
@@ -369,7 +369,9 @@ async def run_pending(
         limits=limits,
         records=records,
         targets=targets,
-        predicates={item["claim_index"]: item for item in claim_predicates(targets, plan)},
+        predicates={
+            item["claim_index"]: item for item in claim_predicates(targets, plan, evidence=study.evidence_json or {})
+        },
     )
     concluded = 0
     for record in pending:

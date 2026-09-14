@@ -656,6 +656,12 @@ class ValidationDriverService:
         evidence["supplements"] = text.supplements
         if text.pmcid:
             evidence["pmcid"] = text.pmcid
+        if text.sections is not None:
+            # plan_8_2 section 3.1: the methods sentences that define a differential test's cutoff, verbatim.
+            # A claim that states no cutoff inherits one only from a sentence covering its experiment.
+            from app.services.validation_methods_cutoffs import record as record_methods
+
+            evidence["methods_cutoffs"] = record_methods((text.sections or {}).get("methods"), source=text.source)
         evidence["scanned_identifiers"] = scan_identifiers(full_text)
         if isinstance(evidence.get("scorecard_record"), dict):
             # plan_8_1 section 1.4: a re-read supersedes the plan, and the score recorded from it is history.
@@ -2150,7 +2156,7 @@ class ValidationDriverService:
         accession = (evidence.get("deposit_inventory") or {}).get("accession")
         candidate = {"name": table.get("filename"), "source": "deposit", "accession": accession}
         records = []
-        for item in claim_predicates(list(rows), plan):
+        for item in claim_predicates(list(rows), plan, evidence=evidence):
             if selected is not None and item["predicate"].get("contrast_index") != selected:
                 continue
             # plan_8_2 section 1.1: the identified table is compared only with a claim it is bound to.

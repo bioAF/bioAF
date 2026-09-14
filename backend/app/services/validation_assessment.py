@@ -195,7 +195,7 @@ async def claimed_predicates(session: AsyncSession, study) -> list[dict]:
         .scalars()
         .all()
     )
-    return claim_predicates(list(rows), plan)
+    return claim_predicates(list(rows), plan, evidence=study.evidence_json or {})
 
 
 async def claimed_thresholds(session: AsyncSession, study) -> list[float]:

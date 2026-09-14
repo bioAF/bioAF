@@ -1706,6 +1706,10 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
             lines.append(f"- Experiment: {experiment.get('id')} ({experiment.get('assay') or 'assay not stated'})")
         if claim.get("predicate"):
             lines.append(f"- Predicate: {claim['predicate']}")
+        source = claim.get("cutoff_source") or {}
+        if source.get("kind") == "methods" and source.get("quote"):
+            # plan_8_2 section 3.1: an inherited cutoff names the methods sentence it came from.
+            lines.append(f'- Cutoff from the methods: "{source["quote"]}"')
         selected = claim.get("selection") or {}
         if selected:
             reason = (

@@ -148,6 +148,11 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                   {claim.cutoff ? `; ${claim.cutoff}` : ""}
                 </p>
                 {claim.predicate && <p className="text-xs text-gray-600">{claim.predicate}</p>}
+                {claim.cutoff_source?.kind === "methods" && claim.cutoff_source.quote && (
+                  <p data-testid="cutoff-source" className="text-xs text-gray-500">
+                    Cutoff from the methods: &quot;{claim.cutoff_source.quote}&quot;
+                  </p>
+                )}
                 {claim.selection && (
                   <p className="mt-1 text-xs">
                     <span className={claim.selection.status === "selected" ? "font-medium text-emerald-700" : "text-gray-600"}>

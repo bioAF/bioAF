@@ -7,7 +7,9 @@ reuse, what it will fetch again and what it will re-evaluate; the recovery then 
 the same services a read and the check queue use:
 
 - **fetch_passages**: the article's JATS is read again from Europe PMC to record the passages that cite
-  each supplement (the binding contract's verbatim evidence). No model is asked.
+  each supplement (the binding contract's verbatim evidence) and, when the study has none recorded, the
+  methods sentences that define a differential test's cutoff (section 3.1). A check whose cutoff those
+  sentences change is re-evaluated with the others. No model is asked.
 - **recheck_supplements**: the article's supplementary bundle is retrieved again and each claim is checked
   against each results table it is bound to.
 - **reevaluate_checks**: the dependent consistency checks are superseded (the prior revision kept whole,
@@ -168,12 +170,18 @@ async def preview_recovery(session, study) -> dict:
     pmcid = (evidence.get("pmcid") or "").strip()
     actions: list[dict] = []
     if plan is not None and pmcid and _supplements_missing_passages(evidence):
+        methods = (
+            ", and the methods sentences that define a differential test's cutoff; a check whose cutoff they change "
+            "is re-evaluated too"
+            if "methods_cutoffs" not in evidence
+            else ""
+        )
         actions.append(
             {
                 "kind": "fetch_passages",
                 "label": "Read the passages that cite each supplement",
                 "detail": f"bioAF reads the article's full text from Europe PMC ({pmcid}) again and records, for each "
-                "supplement, the paragraphs and legend that cite it. No model is asked.",
+                f"supplement, the paragraphs and legend that cite it{methods}. No model is asked.",
             }
         )
     if plan is not None and pmcid and _unbound_supplement_comparisons(evidence):
@@ -240,6 +248,39 @@ def _merge_passages(evidence: dict, fetched_rows: list[dict]) -> int:
     return updated
 
 
+async def _cutoffs_changed(session, study, plan, records) -> set:
+    """The claims whose consistency check applied a predicate other than the one the evidence now gives."""
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_author_consistency import claim_predicates
+    from app.services.validation_predicate import predicate_identity
+
+    if plan is None:
+        return set()
+    targets = list(
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    now = {
+        targets[item["claim_index"]].id: queue.fingerprint(predicate_identity(item["predicate"]))
+        for item in claim_predicates(targets, plan, evidence=study.evidence_json or {})
+    }
+    return {
+        r.comparison_target_id
+        for r in records
+        if r.kind == queue.AUTHOR_RESULTS
+        and (r.dependencies_json or {}).get("predicate_fingerprint") not in (None, now.get(r.comparison_target_id))
+    }
+
+
 async def run_recovery(session, study, *, user_id: int | None, preview_fingerprint: str | None = None) -> dict:
     """Carry out the recovery ``preview_recovery`` describes. Raises ``RecoveryRefused`` for a study being
     read and ``PreviewChanged`` when the preview the person saw no longer holds. Never launches a workflow."""
@@ -263,6 +304,7 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
         "recovery_id": recovery_id,
         "requeued": 0,
         "fetched_passages": 0,
+        "cutoffs_changed": 0,
         "rechecked_supplements": False,
         "affected_checks": preview["affected_checks"],
         "needs_approval": preview["needs_approval"],
@@ -277,6 +319,7 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
         "classification": study.classification,
         "failure_reason": study.failure_reason,
         "scorecard_record": evidence.get("scorecard_record"),
+        "methods_cutoffs": evidence.get("methods_cutoffs"),
         "supplement_comparisons": [
             {"supplement": s.get("filename") or s.get("label"), "consistency": s.get("consistency")}
             for s in evidence.get("supplements") or []
@@ -292,6 +335,11 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
         text = await FullTextFetchService.fetch(pmcid=evidence.get("pmcid"))
         if text is not None:
             result["fetched_passages"] = _merge_passages(evidence, text.supplements)
+            if "methods_cutoffs" not in evidence and getattr(text, "sections", None) is not None:
+                from app.services.validation_methods_cutoffs import record as record_methods
+                from app.services.validation_paper_text import EUROPE_PMC
+
+                evidence["methods_cutoffs"] = record_methods((text.sections or {}).get("methods"), source=EUROPE_PMC)
         study.evidence_json = dict(evidence)
     if "recheck_supplements" in kinds:
         evidence["supplements"] = await resolve_study_supplements(session, study, evidence)
@@ -301,9 +349,14 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
 
     affected_ids = {a["check_id"] for a in preview["affected_checks"]}
     affected_targets = {r.comparison_target_id for r in records if r.check_id in affected_ids}
+    # Section 3.1: a check whose cutoff the recorded methods now change depends on them, and follows them.
+    changed_targets = await _cutoffs_changed(session, study, plan, records)
+    result["cutoffs_changed"] = len(changed_targets - affected_targets)
     before = {r.id: r.revision for r in records}
     recorded_targets = {r.comparison_target_id for r in records if r.kind == queue.AUTHOR_RESULTS}
-    ensured = await enqueue(session, study, plan, reason=reason, skip=recorded_targets - affected_targets)
+    ensured = await enqueue(
+        session, study, plan, reason=reason, skip=recorded_targets - affected_targets - changed_targets
+    )
     for record in records:
         if record.check_id in affected_ids and record.revision == before.get(record.id):
             await queue.supersede(session, record, reason=reason)

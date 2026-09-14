@@ -101,22 +101,30 @@ def legacy_cutoffs(
     return []
 
 
-def _complete_statement(claim: dict, contrast: dict | None) -> bool:
-    """Whether the cutoffs read are the claim's complete statement (so a missing effect means "none"):
-    a claim's or contrast's own cutoffs are; the legacy pairs are not."""
-    return bool(claim_cutoffs(claim or {}) or [c for c in (contrast or {}).get("cutoffs") or [] if isinstance(c, dict)])
-
-
 def build_predicate(
     claim: dict,
     *,
     contrast: dict | None = None,
     design: dict | None = None,
     finding_claim: dict | None = None,
+    inherited: dict | None = None,
 ) -> dict:
-    """The claim's predicate, built deterministically from the fields the extraction filled."""
+    """The claim's predicate, built deterministically from the fields the extraction filled.
+
+    plan_8_2 section 3.1 and owner decision 2: a claim that states no cutoff takes one only from
+    ``inherited``, a methods sentence covering every differential test in its experiment
+    (``validation_methods_cutoffs.inherited_cutoffs``), with the quote recorded. The design's paper-level
+    threshold pair is never substituted for it, and no conventional threshold is supplied."""
     assumptions: list[str] = []
-    cutoffs = legacy_cutoffs(claim, contrast=contrast, design=design, finding_claim=finding_claim)
+    cutoffs, source = _stated_cutoffs(claim, contrast, finding_claim)
+    if not cutoffs and (inherited or {}).get("cutoffs"):
+        cutoffs = claim_cutoffs({"cutoffs": inherited["cutoffs"]})
+        source = {"kind": "methods", "quote": inherited.get("quote")}
+        assumptions.append(
+            f'the claim states no cutoff; the methods state "{inherited.get("quote")}", which covers every '
+            "differential test in its experiment"
+        )
+    complete = (source or {}).get("kind") in ("claim", "methods")
     significance = next((c for c in cutoffs if c.get("kind") in SIGNIFICANCE_KINDS), None)
     if significance is not None:
         adjustment = significance.get("adjustment")
@@ -137,7 +145,7 @@ def build_predicate(
     effect_cutoff = next((c for c in cutoffs if c.get("kind") in ("abs_log2fc", "fold_change")), None)
     effect: dict | None
     if effect_cutoff is None:
-        effect = {"kind": "none"} if _complete_statement(claim, contrast) else None
+        effect = {"kind": "none"} if complete else None
     elif effect_cutoff["kind"] == "fold_change":
         value = effect_cutoff.get("value")
         if isinstance(value, (int, float)) and value > 1:
@@ -186,13 +194,13 @@ def build_predicate(
     if significance_status == UNRESOLVED:
         status, reason = UNRESOLVED, str(unresolved)
     elif significance is None and count is not None:
-        status, reason = NOT_CHECKABLE, "the claim states no significance cutoff, and bioAF supplies none"
+        status, reason = NOT_CHECKABLE, _no_cutoff_reason(inherited, design)
     elif significance is not None and significance["operator"] not in ("<", "<="):
         status, reason = (
             NOT_CHECKABLE,
             f"the significance cutoff ({describe_cutoff(significance)}) does not bound a P value from above",
         )
-    elif effect is None and significance is not None and not _complete_statement(claim, contrast):
+    elif effect is None and significance is not None and not complete:
         status, reason = (
             UNRESOLVED,
             "the comparison's fold-change requirement is not stated, and bioAF does not supply one",
@@ -200,7 +208,7 @@ def build_predicate(
 
     return {
         "contrast_index": (claim or {}).get("contrast_index"),
-        "cutoff_source": _cutoff_source(claim, contrast, cutoffs),
+        "cutoff_source": source,
         "orientation": "test_over_reference",
         "direction": direction,
         "significance": significance,
@@ -214,16 +222,44 @@ def build_predicate(
     }
 
 
-def _cutoff_source(claim: dict, contrast: dict | None, cutoffs: list[dict]) -> dict | None:
-    """Where the predicate's cutoffs came from: the claim's own statement, its contrast's finding claim, or
-    a legacy threshold pair."""
-    if not cutoffs:
-        return None
-    if claim_cutoffs(claim or {}):
-        return {"kind": "claim"}
-    if [c for c in (contrast or {}).get("cutoffs") or [] if isinstance(c, dict)]:
-        return {"kind": "contrast"}
-    return {"kind": "legacy_pair"}
+def _no_cutoff_reason(inherited: dict | None, design: dict | None) -> str:
+    """Why a count claim has no significance cutoff: bioAF supplies none, and why none was inherited."""
+    reason = "the claim states no significance cutoff, and bioAF supplies none"
+    why = (inherited or {}).get("reason")
+    if why:
+        return f"{reason}: {why}"
+    pair = [c for c in _legacy_pair((design or {}).get("thresholds") or {}) if c is not None]
+    if pair:
+        words = " and ".join(describe_cutoff(c) for c in pair)
+        return (
+            f"{reason}; the paper-level threshold ({words}) is not stated for this claim's experiment in a methods "
+            "sentence, so it is not applied"
+        )
+    return reason
+
+
+def _derived_from_a_claim(contrast: dict | None) -> bool:
+    """Whether a contrast's cutoffs were taken from one of its claims (``derive_contrast_thresholds``), so
+    they are that claim's statement, not another claim's."""
+    return (contrast or {}).get("thresholds_from_claim") is not None or bool(
+        [c for c in (contrast or {}).get("cutoffs") or [] if isinstance(c, dict)]
+    )
+
+
+def _stated_cutoffs(claim: dict, contrast: dict | None, finding_claim: dict | None) -> tuple[list[dict], dict | None]:
+    """The cutoffs the claim itself states, and where they are stored.
+
+    plan_8_2 section 3.1 and owner decision 2: a claim's own statement (its cutoffs, or its scalar
+    threshold). A contrast's cutoffs taken from another of its claims are that claim's, never this one's. A
+    legacy per-contrast pair, from an extraction that stored a contrast's threshold there rather than on
+    its claims, is still read as the claim's own, and is never a complete statement."""
+    own = claim_cutoffs(claim or {})
+    if own:
+        return own, {"kind": "claim"}
+    if _derived_from_a_claim(contrast):
+        return [], None
+    legacy = legacy_cutoffs({}, contrast=contrast, finding_claim=finding_claim)
+    return legacy, ({"kind": "legacy_pair"} if legacy else None)
 
 
 # What a predicate says, for deciding whether a check must be re-evaluated: the paper's own expression of an
