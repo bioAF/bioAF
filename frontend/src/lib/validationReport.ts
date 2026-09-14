@@ -139,6 +139,16 @@ export interface ClaimConsistency {
     rows_tested: number | null;
     rows_passing: number | null;
   } | null;
+  // plan_8_2 section 3.2: a count of the authors' published list, and the passage naming the file as the list.
+  method?: string | null;
+  list?: ClaimList | null;
+}
+
+export interface ClaimList {
+  evidence: { text: string | null; source: string | null } | null;
+  dedup: string | null;
+  missing: string | null;
+  subgroup: { definition: string | null; field: string | null; unmapped: number | null } | null;
 }
 
 export interface ClaimCheck {

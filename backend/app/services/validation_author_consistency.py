@@ -253,9 +253,12 @@ def check_claim(
     contrast: dict | None = None,
     interpretation: dict | None = None,
     selector: dict | None = None,
+    list_evidence: dict | None = None,
 ) -> dict:
     """The consistency record for one claim against one table. ``selector`` is the bound contrast's own
-    columns in a table that reports several contrasts (plan_8_2 section 1.1)."""
+    columns in a table that reports several contrasts (plan_8_2 section 1.1). ``list_evidence`` establishes
+    the table as the claim's complete selected list, so a count whose cutoff is not stated can be checked as a
+    count of that list (plan_8_2 section 3.2)."""
     count = predicate.get("count") or {}
     record = {
         "table": table.get("name"),
@@ -285,6 +288,8 @@ def check_claim(
         return record
 
     if predicate.get("status") == "not_checkable":
+        if list_evidence and count and predicate.get("significance") is None:
+            return _list_count(record, predicate, table, list_evidence, _done)
         return _done(NOT_CHECKABLE, predicate.get("reason"))
     if predicate.get("significance_status") == "unresolved" or predicate.get("status") == "unresolved":
         return _done(UNRESOLVED, predicate.get("reason"))
@@ -383,6 +388,109 @@ def check_claim(
     return _done(UNRESOLVED, words)
 
 
+# plan_8_2 section 3.2, labels pending the owner's sign-off.
+LIST_COUNT = "published_list_count"
+LIST_COUNT_NOTE = (
+    "this checks the count of the published list; it does not check the statistical procedure that selected it"
+)
+_CHROMOSOME_NAMES = ("chr", "chrom", "chromosome", "chromosome_name", "seqnames", "seqname")
+_SUBGROUPS = (
+    (re.compile(r"sex[- ](?:chromosome[- ])?linked", re.I), {"X", "Y"}, "located on chromosome X or Y"),
+    (re.compile(r"\bX[- ]linked", re.I), {"X"}, "located on chromosome X"),
+    (re.compile(r"\bY[- ]linked", re.I), {"Y"}, "located on chromosome Y"),
+)
+
+
+def list_subgroup(stated_as: str | None, value) -> dict | None:
+    """The chromosome subgroup a count is of, when the paper attaches one to this very number
+    ("146 are sex-linked"), with its definition. None for a count of the whole list."""
+    text = str(stated_as or "")
+    if value is None:
+        return None
+    for pattern, chromosomes, definition in _SUBGROUPS:
+        for match in pattern.finditer(text):
+            before = text[max(0, match.start() - 50) : match.start()]
+            numbers = re.findall(r"\d[\d,]*(?:\.\d+)?", before)
+            if numbers and float(numbers[-1].replace(",", "")) == float(value):
+                return {"chromosomes": sorted(chromosomes), "definition": definition}
+    return None
+
+
+def _chromosome(value: str) -> str:
+    text = (value or "").strip().strip('"')
+    return text[3:].upper() if text.lower().startswith("chr") else text.upper()
+
+
+def _list_count(record: dict, predicate: dict, table: dict, evidence: dict, done) -> dict:
+    """plan_8_2 section 3.2: the claim's count checked as a count of the published list the evidence names.
+    Distinct identifiers; rows with no identifier excluded and reported; a subgroup counted from the table's
+    own field that defines it. Never a check of the procedure that selected the list."""
+    record["method"] = LIST_COUNT
+    record["list"] = {
+        "evidence": {"text": evidence.get("text"), "source": evidence.get("source")},
+        "dedup": "distinct identifier",
+        "missing": "rows with no identifier are excluded and reported",
+        "subgroup": None,
+    }
+    record["assumptions"].append(LIST_COUNT_NOTE)
+    if evidence.get("partial"):
+        return done(
+            UNRESOLVED,
+            f"the passage calls the file part of the list ({evidence['partial']}), so it is not the claim's complete "
+            "selected list",
+        )
+    rows = _rows(table.get("text") or "")
+    if not rows or _headerless(rows):
+        return done(UNRESOLVED, "the list is headerless, so which column identifies each entry is not established")
+    header, body = rows[0], rows[1:]
+    id_index = _first(header, _ID_NAMES)
+    if id_index is None:
+        id_index = 0
+    record["columns"] = {"id": header[id_index] if id_index < len(header) else None}
+    for role, names in (("padj", _PADJ_NAMES), ("pvalue", _PVAL_NAMES)):
+        column = _first(header, names)
+        values = [_number(r[column]) for r in body if column is not None and column < len(r)]
+        present = [v for v in values if v is not None]
+        if present and max(present) >= 0.5:
+            record["columns"][role] = header[column]
+            return done(
+                UNRESOLVED,
+                f"the table holds rows with {header[column]} up to {max(present):g}, values no selected list includes, "
+                "so it is not the claim's selected list",
+            )
+    count = predicate.get("count") or {}
+    subgroup = list_subgroup(predicate.get("stated_as"), count.get("value"))
+    selected = body
+    if subgroup:
+        column = _first(header, _CHROMOSOME_NAMES)
+        if column is None:
+            record["list"]["subgroup"] = {**subgroup, "field": None, "unmapped": None}
+            return done(
+                UNRESOLVED,
+                f"the table has no chromosome field, and bioAF holds no annotation mapping for its identifiers, so the "
+                f"subgroup ({subgroup['definition']}) cannot be counted",
+            )
+        unmapped = sum(1 for r in body if column >= len(r) or not r[column].strip())
+        selected = [r for r in body if column < len(r) and _chromosome(r[column]) in subgroup["chromosomes"]]
+        record["list"]["subgroup"] = {**subgroup, "field": header[column], "unmapped": unmapped}
+        record["columns"]["subgroup"] = header[column]
+    identifiers = [r[id_index].strip() for r in selected if id_index < len(r)]
+    missing = sum(1 for i in identifiers if not i) + sum(1 for r in selected if id_index >= len(r))
+    distinct = {i for i in identifiers if i}
+    record.update(
+        rows_tested=len(body),
+        rows_passing=len(distinct),
+        rows_missing=missing,
+        count_range=[len(distinct), len(distinct)],
+    )
+    status, words = evaluate_count(count, [len(distinct), len(distinct)])
+    if status == HOLDS:
+        return done(AGREE, words)
+    if status == FAILS:
+        return done(DISAGREE, words)
+    return done(UNRESOLVED, words)
+
+
 def supplement_consistency(
     blob: bytes, filename: str, predicates: list[dict], *, table: dict | None = None
 ) -> list[dict]:
@@ -437,6 +545,7 @@ def supplement_consistency(
                 contrast=item.get("contrast"),
                 interpretation=item.get("interpretation"),
                 selector=bound.get("selector"),
+                list_evidence=binding.list_evidence(candidate, item["predicate"]),
             )
         except Exception:  # noqa: BLE001 - one unreadable table never costs the inventory
             continue

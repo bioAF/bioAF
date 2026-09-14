@@ -609,12 +609,18 @@ async def _run_one(run: _Run, record) -> int:
             },
             terminal_reason=queue.BINDING,
         )
+    candidate = candidate_for(run.study.evidence_json or {}, table)
     result = check_claim(
         {},
         item["predicate"],
         {"name": table.get("name"), "text": run.texts[url], "source": table.get("source")},
         contrast=item["contrast"],
         selector=bound.get("selector"),
+        list_evidence=binding.list_evidence(
+            candidate,
+            item["predicate"],
+            confirmation=confirmation_for(run.study.evidence_json or {}, candidate, item["contrast"]),
+        ),
     )
     result.pop("predicate", None)
     result["identified_by"] = deps.get("identified_by")
@@ -629,6 +635,18 @@ def _bind_with_columns(run: _Run, table: dict, item: dict, text: str) -> dict:
     return bind_table_text(run.plan, run.study.evidence_json or {}, table, item.get("contrast_index"), text)
 
 
+def candidate_for(evidence: dict, table: dict) -> dict:
+    """A chosen table as a binding candidate: a supplement carries its labels and the passages citing it."""
+    candidate = dict(table)
+    index = table.get("supplement_index")
+    supplements = [s for s in (evidence or {}).get("supplements") or [] if isinstance(s, dict)]
+    if table.get("source") == "supplement" and isinstance(index, int) and 0 <= index < len(supplements):
+        row = supplements[index]
+        candidate["labels"] = [label for label in [*(row.get("references") or []), row.get("label")] if label]
+        candidate["passages"] = list(row.get("citing_passages") or [])
+    return candidate
+
+
 def bind_table_text(plan, evidence: dict, table: dict, contrast_index: int | None, text: str) -> dict:
     """plan_8_2 section 1.1: one table, with its text in hand, bound to the contrast at ``contrast_index``.
     The one entry point for the queued check, the acquired authors' table and the reanalysis's ground truth."""
@@ -639,13 +657,7 @@ def bind_table_text(plan, evidence: dict, table: dict, contrast_index: int | Non
         contrasts[contrast_index] if isinstance(contrast_index, int) and 0 <= contrast_index < len(contrasts) else {}
     )
     resources = [r for r in plan.resources_json or [] if isinstance(r, dict)]
-    candidate = dict(table)
-    index = table.get("supplement_index")
-    supplements = [s for s in (evidence or {}).get("supplements") or [] if isinstance(s, dict)]
-    if table.get("source") == "supplement" and isinstance(index, int) and 0 <= index < len(supplements):
-        row = supplements[index]
-        candidate["labels"] = [label for label in [*(row.get("references") or []), row.get("label")] if label]
-        candidate["passages"] = list(row.get("citing_passages") or [])
+    candidate = candidate_for(evidence, table)
     return binding.bind(
         candidate,
         contrast,

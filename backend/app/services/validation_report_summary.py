@@ -65,6 +65,9 @@ CLAIM_CHECK_LABELS = {
     "processed_reanalysis": "Reanalysis of processed data",
     "raw_reanalysis": "Reanalysis from raw reads",
 }
+# plan_8_2 section 3.2, pending the owner's sign-off: how a finding's assessment method reads when it is a
+# count of a published list rather than one of the four checks.
+METHOD_LABELS = {"published_list_count": "Count of the authors' published list"}
 CLAIM_CHECK_STATUS_LABELS = {"available": "Available", "unavailable": "Unavailable", "unresolved": "Unresolved"}
 REFERENCE_STATUS_LABELS = {
     "usable": "Usable",
@@ -90,6 +93,13 @@ CONSISTENCY_LABELS = {
     "not_checkable": "Not checkable against the authors' results",
     # plan_8_2 section 1.1 and decision 5, pending the owner's sign-off.
     "pending_re_evaluation": "Pending re-evaluation against the authors' results",
+}
+# plan_8_2 section 3.2 and decision 3, pending the owner's sign-off: a count of a published list is labelled
+# as one, never as a check of the threshold that selected it.
+LIST_COUNT_LABELS = {
+    "agree": "List count agrees with the authors' published list",
+    "disagree": "List count differs from the authors' published list",
+    "unresolved": "List count unresolved against the authors' published list",
 }
 # plan_8_2 section 1.1: a comparison made with a table not bound to the claim's contrast.
 PENDING_RE_EVALUATION_REASON = (
@@ -850,9 +860,14 @@ def _predicate_words(target: dict, contrasts: list[dict], plan: dict) -> str | N
 
 
 def _consistency_row(record: dict) -> dict:
+    list_count = record.get("method") == "published_list_count"
     row = {
         "outcome": record.get("outcome"),
-        "label": CONSISTENCY_LABELS.get(record.get("outcome"), record.get("outcome")),
+        "label": (LIST_COUNT_LABELS if list_count else CONSISTENCY_LABELS).get(
+            record.get("outcome"), CONSISTENCY_LABELS.get(record.get("outcome"), record.get("outcome"))
+        ),
+        "method": record.get("method"),
+        "list": record.get("list"),
         "reason": record.get("reason"),
         "table": record.get("table"),
         "source": record.get("source"),
