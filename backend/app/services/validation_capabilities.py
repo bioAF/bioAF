@@ -227,6 +227,13 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
     """
     seen: set[str] = set()
     wanted: list[dict] = []
+    # plan_8_2 section 2.2: an archive established from context (a PDB code after "PDB") holds, whichever
+    # source named the identifier first.
+    known_archive = {
+        str((e or {}).get("accession") or "").strip().upper(): (e or {}).get("archive")
+        for e in reversed(accessions or [])
+        if (e or {}).get("archive") and (e or {}).get("archive") != "other"
+    }
     for entry in accessions or []:
         acc = str((entry or {}).get("accession") or "").strip()
         if not acc or acc.upper() in seen:
@@ -241,7 +248,7 @@ async def _describe_deposits(accessions: list[dict], fetcher: Fetcher) -> list[d
             {
                 "accession": acc,
                 "provenance": (entry or {}).get("provenance") or "extracted",
-                "archive": (entry or {}).get("archive"),
+                "archive": (entry or {}).get("archive") or known_archive.get(acc.upper()),
             }
         )
 

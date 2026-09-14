@@ -455,11 +455,9 @@ def _unsupported_deposit(accession: str, archive: str) -> dict:
     bioAF has no adapter for; "an archive bioAF does not recognise" is kept for what matches no
     pattern.
     """
-    if archive == OTHER:
-        reason = f"bioAF cannot look up deposits in an archive bioAF does not recognise, so what {accession} holds is unknown"
-    else:
-        reason = f"bioAF has no adapter for {ARCHIVE_NAMES.get(archive, archive)}, so what {accession} holds is unknown"
-    return _deposit(accession, archive, failure_reason=reason)
+    from app.services.validation_resource_identity import unsupported_lookup_reason
+
+    return _deposit(accession, archive, failure_reason=unsupported_lookup_reason(archive, accession))
 
 
 def not_looked_up(accession: str, archive: str, *, provenance: str, scoped: bool) -> dict:

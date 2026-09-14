@@ -94,9 +94,11 @@ def build_resource_inventory(
     """Every resource the paper names or its repositories link, typed and linked. Never raises."""
     rows: dict[str, dict] = {}
 
-    def _row(identifier: str, archive: str | None = None) -> dict | None:
+    def _row(identifier: str, archive: str | None = None, *, named: bool = False) -> dict | None:
         identifier = " ".join(str(identifier or "").split())
-        if not identifier or is_sample_accession(identifier):
+        # A bare sample accession belongs to its deposit. plan_8_2 section 2.2: one the paper names as a
+        # resource in its own right (the model gives it a role) is kept, as a sample record.
+        if not identifier or (is_sample_accession(identifier) and not named):
             return None
         key = _key(identifier)
         if key not in rows:
@@ -116,7 +118,7 @@ def build_resource_inventory(
     for item in model_resources or []:
         if not isinstance(item, dict):
             continue
-        row = _row(item.get("identifier"))
+        row = _row(item.get("identifier"), named=bool(_text(item.get("role"))))
         if row is None:
             continue
         _add_found(row, "model")
@@ -154,7 +156,10 @@ def build_resource_inventory(
         row.pop("model_type", None)
         _describe(row, deposits_by_key.get(_key(row["identifier"])))
     _link(ordered, experiments or [], deposits_by_key)
-    return ordered
+    # plan_8_2 section 2.2: the one canonical pass the report and the resource statements read too.
+    from app.services.validation_resource_identity import canonical_resources
+
+    return canonical_resources(ordered, deposits=list(deposits_by_key.values()))
 
 
 def _text(value) -> str | None:

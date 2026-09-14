@@ -9769,15 +9769,35 @@
         ],
         "id": "r1",
         "identifier": "GSE555001",
+        "level": "deposit",
         "limitation": null,
+        "link": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE555001",
         "linked_by": "paper",
+        "references": [
+          "GSE555001"
+        ],
         "reported_experiment_ids": [
           "e2"
         ],
         "retrievable": "yes",
         "retrievable_label": "Yes",
         "role": null,
+        "split_from": null,
         "stated_in": null,
+        "support": {
+          "access": "unknown",
+          "analysis_supported": "yes",
+          "download_supported": "yes",
+          "metadata_verified": "unknown",
+          "recognized": "yes"
+        },
+        "support_labels": {
+          "access": "Unknown",
+          "analysis_supported": "Yes",
+          "download_supported": "Yes",
+          "metadata_verified": "Unknown",
+          "recognized": "Yes"
+        },
         "type": "sequencing_data",
         "type_label": "Sequencing data"
       },
@@ -9790,13 +9810,33 @@
         ],
         "id": "r2",
         "identifier": "PXD099001",
+        "level": "deposit",
         "limitation": "bioAF has no PRIDE adapter, and no check reads proteomics data",
+        "link": "https://www.ebi.ac.uk/pride/archive/projects/PXD099001",
         "linked_by": null,
+        "references": [
+          "PXD099001"
+        ],
         "reported_experiment_ids": [],
         "retrievable": "no",
         "retrievable_label": "No",
         "role": "the proteome",
+        "split_from": null,
         "stated_in": null,
+        "support": {
+          "access": "unknown",
+          "analysis_supported": "no",
+          "download_supported": "no",
+          "metadata_verified": "unknown",
+          "recognized": "yes"
+        },
+        "support_labels": {
+          "access": "Unknown",
+          "analysis_supported": "No",
+          "download_supported": "No",
+          "metadata_verified": "Unknown",
+          "recognized": "Yes"
+        },
         "type": "proteomics_data",
         "type_label": "Proteomics data"
       }

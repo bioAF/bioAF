@@ -442,9 +442,22 @@ def supplement_consistency(
             continue
         record.pop("predicate", None)
         records.append(
-            {**record, "binding": bound, "decoding": decoded.provenance(), "claim_index": item.get("claim_index")}
+            {
+                **record,
+                "binding": bound,
+                "decoding": decoded.provenance(),
+                "claim_index": item.get("claim_index"),
+                # The predicate this comparison applied; a held comparison is reused only for the same one.
+                "predicate_fingerprint": _fingerprint(item.get("predicate")),
+            }
         )
     return records
+
+
+def _fingerprint(value) -> str:
+    from app.services.validation_check_queue import fingerprint
+
+    return fingerprint(value)
 
 
 def unbound_record(table: str | None, source: str | None, bound: dict) -> dict:
