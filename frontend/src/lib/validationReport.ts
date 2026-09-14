@@ -96,6 +96,8 @@ export interface ReportClaim {
   // change_7.5 sections 3.1, 4.1 and 4.3: the statistical definition in words, the claim checked
   // against the authors' results, and the reanalysis scored for this claim.
   predicate?: string | null;
+  // plan_8_2 section 3.1: where the predicate's cutoffs came from; an inherited one names its methods sentence.
+  cutoff_source?: { kind: string; quote?: string | null } | null;
   consistency?: ClaimConsistency | null;
   result?: {
     tier: string;

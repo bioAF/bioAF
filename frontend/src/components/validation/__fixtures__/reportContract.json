@@ -813,6 +813,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
         "experiment": null,
         "mapping": {
@@ -842,6 +843,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
         "experiment": null,
         "mapping": {
@@ -871,6 +873,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
         "experiment": null,
         "mapping": {
@@ -900,6 +903,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "TE samples expressed 6086 transcripts",
         "experiment": null,
         "mapping": {
@@ -929,6 +933,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
         "experiment": null,
         "mapping": {
@@ -958,6 +963,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
         "experiment": null,
         "mapping": {
@@ -987,6 +993,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
         "experiment": null,
         "mapping": {
@@ -1016,6 +1023,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
         "experiment": null,
         "mapping": {
@@ -1698,6 +1706,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes up",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -1773,6 +1784,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes down",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2391,6 +2405,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2452,6 +2467,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2513,6 +2529,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2574,6 +2591,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "TE samples expressed 6086 transcripts",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2635,6 +2653,9 @@
         "consistency": null,
         "contrast": "aneuploid vs euploid",
         "cutoff": "adjusted P < 0.05",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2696,6 +2717,9 @@
         "consistency": null,
         "contrast": "aneuploid vs euploid",
         "cutoff": "adjusted P < 0.05",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2757,6 +2781,9 @@
         "consistency": null,
         "contrast": "aneuploid vs euploid",
         "cutoff": "adjusted P < 0.05",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -2818,6 +2845,9 @@
         "consistency": null,
         "contrast": "aneuploid vs euploid",
         "cutoff": "adjusted P < 0.05",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -3602,6 +3632,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -3665,6 +3696,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 2 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -3989,6 +4021,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "genes up",
         "experiment": null,
         "mapping": {
@@ -4194,6 +4227,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4257,6 +4291,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 2 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4320,6 +4355,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 3 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4383,6 +4419,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 4 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4446,6 +4483,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 5 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4509,6 +4547,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 6 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4572,6 +4611,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 7 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4635,6 +4675,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 8 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4698,6 +4739,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 9 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4761,6 +4803,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 10 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4824,6 +4867,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 11 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4887,6 +4931,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 12 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -4950,6 +4995,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 13 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -5013,6 +5059,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 14 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -6110,6 +6157,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -6407,6 +6455,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes up",
         "experiment": null,
         "mapping": {
@@ -6474,6 +6525,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes down",
         "experiment": null,
         "mapping": {
@@ -6721,6 +6775,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "genes up",
         "experiment": null,
         "mapping": {
@@ -6926,6 +6981,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -6989,6 +7045,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 2 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -7360,6 +7417,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes up",
         "experiment": null,
         "mapping": {
@@ -7427,6 +7487,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes down",
         "experiment": null,
         "mapping": {
@@ -7776,6 +7839,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes up",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -7851,6 +7917,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "genes down",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -8289,6 +8358,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8352,6 +8422,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 2 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8715,6 +8786,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 1 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8778,6 +8850,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 2 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8841,6 +8914,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 3 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8904,6 +8978,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 4 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -8967,6 +9042,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "sample 5 yielded many peaks",
         "experiment": null,
         "mapping": {
@@ -9555,6 +9631,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "we called 8000 peaks",
         "experiment": {
           "assay": "ChIP-seq",
@@ -9660,6 +9737,9 @@
         },
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "257 genes were up",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -9736,6 +9816,9 @@
         "consistency": null,
         "contrast": "KO vs WT",
         "cutoff": "P < 0.01",
+        "cutoff_source": {
+          "kind": "claim"
+        },
         "description": "524 genes were down",
         "experiment": {
           "assay": "bulk RNA-seq",
@@ -10302,6 +10385,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "The resulting data set includes 35 WE samples, 19 TE biopsies, 21 PGT-A results, and 10 morphokinetic grades representing 39 unique embryos",
         "experiment": null,
         "mapping": {
@@ -10331,6 +10415,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "Each RNA-seq library was sequenced to an average depth of approximately 44.6 million reads",
         "experiment": null,
         "mapping": {
@@ -10360,6 +10445,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "For WE, we identified 13,175 expressed transcripts, whereas TE samples expressed 6086 transcripts",
         "experiment": null,
         "mapping": {
@@ -10389,6 +10475,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": null,
+        "cutoff_source": null,
         "description": "TE samples expressed 6086 transcripts",
         "experiment": null,
         "mapping": {
@@ -10418,6 +10505,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "We identified 194 significantly differentially expressed genes of which 146 are sex-linked",
         "experiment": null,
         "mapping": {
@@ -10447,6 +10535,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "We found five genes down-regulated and 48 genes up-regulated in the aneuploid samples compared with the euploid samples (53 total differentially regulated genes)",
         "experiment": null,
         "mapping": {
@@ -10476,6 +10565,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "we found five genes up-regulated and five genes down-regulated in the morphologically aberrant samples",
         "experiment": null,
         "mapping": {
@@ -10505,6 +10595,7 @@
         "consistency": null,
         "contrast": null,
         "cutoff": "adjusted P 0.05",
+        "cutoff_source": null,
         "description": "we compared transcriptional profiles of embryos with high- and poor-quality morphokinetics and found three genes down-regulated and six up-regulated in samples meeting strong morphokinetic standards",
         "experiment": null,
         "mapping": {

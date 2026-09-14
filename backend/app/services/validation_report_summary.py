@@ -845,18 +845,30 @@ def _claim_checks(target: dict) -> list[dict]:
     ]
 
 
-def _predicate_words(target: dict, contrasts: list[dict], plan: dict) -> str | None:
-    """A differential claim's predicate in words, or None for a claim that reports on no contrast."""
+def _claim_predicate(target: dict, contrasts: list[dict], plan: dict, evidence: dict) -> tuple[str | None, dict | None]:
+    """A differential claim's predicate in words and where its cutoffs came from, or (None, None) for a claim
+    that reports on no contrast. plan_8_2 section 3.1: a cutoff inherited from the methods names its quote."""
+    from app.services.validation_methods_cutoffs import inherited_cutoffs
     from app.services.validation_predicate import build_predicate, predicate_words
 
     index = target.get("contrast_index")
     if not isinstance(index, int) or not 0 <= index < len(contrasts):
-        return None
+        return None, None
     contrast = contrasts[index]
-    predicate = build_predicate(
-        target, contrast=contrast, design=plan.get("differential_design"), finding_claim=plan.get("finding_claim")
+    inherited = inherited_cutoffs(
+        target.get("reported_experiment_id") or (contrast or {}).get("reported_experiment_id"),
+        experiments=[e for e in plan.get("reported_experiments") or [] if isinstance(e, dict)],
+        contrasts=[c for c in contrasts if isinstance(c, dict)],
+        recorded=(evidence or {}).get("methods_cutoffs"),
     )
-    return predicate_words(predicate, contrast=contrast)
+    predicate = build_predicate(
+        target,
+        contrast=contrast,
+        design=plan.get("differential_design"),
+        finding_claim=plan.get("finding_claim"),
+        inherited=inherited,
+    )
+    return predicate_words(predicate, contrast=contrast), predicate.get("cutoff_source")
 
 
 def _consistency_row(record: dict) -> dict:
@@ -1596,6 +1608,7 @@ def _claims(
         else:
             status, label, explanation = "unmapped", "Not mapped", "No mapping decision was recorded for this claim."
         index = target.get("contrast_index")
+        predicate_words, cutoff_source = _claim_predicate(target, contrasts, plan, evidence)
         claims.append(
             {
                 "description": target.get("claim_text") or str(target.get("metric_key") or "claim").replace("_", " "),
@@ -1632,8 +1645,10 @@ def _claims(
                 ),
                 "checks": _claim_checks(target),
                 "selection": _claim_selection(position, plan),
-                # change_7.5 section 3.1: the claim's statistical definition, in words.
-                "predicate": _predicate_words(target, contrasts, plan),
+                # change_7.5 section 3.1: the claim's statistical definition, in words, and (plan_8_2
+                # section 3.1) where its cutoffs came from.
+                "predicate": predicate_words,
+                "cutoff_source": cutoff_source,
                 # change_7.5 section 4: the authors' results and the reanalysis, on the claim itself.
                 "consistency": _claim_consistency(position, target, contrasts, evidence, checks=checks),
                 "result": _claim_result(position, target, contrasts, evidence),

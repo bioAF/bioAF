@@ -591,12 +591,22 @@ def unbound_record(table: str | None, source: str | None, bound: dict) -> dict:
     }
 
 
-def claim_predicates(targets: list, plan) -> list[dict]:
-    """``[{"claim_index", "predicate", "contrast"}]`` for every claim that reports on a contrast."""
+def claim_predicates(targets: list, plan, *, evidence: dict | None = None) -> list[dict]:
+    """``[{"claim_index", "predicate", "contrast"}]`` for every claim that reports on a contrast.
+
+    plan_8_2 section 3.1: a claim that states no cutoff inherits one only from a methods sentence the study
+    recorded (``evidence["methods_cutoffs"]``) that covers every differential test in its experiment."""
+    from app.services.validation_methods_cutoffs import inherited_cutoffs
     from app.services.validation_predicate import build_predicate
 
     design = (getattr(plan, "differential_design_json", None) or {}) if plan is not None else {}
     contrasts = design.get("contrasts") or []
+    experiments = [
+        e
+        for e in (getattr(plan, "reported_experiments_json", None) or [] if plan is not None else [])
+        if isinstance(e, dict)
+    ]
+    recorded = (evidence or {}).get("methods_cutoffs")
     found = []
     for index, target in enumerate(targets):
         claim = (
@@ -614,16 +624,23 @@ def claim_predicates(targets: list, plan) -> list[dict]:
                 "count_relation": getattr(target, "count_relation", None),
                 "tolerance": target.tolerance,
                 "significance_unresolved": target.unresolved_reason,
+                "reported_experiment_id": getattr(target, "reported_experiment_id", None),
             }
         )
         position = claim.get("contrast_index")
         if not isinstance(position, int) or not 0 <= position < len(contrasts):
             continue
         contrast = contrasts[position]
+        inherited = inherited_cutoffs(
+            claim.get("reported_experiment_id") or (contrast or {}).get("reported_experiment_id"),
+            experiments=experiments,
+            contrasts=contrasts,
+            recorded=recorded,
+        )
         found.append(
             {
                 "claim_index": index,
-                "predicate": build_predicate(claim, contrast=contrast, design=design),
+                "predicate": build_predicate(claim, contrast=contrast, design=design, inherited=inherited),
                 "contrast": contrast,
                 # plan_8_2 section 1.1: every other contrast of the paper, which a table's binding must rule out.
                 "contrast_index": position,
