@@ -563,10 +563,11 @@ def supplement_consistency(
     return records
 
 
-def _fingerprint(value) -> str:
+def _fingerprint(predicate) -> str:
     from app.services.validation_check_queue import fingerprint
+    from app.services.validation_predicate import predicate_identity
 
-    return fingerprint(value)
+    return fingerprint(predicate_identity(predicate))
 
 
 def unbound_record(table: str | None, source: str | None, bound: dict) -> dict:

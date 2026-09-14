@@ -131,13 +131,34 @@ def threshold_disagreement(threshold, threshold_kind, cutoffs: list[dict] | None
     stated = _cutoff(threshold_kind, None, threshold)
     if stated is None or not cutoffs:
         return None
-    if any(c.get("kind") == stated["kind"] and c.get("value") == stated["value"] for c in cutoffs):
+    # plan_8_2 section 3.1: equivalent representations are normalized before they are called contradictory.
+    # A twofold change is an absolute log2 fold change of one.
+    if any(_same_threshold(stated, c) for c in cutoffs):
         return None
     listed = " and ".join(describe_cutoff(c) for c in cutoffs)
     return (
         f"The claim's threshold ({_WORDS.get(stated['kind'], stated['kind'])} {stated['value']:g}) disagrees with its "
         f"stated cutoffs ({listed}), so its statistical cutoff is unresolved; neither reading is taken over the other."
     )
+
+
+def _on_log2_scale(cutoff: dict) -> tuple[str, float] | None:
+    """A cutoff's kind and value with a linear fold change read on the log2 scale, or None."""
+    import math
+
+    kind, value = cutoff.get("kind"), cutoff.get("value")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    if kind == "fold_change":
+        return ("abs_log2fc", math.log2(float(value))) if value > 1 else None
+    return kind, float(value)
+
+
+def _same_threshold(stated: dict, cutoff: dict) -> bool:
+    import math
+
+    a, b = _on_log2_scale(stated), _on_log2_scale(cutoff)
+    return a is not None and b is not None and a[0] == b[0] and math.isclose(a[1], b[1], rel_tol=1e-9, abs_tol=1e-12)
 
 
 def derive_contrast_thresholds(contrasts: list[dict], claims: list[dict]) -> list[dict]:

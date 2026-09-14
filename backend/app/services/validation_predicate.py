@@ -141,7 +141,14 @@ def build_predicate(
     elif effect_cutoff["kind"] == "fold_change":
         value = effect_cutoff.get("value")
         if isinstance(value, (int, float)) and value > 1:
-            effect = {"kind": "abs_log2fc", "operator": effect_cutoff["operator"], "value": math.log2(float(value))}
+            # plan_8_2 section 3.1: applied on the log2 scale with its operator, and the paper's own
+            # expression kept beside it.
+            effect = {
+                "kind": "abs_log2fc",
+                "operator": effect_cutoff["operator"],
+                "value": math.log2(float(value)),
+                "stated": {"kind": "fold_change", "operator": effect_cutoff["operator"], "value": float(value)},
+            }
             assumptions.append(
                 f"the stated {describe_cutoff(effect_cutoff)} is applied as |log2FC| {effect_cutoff['operator']} {math.log2(float(value)):g}"
             )
@@ -193,6 +200,7 @@ def build_predicate(
 
     return {
         "contrast_index": (claim or {}).get("contrast_index"),
+        "cutoff_source": _cutoff_source(claim, contrast, cutoffs),
         "orientation": "test_over_reference",
         "direction": direction,
         "significance": significance,
@@ -204,6 +212,34 @@ def build_predicate(
         "status": status,
         "reason": reason,
     }
+
+
+def _cutoff_source(claim: dict, contrast: dict | None, cutoffs: list[dict]) -> dict | None:
+    """Where the predicate's cutoffs came from: the claim's own statement, its contrast's finding claim, or
+    a legacy threshold pair."""
+    if not cutoffs:
+        return None
+    if claim_cutoffs(claim or {}):
+        return {"kind": "claim"}
+    if [c for c in (contrast or {}).get("cutoffs") or [] if isinstance(c, dict)]:
+        return {"kind": "contrast"}
+    return {"kind": "legacy_pair"}
+
+
+# What a predicate says, for deciding whether a check must be re-evaluated: the paper's own expression of an
+# applied cutoff and where the cutoff came from are kept for the reader, and change nothing the check applies.
+_PRESENTATION_KEYS = ("cutoff_source",)
+
+
+def predicate_identity(predicate: dict | None) -> dict | None:
+    """The predicate without what only presents it, so presenting it better never re-evaluates a check."""
+    if not isinstance(predicate, dict):
+        return predicate
+    identity = {k: v for k, v in predicate.items() if k not in _PRESENTATION_KEYS}
+    effect = identity.get("effect")
+    if isinstance(effect, dict) and "stated" in effect:
+        identity["effect"] = {k: v for k, v in effect.items() if k != "stated"}
+    return identity
 
 
 _COMPARE = {
@@ -312,6 +348,8 @@ def predicate_words(predicate: dict, *, contrast: dict | None = None) -> str:
         parts.append("fold-change requirement not stated")
     elif effect.get("kind") == "none":
         parts.append("no fold-change requirement")
+    elif isinstance(effect.get("stated"), dict):
+        parts.append(f"{describe_cutoff(effect['stated'])} ({describe_cutoff(effect)})")
     else:
         parts.append(describe_cutoff(effect))
     return ", ".join(parts)

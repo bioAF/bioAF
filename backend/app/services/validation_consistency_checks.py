@@ -203,7 +203,7 @@ async def enqueue(session, study, plan, *, skip: set | None = None, reason: str 
 
     from app.models.comparison_target import ComparisonTarget
     from app.services.validation_author_consistency import claim_predicates
-    from app.services.validation_predicate import predicate_words
+    from app.services.validation_predicate import predicate_identity, predicate_words
 
     evidence = study.evidence_json or {}
     targets = list(
@@ -254,7 +254,7 @@ async def enqueue(session, study, plan, *, skip: set | None = None, reason: str 
         )
         dependencies = {
             "predicate": predicate_words(item["predicate"]) if item.get("predicate") else None,
-            "predicate_fingerprint": queue.fingerprint(item["predicate"]),
+            "predicate_fingerprint": queue.fingerprint(predicate_identity(item["predicate"])),
             "contrast": (item["contrast"] or {}).get("name"),
             "table": (
                 {k: table.get(k) for k in ("name", "source", "url", "supplement_index", "accession")} if table else None
