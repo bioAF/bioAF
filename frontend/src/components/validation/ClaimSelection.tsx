@@ -46,6 +46,7 @@ const CONSISTENCY_CLASS: Record<string, string> = {
   disagree: "font-medium text-red-700",
   unresolved: "text-amber-700",
   not_checkable: "text-gray-600",
+  pending_re_evaluation: "text-gray-600",
 };
 
 const DECIDED_BY: Record<string, string> = {
@@ -155,6 +156,12 @@ export function ClaimSelection({ summary }: { summary: ReportSummary | null | un
                       </span>
                     )}
                     {claim.consistency.reason && <p className="text-gray-500">{claim.consistency.reason}</p>}
+                    {claim.consistency.superseded && (
+                      <p data-testid="consistency-superseded" className="text-gray-500">
+                        Superseded comparison, not current evidence: {claim.consistency.superseded.label}
+                        {claim.consistency.superseded.reason ? ` (${claim.consistency.superseded.reason})` : ""}
+                      </p>
+                    )}
                     {claim.consistency.candidates.length > 0 && (
                       <ul className="ml-4 list-disc text-gray-500">
                         {claim.consistency.candidates.map((candidate, i) => (

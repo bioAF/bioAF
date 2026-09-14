@@ -98,8 +98,18 @@ def _candidate_roles(rows: list[list[str]]) -> dict:
     return roles
 
 
-def read_table(text: str, *, contrast_name: str | None = None, interpretation: dict | None = None) -> dict:
+def read_table(
+    text: str,
+    *,
+    contrast_name: str | None = None,
+    interpretation: dict | None = None,
+    selector: dict | None = None,
+) -> dict:
     """The table's rows keyed by role, the columns used, and what its header establishes.
+
+    plan_8_2 section 1.1: ``selector`` is a binding's per-contrast columns in a table that pools several
+    contrasts (``{"lfc": 3, "padj": 4}``). Those columns are read, and a statistic the selector does not
+    name is not taken from another contrast's columns.
 
     Returns ``{"rows": [{"id", "lfc", "pvalue", "padj"}], "columns": {...}, "headerless": bool,
     "candidate_roles": {...} | None, "scale": "log2" | "linear" | None, "orientation": ... | None,
@@ -161,6 +171,8 @@ def read_table(text: str, *, contrast_name: str | None = None, interpretation: d
                     index["pvalue"] = i
         if index["id"] is None:
             index["id"] = 0
+        if selector:
+            index.update({role: selector.get(role) for role in ("lfc", "pvalue", "padj")})
     columns = {role: (header[i] if isinstance(i, int) and i < len(header) else None) for role, i in index.items()}
 
     evidence: list[str] = []
@@ -240,8 +252,10 @@ def check_claim(
     *,
     contrast: dict | None = None,
     interpretation: dict | None = None,
+    selector: dict | None = None,
 ) -> dict:
-    """The consistency record for one claim against one table."""
+    """The consistency record for one claim against one table. ``selector`` is the bound contrast's own
+    columns in a table that reports several contrasts (plan_8_2 section 1.1)."""
     count = predicate.get("count") or {}
     record = {
         "table": table.get("name"),
@@ -278,9 +292,16 @@ def check_claim(
         return _done(NOT_CHECKABLE, "the claim states no count to check against the table")
 
     reading = read_table(
-        table.get("text") or "", contrast_name=(contrast or {}).get("name"), interpretation=interpretation
+        table.get("text") or "",
+        contrast_name=(contrast or {}).get("name"),
+        interpretation=interpretation,
+        selector=selector,
     )
     record["columns"] = reading["columns"]
+    if selector:
+        record["assumptions"].append(
+            "the table reports several contrasts; the columns naming this claim's contrast were read"
+        )
     if reading["reason"]:
         record["candidate_roles"] = reading["candidate_roles"]
         return _done(UNRESOLVED if reading["headerless"] else NOT_CHECKABLE, reading["reason"])
@@ -362,12 +383,20 @@ def check_claim(
     return _done(UNRESOLVED, words)
 
 
-def supplement_consistency(blob: bytes, filename: str, predicates: list[dict]) -> list[dict]:
+def supplement_consistency(
+    blob: bytes, filename: str, predicates: list[dict], *, table: dict | None = None
+) -> list[dict]:
     """Each claim checked against one results supplement while its bytes are in hand. The rows are
     never kept: the record holds counts, the columns used and the outcome. Never raises.
 
     plan_8_2 section 1.2: decoded by the shared decoder. A table that arrived and could not be
-    interpreted gives each claim an unresolved record saying so, with the decoding's provenance."""
+    interpreted gives each claim an unresolved record saying so, with the decoding's provenance.
+
+    plan_8_2 section 1.1: a claim is compared only when the table is bound to its contrast
+    (``validation_table_binding``). ``table`` is the supplement as a binding candidate: its labels and the
+    passages that cite it. Every record carries its binding; a table not bound to a claim is not compared
+    with it, and the record says why."""
+    from app.services import validation_table_binding as binding
     from app.services.table_decoding import decode_table
 
     decoded = decode_table(blob if isinstance(blob, (bytes, bytearray)) else b"", filename)
@@ -384,8 +413,22 @@ def supplement_consistency(blob: bytes, filename: str, predicates: list[dict]) -
             for item in predicates or []
         ]
     text = decoded.text
+    candidate = {"name": filename, "source": "supplement", **(table or {}), "checksum": decoded.source_checksum}
+    header = binding.header_of(text)
     records = []
     for item in predicates or []:
+        bound = binding.bind(
+            candidate, item.get("contrast") or {}, competitors=item.get("competitors") or [], header=header
+        )
+        if not binding.established(bound):
+            records.append(
+                {
+                    **unbound_record(filename, "supplement", bound),
+                    "decoding": decoded.provenance(),
+                    "claim_index": item.get("claim_index"),
+                }
+            )
+            continue
         try:
             record = check_claim(
                 {},
@@ -393,12 +436,36 @@ def supplement_consistency(blob: bytes, filename: str, predicates: list[dict]) -
                 {"name": filename, "text": text, "source": "supplement"},
                 contrast=item.get("contrast"),
                 interpretation=item.get("interpretation"),
+                selector=bound.get("selector"),
             )
         except Exception:  # noqa: BLE001 - one unreadable table never costs the inventory
             continue
         record.pop("predicate", None)
-        records.append({**record, "decoding": decoded.provenance(), "claim_index": item.get("claim_index")})
+        records.append(
+            {**record, "binding": bound, "decoding": decoded.provenance(), "claim_index": item.get("claim_index")}
+        )
     return records
+
+
+def unbound_record(table: str | None, source: str | None, bound: dict) -> dict:
+    """plan_8_2 section 1.1: the record for a claim a table is not bound to. Nothing was compared."""
+    from app.services import validation_table_binding as binding
+
+    return {
+        "table": table,
+        "source": source,
+        "columns": {},
+        "rows_tested": 0,
+        "rows_passing": None,
+        "rows_missing": 0,
+        "count_range": None,
+        "duplicates_disagreeing": [],
+        "candidates": [],
+        "assumptions": [],
+        "outcome": UNRESOLVED,
+        "reason": binding.binding_reason(bound),
+        "binding": bound,
+    }
 
 
 def claim_predicates(targets: list, plan) -> list[dict]:
@@ -435,6 +502,9 @@ def claim_predicates(targets: list, plan) -> list[dict]:
                 "claim_index": index,
                 "predicate": build_predicate(claim, contrast=contrast, design=design),
                 "contrast": contrast,
+                # plan_8_2 section 1.1: every other contrast of the paper, which a table's binding must rule out.
+                "contrast_index": position,
+                "competitors": [c for i, c in enumerate(contrasts) if i != position and isinstance(c, dict)],
             }
         )
     return found

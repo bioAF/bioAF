@@ -5,11 +5,11 @@ contrast: a deposit listing four DESeq2 result tables had one of them checked. C
 consistency for every claim with an identified table (open question 3); this completes it.
 
 - **Which table.** For each claim, the candidates are the result tables its experiment's deposits list,
-  and the paper's retrieved results supplements. One candidate is the table. Of several, the one that
-  NAMES the claim's contrast is: a table names a contrast when its name carries a word only that contrast
-  has (or, when it has none, every word it has) and no word only another contrast has. The input choice's
-  identification for the selected contrast is taken as it stands. Anything else is unresolved, with the
-  candidates listed, never a guess.
+  and the paper's retrieved results supplements. plan_8_2 section 1.1: each is bound to the claim's
+  contrast through ``validation_table_binding`` (its columns, a verified passage, a recorded confirmation);
+  a name, being the only table, or the input choice's identification makes a table a candidate only, read
+  for its columns before any value is compared. A table whose metadata names another contrast is rejected.
+  Anything else is unresolved, with the candidates listed, never a guess.
 - **One record per claim** (``AUTHOR_RESULTS``), never shared: two claims on one contrast keep their own
   predicate and outcome. Their table is downloaded once and read once.
 - **Within bioAF's limits for checks before approval** (D4): total downloaded bytes, decompressed size,
@@ -22,11 +22,11 @@ The result is consistency with the authors' results. It is never presented as re
 from __future__ import annotations
 
 import logging
-import re
 import time
 
 from app.services import validation_check_queue as queue
-from app.services.table_decoding import TOO_LARGE, decode_table, safe_excerpt
+from app.services.table_decoding import DECODER_VERSION, TOO_LARGE, decode_table, safe_excerpt
+from app.services.validation_table_binding import BINDING_VERSION
 
 logger = logging.getLogger("bioaf.validation_consistency_checks")
 
@@ -47,40 +47,10 @@ RETRIEVAL_EXHAUSTED_REASON = (
     "not established"
 )
 ACCESS_REFUSED_REASON = "the archive refused bioAF's request for the authors' table"
-
-_STOP = {"and", "the", "versus", "with", "for", "vs"}
-
-
-def _words(*texts) -> set[str]:
-    found: set[str] = set()
-    for text in texts:
-        for word in re.findall(r"[a-z0-9]+", str(text or "").lower()):
-            if len(word) >= 3 and word not in _STOP:
-                found.add(word)
-    return found
-
-
-def _squash(text: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(text or "").lower())
-
-
-def _contrast_words(contrast: dict | None) -> set[str]:
-    contrast = contrast or {}
-    return _words(contrast.get("name"), contrast.get("test_condition"), contrast.get("reference_condition"))
-
-
-def names_contrast(table_name: str, contrast: dict, others: list[dict]) -> bool:
-    """Whether a table's name names this contrast among the experiment's other contrasts."""
-    squashed = _squash(table_name)
-    own = _contrast_words(contrast)
-    other_words = [_contrast_words(o) for o in others]
-    distinguishing = own - set().union(*other_words) if other_words else own
-    foreign = set().union(*(words - own for words in other_words)) if other_words else set()
-    if any(word in squashed for word in foreign):
-        return False
-    if distinguishing:
-        return any(word in squashed for word in distinguishing)
-    return bool(own) and all(word in squashed for word in own)
+PENDING_RE_EVALUATION_REASON = (
+    "this comparison was made before bioAF established which contrast the table reports, so it is pending "
+    "re-evaluation and is not current evidence"
+)
 
 
 def _deposit_table_url(accession: str, filename: str) -> str | None:
@@ -113,27 +83,115 @@ def candidate_tables(
                     "supplement_index": index,
                     "url": supplement.get("url"),
                     "storage_uri": supplement.get("storage_uri"),
+                    # plan_8_2 section 1.1: what can bind it to a contrast before its bytes are read.
+                    "labels": [
+                        label for label in [*(supplement.get("references") or []), supplement.get("label")] if label
+                    ],
+                    "passages": list(supplement.get("citing_passages") or []),
                 }
             )
     return found
 
 
-def identify_table(
-    contrast: dict | None, others: list[dict], candidates: list[dict], *, identified: str | None = None
-) -> tuple[dict | None, str | None, str]:
-    """``(table, reason, identified_by)`` for one claim's contrast."""
-    if identified:
-        chosen = next((c for c in candidates if c["name"] == identified), None)
-        if chosen is not None:
-            return chosen, None, "input_choice"
-    if len(candidates) == 1:
-        return candidates[0], None, "only_table"
+def competitors_for(table: dict, position: int | None, contrasts: list[dict], resources: list[dict]) -> list[dict]:
+    """plan_8_2 section 1.1: every other contrast the table's source serves, across experiments. A paper's
+    supplement serves every experiment; a deposit serves the experiments its resource is linked to, or
+    all of them when the paper links none."""
+    served: set = set()
+    if table.get("source") == "deposit":
+        key = str(table.get("accession") or "").upper()
+        for resource in resources or []:
+            if str(resource.get("identifier") or "").upper() == key:
+                served.update(resource.get("reported_experiment_ids") or [])
+    return [
+        c
+        for i, c in enumerate(contrasts)
+        if i != position
+        and isinstance(c, dict)
+        and (not served or c.get("reported_experiment_id") in served or not c.get("reported_experiment_id"))
+    ]
+
+
+def confirmation_for(evidence: dict, table: dict, contrast: dict | None) -> dict | None:
+    """A person's recorded confirmation that this table reports this contrast, if one was recorded."""
+    for entry in (evidence or {}).get("table_confirmations") or []:
+        if (
+            isinstance(entry, dict)
+            and entry.get("table") == table.get("name")
+            and entry.get("contrast") == (contrast or {}).get("name")
+        ):
+            return entry
+    return None
+
+
+def choose_table(
+    contrast: dict | None,
+    position: int | None,
+    candidates: list[dict],
+    *,
+    contrasts: list[dict],
+    resources: list[dict],
+    evidence: dict,
+    identified: str | None = None,
+) -> tuple[dict | None, dict | None, str | None, str, list[dict]]:
+    """``(table, binding, reason, identified_by, bindings)`` for one claim.
+
+    plan_8_2 section 1.1: each candidate is bound to the claim's contrast from what is known before its
+    bytes are read (its name, the passages citing it, a confirmation). One established binding is the
+    table. Otherwise a candidate the binding did not reject may be read for its columns: the one the input
+    choice identified, the only one, or the only one whose name names the arms. Rejected tables never are."""
+    from app.services import validation_table_binding as binding
+
     if contrast is None:
-        return None, "the claim reports on no contrast", "none"
-    naming = [c for c in candidates if names_contrast(c["name"], contrast, others)]
-    if len(naming) == 1:
-        return naming[0], None, "table_name"
-    return None, f"{len(candidates)} result tables are listed, and {UNIDENTIFIED_REASON}", "none"
+        return None, None, "the claim reports on no contrast", "none", []
+    bound = []
+    for candidate in candidates:
+        result = binding.bind(
+            candidate,
+            contrast,
+            competitors=competitors_for(candidate, position, contrasts, resources),
+            confirmation=confirmation_for(evidence, candidate, contrast),
+        )
+        bound.append((candidate, result))
+    summary = [{"name": c["name"], "status": b["status"], "reason": b["reason"]} for c, b in bound]
+    established = [(c, b) for c, b in bound if b["status"] == binding.ESTABLISHED]
+    if len(established) == 1:
+        return established[0][0], established[0][1], None, "binding", summary
+    if len(established) > 1:
+        return (
+            None,
+            None,
+            f"{len(established)} tables are each linked to this contrast, and {UNIDENTIFIED_REASON}",
+            "none",
+            summary,
+        )
+    open_ = [(c, b) for c, b in bound if b["status"] != binding.REJECTED]
+    if identified:
+        chosen = next(((c, b) for c, b in open_ if c["name"] == identified), None)
+        if chosen is not None:
+            return chosen[0], chosen[1], None, "input_choice", summary
+    if len(open_) == 1:
+        return open_[0][0], open_[0][1], None, "only_table", summary
+    named = [(c, b) for c, b in open_ if binding.names_arms(str(c.get("name") or ""), contrast)]
+    if len(named) > 1:
+        # Several names name the arms: the one that also names what distinguishes this contrast from the
+        # contrasts sharing its arms leads. It is still only a candidate until its columns bind it.
+        rivals = [c for c in contrasts if c is not contrast and binding.shares_arms(c, contrast)]
+        named = [
+            (c, b)
+            for c, b in named
+            if all(
+                any(binding.mentions(str(c.get("name") or ""), w) for w in binding.own_words(contrast, rival))
+                for rival in rivals
+                if binding.own_words(contrast, rival)
+            )
+        ] or named
+    if len(named) == 1:
+        return named[0][0], named[0][1], None, "table_name", summary
+    if not open_:
+        why = "; ".join(f"{c['name']}: {b['reason']}" for c, b in bound)
+        return None, None, f"{UNIDENTIFIED_REASON}: no listed table reports it ({why})", "none", summary
+    return None, None, f"{len(open_)} result tables are candidates, and {UNIDENTIFIED_REASON}", "none", summary
 
 
 async def enqueue(session, study, plan) -> list:
@@ -181,22 +239,35 @@ async def enqueue(session, study, plan) -> list:
         if not candidates:
             continue
         position = target.contrast_index
-        siblings = [
-            c
-            for i, c in enumerate(contrasts)
-            if i != position and (experiment is None or c.get("reported_experiment_id") in (None, experiment.get("id")))
-        ]
-        table, reason, identified_by = identify_table(
-            item["contrast"], siblings, candidates, identified=input_table if position == selected else None
+        table, bound, reason, identified_by, bindings = choose_table(
+            item["contrast"],
+            position,
+            candidates,
+            contrasts=contrasts,
+            resources=resources,
+            evidence=evidence,
+            identified=input_table if position == selected else None,
         )
         dependencies = {
             "predicate": predicate_words(item["predicate"]) if item.get("predicate") else None,
             "predicate_fingerprint": queue.fingerprint(item["predicate"]),
             "contrast": (item["contrast"] or {}).get("name"),
-            "table": {k: table.get(k) for k in ("name", "source", "url", "supplement_index")} if table else None,
+            "table": (
+                {k: table.get(k) for k in ("name", "source", "url", "supplement_index", "accession")} if table else None
+            ),
             "candidates": sorted(c["name"] for c in candidates),
             "identified_by": identified_by,
             "unidentified_reason": reason,
+            # plan_8_2 section 1.1: the binding the record depends on, and the versions that decided it.
+            "binding": (
+                {k: bound.get(k) for k in ("status", "reason", "version")}
+                | {"evidence": [e.get("kind") for e in bound.get("evidence") or []]}
+                if bound
+                else None
+            ),
+            "bindings": bindings,
+            "binding_version": BINDING_VERSION,
+            "decoder_version": DECODER_VERSION,
         }
         records.append(await queue.ensure_record(session, study, plan, target, queue.AUTHOR_RESULTS, dependencies))
     return records
@@ -236,6 +307,7 @@ class _Run:
         self.predicates = predicates
         # One read per table and pass: a decoded text, or the terminal outcome every sharer receives.
         self.texts: dict[str, str] = {}
+        self.decodings: dict[str, dict] = {}
         self.failed: dict[str, dict] = {}
         self.retrying: dict[str, str] = {}
 
@@ -343,7 +415,8 @@ async def _conclude(run: _Run, record, *, state: str, outcome: dict, terminal_re
 async def _run_one(run: _Run, record) -> int:
     """One record, from its table to its outcome. Returns 1 when it concluded, 0 when it waits."""
     from app.services.validation_acquisition_outcome import ACCESS_REFUSED, RESOURCE_LIMIT, retrieval_cause
-    from app.services.validation_author_consistency import check_claim
+    from app.services import validation_table_binding as binding
+    from app.services.validation_author_consistency import check_claim, unbound_record
 
     deps = record.dependencies_json or {}
     table = deps.get("table")
@@ -357,12 +430,14 @@ async def _run_one(run: _Run, record) -> int:
                 "outcome": "unresolved",
                 "reason": deps.get("unidentified_reason") or UNIDENTIFIED_REASON,
                 "candidates": deps.get("candidates") or [],
+                "bindings": deps.get("bindings") or [],
             },
             terminal_reason=queue.BINDING,
         )
     if table.get("source") == "supplement":
         # The assessment already checked every claim against a retrieved results supplement while its
-        # bytes were in hand (change_7.5 section 4.1): that record is this check's outcome.
+        # bytes were in hand (change_7.5 section 4.1): that record is this check's outcome, when the
+        # assessment bound the table to this claim's contrast (plan_8_2 section 1.1).
         supplement_index = table.get("supplement_index")
         supplements = [x for x in (run.study.evidence_json or {}).get("supplements") or [] if isinstance(x, dict)]
         held = next(
@@ -378,12 +453,39 @@ async def _run_one(run: _Run, record) -> int:
             None,
         )
         if held is not None:
+            if binding.established(held.get("binding")):
+                return await _conclude(
+                    run,
+                    record,
+                    state=queue.DONE,
+                    outcome={**held, "identified_by": deps.get("identified_by")},
+                    terminal_reason=None,
+                )
+            if isinstance(held.get("binding"), dict):
+                return await _conclude(
+                    run,
+                    record,
+                    state=queue.UNRESOLVED,
+                    outcome={
+                        **unbound_record(held.get("table"), "supplement", held["binding"]),
+                        "outcome": "unresolved",
+                    },
+                    terminal_reason=queue.BINDING,
+                )
+            # A comparison made before bindings existed is never reused: it is kept, and it waits for
+            # re-evaluation under the binding contract (plan_8_2 sections 1.1 and 2.1).
             return await _conclude(
                 run,
                 record,
-                state=queue.DONE,
-                outcome={**held, "identified_by": deps.get("identified_by")},
-                terminal_reason=None,
+                state=queue.UNRESOLVED,
+                outcome={
+                    "outcome": "unresolved",
+                    "reason": PENDING_RE_EVALUATION_REASON,
+                    "table": held.get("table"),
+                    "source": "supplement",
+                    "superseded": held,
+                },
+                terminal_reason=queue.BINDING,
             )
         stored = (
             supplements[supplement_index].get("storage_uri")
@@ -478,18 +580,68 @@ async def _run_one(run: _Run, record) -> int:
             run.failed[url] = failure
             return await _conclude(run, record, **failure)
         run.texts[url] = decoded.text
+        run.decodings[url] = decoded.provenance()
     else:
-        await queue.start(run.session, record, url=url, shared_download=True)
+        await queue.start(run.session, record, url=url, shared_download=True, decoding=run.decodings.get(url))
+    # plan_8_2 section 1.1: the table's columns are in hand; its binding to this claim's contrast is
+    # completed from them before any predicate is applied.
+    bound = _bind_with_columns(run, table, item, run.texts[url])
+    if not binding.established(bound):
+        _note_attempt(record, seconds=round(time.monotonic() - started, 3))
+        return await _conclude(
+            run,
+            record,
+            state=queue.UNRESOLVED,
+            outcome={
+                **unbound_record(table.get("name"), table.get("source"), bound),
+                "identified_by": deps.get("identified_by"),
+            },
+            terminal_reason=queue.BINDING,
+        )
     result = check_claim(
         {},
         item["predicate"],
         {"name": table.get("name"), "text": run.texts[url], "source": table.get("source")},
         contrast=item["contrast"],
+        selector=bound.get("selector"),
     )
     result.pop("predicate", None)
     result["identified_by"] = deps.get("identified_by")
+    result["binding"] = bound
     _note_attempt(record, seconds=round(time.monotonic() - started, 3))
     return await _conclude(run, record, state=queue.DONE, outcome=result, terminal_reason=None)
+
+
+def _bind_with_columns(run: _Run, table: dict, item: dict, text: str) -> dict:
+    """The claim's binding to a table whose bytes are in hand: its name, the passages citing it, a
+    confirmation, and now its columns."""
+    return bind_table_text(run.plan, run.study.evidence_json or {}, table, item.get("contrast_index"), text)
+
+
+def bind_table_text(plan, evidence: dict, table: dict, contrast_index: int | None, text: str) -> dict:
+    """plan_8_2 section 1.1: one table, with its text in hand, bound to the contrast at ``contrast_index``.
+    The one entry point for the queued check, the acquired authors' table and the reanalysis's ground truth."""
+    from app.services import validation_table_binding as binding
+
+    contrasts = [c for c in (plan.differential_design_json or {}).get("contrasts") or [] if isinstance(c, dict)]
+    contrast = (
+        contrasts[contrast_index] if isinstance(contrast_index, int) and 0 <= contrast_index < len(contrasts) else {}
+    )
+    resources = [r for r in plan.resources_json or [] if isinstance(r, dict)]
+    candidate = dict(table)
+    index = table.get("supplement_index")
+    supplements = [s for s in (evidence or {}).get("supplements") or [] if isinstance(s, dict)]
+    if table.get("source") == "supplement" and isinstance(index, int) and 0 <= index < len(supplements):
+        row = supplements[index]
+        candidate["labels"] = [label for label in [*(row.get("references") or []), row.get("label")] if label]
+        candidate["passages"] = list(row.get("citing_passages") or [])
+    return binding.bind(
+        candidate,
+        contrast,
+        competitors=competitors_for(candidate, contrast_index, contrasts, resources),
+        header=binding.header_of(text),
+        confirmation=confirmation_for(evidence, candidate, contrast),
+    )
 
 
 async def _default_fetch(url: str) -> bytes:

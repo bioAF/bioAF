@@ -289,14 +289,15 @@ async def test_a_validated_mapping_rewrites_the_contrast_and_the_comparison_need
     assert contrast["units"]["KO_c16"] == "c16"
     level3 = study.evidence_json.get("level3")
     assert level3 is not None, study.evidence_json.get("level3_skipped")
-    assert level3["ground_truth"]["source"] == "identified_author_table"
-    assert {e["id"] for e in level3["paper_finding_set"]["entities"]} == {"g1", "g2"}
-    # change_7.5 section 4.1: the claim checked against the authors' table itself. Its header names
-    # no ratio, so a directional claim is unresolved with both readings shown.
+    # plan_8_2 section 1.1 (flagged change): the identified table's header names neither arm, and no passage
+    # or confirmation links it to the contrast, so the model's identification leaves it a candidate. It is
+    # never the ground truth; the reanalysis still runs, and the study records why nothing was compared.
+    assert level3["ground_truth"] is None and level3["paper_finding_set"] is None
+    assert study.evidence_json["author_table_unbound"]["binding"]["status"] == "candidate"
     [record] = study.evidence_json["author_consistency"]["records"]
     assert record["claim_index"] == 0
     assert record["outcome"] == "unresolved"
-    assert [c["count"] for c in record["candidates"]] == [1, 1]
+    assert record["binding"]["status"] == "candidate"
 
 
 @pytest.mark.asyncio

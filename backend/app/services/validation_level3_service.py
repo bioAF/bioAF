@@ -579,6 +579,25 @@ async def _identified_ground_truth(
         text = await storage.read_text(table["storage_uri"])
     except Exception as exc:  # noqa: BLE001 - a table that cannot be read back is a stated refusal
         return None, None, f"the identified authors' table {table.get('filename')} could not be read back: {exc}"
+    # plan_8_2 section 1.1: the input choice's identification is a proposal. The table is the ground truth
+    # only once it is bound to the selected claim's contrast; otherwise the reanalysis reports its count,
+    # and the study records why no concordance was computed.
+    from app.services.validation_consistency_checks import bind_table_text
+    from app.services.validation_table_binding import established
+
+    accession = (evidence.get("deposit_inventory") or {}).get("accession")
+    bound = bind_table_text(
+        plan,
+        evidence,
+        {"name": table.get("filename"), "source": "deposit", "accession": accession},
+        current.get("contrast_index"),
+        text,
+    )
+    if not established(bound):
+        unbound = {"filename": table.get("filename"), "binding": bound}
+        evidence["author_table_unbound"] = unbound
+        study.evidence_json = {**(study.evidence_json or {}), "author_table_unbound": unbound}
+        return None, None, None
     arguments = {
         "padj_threshold": float(significance["value"]),
         "significance_kind": significance["kind"],
@@ -588,6 +607,19 @@ async def _identified_ground_truth(
     }
     kinds = supported_finding_kinds(plan.pipeline_key)
     normalize = normalize_interval_table if kinds and kinds[0] == "interval" else normalize_gene_table
+    if normalize is normalize_gene_table:
+        # The bound table's own columns, as the binding read them (a selector for a pooled table), so a
+        # header that names the contrast's arms is read as the column it is.
+        from app.services.validation_author_consistency import read_table
+
+        reading = read_table(text, selector=bound.get("selector"))
+        columns = reading.get("columns") or {}
+        arguments["column_map"] = {
+            "id": columns.get("id"),
+            "lfc": columns.get("lfc"),
+            "padj": columns.get("padj"),
+            "pval": columns.get("pvalue"),
+        }
     finding_set = normalize(text, **arguments)
     missing = missing_measure(finding_set)
     if missing:
@@ -597,6 +629,7 @@ async def _identified_ground_truth(
         "file": table.get("filename"),
         "decided_by": (evidence.get("input_choice") or {}).get("decided_by"),
         "predicate_words": current.get("predicate_words"),
+        "binding": bound,
     }
     return finding_set.to_dict(), ground_truth, None
 

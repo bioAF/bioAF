@@ -83,6 +83,7 @@ async def _contract() -> dict:
     # plan_8: the Validation Scorecard in each of its states, through the real projection.
     from tests.test_report_scorecard import (
         _groff_plan_and_targets,
+        _BOUND,
         _samd1_like,
         long_example,
         qc_scenario,
@@ -194,8 +195,21 @@ async def _contract() -> dict:
         **samd1_v2_evidence,
         "author_consistency": {
             "records": [
-                {"claim_index": 0, "outcome": "disagree", "table": "deseq2.txt.gz", "rows_passing": 120},
-                {"claim_index": 1, "outcome": "agree", "table": "deseq2.txt.gz", "rows_passing": 524},
+                # plan_8_2 section 1.1 (flagged change): records carry the binding they were compared under.
+                {
+                    "claim_index": 0,
+                    "outcome": "disagree",
+                    "table": "deseq2.txt.gz",
+                    "rows_passing": 120,
+                    "binding": _BOUND,
+                },
+                {
+                    "claim_index": 1,
+                    "outcome": "agree",
+                    "table": "deseq2.txt.gz",
+                    "rows_passing": 524,
+                    "binding": _BOUND,
+                },
             ]
         },
         "level3": {"claim_index": 0, "source": "deposit", "contrast": "KO vs WT", "cutoffs": {"significance": {}}},

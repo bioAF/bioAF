@@ -174,6 +174,9 @@ class TestGroff:
         assert excluded["weight"] == 0
 
 
+_BOUND = {"version": 1, "status": "established", "evidence": [{"kind": "columns"}]}
+
+
 def _samd1_like(version=1):
     """Two differential counts on one contrast, one finding, the selected claim checked against the
     authors' table and never reanalysed (the mapping was unresolved). ``version`` is the rubric the
@@ -231,9 +234,22 @@ def _samd1_like(version=1):
     }
     evidence = {
         "author_consistency": {
+            # plan_8_2 section 1.1 (flagged change): each record carries the binding it was compared under.
             "records": [
-                {"claim_index": 0, "outcome": "agree", "table": "deseq2.txt.gz", "rows_passing": 257},
-                {"claim_index": 1, "outcome": "agree", "table": "deseq2.txt.gz", "rows_passing": 524},
+                {
+                    "claim_index": 0,
+                    "outcome": "agree",
+                    "table": "deseq2.txt.gz",
+                    "rows_passing": 257,
+                    "binding": _BOUND,
+                },
+                {
+                    "claim_index": 1,
+                    "outcome": "agree",
+                    "table": "deseq2.txt.gz",
+                    "rows_passing": 524,
+                    "binding": _BOUND,
+                },
             ]
         },
         "completion": {

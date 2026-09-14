@@ -88,7 +88,14 @@ CONSISTENCY_LABELS = {
     "disagree": "Differs from the authors' results",
     "unresolved": "Unresolved against the authors' results",
     "not_checkable": "Not checkable against the authors' results",
+    # plan_8_2 section 1.1 and decision 5, pending the owner's sign-off.
+    "pending_re_evaluation": "Pending re-evaluation against the authors' results",
 }
+# plan_8_2 section 1.1: a comparison made with a table not bound to the claim's contrast.
+PENDING_RE_EVALUATION_REASON = (
+    "This comparison was made before bioAF established which contrast the table reports, so it is pending "
+    "re-evaluation and is not current evidence."
+)
 TIER_LABELS = {"deposit": "Deposited data", "pipeline": "Raw reads"}
 SELECTED_LABEL = "Selected for this run"
 UNASSESSED_LABEL = "Not assessed in this run"
@@ -634,7 +641,7 @@ def _predicate_words(target: dict, contrasts: list[dict], plan: dict) -> str | N
 
 
 def _consistency_row(record: dict) -> dict:
-    return {
+    row = {
         "outcome": record.get("outcome"),
         "label": CONSISTENCY_LABELS.get(record.get("outcome"), record.get("outcome")),
         "reason": record.get("reason"),
@@ -648,13 +655,74 @@ def _consistency_row(record: dict) -> dict:
         "duplicates_disagreeing": record.get("duplicates_disagreeing") or [],
         "candidates": record.get("candidates") or [],
         "assumptions": record.get("assumptions") or [],
+        "binding": _binding_view(record.get("binding")),
+        "superseded": None,
+    }
+    superseded = record.get("superseded")
+    if isinstance(superseded, dict):
+        return _pending(row, superseded)
+    if _used_unbound_table(record):
+        return _pending(row, record)
+    return row
+
+
+def _binding_view(value) -> dict | None:
+    if not isinstance(value, dict):
+        return None
+    return {
+        "status": value.get("status"),
+        "reason": value.get("reason"),
+        "version": value.get("version"),
+        "evidence": [e.get("kind") for e in value.get("evidence") or [] if isinstance(e, dict)],
+    }
+
+
+def _used_unbound_table(record: dict) -> bool:
+    """plan_8_2 section 1.1 and decision 5: a comparison with a table and no binding (made before bindings
+    existed) is not current evidence. A record whose binding rejected or could not establish the table
+    compared nothing, and says so itself."""
+    if "binding" in record:
+        return False
+    return bool(record.get("table")) and record.get("outcome") in ("agree", "disagree", "unresolved", "not_checkable")
+
+
+def _pending(row: dict, prior: dict) -> dict:
+    """The row a comparison pending re-evaluation shows: the prior comparison kept for inspection, never as
+    current evidence."""
+    return {
+        **row,
+        "outcome": "pending_re_evaluation",
+        "label": CONSISTENCY_LABELS["pending_re_evaluation"],
+        "reason": PENDING_RE_EVALUATION_REASON,
+        "table": row.get("table") or prior.get("table"),
+        "columns": {},
+        "rows_tested": None,
+        "rows_passing": None,
+        "rows_missing": None,
+        "count_range": None,
+        "duplicates_disagreeing": [],
+        "candidates": [],
+        "superseded": {
+            "outcome": prior.get("outcome"),
+            "label": CONSISTENCY_LABELS.get(prior.get("outcome"), prior.get("outcome")),
+            "reason": prior.get("reason"),
+            "table": prior.get("table"),
+            "rows_tested": prior.get("rows_tested"),
+            "rows_passing": prior.get("rows_passing"),
+        },
     }
 
 
 def _record_consistency(record: dict) -> dict:
-    """plan_8_1 section 3.3: a claim's consistency from its own check record."""
+    """plan_8_1 section 3.3: a claim's consistency from its own check record. plan_8_2 section 1.1: a record
+    made before bindings (its dependencies carry no binding version) that compared a table is pending
+    re-evaluation."""
     outcome = record.get("outcome") or {}
     state = record.get("state")
+    dependencies = record.get("dependencies") or {}
+    if outcome and "binding_version" in dependencies and "binding" not in outcome and not outcome.get("superseded"):
+        # A record this build wrote without comparing anything (no table chosen, a limit, a failed read).
+        outcome = {**outcome, "binding": None}
     row = _consistency_row(outcome) if outcome else _consistency_row({})
     if not outcome:
         row["reason"] = None

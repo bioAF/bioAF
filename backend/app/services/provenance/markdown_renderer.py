@@ -1707,6 +1707,19 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
             )
             for candidate in consistency.get("candidates") or []:
                 lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
+            # plan_8_2 section 1.1: a comparison made before bindings, kept whole and never current evidence.
+            superseded = consistency.get("superseded") or {}
+            if superseded:
+                prior_counts = (
+                    f"; {superseded.get('rows_passing')} of {superseded.get('rows_tested')} rows pass"
+                    if superseded.get("rows_passing") is not None
+                    else ""
+                )
+                lines.append(
+                    f"  - Superseded comparison, not current evidence: {superseded.get('label')} "
+                    f"({superseded.get('table') or 'no table'}{prior_counts})"
+                    f"{': ' + superseded['reason'] if superseded.get('reason') else ''}"
+                )
         result = claim.get("result") or {}
         if result:
             count = result.get("count") or {}

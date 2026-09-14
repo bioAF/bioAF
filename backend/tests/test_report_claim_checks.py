@@ -157,6 +157,8 @@ EVIDENCE = {
                     {"interpretation": "the table is KO over WT", "count": 257},
                     {"interpretation": "the table is WT over KO", "count": 524},
                 ],
+                # plan_8_2 section 1.1 (flagged change): the binding the record was compared under.
+                "binding": {"version": 1, "status": "established", "evidence": [{"kind": "columns"}]},
             }
         ]
     },

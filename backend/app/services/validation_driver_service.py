@@ -2099,7 +2099,9 @@ class ValidationDriverService:
         """change_7.5 section 4.1: every claim on the selected contrast checked against the acquired
         authors' table, at its own predicate. Never raises; the rows are never kept."""
         from app.models.comparison_target import ComparisonTarget
-        from app.services.validation_author_consistency import check_claim, claim_predicates
+        from app.services.validation_author_consistency import check_claim, claim_predicates, unbound_record
+        from app.services.validation_consistency_checks import bind_table_text
+        from app.services.validation_table_binding import established as binding_established
 
         table = next(
             (
@@ -2128,18 +2130,28 @@ class ValidationDriverService:
             .all()
         )
         selected = ((plan.analysis_selection_json or {}).get("current") or {}).get("contrast_index")
+        accession = (evidence.get("deposit_inventory") or {}).get("accession")
+        candidate = {"name": table.get("filename"), "source": "deposit", "accession": accession}
         records = []
         for item in claim_predicates(list(rows), plan):
             if selected is not None and item["predicate"].get("contrast_index") != selected:
+                continue
+            # plan_8_2 section 1.1: the identified table is compared only with a claim it is bound to.
+            bound = bind_table_text(plan, evidence, candidate, item.get("contrast_index"), text)
+            if not binding_established(bound):
+                records.append(
+                    {**unbound_record(table.get("filename"), "deposit", bound), "claim_index": item["claim_index"]}
+                )
                 continue
             record = check_claim(
                 {},
                 item["predicate"],
                 {"name": table.get("filename"), "text": text, "source": "deposit"},
                 contrast=item["contrast"],
+                selector=bound.get("selector"),
             )
             record.pop("predicate", None)
-            records.append({**record, "claim_index": item["claim_index"]})
+            records.append({**record, "binding": bound, "claim_index": item["claim_index"]})
         evidence["author_consistency"] = {"records": records, "table": table.get("filename"), "at": _now().isoformat()}
 
     @staticmethod

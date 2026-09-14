@@ -106,7 +106,7 @@ export interface ReportClaim {
 }
 
 export interface ClaimConsistency {
-  outcome: "agree" | "disagree" | "unresolved" | "not_checkable" | null;
+  outcome: "agree" | "disagree" | "unresolved" | "not_checkable" | "pending_re_evaluation" | null;
   label: string | null;
   reason: string | null;
   table: string | null;
@@ -121,6 +121,17 @@ export interface ClaimConsistency {
   check_state?: string | null;
   check_state_label?: string | null;
   identified_by?: string | null;
+  // plan_8_2 section 1.1: the table's binding to the claim's contrast, and a comparison made before
+  // bindings, kept for inspection and never current evidence.
+  binding?: { status: string | null; reason: string | null; version: number | null; evidence: string[] } | null;
+  superseded?: {
+    outcome: string | null;
+    label: string | null;
+    reason: string | null;
+    table: string | null;
+    rows_tested: number | null;
+    rows_passing: number | null;
+  } | null;
 }
 
 export interface ClaimCheck {
