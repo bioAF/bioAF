@@ -32,6 +32,7 @@ from app.schemas.validation_study import (
     FindingSetRequest,
     InventoryRetryRequest,
     ReadRequest,
+    RecoveryRequest,
     ReproductionPlanResponse,
     SampleManifestResponse,
     ValidationStudyRequest,
@@ -387,6 +388,52 @@ async def retry_inventory(
             raise HTTPException(409, str(exc)) from exc
         await session.commit()
     return await _study_response(session, study, org_id)
+
+
+@router.get("/{study_id}/recovery")
+async def preview_recovery(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "view"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """plan_8_2 section 2.1: what a recovery of this study would reuse, fetch and re-evaluate. Changes nothing."""
+    from app.services.validation_recovery import preview_recovery as preview
+
+    org_id = int(current_user["org_id"])
+    study = await _load(session, study_id, org_id)
+    return await preview(session, study)
+
+
+@router.post("/{study_id}/recovery")
+async def run_recovery(
+    study_id: int,
+    data: RecoveryRequest | None = None,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """plan_8_2 section 2.1 and decision 5: carry out the recovery the preview describes, on request only.
+    Never launches a workflow and asks no model; 409 while the study is being read, held by another worker,
+    or changed since the preview."""
+    from app.services.validation_ownership import owned
+    from app.services.validation_recovery import PreviewChanged, RecoveryRefused
+    from app.services.validation_recovery import run_recovery as recover
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    async with owned(session, study.id, holder="api") as own:
+        if own is None:
+            raise HTTPException(409, "Another worker is working on this study. Try again when it finishes.")
+        await session.refresh(study)
+        try:
+            result = await recover(
+                session, study, user_id=user_id, preview_fingerprint=(data.preview_fingerprint if data else None)
+            )
+        except (RecoveryRefused, PreviewChanged) as exc:
+            raise HTTPException(409, str(exc)) from exc
+        await session.commit()
+    response = await _study_response(session, study, org_id)
+    return {"recovery": result, **response.model_dump(mode="json")}
 
 
 @router.put("/{study_id}/differential-design", response_model=ValidationStudyResponse)

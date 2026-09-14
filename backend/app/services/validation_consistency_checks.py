@@ -194,9 +194,11 @@ def choose_table(
     return None, None, f"{len(open_)} result tables are candidates, and {UNIDENTIFIED_REASON}", "none", summary
 
 
-async def enqueue(session, study, plan) -> list:
+async def enqueue(session, study, plan, *, skip: set | None = None, reason: str | None = None) -> list:
     """A pending consistency record for every claim with an identified candidate table. Idempotent: a
-    claim whose dependencies did not change keeps its record and its outcome."""
+    claim whose dependencies did not change keeps its record and its outcome. plan_8_2 section 2.1:
+    ``skip`` leaves those claims' records untouched (a recovery re-evaluates only what it names), and
+    ``reason`` is recorded with every revision this supersedes."""
     from sqlalchemy import select
 
     from app.models.comparison_target import ComparisonTarget
@@ -228,6 +230,8 @@ async def enqueue(session, study, plan) -> list:
     records = []
     for item in claim_predicates(targets, plan):
         target = targets[item["claim_index"]]
+        if skip and target.id in skip:
+            continue
         experiment = experiments.get(target.reported_experiment_id)
         candidates = candidate_tables(
             {"contrast_index": target.contrast_index},
@@ -239,7 +243,7 @@ async def enqueue(session, study, plan) -> list:
         if not candidates:
             continue
         position = target.contrast_index
-        table, bound, reason, identified_by, bindings = choose_table(
+        table, bound, unidentified, identified_by, bindings = choose_table(
             item["contrast"],
             position,
             candidates,
@@ -257,7 +261,7 @@ async def enqueue(session, study, plan) -> list:
             ),
             "candidates": sorted(c["name"] for c in candidates),
             "identified_by": identified_by,
-            "unidentified_reason": reason,
+            "unidentified_reason": unidentified,
             # plan_8_2 section 1.1: the binding the record depends on, and the versions that decided it.
             "binding": (
                 {k: bound.get(k) for k in ("status", "reason", "version")}
@@ -269,7 +273,9 @@ async def enqueue(session, study, plan) -> list:
             "binding_version": BINDING_VERSION,
             "decoder_version": DECODER_VERSION,
         }
-        records.append(await queue.ensure_record(session, study, plan, target, queue.AUTHOR_RESULTS, dependencies))
+        records.append(
+            await queue.ensure_record(session, study, plan, target, queue.AUTHOR_RESULTS, dependencies, reason=reason)
+        )
     return records
 
 

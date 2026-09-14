@@ -293,11 +293,19 @@ def summarize(
         "comparisons": _comparisons(attempt, counts),
         "resume": _resume(limitations, failures),
         "issue_count": len(issues or []),
+        # plan_8_2 section 2.1: whether an on-request recovery would change anything, and the last one run.
+        "recovery": _recovery(evidence, checks),
         # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
         "scorecard": scorecard_projection(
             study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
         ),
     }
+
+
+def _recovery(evidence: dict, checks: list[dict] | None) -> dict:
+    from app.services.validation_recovery import recovery_projection
+
+    return recovery_projection(evidence, checks or [])
 
 
 _ACTIVE_STATES_TERMINAL = ("classified", "plan_declined", "error")
@@ -940,6 +948,20 @@ def _record_consistency(record: dict) -> dict:
         and row["outcome"] == "unresolved"
     ):
         row["candidates"] = [{"interpretation": name, "count": None} for name in record["dependencies"]["candidates"]]
+    if row.get("superseded") is None:
+        # plan_8_2 section 2.1: a comparison a recovery withdrew stays inspectable, never current evidence.
+        prior = next(
+            (
+                entry.get("outcome")
+                for entry in reversed(record.get("history") or [])
+                if isinstance(entry, dict)
+                and isinstance(entry.get("outcome"), dict)
+                and _used_unbound_table(entry["outcome"])
+            ),
+            None,
+        )
+        if prior:
+            row["superseded"] = _pending({}, prior)["superseded"]
     return row
 
 

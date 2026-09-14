@@ -245,3 +245,27 @@ describe("a study whose read failed", () => {
     expect(screen.queryByText(/data that was already downloaded is reused/)).not.toBeInTheDocument();
   });
 });
+
+// plan_8_2 section 2.1 and decision 5: the recovery control appears only when a recovery would change
+// something, beneath the scorecard.
+describe("the on-request recovery", () => {
+  test("is offered when some checks were made under rules bioAF has since replaced", async () => {
+    mockGet.mockResolvedValue({
+      ...study(),
+      report_summary: { ...contract.groff_failed, recovery: { available: true, affected_count: 3, last: null } },
+    });
+    render(<ValidationStudyPage />);
+    expect(await screen.findByTestId("recovery-notice")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review the re-evaluation" })).toBeInTheDocument();
+  });
+
+  test("is not offered when nothing would change", async () => {
+    mockGet.mockResolvedValue({
+      ...study(),
+      report_summary: { ...contract.groff_failed, recovery: { available: false, affected_count: 0, last: null } },
+    });
+    render(<ValidationStudyPage />);
+    await waitFor(() => expect(screen.getByText("Reproduction not attempted")).toBeInTheDocument());
+    expect(screen.queryByTestId("recovery-notice")).not.toBeInTheDocument();
+  });
+});
