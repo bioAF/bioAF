@@ -49,6 +49,16 @@ class ValidationCheckRecord(Base):
     attempts_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     outcome_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     history_json: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # plan_8_2 section 1.3: the bounded retry policy, held across restarts and worker instances.
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Why a check stopped for good: interpretation | retries_exhausted | persistence_failed | limit |
+    # access_refused | unavailable. None while it can still run.
+    terminal_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # When the queue last took this record, which is how the queue stays fair between studies.
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # plan_8_2 section 1.4: counts every change to the outcome, so a projection names the outcomes it read.
+    outcome_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

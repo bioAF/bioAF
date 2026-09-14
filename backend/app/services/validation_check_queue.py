@@ -14,18 +14,26 @@ checks before approval. A workflow check runs only when an approval covers it (`
 launch carries an idempotency key made of its ``analysis_key`` and ``approval_id``: a retry or a restart
 reuses the execution already launched, and checks sharing an analysis key share one execution. Credit
 stays per finding, so sharing never multiplies it.
+
+**Failure (plan_8_2 section 1.3).** A transport failure is retried a bounded number of times, with the
+count and the next attempt held on the record so restarts and other workers keep them. A failure to
+interpret what arrived is terminal until the evidence or bioAF changes; it is never downloaded again. A
+check whose result could not be stored gets a minimal safe record. Each stop records its terminal reason.
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
 from app.models.validation_check_record import ValidationCheckRecord
+from app.services.table_decoding import json_safe
+from app.services.validation_acquisition_outcome import BACKOFF_SECONDS, MAX_ATTEMPTS
 
 # The four checks a claim is evaluated for (change_7.5 section 2.5).
 QC_METRIC = "qc_metric"
@@ -42,6 +50,36 @@ UNRESOLVED = "unresolved"
 INTERRUPTED = "interrupted"
 SUPERSEDED = "superseded"
 STATES = (PENDING, RUNNING, DONE, BLOCKED, UNRESOLVED, INTERRUPTED, SUPERSEDED)
+# plan_8_2 section 1.3: what the queue shows for a pending record that already failed to reach its input.
+RETRYING = "retrying"
+
+# Why a check stopped for good. Each is terminal until its evidence, or bioAF, changes.
+INTERPRETATION = "interpretation"  # what arrived could not be interpreted
+BINDING = "binding"  # which table reports the claim is not established
+RETRIES_EXHAUSTED = "retries_exhausted"
+PERSISTENCE_FAILED = "persistence_failed"
+ERROR = "error"
+LIMIT = "limit"
+ACCESS_REFUSED = "access_refused"
+UNAVAILABLE = "unavailable"
+TERMINAL_REASONS = (
+    INTERPRETATION,
+    BINDING,
+    RETRIES_EXHAUSTED,
+    PERSISTENCE_FAILED,
+    ERROR,
+    LIMIT,
+    ACCESS_REFUSED,
+    UNAVAILABLE,
+)
+
+# The acquisition policy's bound: three attempts over roughly a quarter of an hour.
+MAX_TRANSPORT_ATTEMPTS = MAX_ATTEMPTS
+RETRY_BACKOFF_SECONDS = BACKOFF_SECONDS
+
+# plan_8_2 labels, pending the owner's sign-off.
+PERSISTENCE_REASON = "bioAF could not record this check's result; the details are in bioAF's log"
+ERROR_REASON = "bioAF could not run this check; the details are in bioAF's log"
 
 
 class NotApproved(Exception):
@@ -50,6 +88,32 @@ class NotApproved(Exception):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def due(record: ValidationCheckRecord, now: datetime | None = None) -> bool:
+    """A pending record whose retry time, if it has one, has passed."""
+    if record.state != PENDING:
+        return False
+    at = record.next_attempt_at
+    return at is None or at <= (now or _utcnow())
+
+
+def activity_of(record) -> str:
+    """What the queue is doing with a record: its state, with a pending record that already failed to
+    reach its input told apart as retrying."""
+    state = record.state if not isinstance(record, dict) else record.get("state")
+    retries = record.retry_count if not isinstance(record, dict) else record.get("retry_count")
+    if state == PENDING and (retries or 0) > 0:
+        return RETRYING
+    return state
+
+
+def backoff_for(retry_count: int) -> int:
+    return RETRY_BACKOFF_SECONDS[max(0, min(retry_count - 1, len(RETRY_BACKOFF_SECONDS) - 1))]
 
 
 def fingerprint(value) -> str:
@@ -90,6 +154,11 @@ def _supersede(record: ValidationCheckRecord, dependencies: dict, *, analysis_ke
     record.state = PENDING
     record.attempts_json = []
     record.outcome_json = None
+    # plan_8_2 section 1.3: a new revision is a new question, with the whole retry bound ahead of it.
+    record.retry_count = 0
+    record.next_attempt_at = None
+    record.terminal_reason = None
+    record.outcome_revision = int(record.outcome_revision or 0) + 1
 
 
 async def records_for(session, study_id: int, *, kind: str | None = None) -> list[ValidationCheckRecord]:
@@ -157,26 +226,76 @@ async def start(session, record: ValidationCheckRecord, *, execution_ref: str | 
         "execution_ref": execution_ref,
         **fields,
     }
-    record.attempts_json = list(record.attempts_json or []) + [attempt]
+    record.attempts_json = json_safe(list(record.attempts_json or []) + [attempt])
     record.state = RUNNING
+    record.last_attempted_at = _utcnow()
     await session.flush()
     return attempt
 
 
 async def finish(
-    session, record: ValidationCheckRecord, *, state: str, outcome: dict | None = None, error: str | None = None
+    session,
+    record: ValidationCheckRecord,
+    *,
+    state: str,
+    outcome: dict | None = None,
+    error: str | None = None,
+    terminal_reason: str | None = None,
 ) -> None:
-    """Close the attempt in flight (opening one if none was started) with the check's outcome."""
+    """Close the attempt in flight (opening one if none was started) with the check's outcome.
+
+    plan_8_2 section 1.3: an unresolved or blocked record names why it stopped (``terminal_reason``).
+    Diagnostics (the attempts, the error, the reason) are made safe for JSONB, so a diagnostic can never
+    cost the record. Scientific content is stored as it is: a value the database rejects is the caller's
+    safe-failure path, never silently repaired."""
     if state not in STATES:
         raise ValueError(f"{state!r} is not a check state")
+    if terminal_reason is not None and terminal_reason not in TERMINAL_REASONS:
+        raise ValueError(f"{terminal_reason!r} is not a terminal reason")
     attempts = list(record.attempts_json or [])
     if not attempts or attempts[-1].get("finished_at"):
         attempts.append({"attempt": len(attempts) + 1, "started_at": _now(), "execution_ref": None})
     attempts[-1] = {**attempts[-1], "finished_at": _now(), "outcome": state, "error": error}
-    record.attempts_json = attempts
+    record.attempts_json = json_safe(attempts)
     record.state = state
+    if isinstance(outcome, dict) and isinstance(outcome.get("reason"), str):
+        outcome = {**outcome, "reason": json_safe(outcome["reason"])}
     record.outcome_json = outcome
+    record.terminal_reason = terminal_reason if state in (UNRESOLVED, BLOCKED) else None
+    record.next_attempt_at = None
+    record.last_attempted_at = _utcnow()
+    record.outcome_revision = int(record.outcome_revision or 0) + 1
     await session.flush()
+
+
+async def retry_later(
+    session, record: ValidationCheckRecord, *, error: str | None, exhausted_reason: str, now: datetime | None = None
+) -> bool:
+    """A transport failure: close the attempt and schedule the next one, or, when the bound is spent,
+    conclude the record unresolved with ``exhausted_reason``. Returns True when the record concluded."""
+    now = now or _utcnow()
+    attempts = list(record.attempts_json or [])
+    if not attempts or attempts[-1].get("finished_at"):
+        attempts.append({"attempt": len(attempts) + 1, "started_at": now.isoformat(), "execution_ref": None})
+    record.retry_count = int(record.retry_count or 0) + 1
+    if record.retry_count >= MAX_TRANSPORT_ATTEMPTS:
+        record.attempts_json = attempts
+        await finish(
+            session,
+            record,
+            state=UNRESOLVED,
+            outcome={"outcome": "unresolved", "reason": exhausted_reason},
+            error=error,
+            terminal_reason=RETRIES_EXHAUSTED,
+        )
+        return True
+    attempts[-1] = {**attempts[-1], "finished_at": now.isoformat(), "outcome": RETRYING, "error": error}
+    record.attempts_json = json_safe(attempts)
+    record.state = PENDING
+    record.next_attempt_at = now + timedelta(seconds=backoff_for(record.retry_count))
+    record.last_attempted_at = now
+    await session.flush()
+    return False
 
 
 async def reconcile(session, study_id: int, *, execution_state) -> None:
@@ -205,16 +324,51 @@ async def approve(session, study_id: int, check_ids: list[str], *, approval_id: 
     await session.flush()
 
 
-async def execute(session, record: ValidationCheckRecord, *, launch) -> str:
+async def _answer(value):
+    return await value if inspect.isawaitable(value) else value
+
+
+async def _set_execution_ref(session, record: ValidationCheckRecord, key: str, ref: str, **fields) -> None:
+    """Attach a launched execution's reference to the attempt that holds its launch identity."""
+    attempts = list(record.attempts_json or [])
+    for position in range(len(attempts) - 1, -1, -1):
+        if attempts[position].get("launch_key") == key and not attempts[position].get("execution_ref"):
+            attempts[position] = {**attempts[position], "execution_ref": ref, "dispatch": "dispatched", **fields}
+            break
+    record.attempts_json = attempts
+    record.state = RUNNING
+    await session.flush()
+
+
+async def execute(session, record: ValidationCheckRecord, *, launch, lookup=None, checkpoint=None) -> str:
     """Run a workflow check once. ``launch()`` returns the execution's reference and is called only
     when no execution under this record's launch key exists yet, here or on a record sharing its
-    analysis key. Returns the execution reference."""
+    analysis key. Returns the execution reference.
+
+    plan_8_2 section 1.3: the launch identity is persisted before the dispatch (``checkpoint`` commits
+    it), so a worker that stopped between the provider accepting the launch and the reference being
+    recorded leaves a ``dispatching`` attempt. The next call asks the provider (``lookup(key)``) for an
+    execution under that identity before launching, and launches under the same identity only when there
+    is none."""
     if record.kind in WORKFLOW_KINDS and not record.approval_id:
         raise NotApproved(f"{record.check_id} is not in an approved set")
     key = launch_key(record.analysis_key, record.approval_id)
     for attempt in reversed(record.attempts_json or []):
         if attempt.get("launch_key") == key and attempt.get("execution_ref"):
             return attempt["execution_ref"]
+    dispatching = next(
+        (
+            a
+            for a in reversed(record.attempts_json or [])
+            if a.get("launch_key") == key and not a.get("execution_ref") and a.get("dispatch") == "dispatching"
+        ),
+        None,
+    )
+    if dispatching is not None and lookup is not None:
+        found = await _answer(lookup(key))
+        if found:
+            await _set_execution_ref(session, record, key, found, reconciled=True)
+            return found
     if record.analysis_key:
         for other in await records_for(session, record.validation_study_id):
             if other.id == record.id or other.analysis_key != record.analysis_key:
@@ -232,8 +386,12 @@ async def execute(session, record: ValidationCheckRecord, *, launch) -> str:
                     session, record, execution_ref=shared["execution_ref"], launch_key=key, shared_with=other.check_id
                 )
                 return shared["execution_ref"]
+    if dispatching is None:
+        await start(session, record, execution_ref=None, launch_key=key, dispatch="dispatching")
+    if checkpoint is not None:
+        await checkpoint()
     ref = await launch()
-    await start(session, record, execution_ref=ref, launch_key=key)
+    await _set_execution_ref(session, record, key, ref)
     return ref
 
 
@@ -251,4 +409,10 @@ def record_dict(record: ValidationCheckRecord) -> dict:
         "analysis_key": record.analysis_key,
         "approval_id": record.approval_id,
         "history": list(record.history_json or []),
+        # plan_8_2 sections 1.3 and 1.4.
+        "retry_count": int(record.retry_count or 0),
+        "next_attempt_at": record.next_attempt_at.isoformat() if record.next_attempt_at else None,
+        "terminal_reason": record.terminal_reason,
+        "outcome_revision": int(record.outcome_revision or 0),
+        "activity": activity_of(record),
     }
