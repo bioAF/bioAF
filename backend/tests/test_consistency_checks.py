@@ -22,9 +22,11 @@ _TABLE_B = "GSE555001_DESeq2_day7_treated_vs_control.txt.gz"
 _BASE = "https://ftp.ncbi.nlm.nih.gov/geo/series/GSE555nnn/GSE555001/suppl/"
 
 _P = [{"kind": "pvalue", "operator": "<", "value": 0.01}]
+# plan_8_2 section 1.1 (flagged change): the two contrasts share their arms, so each carries the time point
+# that tells them apart, and each table's own column names both. A name alone never binds a table.
 _CONTRASTS = [
     {
-        "name": "treated vs control",
+        "name": "treated vs control, day 0",
         "test_condition": "treated",
         "reference_condition": "control",
         "reported_experiment_id": "e1",
@@ -38,8 +40,8 @@ _CONTRASTS = [
 ]
 
 
-def _table(up: int, down: int) -> bytes:
-    rows = ["gene\tlog2FoldChange(treated/control)\tpvalue\tpadj"]
+def _table(up: int, down: int, day: int = 0) -> bytes:
+    rows = [f"gene\tlog2FoldChange(treated/control, day {day})\tpvalue\tpadj"]
     rows += [f"u{i}\t2.0\t0.001\t0.01" for i in range(up)]
     rows += [f"d{i}\t-2.0\t0.001\t0.01" for i in range(down)]
     rows += [f"n{i}\t0.1\t0.5\t0.9" for i in range(5)]
@@ -118,24 +120,6 @@ def _outcomes(records):
     return {r.comparison_target_id: (r.outcome_json or {}).get("outcome") for r in records}
 
 
-class TestWhichTable:
-    def test_a_table_names_its_contrast_among_the_others(self):
-        assert consistency.names_contrast(_TABLE_A, _CONTRASTS[0], [_CONTRASTS[1]])
-        assert not consistency.names_contrast(_TABLE_B, _CONTRASTS[0], [_CONTRASTS[1]])
-        assert consistency.names_contrast(_TABLE_B, _CONTRASTS[1], [_CONTRASTS[0]])
-        assert not consistency.names_contrast(_TABLE_A, _CONTRASTS[1], [_CONTRASTS[0]])
-
-    def test_several_candidates_none_naming_the_contrast_is_unresolved(self):
-        candidates = [{"name": "results_1.txt"}, {"name": "results_2.txt"}]
-        table, reason, by = consistency.identify_table(_CONTRASTS[0], [_CONTRASTS[1]], candidates)
-        assert table is None and by == "none"
-        assert "which table reports this claim's contrast is not established" in reason
-
-    def test_the_one_listed_table_is_the_table(self):
-        table, _, by = consistency.identify_table(_CONTRASTS[0], [], [{"name": "only.txt"}])
-        assert table["name"] == "only.txt" and by == "only_table"
-
-
 class TestEveryClaimWithAnIdentifiedTable:
     @pytest.mark.asyncio
     async def test_every_claim_gets_a_record_not_only_the_selected_contrast(self, session, admin_user):
@@ -151,7 +135,7 @@ class TestEveryClaimWithAnIdentifiedTable:
     ):
         study, plan, targets = await _seed(session, admin_user)
         await consistency.enqueue(session, study, plan)
-        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1)})
+        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
         assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: "disagree"}
@@ -205,7 +189,7 @@ class TestTheLimitsOnChecksBeforeApproval:
     async def test_decompressed_size(self, session, admin_user):
         study, plan, targets = await _seed(session, admin_user)
         await consistency.enqueue(session, study, plan)
-        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1)})
+        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch, limits={"decompressed_bytes": 10})
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
         assert {r.outcome_json["reason"] for r in records} == {"exceeds bioAF's limit for checks run before approval"}
@@ -214,7 +198,7 @@ class TestTheLimitsOnChecksBeforeApproval:
     async def test_execution_time(self, session, admin_user):
         study, plan, targets = await _seed(session, admin_user)
         await consistency.enqueue(session, study, plan)
-        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1)})
+        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch, limits={"seconds": 0.0})
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
         assert {r.outcome_json["reason"] for r in records} == {"exceeds bioAF's limit for checks run before approval"}
@@ -236,7 +220,7 @@ class TestTheQueueRunsFromTheDriver:
         study.state = "plan_ready"  # the C1 gate: nothing is approved, and nothing is launched
         await consistency.enqueue(session, study, plan)
         await session.commit()
-        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1)})
+        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         ran = await ValidationDriverService.advance_check_queue(session, fetcher=fetch)
         assert ran == 3
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
@@ -264,7 +248,7 @@ class TestTheReportReadsTheRecords:
 
         study, plan, targets = await _seed(session, admin_user)
         await consistency.enqueue(session, study, plan)
-        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1)})
+        fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         summary = await report_summary_for(session, study, admin_user.organization_id)
         rows = [c["consistency"] for c in summary["claims"]]
@@ -293,7 +277,14 @@ class TestAResultsSupplement:
         """plan_8_1 section 3.5: a supplement that holds a result table is checked (3.3). The assessment
         reads every claim against it while its bytes are in hand; that reading is the record's outcome."""
         study, plan, targets = await _seed(session, admin_user, tables=())
-        held = {"claim_index": 0, "outcome": "agree", "table": "Supplemental_File_3.txt", "rows_passing": 3}
+        held = {
+            "claim_index": 0,
+            "outcome": "agree",
+            "table": "Supplemental_File_3.txt",
+            "rows_passing": 3,
+            # plan_8_2 section 1.1 (flagged change): the assessment records the binding it compared under.
+            "binding": {"version": 1, "status": "established", "evidence": [{"kind": "columns"}]},
+        }
         study.evidence_json = {
             **study.evidence_json,
             "supplements": [

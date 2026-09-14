@@ -14,6 +14,7 @@ from app.services.validation_predicate import build_predicate
 
 _P = {"kind": "pvalue", "operator": "<", "value": 0.01}
 _CONTRAST = {"name": "KO vs WT", "test_condition": "KO", "reference_condition": "WT"}
+_BOUND = {"version": 1, "status": "established", "evidence": [{"kind": "columns"}]}
 
 
 def _claim(value, direction, **over):
@@ -161,6 +162,8 @@ def test_the_report_carries_each_claims_consistency_and_the_level_3_result_attac
     record = {
         **check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
         "claim_index": 0,
+        # plan_8_2 section 1.1 (flagged change): the binding the record was compared under.
+        "binding": _BOUND,
     }
     evidence = {
         "author_consistency": {"records": [record]},
@@ -221,6 +224,7 @@ def test_the_markdown_renders_each_claim_from_the_projection():
     record = {
         **check_claim(claim, predicate, {"name": "t.txt", "text": _ORIENTED, "source": "deposit"}, contrast=_CONTRAST),
         "claim_index": 0,
+        "binding": _BOUND,  # plan_8_2 section 1.1 (flagged change)
     }
     plan = {"differential_design": {"contrasts": [_CONTRAST]}}
     summary = summarize(

@@ -52,8 +52,10 @@ _SELECTION = {
         "predicate_words": "KO versus WT, P < 0.01, up, no fold-change requirement",
     }
 }
+# plan_8_2 section 1.1 (flagged change): the table's own column names the contrast's arms, which binds it to
+# the selected claim; an identification alone no longer makes a table the ground truth.
 _AUTHOR_TABLE = (
-    "gene\tlog2FoldChange\tpvalue\tpadj\n"
+    "gene\tlog2FoldChange(KO/WT)\tpvalue\tpadj\n"
     "g1\t1.5\t0.001\t0.02\n"
     "g2\t2.0\t0.005\t0.03\n"
     "g3\t-1.0\t0.001\t0.02\n"  # down: not the claim's direction

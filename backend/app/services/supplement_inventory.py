@@ -25,6 +25,7 @@ matrix needed to rerun the analysis that produced it, and accepting it as one wo
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 import re
@@ -200,7 +201,68 @@ def parse_jats_supplements(xml_text: str) -> list[dict]:
             ),
         )
 
-    return establish_identity(list(rows.values()))
+    established = establish_identity(list(rows.values()))
+    _record_citing_passages(root, established, source_checksum=hashlib.sha256(xml_text.encode("utf-8")).hexdigest())
+    return established
+
+
+# plan_8_2 section 1.1: the passages kept per supplement, each capped, so a paper citing one file in every
+# paragraph cannot carry its whole text into the record.
+_MAX_PASSAGES = 6
+_MAX_PASSAGE_CHARS = 4000
+
+
+def _record_citing_passages(root, rows: list[dict], *, source_checksum: str) -> None:
+    """plan_8_2 section 1.1: each supplement's legend and the paragraphs that cite it, verbatim.
+
+    A binding may rest on a verbatim passage linking a file to a contrast, and the article's paragraphs are
+    in hand only here: the full text is never persisted. A paragraph cites a supplement when it names one
+    of the supplement's citations ("Supplemental Files S2, S3" cites S2 and S3) or its filename."""
+    paragraphs: list[str] = []
+    for element in root.iter():
+        if not element.tag.endswith("}p") and element.tag != "p":
+            continue
+        # Joined as written: inline markup (a link, a subscript) is part of the sentence, not a word break.
+        text = re.sub(r"\s+", " ", "".join(element.itertext())).strip()
+        if text and text not in paragraphs:
+            paragraphs.append(text)
+    legends: dict[str, str] = {}
+    for element in root.iter():
+        if not element.tag.endswith("supplementary-material"):
+            continue
+        caption = next((c for c in element.iter() if c.tag.endswith("caption")), None)
+        words = ""
+        if caption is not None:
+            texts = ("".join(p.itertext()) for p in caption.iter() if p.tag.endswith("}p") or p.tag == "p")
+            words = re.sub(r"\s+", " ", " ".join(texts)).strip()
+        if not words:
+            continue
+        for media in element.iter():
+            href = next((v for k, v in media.attrib.items() if k.endswith("href")), None)
+            if href:
+                legends.setdefault(href, words)
+    for row in rows:
+        if row.get("kind") in (KIND_FIGURE, KIND_INDEX):
+            continue
+        keys = {
+            c["key"] for label in [*(row.get("references") or []), row.get("label")] for c in _citations(label or "")
+        }
+        filename = row.get("filename")
+        found: list[dict] = []
+        legend = legends.get(filename) if filename else None
+        if legend:
+            found.append({"text": legend[:_MAX_PASSAGE_CHARS], "source": "legend", "source_checksum": source_checksum})
+        for paragraph in paragraphs:
+            cited = {c["key"] for c in _citations(paragraph)}
+            if (keys and keys & cited) or (filename and filename in paragraph):
+                if legend and paragraph == legend:
+                    continue
+                found.append(
+                    {"text": paragraph[:_MAX_PASSAGE_CHARS], "source": "paper_text", "source_checksum": source_checksum}
+                )
+            if len(found) >= _MAX_PASSAGES:
+                break
+        row["citing_passages"] = found
 
 
 def establish_identity(rows: list[dict] | None) -> list[dict]:
@@ -735,7 +797,12 @@ def _check_claims(row: dict, filename: str, blob: bytes, predicates: list[dict] 
         return
     from app.services.validation_author_consistency import supplement_consistency
 
-    records = supplement_consistency(blob, filename, predicates)
+    # plan_8_2 section 1.1: the supplement as a binding candidate, with its labels and the passages citing it.
+    table = {
+        "labels": [label for label in [*(row.get("references") or []), row.get("label")] if label],
+        "passages": list(row.get("citing_passages") or []),
+    }
+    records = supplement_consistency(blob, filename, predicates, table=table)
     if records:
         row["consistency"] = records
 

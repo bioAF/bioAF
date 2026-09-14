@@ -140,3 +140,59 @@ describe("a claim's consistency record", () => {
     expect(screen.getByText("Consistency with the authors' results: Pending")).toBeInTheDocument();
   });
 });
+
+// plan_8_2 section 1.1 and decision 5: a comparison made with a table not bound to the claim's contrast.
+describe("a comparison pending re-evaluation", () => {
+  const withPending = (superseded: Record<string, unknown>) =>
+    ({
+      ...stage2,
+      claims: stage2.claims.map((claim, i) =>
+        i === 0
+          ? {
+              ...claim,
+              consistency: {
+                outcome: "pending_re_evaluation",
+                label: contract.enums.consistency.pending_re_evaluation,
+                reason:
+                  "This comparison was made before bioAF established which contrast the table reports, so it is pending re-evaluation and is not current evidence.",
+                table: "S3.txt",
+                source: "supplement",
+                rows_tested: null,
+                rows_passing: null,
+                rows_missing: null,
+                count_range: null,
+                candidates: [],
+                assumptions: [],
+                binding: null,
+                superseded,
+              },
+            }
+          : claim,
+      ),
+    }) as unknown as ReportSummary;
+
+  it("says it is pending re-evaluation and why, never as a current disagreement", () => {
+    render(
+      <ClaimSelection
+        summary={withPending({
+          outcome: "disagree",
+          label: contract.enums.consistency.disagree,
+          reason: "194 against the claim's exactly 53",
+          table: "S3.txt",
+          rows_tested: 194,
+          rows_passing: 194,
+        })}
+      />,
+    );
+    const row = screen.getByTestId("claim-0");
+    expect(within(row).getByText(contract.enums.consistency.pending_re_evaluation)).toBeInTheDocument();
+    expect(within(row).getByText(/is not current evidence/)).toBeInTheDocument();
+    // The earlier comparison stays inspectable, labelled as superseded, and is never styled as a discrepancy.
+    const superseded = within(row).getByTestId("consistency-superseded");
+    expect(superseded).toHaveTextContent(/Superseded comparison, not current evidence/);
+    expect(superseded).toHaveTextContent(/Differs from the authors' results/);
+    expect(superseded).toHaveTextContent(/194 against the claim's exactly 53/);
+    expect(within(row).queryByText("194 of 194 rows pass")).not.toBeInTheDocument();
+    expect(superseded.innerHTML).not.toContain("text-red-700");
+  });
+});

@@ -152,6 +152,7 @@
       "agree": "Consistent with the authors' deposited results",
       "disagree": "Differs from the authors' results",
       "not_checkable": "Not checkable against the authors' results",
+      "pending_re_evaluation": "Pending re-evaluation against the authors' results",
       "unresolved": "Unresolved against the authors' results"
     },
     "finding_category": {
@@ -5731,6 +5732,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -5742,6 +5751,7 @@
           "rows_passing": 257,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -5787,6 +5797,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -5798,6 +5816,7 @@
           "rows_passing": 524,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -6602,6 +6621,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -6613,6 +6640,7 @@
           "rows_passing": 257,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -6658,6 +6686,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -6669,6 +6705,7 @@
           "rows_passing": 524,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -6976,6 +7013,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -6987,6 +7032,7 @@
           "rows_passing": 120,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -7040,6 +7086,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [],
           "columns": {},
           "count_range": null,
@@ -7051,6 +7105,7 @@
           "rows_passing": 524,
           "rows_tested": null,
           "source": null,
+          "superseded": null,
           "table": "deseq2.txt.gz"
         },
         "contrast": "KO vs WT",
@@ -8762,6 +8817,14 @@
         ],
         "consistency": {
           "assumptions": [],
+          "binding": {
+            "evidence": [
+              "columns"
+            ],
+            "reason": null,
+            "status": "established",
+            "version": 1
+          },
           "candidates": [
             {
               "count": 257,
@@ -8787,6 +8850,7 @@
           "rows_passing": null,
           "rows_tested": 20000,
           "source": "deposit",
+          "superseded": null,
           "table": "t.txt.gz"
         },
         "contrast": "KO vs WT",
