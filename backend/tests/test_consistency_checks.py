@@ -161,13 +161,23 @@ class TestEveryClaimWithAnIdentifiedTable:
 
     @pytest.mark.asyncio
     async def test_a_failed_fetch_leaves_that_record_unresolved_and_the_others_intact(self, session, admin_user):
+        """plan_8_2 section 1.3 (flagged change): a failed fetch is retried within the acquisition policy's
+        bound before the record concludes unresolved; the other records stand throughout."""
+        from datetime import datetime, timedelta, timezone
+
         study, plan, targets = await _seed(session, admin_user)
         await consistency.enqueue(session, study, plan)
         fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2)})
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
-        assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: "unresolved"}
         failed = next(r for r in records if r.comparison_target_id == targets[2].id)
+        assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: None}
+        assert queue.activity_of(failed) == queue.RETRYING
+        for _attempt in range(queue.MAX_TRANSPORT_ATTEMPTS - 1):
+            failed.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await consistency.run_pending(session, study, plan, fetcher=fetch)
+        records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
+        assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: "unresolved"}
         assert "could not be retrieved" in failed.outcome_json["reason"]
 
     @pytest.mark.asyncio

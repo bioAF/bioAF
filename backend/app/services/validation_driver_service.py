@@ -339,6 +339,11 @@ _RUN_FAILED = {"failed", "cancelled", "error"}
 # backoff (releasing the pipeline node between attempts), staying in `acquiring_data`; a genuinely
 # unavailable accession short-circuits to `missing_data`; exhausting the budget parks to `error`.
 _MAX_ACQUIRE_RETRIES = 3
+# plan_8_2 section 1.3: the check queue's fairness. One study runs at most this many checks a tick, and the
+# queue considers this many studies for every slot, so studies another worker holds never take the slots.
+_CHECKS_PER_STUDY = 5
+_CANDIDATES_PER_SLOT = 4
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # Backoff before each retry (seconds): 5 min, 15 min, 45 min -> a ~65 min window before giving up.
 _ACQUIRE_BACKOFF_SECONDS = (300, 900, 2700)
 
@@ -802,32 +807,47 @@ class ValidationDriverService:
             logger.exception("study %s: consistency checks could not be queued", study.id)
 
     @staticmethod
-    async def advance_check_queue(session: AsyncSession, *, fetcher=None, limit: int = 5) -> int:
+    async def advance_check_queue(
+        session: AsyncSession, *, fetcher=None, limit: int = 5, per_study: int = _CHECKS_PER_STUDY
+    ) -> int:
         """plan_8_1 section 3.1: run the pending checks that launch no analysis workflow, within bioAF's
         limits for checks before approval. A study being read, or held by another worker, waits for a
-        later tick. Records only: a study's state and evidence are never touched here."""
+        later tick. Records only: a study's state and evidence are never touched here.
+
+        plan_8_2 section 1.3: fair. Studies with due work are taken oldest attempt first, each at most
+        ``per_study`` checks a tick, and ``limit`` studies run; a study another worker holds is skipped
+        without taking a slot. Each check commits on its own under the study's claim. A study whose pass
+        fails outside any one check goes to the back of the queue, and its checks spend one attempt of
+        their bound, so it can neither hold the front nor retry forever."""
+        from sqlalchemy import func
+
         from app.models.validation_check_record import ValidationCheckRecord
         from app.services import validation_check_queue as queue
+        from app.services import validation_consistency_checks as consistency
         from app.services.validation_assessment import active_plan
-        from app.services.validation_consistency_checks import run_pending
 
-        ids = list(
-            (
-                await session.execute(
-                    select(ValidationCheckRecord.validation_study_id)
-                    .join(ValidationStudy, ValidationStudy.id == ValidationCheckRecord.validation_study_id)
-                    .where(
-                        ValidationCheckRecord.kind == queue.AUTHOR_RESULTS,
-                        ValidationCheckRecord.state == queue.PENDING,
-                        ValidationStudy.state.not_in(("requested", "acquiring_text", "reading")),
-                    )
-                    .distinct()
-                    .limit(limit)
+        now = _now()
+        oldest = func.min(func.coalesce(ValidationCheckRecord.last_attempted_at, _EPOCH))
+        rows = (
+            await session.execute(
+                select(ValidationCheckRecord.validation_study_id, oldest.label("oldest"))
+                .join(ValidationStudy, ValidationStudy.id == ValidationCheckRecord.validation_study_id)
+                .where(
+                    ValidationCheckRecord.kind == queue.AUTHOR_RESULTS,
+                    ValidationCheckRecord.state == queue.PENDING,
+                    or_(ValidationCheckRecord.next_attempt_at.is_(None), ValidationCheckRecord.next_attempt_at <= now),
+                    ValidationStudy.state.not_in(("requested", "acquiring_text", "reading")),
                 )
-            ).scalars()
-        )
+                .group_by(ValidationCheckRecord.validation_study_id)
+                .order_by(oldest, ValidationCheckRecord.validation_study_id)
+                .limit(limit * _CANDIDATES_PER_SLOT)
+            )
+        ).all()
         ran = 0
-        for study_id in ids:
+        served = 0
+        for study_id, _oldest in rows:
+            if served >= limit:
+                break
             try:
                 async with owned(session, study_id, holder="check_queue") as claim:
                     if claim is None:
@@ -838,13 +858,41 @@ class ValidationDriverService:
                     plan = await active_plan(session, study) if study is not None else None
                     if plan is None:
                         continue
-                    ran += await run_pending(session, study, plan, fetcher=fetcher)
+
+                    async def checkpoint(claim=claim):
+                        await assert_held(session, claim)
+                        await session.commit()
+
+                    ran += await consistency.run_pending(
+                        session, study, plan, fetcher=fetcher, max_checks=per_study, checkpoint=checkpoint
+                    )
                     await assert_held(session, claim)
                     await session.commit()
+                    served += 1
             except Exception:
                 logger.exception("validation study %d: consistency checks failed", study_id)
                 await session.rollback()
+                await ValidationDriverService._defer_checks(session, study_id, now)
         return ran
+
+    @staticmethod
+    async def _defer_checks(session: AsyncSession, study_id: int, now) -> None:
+        """A pass that failed outside any one check: each due check spends an attempt of its bound and waits
+        its backoff, so the study goes to the back of the queue and cannot fail every tick for ever."""
+        from app.services import validation_check_queue as queue
+
+        try:
+            records = [
+                r for r in await queue.records_for(session, study_id, kind=queue.AUTHOR_RESULTS) if queue.due(r, now)
+            ]
+            for record in records:
+                await queue.retry_later(session, record, error=None, exhausted_reason=queue.ERROR_REASON, now=now)
+                if record.state == queue.UNRESOLVED:
+                    record.terminal_reason = queue.ERROR
+            await session.commit()
+        except Exception:  # noqa: BLE001 - the log already holds the failure this follows
+            logger.exception("validation study %d: its checks could not be deferred", study_id)
+            await session.rollback()
 
     @staticmethod
     async def _conclude_read(session: AsyncSession, study, plan, org_id: int, user_id: int) -> ValidationStudy:
