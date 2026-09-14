@@ -327,11 +327,39 @@ def resource_statements(plan: dict, evidence: dict, *, source_accession: str | N
         if isinstance(resource, dict) and resource.get("identifier"):
             ids = served.setdefault(str(resource["identifier"]).upper(), [])
             ids.extend(e for e in resource.get("reported_experiment_ids") or [] if e not in ids)
+    # plan_8_2 section 2.2: the archive a resource is, as the canonical inventory establishes it (a PDB code
+    # recognised from its context stays a PDB structure), and the words for bioAF's limitation with it.
+    from app.services.validation_resource_identity import canonical_resources, unsupported_lookup_reason
+
+    canonical = {
+        str(r.get("identifier") or "").upper(): r
+        for r in canonical_resources(plan.get("resources") or [])
+        if isinstance(r, dict)
+    }
     rows = []
     for key, experiment_ids in served.items():
         deposit = deposits.get(key)
         if deposit is None:
             continue
+        resource = canonical.get(key) or {}
+        if (
+            resource.get("archive")
+            and resource.get("archive") != deposit.get("archive")
+            and deposit.get("archive")
+            in (
+                None,
+                "other",
+            )
+        ):
+            deposit = {
+                **deposit,
+                "archive": resource["archive"],
+                "failure_reason": (
+                    unsupported_lookup_reason(resource["archive"], deposit.get("accession"))
+                    if deposit.get("exists") not in ("yes", "no")
+                    else deposit.get("failure_reason")
+                ),
+            }
         experiment = experiments.get(experiment_ids[0]) if experiment_ids else None
         checks = _statement_checks(
             deposit,

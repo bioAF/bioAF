@@ -799,10 +799,13 @@ class ValidationDriverService:
     async def _enqueue_checks(session: AsyncSession, study, plan) -> None:
         """plan_8_1 section 3.3: a pending consistency record for every claim with an identified table.
         Idempotent, and it never fails the step it rides on."""
+        from app.services.validation_claim_capabilities import refresh_claim_capabilities
         from app.services.validation_consistency_checks import enqueue
 
         try:
             await enqueue(session, study, plan)
+            # plan_8_2 section 2.2: what the claims can be checked with, from the evidence as it now stands.
+            await refresh_claim_capabilities(session, study, plan)
         except Exception:  # noqa: BLE001 - a check that cannot be queued is not a reason to fail a read
             logger.exception("study %s: consistency checks could not be queued", study.id)
 
@@ -867,6 +870,11 @@ class ValidationDriverService:
                         session, study, plan, fetcher=fetcher, max_checks=per_study, checkpoint=checkpoint
                     )
                     ran += concluded
+                    if concluded:
+                        # plan_8_2 section 2.2: a bound or rejected table changes what the claims can use.
+                        from app.services.validation_claim_capabilities import refresh_claim_capabilities
+
+                        await refresh_claim_capabilities(session, study, plan)
                     await assert_held(session, claim)
                     await session.commit()
                     if concluded and study.state == "classified":

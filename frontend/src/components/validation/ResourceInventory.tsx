@@ -40,15 +40,29 @@ export function ResourceInventory({ summary }: { summary: ReportSummary | null |
             <th scope="col" className="py-1 pr-4 font-medium">Resource</th>
             <th scope="col" className="py-1 pr-4 font-medium">Type</th>
             <th scope="col" className="py-1 pr-4 font-medium">Experiment</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Recognized by bioAF</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Metadata verified</th>
             <th scope="col" className="py-1 pr-4 font-medium">Retrievable by bioAF</th>
             <th scope="col" className="py-1 pr-4 font-medium">Analyzable by bioAF</th>
+            <th scope="col" className="py-1 pr-4 font-medium">Access</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.id ?? row.identifier ?? ""} className="border-t border-gray-100 align-top">
               <td className="py-1.5 pr-4">
-                <span className="font-mono text-xs">{row.identifier}</span>
+                {row.link ? (
+                  <a
+                    href={row.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-xs text-bioaf-700 hover:underline"
+                  >
+                    {row.identifier}
+                  </a>
+                ) : (
+                  <span className="font-mono text-xs">{row.identifier}</span>
+                )}
                 {row.role && <p className="text-xs text-gray-500">{row.role}</p>}
                 {row.limitation && <p className="text-xs text-gray-600">{row.limitation}</p>}
               </td>
@@ -65,11 +79,21 @@ export function ResourceInventory({ summary }: { summary: ReportSummary | null |
                 )}
               </td>
               <td className="py-1.5 pr-4">
+                <Ability value={row.support?.recognized ?? null} label={row.support_labels?.recognized ?? null} />
+              </td>
+              <td className="py-1.5 pr-4">
+                <Ability
+                  value={row.support?.metadata_verified ?? null}
+                  label={row.support_labels?.metadata_verified ?? null}
+                />
+              </td>
+              <td className="py-1.5 pr-4">
                 <Ability value={row.retrievable} label={row.retrievable_label} />
               </td>
               <td className="py-1.5 pr-4">
                 <Ability value={row.analyzable} label={row.analyzable_label} />
               </td>
+              <td className="py-1.5 pr-4 text-xs text-gray-700">{row.support_labels?.access ?? row.support?.access ?? "Unknown"}</td>
             </tr>
           ))}
         </tbody>

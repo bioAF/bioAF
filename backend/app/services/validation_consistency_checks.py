@@ -452,6 +452,9 @@ async def _run_one(run: _Run, record) -> int:
             ),
             None,
         )
+        if held is not None and held.get("predicate_fingerprint") not in (None, deps.get("predicate_fingerprint")):
+            # Compared at a predicate the claim no longer has: not this check's outcome.
+            held = None
         if held is not None:
             if binding.established(held.get("binding")):
                 return await _conclude(

@@ -146,6 +146,14 @@ ISSUE_OUTCOME_LABELS = {
 }
 
 TRISTATE_LABELS = {"yes": "Yes", "no": "No", "not_established": "Not established", "unknown": "Unknown"}
+# plan_8_2 section 2.2, pending the owner's sign-off: how a resource's access condition reads.
+ACCESS_LABELS = {
+    "public": "Public",
+    "controlled": "Controlled access",
+    "unavailable": "Unavailable",
+    "unknown": "Unknown",
+    "not_attempted": "Not looked up",
+}
 
 CHECK_LABELS = {
     "species_matches": "Species matches the deposit",
@@ -265,7 +273,7 @@ def summarize(
         "index_pages": index_pages,
         "code_sources": _code_sources(evidence),
         "capability_rows": _capability_rows(evidence),
-        "resources": _resources(plan),
+        "resources": _resources(plan, evidence),
         "experiments": _experiments(plan),
         "selection": _selection(plan),
         "selection_history": _selection_history(evidence),
@@ -340,8 +348,11 @@ _SCORED_EVIDENCE = (
 _SCORED_PLAN = ("finding_inventory", "differential_design", "analysis_selection", "reported_experiments", "resources")
 
 
-def projection_provenance(plan: dict, evidence: dict, checks: list[dict] | None) -> dict:
-    """Everything a scorecard's outcomes were read from, as revisions and fingerprints."""
+def projection_provenance(
+    plan: dict, evidence: dict, checks: list[dict] | None, targets: list[dict] | None = None
+) -> dict:
+    """Everything a scorecard's outcomes were read from, as revisions and fingerprints. plan_8_2 section 2.2:
+    the claims' capabilities too, since an unassessed finding's cause is read from them."""
     from app.services.table_decoding import DECODER_VERSION
     from app.services.validation_check_queue import fingerprint
     from app.services.validation_table_binding import BINDING_VERSION
@@ -358,6 +369,7 @@ def projection_provenance(plan: dict, evidence: dict, checks: list[dict] | None)
         "checks": sorted(
             [c.get("check_id"), c.get("revision"), c.get("outcome_revision") or 0, c.get("state")] for c in checks or []
         ),
+        "claims": fingerprint([[t.get("id"), t.get("checks")] for t in targets or []]),
     }
 
 
@@ -367,7 +379,9 @@ def provenance_fingerprint(provenance: dict) -> str:
     return fingerprint(provenance)
 
 
-def _usable_record(study: dict, evidence: dict, plan: dict, checks: list[dict] | None = None) -> dict | None:
+def _usable_record(
+    study: dict, evidence: dict, plan: dict, checks: list[dict] | None = None, targets: list[dict] | None = None
+) -> dict | None:
     """The outcomes recorded for a concluded study, while everything they were read from holds (plan_8_2
     section 1.4): the plan and inventory, the rubric, the binding and decoder versions, the evidence and
     every contributing check's outcome revision. A record keeps the rubric version its inventory was
@@ -377,7 +391,9 @@ def _usable_record(study: dict, evidence: dict, plan: dict, checks: list[dict] |
         return None
     if not isinstance(record.get("outcomes"), dict):
         return None
-    if record.get("provenance_fingerprint") != provenance_fingerprint(projection_provenance(plan, evidence, checks)):
+    if record.get("provenance_fingerprint") != provenance_fingerprint(
+        projection_provenance(plan, evidence, checks, targets)
+    ):
         return None
     return record
 
@@ -459,7 +475,7 @@ def scorecard_projection(
             return build_scorecard(None, {}, in_progress=in_progress)
         reason = "The paper has not been read yet." if in_progress else "No reproduction plan was read for this study."
         return build_scorecard({"status": "unresolved", "reason": reason}, {}, in_progress=in_progress)
-    record = _usable_record(study, evidence, plan, checks)
+    record = _usable_record(study, evidence, plan, checks, targets)
     try:
         if record is not None:
             outcomes = record["outcomes"]
@@ -587,7 +603,7 @@ async def compute_scorecard_record(session, study) -> dict | None:
     except ScorecardInvariantError:
         logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
         return None
-    provenance = projection_provenance(plan_dict, evidence, checks)
+    provenance = projection_provenance(plan_dict, evidence, checks, [target_dict(t) for t in rows])
     return {
         "rubric_version": plan.finding_inventory_json.get("rubric_version") or 1,
         "inventory_revision": plan.finding_inventory_json.get("revision"),
@@ -668,12 +684,14 @@ async def record_scorecard(session, study, *, reason: str = "the study concluded
     )
 
 
-def _resources(plan: dict) -> list[dict]:
-    """change_7.5 section 2.1: one row per resource the paper names, with what bioAF can do with it."""
+def _resources(plan: dict, evidence: dict | None = None) -> list[dict]:
+    """change_7.5 section 2.1: one row per resource the paper names, with what bioAF can do with it.
+    plan_8_2 section 2.2: the canonical inventory, so a plan recorded before it reads the same way."""
+    from app.services.validation_resource_identity import canonical_resources
+
+    deposits = ((evidence or {}).get("capabilities") or {}).get("deposits") or []
     rows = []
-    for resource in plan.get("resources") or []:
-        if not isinstance(resource, dict):
-            continue
+    for resource in canonical_resources(plan.get("resources") or [], deposits=deposits):
         bioaf = resource.get("bioaf") or {}
         rows.append(
             {
@@ -692,6 +710,16 @@ def _resources(plan: dict) -> list[dict]:
                 "analyzable": bioaf.get("analyzable"),
                 "analyzable_label": TRISTATE_LABELS.get(bioaf.get("analyzable"), bioaf.get("analyzable")),
                 "limitation": bioaf.get("limitation"),
+                # plan_8_2 section 2.2: support as separate facts, where to open it, and how it was named.
+                "support": resource.get("support"),
+                "support_labels": {
+                    key: (ACCESS_LABELS if key == "access" else TRISTATE_LABELS).get(value, value)
+                    for key, value in (resource.get("support") or {}).items()
+                },
+                "link": resource.get("link"),
+                "level": resource.get("level"),
+                "references": list(resource.get("references") or []),
+                "split_from": resource.get("split_from"),
             }
         )
     return rows

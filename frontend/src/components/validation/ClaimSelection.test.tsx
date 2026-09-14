@@ -32,6 +32,21 @@ describe("ResourceInventory (section 2.1)", () => {
     const { container } = render(<ResourceInventory summary={legacy} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  // plan_8_2 section 2.2: an unsupported archive stays visible with its link, and support is stated as
+  // separate facts.
+  it("links each resource to its archive and states recognition, metadata and access as their own facts", () => {
+    render(<ResourceInventory summary={stage2} />);
+    expect(screen.getByRole("link", { name: "PXD099001" })).toHaveAttribute(
+      "href",
+      "https://www.ebi.ac.uk/pride/archive/projects/PXD099001",
+    );
+    expect(screen.getByText("Recognized by bioAF")).toBeInTheDocument();
+    expect(screen.getByText("Metadata verified")).toBeInTheDocument();
+    expect(screen.getByText("Access")).toBeInTheDocument();
+    const pride = screen.getByText("PXD099001").closest("tr") as HTMLElement;
+    expect(within(pride).getAllByText("Yes").length).toBeGreaterThan(0);
+  });
 });
 
 describe("ClaimSelection (sections 2.2, 2.5 and 2.6)", () => {

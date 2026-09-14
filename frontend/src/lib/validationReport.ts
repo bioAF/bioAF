@@ -158,6 +158,19 @@ export interface ReportResource {
   analyzable: string | null;
   analyzable_label: string | null;
   limitation: string | null;
+  // plan_8_2 section 2.2: support as separate facts, where to open the resource, and how it was named.
+  support?: {
+    recognized: string;
+    metadata_verified: string;
+    download_supported: string;
+    analysis_supported: string;
+    access: string;
+  } | null;
+  support_labels?: Record<string, string> | null;
+  link?: string | null;
+  level?: string | null;
+  references?: string[];
+  split_from?: string | null;
 }
 
 export interface ReportExperiment {
