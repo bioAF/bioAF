@@ -12,6 +12,16 @@ import respx
 
 from app.services.literature.fulltext_service import FullTextFetchService, _BASE
 
+# conftest stubs Europe PMC for every other test (plan_8_1 D7). These tests exercise the real fetch against
+# respx's mocked transport, so they take the implementation back, as it was when this module was imported.
+_REAL_FETCH = FullTextFetchService.__dict__["fetch"]
+
+
+@pytest.fixture(autouse=True)
+def _the_real_fetch(monkeypatch):
+    monkeypatch.setattr(FullTextFetchService, "fetch", _REAL_FETCH)
+
+
 # JATS with a namespace, to prove the body is found regardless of namespace and tags are stripped.
 _JATS = (
     '<?xml version="1.0"?>'
