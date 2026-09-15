@@ -1915,7 +1915,10 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
                 # plan_8_2 section 3.1: a reading a person recorded, with who recorded it and why.
                 lines.append(f"  - Table read as {'; '.join(interpretation['evidence'])}")
             for candidate in consistency.get("candidates") or []:
-                lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
+                if isinstance(candidate, dict):
+                    lines.append(f"  - if {candidate.get('interpretation')}: {candidate.get('count')}")
+                else:
+                    lines.append(f"  - if {candidate}: None")
             # plan_8_2 section 1.1: a comparison made before bindings, kept whole and never current evidence.
             superseded = consistency.get("superseded") or {}
             if superseded:

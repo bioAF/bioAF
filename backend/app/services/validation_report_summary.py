@@ -903,7 +903,7 @@ def _consistency_row(record: dict) -> dict:
         "rows_missing": record.get("rows_missing"),
         "count_range": record.get("count_range"),
         "duplicates_disagreeing": record.get("duplicates_disagreeing") or [],
-        "candidates": record.get("candidates") or [],
+        "candidates": _candidates(record.get("candidates")),
         "assumptions": record.get("assumptions") or [],
         "binding": _binding_view(record.get("binding")),
         "superseded": None,
@@ -919,6 +919,18 @@ def _consistency_row(record: dict) -> dict:
     if _used_unbound_table(record):
         return _pending(row, record)
     return row
+
+
+def _candidates(value) -> list[dict]:
+    """A row's candidates as ``{"interpretation", "count"}``. The queue records the candidate tables of a check
+    whose table is not established by name only; every surface reads the one shape."""
+    rows = []
+    for candidate in value or []:
+        if isinstance(candidate, dict):
+            rows.append(candidate)
+        elif candidate:
+            rows.append({"interpretation": str(candidate), "count": None})
+    return rows
 
 
 def _interpretation_row(value) -> dict | None:

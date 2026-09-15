@@ -75,3 +75,27 @@ def test_a_shared_reason_is_stated_once_and_each_finding_points_to_it():
     assert text.count(shared["text"]) == 1
     assert f"**{shared['id']}**" in _section(text, "Findings")
     assert "see R1 under Findings" in _section(text, "Validation Scorecard")
+
+
+def test_a_check_that_named_its_candidate_tables_renders_on_the_page_and_in_the_export():
+    """Demo, study 45 after its recovery: an unresolved check whose outcome names its candidate tables (the
+    queue's "which table reports this contrast is not established" record) crashed the export."""
+    from app.services.provenance.markdown_renderer import _append_each_claim
+    from app.services.validation_report_summary import _record_consistency
+
+    record = {
+        "kind": "author_results",
+        "state": "unresolved",
+        "dependencies": {"binding_version": 1, "candidates": ["S3_siggenes.txt"]},
+        "outcome": {
+            "outcome": "unresolved",
+            "reason": "which table reports this claim's contrast is not established: no listed table reports it",
+            "candidates": ["S3_siggenes.txt"],
+            "bindings": [{"name": "S3_siggenes.txt", "status": "rejected", "reason": "another contrast"}],
+        },
+    }
+    row = _record_consistency(record)
+    assert row["candidates"] == [{"interpretation": "S3_siggenes.txt", "count": None}]
+    parts: list[str] = []
+    _append_each_claim(parts, {"claims": [{"description": "53 genes", "checks": [], "consistency": row}]})
+    assert "  - if S3_siggenes.txt: None" in "\n".join(parts)
