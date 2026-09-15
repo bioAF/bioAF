@@ -54,6 +54,7 @@ import { ReportSection, useDisclosureLinks } from "@/components/validation/Repor
 import { ReportFindings } from "@/components/validation/ReportFindings";
 import { ReportDataAndCode } from "@/components/validation/ReportDataAndCode";
 import { usePermissions } from "@/hooks/usePermissions";
+import { Card } from "@/components/ui/Card";
 import type { ReportSections } from "@/lib/validationReport";
 import { NOT_SET } from "@/lib/placeholders";
 
@@ -399,72 +400,69 @@ export default function ValidationStudyPage() {
         )}
 
         {decisionsVisible && (
-          <section
-            aria-labelledby="needs-a-decision-heading"
-            data-testid="needs-a-decision"
-            className="mb-4 space-y-3 rounded-lg border border-gray-200 bg-surface p-4"
-          >
-            <h2 id="needs-a-decision-heading" className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Needs a decision
-            </h2>
-            {summary?.scorecard?.inventory_retry && (
-              <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
-            )}
-            {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
-            {summary?.recovery?.available && (
-              <RecoveryNotice
-                studyId={study.id}
-                onChanged={(updated) => setStudy(updated as ValidationStudy)}
-                restate={summary?.recovery?.restate}
-                affectedCount={summary?.recovery?.affected_count}
-              />
-            )}
-            {study.state === "error" && (
-              <RetryNotice
-                studyId={study.id}
-                failureReason={study.failure_reason}
-                readFailed={!!summary?.read_failure}
-                reapAfter={study.evidence?.fetch_reap_after as string | undefined}
-                dataDeleted={!!study.evidence?.fetch_reaped}
-                onChanged={(updated) => setStudy(updated as ValidationStudy)}
-              />
-            )}
-            {study.state === "samples_mismatch" && (
-              <SamplesMismatchNotice
-                studyId={study.id}
-                failureReason={study.failure_reason}
-                onChanged={(updated) => setStudy(updated as ValidationStudy)}
-              />
-            )}
-            {study.state === "plan_ready" && plan?.deposit_conflict && (
-              <DepositConflictNotice
-                studyId={study.id}
-                conflict={plan.deposit_conflict}
-                onChanged={(updated) => setStudy(updated as ValidationStudy)}
-              />
-            )}
-            {study.state === "plan_ready" && (
-              <PipelineInstallNotice
-                pipelineKey={plan?.pipeline_key}
-                pipelineVersion={plan?.pipeline_version}
-                registryName={plan?.pipeline_registry_name}
-                installed={plan?.pipeline_installed}
-                onInstalled={refresh}
-              />
-            )}
-            {study.state === "plan_ready" && (
-              <Level3Gate
-                studyId={study.id}
-                design={plan?.differential_design}
-                claim={plan?.finding_claim}
-                supportedFindingKinds={plan?.supported_finding_kinds}
-                onChanged={(updated) => setStudy(updated as ValidationStudy)}
-              />
-            )}
-            {canPick && depositPanel}
-            {speciesBlocking && precomputePanel}
-            {studyActions}
-          </section>
+          <div data-testid="needs-a-decision" className="mb-4">
+            <Card title="Needs a decision" padding="sm">
+              <div className="space-y-3">
+                {summary?.scorecard?.inventory_retry && (
+                  <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
+                )}
+                {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
+                {summary?.recovery?.available && (
+                  <RecoveryNotice
+                    studyId={study.id}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                    restate={summary?.recovery?.restate}
+                    affectedCount={summary?.recovery?.affected_count}
+                  />
+                )}
+                {study.state === "error" && (
+                  <RetryNotice
+                    studyId={study.id}
+                    failureReason={study.failure_reason}
+                    readFailed={!!summary?.read_failure}
+                    reapAfter={study.evidence?.fetch_reap_after as string | undefined}
+                    dataDeleted={!!study.evidence?.fetch_reaped}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                  />
+                )}
+                {study.state === "samples_mismatch" && (
+                  <SamplesMismatchNotice
+                    studyId={study.id}
+                    failureReason={study.failure_reason}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                  />
+                )}
+                {study.state === "plan_ready" && plan?.deposit_conflict && (
+                  <DepositConflictNotice
+                    studyId={study.id}
+                    conflict={plan.deposit_conflict}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                  />
+                )}
+                {study.state === "plan_ready" && (
+                  <PipelineInstallNotice
+                    pipelineKey={plan?.pipeline_key}
+                    pipelineVersion={plan?.pipeline_version}
+                    registryName={plan?.pipeline_registry_name}
+                    installed={plan?.pipeline_installed}
+                    onInstalled={refresh}
+                  />
+                )}
+                {study.state === "plan_ready" && (
+                  <Level3Gate
+                    studyId={study.id}
+                    design={plan?.differential_design}
+                    claim={plan?.finding_claim}
+                    supportedFindingKinds={plan?.supported_finding_kinds}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                  />
+                )}
+                {canPick && depositPanel}
+                {speciesBlocking && precomputePanel}
+                {studyActions}
+              </div>
+            </Card>
+          </div>
         )}
         {!decisionsVisible && studyActions}
 

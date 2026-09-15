@@ -2,6 +2,7 @@
 
 import { useEffect, type ReactNode } from "react";
 
+import { Card } from "@/components/ui/Card";
 import type { ReportCount } from "@/lib/validationReport";
 
 /**
@@ -49,24 +50,21 @@ export function ReportSection({
   children: ReactNode;
 }) {
   return (
-    <details
-      id={id}
-      open={defaultOpen || undefined}
-      data-testid={`report-section-${id}`}
-      className="group mb-4 rounded-lg border border-gray-200 bg-surface"
-    >
-      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-4 py-3 [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="text-xs text-gray-500 transition-transform group-open:rotate-90 motion-reduce:transition-none">
-          ▶
-        </span>
-        <h2 className="text-base font-semibold text-ink">{title}</h2>
-        <span className="ml-auto">
-          <CountChips counts={counts} />
-        </span>
-        {summary && <p className="basis-full pl-6 text-sm text-gray-700">{summary}</p>}
-      </summary>
-      <div className="space-y-5 border-t border-gray-100 px-4 py-4 sm:pl-10">{children}</div>
-    </details>
+    <Card padding="none" className="mb-4">
+      <details id={id} open={defaultOpen || undefined} data-testid={`report-section-${id}`} className="group">
+        <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-4 py-3 [&::-webkit-details-marker]:hidden">
+          <span aria-hidden="true" className="text-xs text-gray-500 transition-transform group-open:rotate-90 motion-reduce:transition-none">
+            ▶
+          </span>
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          <span className="ml-auto">
+            <CountChips counts={counts} />
+          </span>
+          {summary && <p className="basis-full pl-6 text-sm text-gray-700">{summary}</p>}
+        </summary>
+        <div className="space-y-5 border-t border-gray-100 px-4 py-4 sm:pl-10">{children}</div>
+      </details>
+    </Card>
   );
 }
 
