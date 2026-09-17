@@ -18,12 +18,48 @@ import logging
 from dataclasses import dataclass
 
 from app.adapters.registry import get_storage_adapter
+from app.services.literature.fulltext_service import FullTextFetchService
 
 logger = logging.getLogger("bioaf.validation_paper_text")
 
 EUROPE_PMC = "europe_pmc"
 LIBRARY = "library"
 PASTED = "pasted"
+ROUTES = (EUROPE_PMC, LIBRARY, PASTED)
+
+# plan_8_3 section 1.4: what one source's attempt actually established. Study 49's read failed at
+# Europe PMC and was recorded as having no text; the account of that ONE source was accurate and it
+# is not a fact about the paper, because two other routes were never reported as still open.
+SUCCEEDED = "succeeded"
+# bioAF could not reach the endpoint, or it answered with an error. Another attempt could fix it.
+ENDPOINT_FAILED = "endpoint_failed"
+# The API answered and holds no open full text for this paper. A reuse fact about this source, and
+# never a statement about whether the paper's results or data are available anywhere.
+NOT_OPEN_ACCESS = "not_open_access"
+# There was nothing to look the paper up by.
+NO_IDENTIFIER = "no_identifier"
+# The Library holds no stored text for this paper.
+NO_STORED_TEXT = "no_stored_text"
+# No text was supplied.
+NOT_SUPPLIED = "not_supplied"
+OUTCOMES = (SUCCEEDED, ENDPOINT_FAILED, NOT_OPEN_ACCESS, NO_IDENTIFIER, NO_STORED_TEXT, NOT_SUPPLIED)
+
+_OUTCOME_WORDS = {
+    ENDPOINT_FAILED: "bioAF could not reach Europe PMC",
+    NOT_OPEN_ACCESS: "Europe PMC holds no open full text for this paper",
+    NO_IDENTIFIER: "the study names no identifier to look the paper up by",
+    NO_STORED_TEXT: "the Literature Library holds no stored text for this paper",
+    NOT_SUPPLIED: "no text was supplied to bioAF",
+}
+# Words pending the owner's sign-off.
+NOT_ESTABLISHED_NOTE = (
+    "This does not establish that the paper's text, results or data are unavailable; it says what these "
+    "sources answered."
+)
+SUPPLEMENT_LIMITATION = (
+    "This route does not supply the paper's supplement manifest, so what supplements it publishes is not "
+    "established here."
+)
 
 # plan_8_1 labels, pending the owner's sign-off: the "Paper text available" row names its source.
 SOURCE_LABELS = {
@@ -41,9 +77,29 @@ class PaperText:
     pmcid: str = ""
     sections: dict | None = None
 
+    @property
+    def supplements_established(self) -> bool:
+        """Whether this route established WHAT the paper publishes as supplements.
+
+        plan_8_3 section 1.4: only Europe PMC carries the manifest. A text supplied by hand or read
+        back from the Library comes with an empty list because the route supplies none, which is not
+        the same fact as a paper that published none, and nothing may read it as one.
+        """
+        return self.source == EUROPE_PMC
+
+    @property
+    def supplement_limitation(self) -> str | None:
+        return None if self.supplements_established else SUPPLEMENT_LIMITATION
+
     def record(self) -> dict:
         """What the extraction cycle keeps about the text: never the text itself."""
-        return {"source": self.source, "sha256": text_hash(self.text), "chars": len(self.text)}
+        return {
+            "source": self.source,
+            "sha256": text_hash(self.text),
+            "chars": len(self.text),
+            "supplements_established": self.supplements_established,
+            "supplement_limitation": self.supplement_limitation,
+        }
 
 
 def text_hash(text: str) -> str:
@@ -62,15 +118,62 @@ def _doi(study, paper) -> str | None:
     return (getattr(study, "source_doi", None) or getattr(paper, "doi", None) or "").strip() or None
 
 
-async def from_europe_pmc(study, paper=None) -> PaperText | None:
-    from app.services.literature.fulltext_service import FullTextFetchService
+async def try_europe_pmc(study, paper=None) -> tuple[PaperText | None, dict]:
+    """The text and an account of the attempt: which failure it was, in Europe PMC's own terms.
+
+    plan_8_3 section 1.4: an endpoint that did not answer and a paper that has no open full text are
+    different facts. The first is bioAF's reach and another attempt could fix it; the second is this
+    source's reuse policy, and neither says anything about whether the paper's results exist.
+    """
+    import httpx
 
     doi = _doi(study, paper)
     if not doi:
-        return None
-    result = await FullTextFetchService.fetch(doi=doi)
+        return None, _attempt(EUROPE_PMC, NO_IDENTIFIER, None)
+    try:
+        result = await FullTextFetchService.fetch(doi=doi)
+    except (httpx.HTTPError, ValueError, OSError) as exc:
+        logger.info("study %s: Europe PMC could not be reached: %s", getattr(study, "id", "?"), exc)
+        return None, _attempt(EUROPE_PMC, ENDPOINT_FAILED, str(exc)[:300])
     if result is None:
-        return None
+        return None, _attempt(EUROPE_PMC, NOT_OPEN_ACCESS, f"no open full text for {doi}")
+    return (
+        _paper_text(result),
+        _attempt(EUROPE_PMC, SUCCEEDED, result.external_id or None),
+    )
+
+
+def _attempt(source: str, outcome: str, detail: str | None) -> dict:
+    return {"source": source, "outcome": outcome, "detail": detail}
+
+
+def acquisition_record(attempts: list[dict], *, text_source: str | None) -> dict:
+    """What every route answered, whether the text was established, and which routes are still open.
+
+    plan_8_3 section 1.4: a study whose read failed at one source is not a study whose paper cannot be
+    read. The routes that were never tried are named, so the next step is a step somebody can take.
+    """
+    rows = [a for a in attempts or [] if isinstance(a, dict)]
+    tried = {a.get("source") for a in rows}
+    established = bool(text_source) or any(a.get("outcome") == SUCCEEDED for a in rows)
+    remaining = [] if established else [r for r in ROUTES if r not in tried]
+    failures = [
+        _OUTCOME_WORDS.get(str(a.get("outcome")), str(a.get("outcome"))) for a in rows if a.get("outcome") != SUCCEEDED
+    ]
+    reason = None
+    if not established:
+        reason = "; ".join(dict.fromkeys(failures)) or "no source was tried"
+        reason = f"{reason}. {NOT_ESTABLISHED_NOTE}"
+    return {
+        "established": established,
+        "source": text_source,
+        "attempts": rows,
+        "routes_remaining": remaining,
+        "reason": reason,
+    }
+
+
+def _paper_text(result) -> PaperText:
     return PaperText(
         text=result.text,
         source=EUROPE_PMC,
@@ -78,6 +181,13 @@ async def from_europe_pmc(study, paper=None) -> PaperText | None:
         pmcid=result.external_id or "",
         sections=getattr(result, "sections", None),
     )
+
+
+async def from_europe_pmc(study, paper=None) -> PaperText | None:
+    """The text, or None. Kept for callers that need only the answer; the attempt is on
+    ``try_europe_pmc``."""
+    found, _ = await try_europe_pmc(study, paper)
+    return found
 
 
 async def from_library(session, study) -> PaperText | None:
@@ -94,14 +204,26 @@ async def from_library(session, study) -> PaperText | None:
     return PaperText(text=text, source=LIBRARY, supplements=[])
 
 
-async def acquire(session, study, *, pasted: str | None) -> PaperText | None:
-    """D7: Europe PMC, then the Library, then pasted text. None when none of them has the paper."""
+async def acquire(session, study, *, pasted: str | None, attempts: list | None = None) -> PaperText | None:
+    """D7: Europe PMC, then the Library, then pasted text. None when none of them has the paper.
+
+    plan_8_3 section 1.4: ``attempts``, when given, collects an account of every route tried, so a
+    failed read can say which source refused it and which routes are still open.
+    """
+    record = attempts if attempts is not None else []
     paper = await _paper(session, study)
-    for found in (await from_europe_pmc(study, paper), await from_library(session, study)):
-        if found is not None:
-            return found
+    found, attempt = await try_europe_pmc(study, paper)
+    record.append(attempt)
+    if found is not None:
+        return found
+    library = await from_library(session, study)
+    record.append(_attempt(LIBRARY, SUCCEEDED if library else NO_STORED_TEXT, None))
+    if library is not None:
+        return library
     if (pasted or "").strip():
+        record.append(_attempt(PASTED, SUCCEEDED, None))
         return PaperText(text=pasted or "", source=PASTED, supplements=[])
+    record.append(_attempt(PASTED, NOT_SUPPLIED, None))
     return None
 
 
