@@ -23,7 +23,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from app.services.llm_decision import decide
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery
 from app.services.validation_checks import (
     AUTHOR_RESULTS,
     AVAILABLE,
@@ -136,8 +137,14 @@ async def select_analysis(
         confidence = 1.0
     elif pairs and autonomous:
         system, payload = _prompt(targets, pairs, experiments)
-        decision = await decide(
-            intent=SELECTION_INTENT, system=system, payload=payload, client=client, model=model, api_key=api_key
+        decision = await decide_with_recovery(
+            intent=SELECTION_INTENT,
+            system=system,
+            payload=payload,
+            client=client,
+            model=model,
+            api_key=api_key,
+            purpose=budgets.ANALYSIS_SELECTION,
         )
         answer = decision.data if decision.ok else {}
         picked = next(

@@ -47,7 +47,8 @@ from app.services.code_execution_service import (
     QUALIFIER_GENERATED_FROM_PROSE,
     QUALIFIER_METHODS_INADEQUATE,
 )
-from app.services.llm_decision import decide
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery
 
 logger = logging.getLogger("bioaf.generated_analysis")
 
@@ -121,13 +122,14 @@ async def generate_analysis(
         + f"The paper's methods, verbatim:\n{(methods_text or '')[:40000]}"
     )
 
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=GENERATION_INTENT,
         system=_SYSTEM,
         payload=payload,
         client=client,
         model=model,
         api_key=api_key,
+        purpose=budgets.GENERATED_ANALYSIS,
     )
     if not decision.ok:
         return {

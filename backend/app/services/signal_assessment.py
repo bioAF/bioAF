@@ -28,7 +28,8 @@ import logging
 from datetime import datetime, timezone
 
 from app.services.code_execution_service import METHOD_AUTHORS_CODE, METHOD_LLM_FROM_METHODS
-from app.services.llm_decision import decide
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery
 
 logger = logging.getLogger("bioaf.signal_assessment")
 
@@ -133,7 +134,7 @@ async def assess_signal(
         f"Our re-run of the authors' own analysis produced: {our_value}\n"
         f"{('Context: ' + context) if (context or '').strip() else ''}"
     )
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=SIGNAL_INTENT,
         system=_SIGNAL_SYSTEM,
         payload=payload,
@@ -141,6 +142,7 @@ async def assess_signal(
         model=model,
         api_key=api_key,
         allowed=[LIKELY, NOT_LIKELY],
+        purpose=budgets.SIGNAL_VERDICT,
     )
     if not decision.ok:
         return None
@@ -180,7 +182,7 @@ async def assess_causes(*, observation: dict, method: str, client, model: str, a
         f"Method: {_METHOD_LABEL[method]}\n"
         f"Last of the transcript:\n{(observation.get('transcript_tail') or '')[-2000:]}"
     )
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=CAUSE_INTENT,
         system=_CAUSE_SYSTEM,
         payload=payload,
@@ -188,6 +190,7 @@ async def assess_causes(*, observation: dict, method: str, client, model: str, a
         model=model,
         api_key=api_key,
         allowed=list(CAUSE_CANDIDATES),
+        purpose=budgets.SIGNAL_CANDIDATE,
     )
     if not decision.ok:
         return None

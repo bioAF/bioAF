@@ -33,7 +33,14 @@ from app.services.literature.accession_manifest_service import (
     AccessionManifestService,
     dominant_library_strategy,
 )
-from app.services.llm_decision import confidence_of, decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import (
+    OUTCOME_SCHEMA_REJECTED,
+    confidence_of,
+    decide,
+    decide_with_recovery,
+    fenced_json,
+)
 from app.services.llm_provider_clients import get_client
 from app.services.validation_issue_service import ValidationIssueService
 from app.services.validation_read_failure import (
@@ -676,6 +683,7 @@ def build_binding_prompt(
     previous: list[dict] | None = None,
     inventory: str | None = None,
     statements: list[str] | None = None,
+    indexes: list[int] | None = None,
 ) -> tuple[str, str]:
     """Return (system, payload) asking the model to bind each claim to a controlled metric, or decline.
 
@@ -752,7 +760,9 @@ def build_binding_prompt(
             "the data supports. A supplement bioAF has not retrieved proves nothing either way."
         )
     lines = []
-    for i, c in enumerate(claims):
+    # plan_8_3 stage 6: a claim's identifier is its place in the PAPER, not its place in the batch, so
+    # the same claim carries the same number however the set is divided.
+    for i, c in zip(indexes if indexes is not None else range(len(claims)), claims, strict=True):
         line = (
             f"[{i}] key={c.get('metric_key')!r} value={c.get('value')!r} unit={c.get('unit')!r} "
             f"where={c.get('source_locator')!r}"
@@ -1031,6 +1041,7 @@ async def read_paper(study, *, system: str, payload: str, client, cfg, checkpoin
             model=cfg.model,
             api_key=cfg.api_key,
             max_tokens=max_tokens,
+            purpose=budgets.PAPER_READING,
         )
         usage = {
             "output_tokens": decision.output_tokens,
@@ -1098,6 +1109,143 @@ def binding_failure_blocker(decisions: list[dict]) -> str | None:
     return BINDING_FAILURE_BLOCKER
 
 
+# plan_8_3 stage 6: how many claims travel in one binding call. Each claim costs about 120 output
+# tokens, so a batch this size sits well inside the registered budget with room for a long reason on
+# every row, and a batch that fails costs only its own claims.
+BINDING_BATCH = 20
+
+
+def binding_problems(data: dict | None, indexes: list[int]) -> list[str]:
+    """What is wrong with a binding answer for the claims ``indexes`` named, in the model's own terms.
+
+    plan_8_3 stage 6: exactly one decision per claim asked about. A missing claim would otherwise be
+    read as undecided, a duplicate would silently take whichever row came first, and a decision for a
+    claim this call never asked about would be dropped without anyone knowing the model had answered
+    a different question.
+    """
+    seen = [
+        item.get("claim_index")
+        for item in _as_list((data or {}).get("bindings"))
+        if isinstance(item, dict)
+        and isinstance(item.get("claim_index"), int)
+        and not isinstance(item.get("claim_index"), bool)
+    ]
+    wanted = set(indexes)
+    problems = []
+    missing = [i for i in indexes if i not in seen]
+    if missing:
+        problems.append(
+            f"you gave no decision for claim {', '.join(str(i) for i in missing)}; every claim listed needs "
+            "exactly one row, and a decline with a reason is a decision"
+        )
+    duplicated = sorted({i for i in seen if seen.count(i) > 1})
+    if duplicated:
+        problems.append(
+            f"you gave more than one decision for claim {', '.join(str(i) for i in duplicated)}; give exactly one"
+        )
+    unknown = sorted({i for i in seen if i not in wanted})
+    if unknown:
+        problems.append(
+            f"you gave a decision for claim {', '.join(str(i) for i in unknown)}, which this list does not hold; "
+            "answer only for the claims listed, using the numbers they are listed under"
+        )
+    return problems
+
+
+def _binding_failed(index: int, reason: str) -> dict:
+    return {
+        "claim_index": index,
+        "bound_key": None,
+        "reason": reason,
+        "confidence": 0.0,
+        "declined": False,
+        "bound_by": BINDING_FAILED,
+    }
+
+
+async def _bind_batch(
+    indexes: list[int],
+    claims: list[dict],
+    *,
+    client,
+    model: str,
+    api_key: str | None,
+    inventory: str | None,
+    previous: list[dict] | None,
+    on_issue,
+    statements: list[str] | None,
+) -> dict[int, dict]:
+    """One binding call, over the claims ``indexes`` names, with one decision per claim or none."""
+    wanted = set(indexes)
+    system, payload = build_binding_prompt(
+        [claims[i] for i in indexes],
+        indexes=indexes,
+        previous=[d for d in previous or [] if d.get("claim_index") in wanted] or None,
+        inventory=inventory,
+        statements=statements,
+    )
+    # `allowed` is the controlled vocabulary. An invented key would persist as a binding and be
+    # compared against a metric that does not exist, which is the one failure this call removes.
+    decision = await decide_with_recovery(
+        intent=CLAIM_BINDING_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        allowed=CONTROLLED_METRIC_KEYS,
+        purpose=budgets.CLAIM_BINDING,
+        validate=lambda data: binding_problems(data, indexes),
+    )
+    if not decision.ok and decision.outcome != OUTCOME_SCHEMA_REJECTED:
+        # change_7.1 section 3. This used to return [], which left every target on `alias_table`
+        # with a NULL bound_key, and the comparison then resolved the claim through the alias table
+        # and printed a verdict. Groff's binding failed exactly this way and the study still showed
+        # comparisons as though a model had approved them.
+        #
+        # A FAILURE is not a DECLINE. Declining is an answer the model gives on purpose, and the
+        # alias table is the right fallback for it. An unreadable response is not an answer, and
+        # letting it fall back manufactures agreement out of an outage.
+        if on_issue:
+            on_issue(decision.as_issue(impact="degraded"))
+        return {
+            i: _binding_failed(i, "the binding call did not return a readable decision for this claim") for i in indexes
+        }
+
+    # plan_8_3 stage 6: an answer that arrived whole and still does not hold one decision per claim
+    # has already been asked again once. What arrived is kept claim by claim: a decision bioAF can
+    # read stands, a claim with none is recorded as undecided, and a claim the model answered twice
+    # is recorded as failed rather than resolved by taking whichever row came first. No claim is
+    # dropped without a record, and an unbound claim cannot earn a comparison either way.
+    if decision.outcome == OUTCOME_SCHEMA_REJECTED and on_issue:
+        on_issue(decision.as_issue(impact="degraded"))
+    counted: dict[int, int] = {}
+    by_index: dict[int, dict] = {}
+    for row in parse_binding(decision.text):
+        idx = row.get("claim_index")
+        if isinstance(idx, int) and not isinstance(idx, bool) and idx in wanted:
+            counted[idx] = counted.get(idx, 0) + 1
+            by_index.setdefault(idx, row)
+    bound = {}
+    for i in indexes:
+        if counted.get(i, 0) > 1:
+            bound[i] = _binding_failed(
+                i, "the model gave more than one binding decision for this claim, so none of them is its binding"
+            )
+        else:
+            bound[i] = by_index.get(
+                i,
+                {
+                    "claim_index": i,
+                    "bound_key": None,
+                    "reason": "the model returned no binding decision for this claim",
+                    "confidence": 0.0,
+                    "declined": False,
+                },
+            )
+    return bound
+
+
 async def bind_claims(
     claims: list[dict],
     *,
@@ -1114,66 +1262,32 @@ async def bind_claims(
     A claim the model said nothing about comes back undecided rather than missing, so a short or
     scrambled answer cannot silently drop a claim out of the plan.
 
+    plan_8_3 stage 6: a set larger than ``BINDING_BATCH`` is asked in several calls. Every batch is
+    asked the same question over the same shared context, a claim keeps the number it has in the paper,
+    and a batch that fails costs only its own claims: the batches that answered keep their bindings.
+
     ``previous`` re-asks with the last attempt's own answers in front of it. It is used once, when a
     whole paper bound nothing, because that is the case where a second look is worth its cost.
     """
     if not claims:
         return []
 
-    system, payload = build_binding_prompt(claims, previous=previous, inventory=inventory, statements=statements)
-    # `allowed` is the controlled vocabulary. An invented key would persist as a binding and be
-    # compared against a metric that does not exist, which is the one failure this call removes.
-    decision = await decide(
-        intent=CLAIM_BINDING_INTENT,
-        system=system,
-        payload=payload,
-        client=client,
-        model=model,
-        api_key=api_key,
-        allowed=CONTROLLED_METRIC_KEYS,
-    )
-    if not decision.ok:
-        # change_7.1 section 3. This used to return [], which left every target on `alias_table`
-        # with a NULL bound_key, and the comparison then resolved the claim through the alias table
-        # and printed a verdict. Groff's binding failed exactly this way and the study still showed
-        # comparisons as though a model had approved them.
-        #
-        # A FAILURE is not a DECLINE. Declining is an answer the model gives on purpose, and the
-        # alias table is the right fallback for it. An unreadable response is not an answer, and
-        # letting it fall back manufactures agreement out of an outage.
-        if on_issue:
-            on_issue(decision.as_issue(impact="degraded"))
-        return [
-            {
-                "claim_index": i,
-                "bound_key": None,
-                "reason": "the binding call did not return a readable decision for this claim",
-                "confidence": 0.0,
-                "declined": False,
-                "bound_by": BINDING_FAILED,
-            }
-            for i in range(len(claims))
-        ]
-
-    by_index = {}
-    for row in parse_binding(decision.text):
-        idx = row.get("claim_index")
-        if isinstance(idx, int) and not isinstance(idx, bool) and 0 <= idx < len(claims):
-            by_index.setdefault(idx, row)
-
-    return [
-        by_index.get(
-            i,
-            {
-                "claim_index": i,
-                "bound_key": None,
-                "reason": "the model returned no binding decision for this claim",
-                "confidence": 0.0,
-                "declined": False,
-            },
+    bound: dict[int, dict] = {}
+    for start in range(0, len(claims), BINDING_BATCH):
+        bound.update(
+            await _bind_batch(
+                list(range(start, min(start + BINDING_BATCH, len(claims)))),
+                claims,
+                client=client,
+                model=model,
+                api_key=api_key,
+                inventory=inventory,
+                previous=previous,
+                on_issue=on_issue,
+                statements=statements,
+            )
         )
-        for i in range(len(claims))
-    ]
+    return [bound[i] for i in range(len(claims))]
 
 
 CUTOFF_STEP = "settling a claim's statistical cutoff"

@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 
-from app.services.llm_decision import confidence_of, decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
 
 logger = logging.getLogger("bioaf.column_resolution")
 
@@ -119,7 +120,7 @@ async def resolve_columns(
     # `allowed` is the header, because the closed set here is the VALUES: a column name the table
     # does not have would be read as a role assignment and parse the wrong column. The role KEYS are
     # this module's own closed set and it checks them itself, three lines below.
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=COLUMN_RESOLUTION_INTENT,
         system=system,
         payload=payload,
@@ -127,6 +128,7 @@ async def resolve_columns(
         model=model,
         api_key=api_key,
         allowed=header,
+        purpose=budgets.COLUMN_RESOLUTION,
     )
     if not decision.ok:
         # The table stays exactly as unparsed as it already was, and the gate still reports the

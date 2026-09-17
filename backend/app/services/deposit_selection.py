@@ -22,7 +22,8 @@ from __future__ import annotations
 import logging
 
 from app.services.literature.deposit_inventory_service import DepositEntry
-from app.services.llm_decision import confidence_of, decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
 
 logger = logging.getLogger("bioaf.deposit_selection")
 
@@ -344,7 +345,7 @@ async def select_deposit(
     # `allowed` is what the deposit actually holds. A filename the model invented would send the
     # download at a 404, and the parser's own guard would catch it; stating the set here means the
     # decision record says which value was refused and why.
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=DEPOSIT_SELECTION_INTENT,
         system=system,
         payload=payload,
@@ -352,6 +353,7 @@ async def select_deposit(
         model=model,
         api_key=api_key,
         allowed=[e.filename for e in inventory or []],
+        purpose=budgets.DEPOSIT_SELECTION,
     )
     if not decision.ok:
         # Falls back to the assisted pick: a person chooses at the C1 gate rather than a provider

@@ -21,7 +21,8 @@ import json
 import logging
 
 from app.models.validation_study import VALIDATION_STUDY_CLASSIFICATIONS
-from app.services.llm_decision import decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery, fenced_json
 from app.services.validation_autonomy import AUTONOMY_AUTONOMOUS
 
 logger = logging.getLogger("bioaf.validation_ratification")
@@ -111,7 +112,7 @@ async def ratify(result: dict, *, autonomy: str, client, model: str, api_key: st
 
     suggested = result.get("classification")
     system, payload = build_ratification_prompt(result)
-    answer = await decide(
+    answer = await decide_with_recovery(
         intent=RATIFICATION_INTENT,
         system=system,
         payload=payload,
@@ -119,6 +120,7 @@ async def ratify(result: dict, *, autonomy: str, client, model: str, api_key: st
         model=model,
         api_key=api_key,
         allowed=VALIDATION_STUDY_CLASSIFICATIONS,
+        purpose=budgets.RATIFICATION,
     )
     if not answer.ok:
         # `blocked`: the study does not finalise. It holds at `comparing` for a person, exactly where

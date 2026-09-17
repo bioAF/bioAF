@@ -68,6 +68,9 @@ _INVENTORY = (
     '```json\n{"findings": [{"description": "d", "claim_indices": [0], "importance": "primary", '
     '"rationale": "r", "quote": "q"}]}\n```'
 )
+_BINDING = (
+    '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "no metric measures it"}]}\n```'
+)
 
 
 class _Client:
@@ -91,23 +94,29 @@ class _Cfg:
 
 class TestMeasuringAPaper:
     @pytest.mark.asyncio
-    async def test_both_calls_are_measured_through_the_prompts_a_read_uses(self):
+    async def test_each_call_is_measured_through_the_prompts_a_read_uses(self):
+        """plan_8_3 stage 6 added the claim binding, so a paper now measures three calls, not two."""
         client = _Client(
             [
                 ModelAnswer(_EXTRACTION, output_tokens=9100, stop_reason="end_turn"),
                 ModelAnswer(_INVENTORY, output_tokens=800, stop_reason="end_turn"),
+                ModelAnswer(_BINDING, output_tokens=310, stop_reason="end_turn"),
             ]
         )
         rows = await measure.measure_paper("10.1/x", "the paper text", client=client, cfg=_Cfg(), max_tokens=32000)
         assert rows[budget.EXTRACTION]["output_tokens"] == 9100
         assert rows[budget.INVENTORY]["output_tokens"] == 800
+        assert rows[measure.CLAIM_BINDING]["output_tokens"] == 310
         assert rows[budget.EXTRACTION]["paper"] == "10.1/x"
         assert rows[budget.EXTRACTION]["claims"] == 1
-        extraction_call, inventory_call = client.calls
+        assert rows[measure.CLAIM_BINDING]["claims"] == 1
+        extraction_call, inventory_call, binding_call = client.calls
         assert budget.fingerprint(extraction_call["system"]) == budget.extraction_fingerprint()
         assert budget.fingerprint(inventory_call["system"]) == budget.inventory_fingerprint()
         assert "[0] genes up" in inventory_call["payload"]
+        assert "[0] key='de_genes'" in binding_call["payload"]
         assert extraction_call["max_tokens"] == inventory_call["max_tokens"] == 32000
+        assert binding_call["max_tokens"] == 32000
 
     @pytest.mark.asyncio
     async def test_a_cut_off_extraction_is_reported_and_the_inventory_is_not_measured(self):

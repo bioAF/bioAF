@@ -162,7 +162,7 @@ class _Client:
         self.raises = raises
         self.calls: list[dict] = []
 
-    async def submit(self, *, prompt, payload, model, api_key):
+    async def submit(self, *, prompt, payload, model, api_key, max_tokens=None):
         self.calls.append({"prompt": prompt, "payload": payload, "model": model})
         if self.raises:
             raise RuntimeError("provider down")

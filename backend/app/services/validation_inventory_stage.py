@@ -23,6 +23,7 @@ import logging
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
+from app.services import validation_decision_budgets as budgets
 from app.services.llm_decision import decide, fenced_json
 
 logger = logging.getLogger("bioaf.validation_inventory")
@@ -283,6 +284,7 @@ async def run_inventory_stage(
             model=cfg.model,
             api_key=cfg.api_key,
             max_tokens=max_tokens,
+            purpose=budgets.FINDING_INVENTORY,
         )
         usage = {
             "output_tokens": decision.output_tokens,
