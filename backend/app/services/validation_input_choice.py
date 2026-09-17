@@ -193,6 +193,129 @@ def _citation_fields(quote: str) -> list[str]:
     return [part for part in parts if part and part != "-"]
 
 
+# plan_8_3 stage 5: the words the prompt offers as EXAMPLES of an independent unit. They name what
+# kind of thing a unit is. Study 50's answer, `gingival fibroblast culture`, is one of them with a
+# tissue in front of it, and `design_from_mapping` read it as a unique identity: six columns became
+# one biological sample, and both arms were rejected as unsupported technical replication. Allowed
+# through, the same string would have collapsed the pairing instead.
+UNIT_TYPE_WORDS = frozenset(
+    {
+        "animal",
+        "mouse",
+        "rat",
+        "subject",
+        "patient",
+        "donor",
+        "participant",
+        "clone",
+        "culture",
+        "cell line",
+        "cell culture",
+        "organoid",
+        "biological replicate",
+        "replicate",
+        "sample",
+        "embryo",
+        "isolate",
+        "strain",
+        "well",
+        "dish",
+        "flask",
+        "passage",
+    }
+)
+# What tells a type apart from an identity: an identity carries something that distinguishes THIS one
+# from the others, a number, a letter, an accession. A type is the category alone, with or without
+# words describing the material or the treatment.
+_HAS_DISTINGUISHER = re.compile(r"\d|\b[A-Z]{2,}\b")
+
+UNIT_KIND_TYPE = "type"
+UNIT_KIND_IDENTITY = "identity"
+UNIT_KIND_UNSTATED = "unstated"
+
+
+def unit_identity(unit: str | None) -> dict:
+    """Whether ``unit`` names a PARTICULAR biological unit or only what kind of unit it is.
+
+    ``{"kind": "identity" | "type" | "unstated", "value": str, "type_word": str | None}``. A type is
+    never an identity: it cannot tell one of a paper's donors from another, and code that groups
+    samples by unit identity must never be handed one.
+    """
+    value = str(unit or "").strip()
+    if not value:
+        return {"kind": UNIT_KIND_UNSTATED, "value": "", "type_word": None}
+    lowered = _normalized(value)
+    word = next(
+        (w for w in sorted(UNIT_TYPE_WORDS, key=len, reverse=True) if re.search(rf"\b{re.escape(w)}\b", lowered)),
+        None,
+    )
+    if word is None:
+        return {"kind": UNIT_KIND_IDENTITY, "value": value, "type_word": None}
+    # The type word is there. What is left over decides: a number or an accession-like token makes it
+    # a particular one ("donor 3", "clone Cl16"); descriptive words do not ("gingival fibroblast
+    # culture treated with Mucoderm" is still every one of them).
+    remainder = re.sub(rf"\b{re.escape(word)}\b", " ", value, flags=re.I)
+    if _HAS_DISTINGUISHER.search(remainder):
+        return {"kind": UNIT_KIND_IDENTITY, "value": value, "type_word": word}
+    return {"kind": UNIT_KIND_TYPE, "value": value, "type_word": word}
+
+
+ASSISTANCE_UNIT_IDENTITY = "unit_identity_confirmed"
+
+
+def _squashed(text: str) -> str:
+    """Letters and digits only, lowercased, so punctuation and spacing cannot hide a match. Deposits
+    write the same identity as `culture: WT1`, `WT-1` and `WT 1`."""
+    return re.sub(r"[^a-z0-9]", "", str(text or "").lower())
+
+
+# An alphanumeric run that distinguishes one unit from another: it carries a digit, or two or more
+# capitals. `1` in `donor 1` is one; `the` is not.
+_DISTINGUISHING_TOKEN = re.compile(r"[A-Za-z0-9]*(?:\d[A-Za-z0-9]*|[A-Z]{2,}[A-Za-z0-9]*)")
+
+
+def _identity_is_stated(unit: str, row: dict, cited_records: list[dict], corpus: str) -> bool:
+    """Whether something the row cites actually states this unit identity.
+
+    A unit identity is a fact about the experiment, and the only places it can come from are the
+    records the row cites, the text the decision was given, and a recorded confirmation. It is never
+    read off a column's order, its trailing digits or a repeating filename pattern.
+
+    The words are the depositor's, so a match is on SUBSTANCE, not spelling: the sources must name
+    what kind of unit it is where the identity says so ("clone Cl16" needs the sources to talk about
+    clones), and every token that tells this unit from another ("Cl16", "WT1", "3"). That is what
+    refuses `donor 1` for a sample whose records name a tissue, a cell type and a treatment and no
+    donor at all, while accepting `WT culture 1` for one whose records say `culture: WT1`.
+    """
+    identity = unit_identity(unit)
+    if identity["kind"] != UNIT_KIND_IDENTITY:
+        return False
+    stated = " ".join(
+        [
+            *(
+                _squashed(" ".join([*record["fields"].values(), *sorted(record["identifiers"])]))
+                for record in cited_records
+            ),
+            _squashed(corpus),
+            *(
+                _squashed(item.get("quote"))
+                for item in row.get("evidence") or []
+                if isinstance(item, dict) and str(item.get("source") or "") == "confirmation"
+            ),
+        ]
+    )
+    if not stated.strip():
+        return False
+    word = identity["type_word"]
+    if word and _squashed(word) not in stated:
+        return False
+    remainder = re.sub(rf"\b{re.escape(word)}\b", " ", unit, flags=re.I) if word else unit
+    tokens = [t for t in _DISTINGUISHING_TOKEN.findall(remainder) if t]
+    if not tokens:
+        return _squashed(unit) in stated
+    return all(_squashed(token) in stated for token in tokens)
+
+
 def source_records(records: list[dict]) -> list[dict]:
     """The repository's sample records as the decision sees them: the record, its reference, and the
     fields a citation of it must match."""
@@ -244,6 +367,7 @@ def validate_mapping(
     sample_records: list[dict],
     texts: list[str] | None = None,
     contrast: dict | None = None,
+    confirmed_units: dict[str, str] | None = None,
 ) -> dict:
     """Accept a proposed mapping only when the evidence supports every assignment.
 
@@ -259,6 +383,7 @@ def validate_mapping(
     corpus = _normalized(" ".join(texts or []))
     column_names = {_normalized(c) for c in columns}
     every_identifier = {identifier for entry in shown for identifier in entry["identifiers"]}
+    assistance: str | None = None
     rows = [r for r in mapping or [] if isinstance(r, dict)]
     seen: dict[str, int] = {}
     for row in rows:
@@ -310,6 +435,12 @@ def validate_mapping(
             elif source == "exact_identifier":
                 if _normalized(quote) not in column_names:
                     reasons.append(f'column {column} cites the identifier "{quote}", which the matrix does not hold')
+            elif source == "confirmation":
+                # plan_8_3 stage 5: a recorded confirmation is checked against what was recorded, not
+                # against the paper. A citation of one bioAF holds no record of establishes nothing.
+                recorded = _normalized((confirmed_units or {}).get(column))
+                if not recorded or recorded not in _normalized(quote):
+                    reasons.append(f'column {column} cites a confirmation, "{quote}", that bioAF holds no record of')
             elif _normalized(quote) not in corpus:
                 reasons.append(f'column {column} cites "{quote}", which is not in the text given to the decision')
 
@@ -328,18 +459,43 @@ def validate_mapping(
         if arm == "excluded":
             continue
         unit = str(row.get("biological_unit") or "").strip()
+        sources = {str(e.get("source") or "") for e in evidence}
+        group = row.get("technical_group")
+        if group:
+            # Registered before the unit checks, so a group that rests on a name pattern is reported
+            # whether or not the same row's unit identity also failed.
+            groups.setdefault(str(group), []).append({**row, "_sources": sources})
         if not unit:
             reasons.append(f"the evidence does not state the biological unit of column {column}")
             continue
-        sources = {str(e.get("source") or "") for e in evidence}
+        # The most specific rule first: a trailing number taken off the column's own name is the one
+        # inference that has its own sentence, and it is never replicate identity.
         trailing = _TRAILING_NUMBER.search(column)
         if sources <= {"column_name"} and trailing and unit in (trailing.group(1), column):
             reasons.append(
                 f"column {column}: a trailing number is a candidate token, never replicate identity on its own"
             )
-        group = row.get("technical_group")
-        if group:
-            groups.setdefault(str(group), []).append({**row, "_sources": sources})
+            continue
+        # plan_8_3 stage 5: a unit TYPE is not a unit identity. It is the answer to "what kind of
+        # thing is this", and the design code groups samples by unit identity.
+        identity = unit_identity(unit)
+        if identity["kind"] == UNIT_KIND_TYPE:
+            reasons.append(
+                f'column {column} states its biological unit as "{unit}", which is the kind of unit it is, not '
+                f"which {identity['type_word']} it is; every column carrying the same words would be one unit"
+            )
+            continue
+        # An identity has to come from somewhere. A confirmation supplies one the sources do not, and
+        # is recorded as assistance; otherwise the cited evidence has to state it.
+        confirmed = str((confirmed_units or {}).get(column) or "").strip()
+        if confirmed and _normalized(confirmed) == _normalized(unit):
+            assistance = ASSISTANCE_UNIT_IDENTITY
+        elif not _identity_is_stated(unit, row, cited_records, corpus):
+            reasons.append(
+                f'column {column} states its biological unit as "{unit}", which nothing it cites states; a unit '
+                "identity is never read off a sample's order, its trailing digits or a repeating filename pattern"
+            )
+            continue
 
     for group, members in groups.items():
         if any(m["_sources"] <= {"column_name"} for m in members):
@@ -354,7 +510,14 @@ def validate_mapping(
     reference = [r for r in rows if r.get("arm") == "reference"]
     if not test or not reference:
         reasons.append("the proposal leaves an arm with no column")
-    return {"status": "unresolved" if reasons else "accepted", "reasons": sorted(set(reasons)), "mapping": rows}
+    return {
+        "status": "unresolved" if reasons else "accepted",
+        "reasons": sorted(set(reasons)),
+        "mapping": rows,
+        # plan_8_3 stage 5: what a person supplied that the published sources did not. A result carrying
+        # this is assisted, and is never reported as unattended validation.
+        "assistance": None if reasons else assistance,
+    }
 
 
 def build_input_prompt(
@@ -375,7 +538,8 @@ def build_input_prompt(
         "Respond with a SINGLE fenced JSON block (```json ... ```) and nothing else:\n"
         '{"primary_matrix": "exact filename", "author_table": "exact filename or null", '
         '"mapping": [{"column": "exact column name", "arm": "test | reference | excluded", '
-        '"biological_unit": "the independent unit (animal, donor, independently derived clone, culture)", '
+        '"biological_unit": "WHICH independent unit this column measured, named as the sources name it '
+        '(donor D2, animal 7, clone Cl16, culture WT1) - never what KIND of unit it is", '
         '"biological_sample": "the unit under one condition at one time point", '
         '"technical_group": "a label shared by repeated measurements of one biological sample, or null", '
         '"time_point": "as the evidence states it, or null", '
@@ -390,6 +554,10 @@ def build_input_prompt(
         "quote its whole line as shown, separators and all.\n"
         "- A clone is not a replicate, and a trailing number in a column name is never replicate identity on "
         "its own. State the biological unit only as the evidence defines it.\n"
+        "- biological_unit must say WHICH one, not what kind. A phrase that would be true of every column "
+        "(a cell type, a tissue, a culture) identifies nothing, and bioAF will refuse it. Where the sources "
+        "do not say which unit a column came from, say so in the reason rather than inventing one, and never "
+        "read it off a column's order, its trailing digits or a repeating name pattern.\n"
         "- A technical group is only repeated measurements of ONE biological sample under one condition "
         "and one time point that the evidence names as such; a name pattern never confirms one."
     )
@@ -543,6 +711,26 @@ def design_from_mapping(
     if not test or not reference:
         return design or {}, "unsupported", "Held before running: the mapping leaves an arm with no column."
 
+    # plan_8_3 stage 5: a generic unit TYPE never reaches the code that groups samples by unit
+    # identity. It used to, and the arms then looked like repeated measurements of one sample, which
+    # was reported as an unsupported experimental design rather than as the missing fact it is.
+    generic = [
+        (str(r["column"]), unit_identity(r.get("biological_unit")))
+        for r in rows
+        if unit_identity(r.get("biological_unit"))["kind"] != UNIT_KIND_IDENTITY
+    ]
+    if generic:
+        columns = ", ".join(column for column, _ in generic)
+        kinds = sorted({identity["type_word"] or "unit" for _, identity in generic})
+        return (
+            design or {},
+            "unresolved_identity",
+            "Held before running: the biological unit of "
+            f"{columns} is stated as what kind of unit it is, not which {' or '.join(kinds)} it is. "
+            "bioAF cannot tell the paper's units apart from that, and it does not infer them from the "
+            "samples' order or their names.",
+        )
+
     problems: list[str] = []
     groups: dict[str, list[dict]] = {}
     for row in rows:
@@ -582,10 +770,15 @@ def design_from_mapping(
     if problems:
         return design or {}, "unsupported", "Held before running: " + "; ".join(problems) + "."
 
+    units = {str(r["column"]): str(r.get("biological_unit")) for r in rows}
     contrast.update(
         test_samples=test,
         reference_samples=reference,
-        units={str(r["column"]): str(r.get("biological_unit")) for r in rows},
+        units=units,
+        # plan_8_3 stage 5: what the unit identities ARE. A repository sample accession establishes
+        # repository identity, not donor identity, and the difference decides whether a paired model
+        # is available at all.
+        unit_basis=_unit_basis(units, rows),
     )
     technical = {str(r["column"]): str(r["technical_group"]) for r in rows if r.get("technical_group")}
     if technical:
@@ -711,3 +904,28 @@ def associations_from_mapping(mapping: list[dict], contrast: dict) -> list[dict]
             }
         )
     return rows
+
+
+# What a set of unit identities rests on. Recorded on the contrast so no later reader can mistake one
+# for the other: three distinct repository samples per arm are three samples, not three donors.
+UNIT_BASIS_REPOSITORY = "repository_sample"
+UNIT_BASIS_SOURCE = "source_stated"
+UNIT_BASIS_CONFIRMED = "confirmed"
+
+_ACCESSION = re.compile(r"^(?:GSM|SRR|ERR|DRR|SRX|ERX|SAMN|SAMEA|SAMD|EGAF|EGAN)\d+$", re.I)
+
+
+def _unit_basis(units: dict[str, str], rows: list[dict]) -> str:
+    """Whether these unit identities are repository sample records, the sources' own words, or a
+    person's recorded confirmation."""
+    if any(
+        str(item.get("source") or "") == "confirmation"
+        for row in rows
+        for item in row.get("evidence") or []
+        if isinstance(item, dict)
+    ):
+        return UNIT_BASIS_CONFIRMED
+    values = [v for v in units.values() if v]
+    if values and all(_ACCESSION.match(v) for v in values):
+        return UNIT_BASIS_REPOSITORY
+    return UNIT_BASIS_SOURCE

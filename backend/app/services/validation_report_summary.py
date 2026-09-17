@@ -42,6 +42,8 @@ LIMITATION_LABELS = {
     "no_compatible_contrast": "No comparison this route can analyze",
     # change_7.5 section 1.3, pending the owner's sign-off.
     "reference_unavailable": "Stated reference not available to bioAF",
+    # plan_8_3 stage 5, pending the owner's sign-off.
+    "biological_identity_unresolved": "Which biological unit each sample came from is not established",
 }
 # A missing input the evidence has not established is not a missing input. Worded as what it is.
 _UNESTABLISHED_ABSENCE_LABEL = "Not established"
@@ -151,6 +153,9 @@ ISSUE_OUTCOME_LABELS = {
     # plan_8_1 section 1.1, pending the owner's sign-off.
     "timed_out": "the model's answer did not finish within bioAF's time limit",
     "incomplete": "the model's answer left out parts bioAF requires",
+    # plan_8_3 stage 6, pending the owner's sign-off: an answer that arrived whole, twice, and did
+    # not hold what bioAF asked it for. Not a truncation, not a refusal, not badly formatted.
+    "schema_rejected": "the model's answer did not hold what bioAF asked for",
     "retrieval_failed": "bioAF could not retrieve a file it needed",
     "not_performed": "this step could not run",
 }

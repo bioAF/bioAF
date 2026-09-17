@@ -122,9 +122,7 @@ class TestWhatAnAccessionEstablishes:
         records = _records()
         mapping = [{**row, "biological_unit": _accession_for(row["column"], records)} for row in _saved_proposal()]
         design = {
-            "contrasts": [
-                {**_contrast(), "test_samples": [], "reference_samples": [], "subjects": {"a": "donor 1"}}
-            ]
+            "contrasts": [{**_contrast(), "test_samples": [], "reference_samples": [], "subjects": {"a": "donor 1"}}]
         }
         rewritten, status, reason = design_from_mapping(design, mapping, contrast_index=0)
         assert status == "pairing_lost"
@@ -154,7 +152,7 @@ class TestDonorIdentityIsNeverInferred:
         ]
         result = validate_mapping(mapping, columns=[r["title"] for r in records], sample_records=records)
         assert result["status"] == "unresolved"
-        assert any("does not state" in r for r in result["reasons"])
+        assert any("nothing it cites states" in r for r in result["reasons"])
 
     def test_a_donor_the_records_do_state_is_accepted(self):
         records = [
@@ -247,4 +245,4 @@ class TestARecordedConfirmationCanSupplyWhatThePaperDoesNot:
         mapping = [{**row, "biological_unit": confirmed[row["column"]]} for row in _saved_proposal()]
         result = validate_mapping(mapping, columns=titles, sample_records=records, contrast=_contrast())
         assert result["status"] == "unresolved"
-        assert any("does not state" in r for r in result["reasons"])
+        assert any("nothing it cites states" in r for r in result["reasons"])

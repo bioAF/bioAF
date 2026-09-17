@@ -142,9 +142,12 @@ def _row(column, arm, unit, *, evidence=None, group=None, time="day 0"):
 
 
 def _mapping():
+    # plan_8_3 stage 5 (flagged test change): a biological unit the cited record states. "WT culture
+    # 1" was a paraphrase of nothing these records hold, and a unit identity that comes from nowhere
+    # is what the stage exists to refuse.
     return [
-        _row("WT-1", "reference", "WT culture 1", evidence=_cite("WT rep1")),
-        _row("WT-2", "reference", "WT culture 2", evidence=_cite("WT rep2")),
+        _row("WT-1", "reference", "GSM1", evidence=_cite("WT rep1")),
+        _row("WT-2", "reference", "GSM2", evidence=_cite("WT rep2")),
         _row("KO Cl5 repl1", "test", "clone Cl5", evidence=_cite("KO Cl5")),
         _row("KO Cl16", "test", "clone Cl16", evidence=_cite("KO Cl16")),
         {"column": "KO Cl5 d7", "arm": "excluded", "evidence": _cite("KO Cl5 d7")},
@@ -175,7 +178,7 @@ def test_every_column_is_assigned_or_excluded_explicitly():
 
 
 def test_a_column_in_two_arms_is_unresolved():
-    mapping = _mapping() + [_row("WT-1", "test", "WT culture 1")]
+    mapping = _mapping() + [_row("WT-1", "test", "GSM1", evidence=_cite("WT rep1"))]
     assert _validate(mapping)["status"] == "unresolved"
 
 
@@ -192,9 +195,9 @@ def test_a_technical_group_needs_evidence_beyond_a_name_pattern():
     mapping[0]["technical_group"] = "t1"
     mapping[1] = {
         **mapping[1],
-        "biological_unit": "WT culture 1",
+        "biological_unit": "GSM1",
         "technical_group": "t1",
-        "evidence": [{"source": "column_name", "quote": "WT-1"}],
+        "evidence": [{"source": "column_name", "quote": "WT-2"}],
     }
     result = _validate(mapping)
     assert result["status"] == "unresolved"
