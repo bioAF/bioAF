@@ -242,3 +242,24 @@ class TestTheResolutionOpensThem:
         state = author_table_state(supplements=rows)
         assert state["status"] in (UNRESOLVED_APPLICABILITY, "available")
         assert state["status"] != NOT_DEPOSITED
+
+
+class TestItReadsRealEvidenceWithoutRaising:
+    """Found by the deployed smoke check: a study's `deposit_inventory` is a dict, not a list."""
+
+    @pytest.mark.parametrize("deposits", [None, {}, {"GSE1": {"files": []}}, "nonsense", [{"identity": "S1"}]])
+    def test_a_deposits_value_of_any_shape_is_read_or_ignored(self, deposits):
+        state = author_table_state(supplements=[], deposits=deposits)
+        assert state["status"] in {
+            NOT_DEPOSITED,
+            NOT_INSPECTED,
+            RETRIEVAL_FAILED,
+            UNSUPPORTED_FORMAT,
+            NO_ELIGIBLE_TABLE,
+            UNRESOLVED_APPLICABILITY,
+            "available",
+        }
+
+    @pytest.mark.parametrize("supplements", [None, {}, "nonsense", [None, 3]])
+    def test_a_supplements_value_of_any_shape_is_read_or_ignored(self, supplements):
+        assert author_table_state(supplements=supplements)["status"] == NOT_DEPOSITED
