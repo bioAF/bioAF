@@ -429,6 +429,48 @@ def _readiness_statement(inputs: dict) -> str:
     )
 
 
+def _targets_with_predicates(targets: list[dict], *, plan, contrasts: list[dict], methods: dict | None) -> list[dict]:
+    """The plan's claims, each carrying the predicate its own statement defines (plan_8_3 stage 7.1).
+
+    A predicate is built at selection time for the SELECTED claim only, and a comparison this analysis
+    supplies for another claim has to be made under that claim's own definition, not the selected
+    claim's.
+    """
+    from app.services.validation_extraction_service import BINDING_FAILED
+    from app.services.validation_methods_cutoffs import inherited_cutoffs
+    from app.services.validation_predicate import build_predicate
+
+    experiments = [e for e in plan.reported_experiments_json or [] if isinstance(e, dict)]
+    rows = []
+    for target in targets:
+        index = target.get("contrast_index")
+        contrast = contrasts[index] if isinstance(index, int) and 0 <= index < len(contrasts) else None
+        predicate = None
+        if contrast is not None:
+            inherited = inherited_cutoffs(
+                target.get("reported_experiment_id") or contrast.get("reported_experiment_id"),
+                experiments=experiments,
+                contrasts=contrasts,
+                recorded=methods,
+            )
+            predicate = build_predicate(target, contrast=contrast, inherited=inherited)
+        rows.append(
+            {
+                **target,
+                "predicate": predicate,
+                "binding_failed": target.get("bound_by") == BINDING_FAILED,
+            }
+        )
+    return rows
+
+
+def _recorded_cutoffs(predicate: dict | None) -> dict | None:
+    """A predicate's cutoffs in the shape ``normalizer_arguments`` reads (plan_8_3 stage 7.1)."""
+    if not isinstance(predicate, dict) or not isinstance(predicate.get("significance"), dict):
+        return None
+    return {"significance": predicate["significance"], "effect": predicate.get("effect")}
+
+
 def _waiting_to_retry(study: ValidationStudy) -> bool:
     """Whether a transient acquisition failure is still waiting out its backoff.
 
@@ -799,8 +841,52 @@ class ValidationDriverService:
         Section 3.3: every claim with an identified table is queued for a consistency check."""
         result = await ValidationDriverService._group_claims(session, study, plan, full_text, checkpoint=checkpoint)
         await ValidationDriverService._land_inventory(session, study, plan, result)
+        await ValidationDriverService._apply_coverage(session, study, plan)
         await ValidationDriverService._enqueue_checks(session, study, plan)
         return await ValidationDriverService._conclude_read(session, study, plan, org_id, user_id)
+
+    @staticmethod
+    async def _apply_coverage(session: AsyncSession, study, plan) -> None:
+        """plan_8_3 stage 2: re-rank the recorded candidates now that the findings are established.
+
+        The selection is made during the read, before the claims are grouped, so nothing then knew
+        what any analysis could FINISH. Study 50's run was selected for a claim whose finding needs a
+        second contrast, while two other contrasts of the same paper each complete two whole findings
+        from one output. No model is asked, nothing is launched, and a person's choice stands.
+        """
+        from app.services.validation_revisions import current_revision, invalidate
+        from app.services.validation_selection import reselect_for_coverage
+
+        before_current = dict((plan.analysis_selection_json or {}).get("current") or {})
+        try:
+            revised, changed = reselect_for_coverage(
+                plan.analysis_selection_json,
+                targets=await ValidationDriverService._plan_claims(session, plan),
+                contrasts=[
+                    c for c in ((plan.differential_design_json or {}).get("contrasts") or []) if isinstance(c, dict)
+                ],
+                inventory=plan.finding_inventory_json if isinstance(plan.finding_inventory_json, dict) else None,
+            )
+        except Exception:  # noqa: BLE001 - a coverage ranking is never a reason to fail a read
+            logger.exception("study %s: complete-finding coverage could not be applied", study.id)
+            return
+        if revised is None:
+            return
+        before = current_revision(plan)
+        plan.analysis_selection_json = revised
+        await session.flush()
+        if changed:
+            moved = {
+                part
+                for part in ("claim_index", "contrast_index", "check", "reported_experiment_id", "workflow")
+                if before_current.get(part) != (revised["current"] or {}).get(part)
+            }
+            logger.info(
+                "study %s: selection moved to the analysis that completes %s",
+                study.id,
+                ", ".join((revised["current"].get("coverage") or {}).get("completes") or []),
+            )
+            invalidate(study, plan, moved, revision=before)
 
     @staticmethod
     async def _enqueue_checks(session: AsyncSession, study, plan) -> None:
@@ -2930,6 +3016,11 @@ class ValidationDriverService:
             else:
                 conc = compare_gene_sets(paper_fs, our_fs, universe)
             evidence["level3_result"] = {"concordance": conc.to_dict(), "our_finding_set": our_fs.to_dict()}
+        # plan_8_3 stage 7.1: the same fit answers every other claim it can validly answer, each under
+        # its OWN predicate applied to the unfiltered statistics. The compute is already spent; a
+        # finding whose claims share this contrast should not stay unassessed because only one of them
+        # was selected.
+        await ValidationDriverService._compare_shared_claims(session, study, evidence, level3, cs, universe=universe)
         study.evidence_json = evidence
         await ValidationStudyService.transition(
             session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
@@ -3978,6 +4069,67 @@ class ValidationDriverService:
         if kind == "interval":
             return normalize_interval_table(text, **applied)
         return normalize_gene_table(text, **applied)
+
+    @staticmethod
+    async def _compare_shared_claims(session: AsyncSession, study, evidence: dict, level3: dict, cs, *, universe: int):
+        """plan_8_3 stage 7.1: every other claim this one fit validly supplies, under its own predicate.
+
+        Never raises and never runs compute: it re-reads the output the run already wrote. A claim it
+        cannot supply is recorded with the reason rather than left silently outstanding.
+        """
+        from app.services.validation_claim_cutoffs import normalizer_arguments
+        from app.services.validation_level3_service import score_reproduction
+        from app.services.validation_predicate import predicate_identity
+        from app.services.validation_shared_analysis import record_results, shared_claims
+
+        try:
+            plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+            if plan is None:
+                return
+            contrasts = [
+                c for c in ((plan.differential_design_json or {}).get("contrasts") or []) if isinstance(c, dict)
+            ]
+            targets = _targets_with_predicates(
+                await ValidationDriverService._plan_claims(session, plan),
+                plan=plan,
+                contrasts=contrasts,
+                methods=(study.evidence_json or {}).get("methods_cutoffs"),
+            )
+            rows = shared_claims(level3, targets=targets, contrasts=contrasts, include_refused=True)
+            results: dict[int, dict] = {}
+            for row in rows:
+                if not row["supplied"]:
+                    continue
+                if row["selected"]:
+                    results[row["claim_index"]] = evidence.get("level3_result") or {}
+                    continue
+                applied = normalizer_arguments(_recorded_cutoffs(row["predicate"]))
+                if applied is None:
+                    continue
+                theirs = await ValidationDriverService._extract_reproduced_set(
+                    session, cs, level3.get("kind", "gene"), **applied
+                )
+                results[row["claim_index"]] = {
+                    **score_reproduction(
+                        {**level3, "predicate": row["predicate"], "claim_index": row["claim_index"]},
+                        theirs,
+                        universe=universe,
+                    ),
+                    # The definition this comparison was made under. A claim whose predicate changes
+                    # afterwards is not governed by a comparison made under the old one.
+                    "predicate_identity": predicate_identity(row["predicate"]),
+                }
+            evidence["level3_results"] = record_results(
+                level3,
+                results,
+                analysis_reference=str(getattr(cs, "id", None) or ""),
+                previous=evidence.get("level3_results"),
+            )
+            evidence["level3_results"]["not_supplied"] = [
+                {"claim_index": r["claim_index"], "reason": r["reason"]} for r in rows if not r["supplied"]
+            ]
+        except Exception:  # noqa: BLE001 - a shared comparison is never a reason to fail the run that produced it
+            logger.exception("study %s: the analysis's other claim comparisons could not be made", study.id)
 
     @staticmethod
     async def _read_reproduction_output(session: AsyncSession, cs) -> str | None:

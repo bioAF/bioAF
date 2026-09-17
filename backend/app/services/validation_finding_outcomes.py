@@ -133,6 +133,13 @@ class _Evidence:
         self.revision = revision if isinstance(revision, int) else None
         self.level3 = self.artifact("level3") or {}
         self.level3_result = self.artifact("level3_result") or {}
+        # plan_8_3 stage 7.1: every claim the selected analysis validly supplied, not only the one it
+        # was selected for. A finding whose claims share a contrast is finished by one fit.
+        self.level3_per_claim = {
+            int(index): result
+            for index, result in ((self.artifact("level3_results") or {}).get("per_claim") or {}).items()
+            if str(index).lstrip("-").isdigit() and isinstance(result, dict)
+        }
         self.classification = self.artifact("classification_result") or {}
         self.rows = self._rows()
 
@@ -219,23 +226,33 @@ def _concordance_words(concordance: dict) -> str:
 
 
 def _level3_result(index: int, ev: _Evidence) -> dict | None:
-    if not ev.level3_result or ev.level3_claim() != index:
+    # plan_8_3 stage 7.1: the comparison this claim's own predicate produced from the analysis, which
+    # is the selected claim's result for the selected claim and its own for every other claim the
+    # same fit validly supplied.
+    shared = ev.level3_per_claim.get(index)
+    result_for_claim = shared if shared is not None else (ev.level3_result if ev.level3_claim() == index else None)
+    if not result_for_claim:
         return None
     method = "processed_reanalysis" if ev.level3.get("source") == "deposit" else "raw_reanalysis"
     stamp = (ev.evidence.get("artifact_revisions") or {}).get("level3_result")
     evidence = [f"level3_result (selection revision {stamp})" if isinstance(stamp, int) else "level3_result"]
+    if shared is not None and shared.get("analysis_reference"):
+        evidence = [f"level3_results claim {index} (analysis {shared['analysis_reference']})"]
 
     def result(status, reason):
         return _result(
             status, method=method, reason=reason, evidence=evidence, criteria=_CONCORDANCE_CRITERIA, claim_index=index
         )
 
-    if not _definition_applied(ev.level3, ev.plan):
+    # plan_8_3 stage 7.1: a shared comparison records the predicate it was made under, so the claim's
+    # own definition was applied to the stored statistics by construction.
+    applied = bool((shared or {}).get("predicate_identity")) or _definition_applied(ev.level3, ev.plan)
+    if not applied:
         return result(
             INCONCLUSIVE,
             "The reanalysis did not apply the claim's statistical definition, so it is not a valid comparison.",
         )
-    concordance = ev.level3_result.get("concordance")
+    concordance = result_for_claim.get("concordance")
     if not isinstance(concordance, dict):
         return result(
             INCONCLUSIVE,

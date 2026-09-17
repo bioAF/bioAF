@@ -60,6 +60,17 @@ def rank_candidates(pairs: list[dict], checks: list[dict]) -> list[dict]:
     return sorted(pairs, key=_key)
 
 
+def _pairs_in_ranked_order(pairs: list[dict], analyses: list[dict]) -> list[dict]:
+    """The (claim, check) pairs in the order the ranked ANALYSES put them, so the choice that follows
+    prefers the analysis that finishes the most, not the claim that reads best."""
+    order = {
+        (index, analysis["check"]): (analysis["ranking"]["rank"], position)
+        for analysis in analyses
+        for position, index in enumerate(analysis["claim_indices"])
+    }
+    return sorted(pairs, key=lambda p: order.get((p["claim_index"], p["check"]), (len(order) + 1, 0)))
+
+
 def _unassessed(targets: list[dict], checks: list[dict], selected: int | None, *, route: str | None) -> list[dict]:
     """Every claim this run does not check, with the reason each check gave."""
     rows = []
@@ -121,15 +132,34 @@ async def select_analysis(
     on_issue=None,
     previous: dict | None = None,
     methods: dict | None = None,
+    inventory: dict | None = None,
+    settled: list[int] | None = None,
+    chosen_claim: int | None = None,
 ) -> dict:
     """The selection record. ``current`` is None when nothing on the route can be checked.
 
     ``library_strategies`` is what each experiment's own dataset declares itself to be, by experiment
     id; ``library_strategy`` applies to an experiment it does not name. ``methods`` is the study's recorded
-    methods sentences (plan_8_2 section 3.1), from which a claim that states no cutoff may inherit one."""
+    methods sentences (plan_8_2 section 3.1), from which a claim that states no cutoff may inherit one.
+
+    plan_8_3 stage 2: with an ``inventory`` the candidates are ANALYSES, and they rank by which whole
+    findings each could complete. ``settled`` are claims a valid outcome already governs; ``chosen_claim``
+    is a declared choice an automated ranking never replaces. Without an inventory nothing has changed."""
     from app.services.contrast_selection import INCOMPATIBLE, contrast_compatibility
+    from app.services.validation_coverage import analysis_candidates, rank_analyses
 
     pairs = rank_candidates(candidate_pairs(targets, checks, route=route), checks)
+    analyses: list[dict] = []
+    if inventory:
+        analyses = rank_analyses(
+            analysis_candidates(pairs, targets=targets, contrasts=contrasts),
+            inventory=inventory,
+            settled=settled,
+            chosen_claim=chosen_claim,
+        )
+        # The claim a run is selected FOR stays one claim, and the analysis it belongs to is what the
+        # ranking chose. The other claims that analysis supplies are its coverage, not further runs.
+        pairs = _pairs_in_ranked_order(pairs, analyses)
     chosen, decided_by, reason, confidence = None, None, None, None
     if len(pairs) == 1:
         chosen, decided_by = pairs[0], "only_candidate"
@@ -167,6 +197,14 @@ async def select_analysis(
         )
         confidence = None
 
+    coverage = None
+    if chosen is not None and analyses:
+        holder = next((a for a in analyses if chosen["claim_index"] in a["claim_indices"]), None)
+        coverage = (
+            {**holder["coverage"], "analysis_key": holder["analysis_key"], "ranking": holder["ranking"]}
+            if holder
+            else None
+        )
     current = None
     refusal = None
     if chosen is not None:
@@ -216,6 +254,9 @@ async def select_analysis(
                 "sample_mapping": None,
                 "predicate": predicate,
                 "predicate_words": predicate_words(predicate, contrast=contrast) if predicate else None,
+                # plan_8_3 stage 2: which whole findings this analysis could complete, which it would
+                # only start, and what is still outstanding for those. Computed before any outcome.
+                "coverage": coverage,
                 "decided_by": decided_by,
                 "reason": reason,
                 "confidence": confidence,
@@ -231,6 +272,7 @@ async def select_analysis(
         "current": current,
         "history": history,
         "candidates": [{k: v for k, v in p.items()} for p in pairs],
+        "analyses": analyses,
         "unassessed": _unassessed(targets, checks, current["claim_index"] if current else None, route=route),
         "route": route,
     }
@@ -248,3 +290,88 @@ def describe_selection(record: dict | None) -> str:
         f"claim {current['claim_index']} by {_CHECK_WORDS.get(current['check'], current['check'])} on "
         f"{current['workflow']} (experiment {current['reported_experiment_id']}, decided by {current['decided_by']})"
     )
+
+
+def reselect_for_coverage(
+    record: dict | None,
+    *,
+    targets: list[dict],
+    contrasts: list[dict],
+    inventory: dict | None,
+    settled: list[int] | None = None,
+) -> tuple[dict, bool]:
+    """plan_8_3 stage 2: apply complete-finding coverage once the findings are established.
+
+    The selection is made during the read, before the inventory stage has grouped the claims into
+    findings, so at that point nothing knows what any analysis could finish. When the findings land,
+    the candidates already recorded are re-ranked by coverage: a selection whose analysis finishes
+    nothing gives way to one that finishes whole findings, and the one it replaces is kept as history
+    with its reason.
+
+    Nothing here asks a model, launches anything or looks at a result, and a choice a person made is
+    never replaced: it is annotated with what it covers and what it leaves outstanding.
+    """
+    from app.services.validation_coverage import analysis_candidates, rank_analyses
+
+    record = dict(record or {})
+    current = record.get("current")
+    findings = (inventory or {}).get("findings") if isinstance(inventory, dict) else None
+    if not current or not findings:
+        return record, False
+
+    ranked = rank_analyses(
+        analysis_candidates(record.get("candidates") or [], targets=targets, contrasts=contrasts),
+        inventory=inventory,
+        settled=settled,
+        chosen_claim=current.get("claim_index") if current.get("decided_by") == "human" else None,
+    )
+    if not ranked:
+        return record, False
+    record["analyses"] = ranked
+
+    def _coverage(analysis: dict) -> dict:
+        return {**analysis["coverage"], "analysis_key": analysis["analysis_key"], "ranking": analysis["ranking"]}
+
+    best = ranked[0]
+    holding = next((a for a in ranked if current.get("claim_index") in a["claim_indices"]), None)
+    if current.get("decided_by") == "human" or (holding is not None and holding is best):
+        record["current"] = {**current, "coverage": _coverage(holding) if holding else None}
+        return record, False
+
+    claim_index = best["claim_indices"][0]
+    history = list(record.get("history") or [])
+    history.append({**current, "superseded": True})
+    record["history"] = history
+    record["current"] = {
+        **current,
+        "revision": int(current.get("revision") or 0) + 1,
+        "claim_index": claim_index,
+        "contrast_index": best["contrast_index"],
+        "check": best["check"],
+        "reported_experiment_id": best["experiment_id"] or current.get("reported_experiment_id"),
+        "coverage": _coverage(best),
+        "decided_by": "coverage",
+        "reason": (
+            "chosen once the paper's findings were established: this analysis can complete "
+            + ", ".join(best["coverage"]["completes"])
+            + (
+                f", and the earlier selection completed {', '.join((holding or {}).get('coverage', {}).get('completes') or []) or 'no finding on its own'}"
+                if holding is not None
+                else ""
+            )
+        ),
+        "confidence": None,
+        "model": None,
+        "at": _now(),
+    }
+    record["unassessed"] = [u for u in record.get("unassessed") or [] if u.get("claim_index") != claim_index] + (
+        [
+            {
+                "claim_index": current.get("claim_index"),
+                "reason": "not selected for this run; another analysis completes whole findings",
+            }
+        ]
+        if current.get("claim_index") != claim_index
+        else []
+    )
+    return record, True
