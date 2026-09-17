@@ -272,7 +272,11 @@ describe("weighted rubric version 2", () => {
     render(<ValidationScorecard scorecard={groff} />);
     const first = within(screen.getByTestId("scorecard-unassessed")).getAllByRole("listitem")[0];
     expect(within(first).getByText(/Reanalysis from raw reads: Access required/)).toBeInTheDocument();
-    expect(within(first).getByText(/Consistency with the authors' results: Required data not deposited/)).toBeInTheDocument();
+    expect(within(first).getByText(/Reanalysis of processed data: Required data not deposited/)).toBeInTheDocument();
+    // plan_8_3 section 1.1 (flagged test change): this fixture's supplement bundle did not download,
+    // so the authors' results are UNRESOLVED and not "not deposited". bioAF's own failure to retrieve
+    // a file is never evidence that the authors published nothing.
+    expect(within(first).getByText(/Consistency with the authors' results: Not resolved by bioAF/)).toBeInTheDocument();
   });
 
   it("shows no depth for a version 1 card", () => {
