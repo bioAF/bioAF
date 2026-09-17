@@ -58,6 +58,15 @@ def _inspected(row: dict) -> bool:
     return bool(row.get("role"))
 
 
+def _rows(value) -> list:
+    """The rows in a value the evidence recorded, whatever shape it took."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [v for v in value.values() if isinstance(v, dict)]
+    return []
+
+
 def author_table_state(*, supplements: list[dict] | None, deposits: list[dict] | None = None) -> dict:
     """What is established about an authors' result table for this paper, and why.
 
@@ -65,7 +74,10 @@ def author_table_state(*, supplements: list[dict] | None, deposits: list[dict] |
     at holds the answer open, because a definitive absence cannot be established from sources nobody
     read.
     """
-    rows = [r for r in (supplements or []) + (deposits or []) if isinstance(r, dict)]
+    # Evidence is what a real study recorded, not what a caller promised: `deposit_inventory` is a
+    # dict keyed by accession on a real study, and a value that is not a list of rows holds no
+    # supplement either way.
+    rows = [r for r in [*_rows(supplements), *_rows(deposits)] if isinstance(r, dict)]
     if not rows:
         return {
             "status": NOT_DEPOSITED,
