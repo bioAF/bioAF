@@ -679,6 +679,13 @@ def score_reproduction(level3: dict, ours, *, universe: int) -> dict:
     }
 
 
+def _id_column_index(inspection: dict) -> int | str:
+    """The 1-based position of the identifier column the interpretation established, or "" when the
+    inspection predates it (a study read before plan_8_3, resolved by name as before)."""
+    index = (inspection.get("interpretation") or {}).get("feature_index")
+    return index + 1 if isinstance(index, int) and not isinstance(index, bool) else ""
+
+
 async def resolve_level3_from_deposit(
     session: AsyncSession,
     study: ValidationStudy,
@@ -781,6 +788,10 @@ async def resolve_level3_from_deposit(
         # unnamed). The wiring's fixed id_column describes an nf-core output and cannot speak for a
         # deposit, so it is carried from what step 6 measured.
         "id_column": inspection.get("id_column") or "",
+        # plan_8_3 stage 4: and its 1-based position, which is what the template resolves it by. A
+        # name is not enough: a deposit can leave the column unnamed, and a template that fell back
+        # to the first column made GSE309060's gene biotype the feature identifier.
+        "id_column_index": _id_column_index(inspection),
     }
     if template_spec.method == "limma_trend":
         # Logging a log compresses real differences into nothing and yields a quiet null result.

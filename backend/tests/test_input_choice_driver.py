@@ -41,37 +41,53 @@ _SERIES_MATRIX = (
 _LISTING = f'<html><body><a href="{_MATRIX}">{_MATRIX}</a><a href="{_TABLE}">{_TABLE}</a></body></html>'
 
 
-def _mapping(*, ko16_quote="clone: c16"):
+# plan_8_3 stage 3 (flagged test change): a `sample_record` citation names the RECORD it cites, as the
+# prompt shows it. "culture: WT1" is one characteristic of one record and identifies no record at all;
+# it used to validate because every record's words were searched as one corpus.
+_SERIES_RECORDS = {
+    "WT_a": "GSM1 | WT_a | genotype: wild type; culture: WT1; time: day 0",
+    "WT_b": "GSM2 | WT_b | genotype: wild type; culture: WT2; time: day 0",
+    "KO_c5": "GSM3 | KO_c5 | genotype: SAMD1 KO; clone: c5; time: day 0",
+    "KO_c16": "GSM4 | KO_c16 | genotype: SAMD1 KO; clone: c16; time: day 0",
+    "KO_c5_d7": "GSM5 | KO_c5_d7 | genotype: SAMD1 KO; clone: c5; time: day 7",
+}
+
+
+def _cite(column):
+    return [{"source": "sample_record", "quote": _SERIES_RECORDS[column]}]
+
+
+def _mapping(*, ko16_quote=None):
     return [
         {
             "column": "WT_a",
             "arm": "reference",
             "biological_unit": "WT1",
             "time_point": "day 0",
-            "evidence": [{"source": "sample_record", "quote": "culture: WT1"}],
+            "evidence": _cite("WT_a"),
         },
         {
             "column": "WT_b",
             "arm": "reference",
             "biological_unit": "WT2",
             "time_point": "day 0",
-            "evidence": [{"source": "sample_record", "quote": "culture: WT2"}],
+            "evidence": _cite("WT_b"),
         },
         {
             "column": "KO_c5",
             "arm": "test",
             "biological_unit": "c5",
             "time_point": "day 0",
-            "evidence": [{"source": "sample_record", "quote": "clone: c5"}],
+            "evidence": _cite("KO_c5"),
         },
         {
             "column": "KO_c16",
             "arm": "test",
             "biological_unit": "c16",
             "time_point": "day 0",
-            "evidence": [{"source": "sample_record", "quote": ko16_quote}],
+            "evidence": [{"source": "sample_record", "quote": ko16_quote}] if ko16_quote else _cite("KO_c16"),
         },
-        {"column": "KO_c5_d7", "arm": "excluded", "evidence": [{"source": "sample_record", "quote": "time: day 7"}]},
+        {"column": "KO_c5_d7", "arm": "excluded", "evidence": _cite("KO_c5_d7")},
     ]
 
 
@@ -308,7 +324,7 @@ async def test_an_unresolved_mapping_holds_keeps_the_input_and_resume_re_enters_
         {
             "primary_matrix": _MATRIX,
             "author_table": _TABLE,
-            "mapping": _mapping(ko16_quote="clone: c99"),
+            "mapping": _mapping(ko16_quote="GSM99 | KO_c99 | clone: c99"),
             "reason": "r",
         },
         {"mapping": _mapping(), "reason": "read again", "confidence": 0.7},
@@ -323,7 +339,9 @@ async def test_an_unresolved_mapping_holds_keeps_the_input_and_resume_re_enters_
     assert study.state == "classified"
     assert evidence["deposit_failed"]["cause"] == "sample_mapping_unresolved"
     assert "clone: c99" in evidence["deposit_failed"]["reason"]
-    assert evidence["input_choice"]["mapping"][3]["evidence"][0]["quote"] == "clone: c99"  # the proposal is kept
+    assert (
+            evidence["input_choice"]["mapping"][3]["evidence"][0]["quote"] == "GSM99 | KO_c99 | clone: c99"
+        )  # the proposal is kept
     assert "acquisition_retry_at" not in evidence
 
     downloads = []
