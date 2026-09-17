@@ -898,6 +898,7 @@ _ATTEMPT_CAUSES = {
     "unreachable": "bioAF could not reach the language model",
     "unparseable": "the model's answer was not in the format bioAF asked for",
     "timed_out": "the model's answer did not finish within bioAF's time limit",
+    "schema_rejected": "the model's answer did not hold what bioAF asked for",
     "internal": "bioAF hit an internal error",
     "interrupted": "the read was interrupted before the model's answer arrived",
 }

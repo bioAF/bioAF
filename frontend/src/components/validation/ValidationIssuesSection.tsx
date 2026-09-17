@@ -41,6 +41,8 @@ const OUTCOME_LABEL: Record<string, string> = {
   timed_out: "the model's answer did not finish within bioAF's time limit",
   // plan_8_1 section 1.2: an answer that parsed and left out a required part, never a fact about the paper.
   incomplete: "the model's answer left out parts bioAF requires",
+  // plan_8_3 stage 6: an answer that arrived whole, twice, and did not hold what bioAF asked for.
+  schema_rejected: "the model's answer did not hold what bioAF asked for",
   // change_7.3 section 9: failures that are not a model's.
   retrieval_failed: "bioAF could not retrieve a file it needed",
   not_performed: "this step could not run",

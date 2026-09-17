@@ -51,6 +51,7 @@ from app.services.validation_assessment import (
 )
 from app.services.validation_acquisition_outcome import (
     AWAITING_INPUT,
+    BIOLOGICAL_IDENTITY_UNRESOLVED,
     INPUT_UNIDENTIFIED,
     INPUT_UNREADABLE,
     MAX_ATTEMPTS,
@@ -2279,7 +2280,16 @@ class ValidationDriverService:
             # plan_8_3 stage 3: treatment compatibility with the arm is its own check. A real record,
             # quoted correctly, for the column it describes, can still be the wrong arm.
             contrast=contrast,
+            # plan_8_3 stage 5: identities a person recorded where the published sources state none.
+            # A mapping that rests on one is assisted, and says so on the evidence.
+            confirmed_units=(evidence.get("unit_confirmations") or {}).get("units") or None,
         )
+        if validation.get("assistance"):
+            evidence["mapping_assistance"] = {
+                "kind": validation["assistance"],
+                "confirmed_by": (evidence.get("unit_confirmations") or {}).get("confirmed_by"),
+                "at": (evidence.get("unit_confirmations") or {}).get("at"),
+            }
         choice["mapping_validation"] = validation
         evidence["input_choice"] = choice
         evidence["deposit_metadata_association"] = associations_from_mapping(validation["mapping"], contrast)
@@ -2324,7 +2334,13 @@ class ValidationDriverService:
                 study,
                 evidence,
                 f"bioAF downloaded and read {name}. {reason}",
-                cause=SAMPLE_MAPPING_UNRESOLVED,
+                # plan_8_3 stage 5: an unresolved biological identity is its own fact. The columns are
+                # placed and their treatments are right; which donor or culture each one came from is
+                # what is missing, and calling that an unresolved mapping sends a reader to the wrong
+                # remedy.
+                cause=(
+                    BIOLOGICAL_IDENTITY_UNRESOLVED if status == "unresolved_identity" else SAMPLE_MAPPING_UNRESOLVED
+                ),
                 resource=name,
             )
         plan.differential_design_json = rewritten

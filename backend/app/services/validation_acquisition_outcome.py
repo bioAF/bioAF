@@ -64,13 +64,20 @@ SAMPLE_MAPPING_UNRESOLVED = completion.SAMPLE_MAPPING_UNRESOLVED
 DESIGN_INCOMPATIBLE = completion.DESIGN_INCOMPATIBLE
 # No contrast can be analyzed on this route.
 NO_COMPATIBLE_CONTRAST = completion.NO_COMPATIBLE_CONTRAST
+# plan_8_3 stage 5: the arms are settled and what each column's independent biological unit IS is not.
+BIOLOGICAL_IDENTITY_UNRESOLVED = completion.BIOLOGICAL_IDENTITY_UNRESOLVED
 # `no_input`, `no_adapter` and `not_authorized` are the route policy's own actions, passed as causes
 # unchanged. `no_input` is reserved for an absence established within a stated scope, and
 # `not_authorized` for an archive's declared access model; neither is ever read from a status code.
 
 RETRIEVAL_CAUSES = (RETRIEVAL_TRANSIENT, RETRIEVAL_NOT_FOUND)
 # The causes that decide the input is not ready for the selected analysis (change_7.4 section 1.3).
-READINESS_CAUSES = (SAMPLE_MAPPING_UNRESOLVED, DESIGN_INCOMPATIBLE, NO_COMPATIBLE_CONTRAST)
+READINESS_CAUSES = (
+    SAMPLE_MAPPING_UNRESOLVED,
+    DESIGN_INCOMPATIBLE,
+    NO_COMPATIBLE_CONTRAST,
+    BIOLOGICAL_IDENTITY_UNRESOLVED,
+)
 
 # What each cause is reported as when it ends the attempt.
 _LIMITATION_FOR_CAUSE = {
@@ -84,6 +91,7 @@ _LIMITATION_FOR_CAUSE = {
     SAMPLE_MAPPING_UNRESOLVED: completion.SAMPLE_MAPPING_UNRESOLVED,
     DESIGN_INCOMPATIBLE: completion.DESIGN_INCOMPATIBLE,
     NO_COMPATIBLE_CONTRAST: completion.NO_COMPATIBLE_CONTRAST,
+    BIOLOGICAL_IDENTITY_UNRESOLVED: completion.BIOLOGICAL_IDENTITY_UNRESOLVED,
     NO_INPUT: completion.MISSING_INPUT,
     NO_ADAPTER: completion.UNSUPPORTED_ACQUISITION,
     NOT_AUTHORIZED: completion.CONTROLLED_ACCESS,

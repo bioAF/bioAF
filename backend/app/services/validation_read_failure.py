@@ -27,6 +27,7 @@ PAPER_READING_STEP = "reading the paper and extracting its methods and claims"
 _LEGACY_CAUSES = {
     "truncated": "the model's answer was cut off at its token limit",
     "timed_out": "the model's answer did not finish within bioAF's time limit",
+    "schema_rejected": "the model's answer did not hold what bioAF asked for",
     "refusal": "the model declined to answer",
     "unreachable": "bioAF could not reach the language model",
     "unparseable": "the model's answer was not in the format bioAF asked for",

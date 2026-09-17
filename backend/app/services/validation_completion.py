@@ -42,6 +42,11 @@ NO_COMPATIBLE_CONTRAST = "no_compatible_contrast"
 # change_7.5 section 1.3: the paper's reference is one bioAF cannot supply, so an operation that depends
 # on a reference was refused. A limitation of bioAF, never an absence in the paper.
 REFERENCE_UNAVAILABLE = "reference_unavailable"
+# plan_8_3 stage 5: the columns are placed and their treatments are right, and what each one's
+# independent biological unit IS has not been established. Study 50's samples named a tissue and a
+# treatment and no donor, so the paper's three donors cannot be told apart. It is not a missing input
+# (the data is published), not an unresolved mapping (the arms are settled) and not a discrepancy.
+BIOLOGICAL_IDENTITY_UNRESOLVED = "biological_identity_unresolved"
 _NOT_AN_ABSENCE = (
     ACCESS_REFUSED,
     RESOURCE_LIMIT,
@@ -52,6 +57,7 @@ _NOT_AN_ABSENCE = (
     DESIGN_INCOMPATIBLE,
     NO_COMPATIBLE_CONTRAST,
     REFERENCE_UNAVAILABLE,
+    BIOLOGICAL_IDENTITY_UNRESOLVED,
 )
 
 LIMITATION_KINDS = (

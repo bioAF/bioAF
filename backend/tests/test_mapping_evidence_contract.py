@@ -237,13 +237,19 @@ class TestOtherSourcesKeepTheirIdentity:
                 "column": "S1",
                 "arm": "test",
                 "biological_unit": "GSM1",
-                "evidence": [{"source": "methods", "quote": "cultures were treated for 24 hours"}],
+                "evidence": [
+                    {"source": "sample_record", "quote": record_reference(records[0])},
+                    {"source": "methods", "quote": "cultures were treated for 24 hours"},
+                ],
             },
             {
                 "column": "S2",
                 "arm": "reference",
                 "biological_unit": "GSM2",
-                "evidence": [{"source": "methods", "quote": "cultures were left untreated"}],
+                "evidence": [
+                    {"source": "sample_record", "quote": record_reference(records[1])},
+                    {"source": "methods", "quote": "cultures were left untreated"},
+                ],
             },
         ]
         good = validate_mapping(
