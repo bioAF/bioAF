@@ -166,22 +166,99 @@ def _normalized(text: str) -> str:
     return " ".join(str(text or "").lower().split())
 
 
+# plan_8_3 stage 3: ONE representation of a source record, used to show it and to check a citation of
+# it. The prompt printed `accession | title | characteristics` and the validator searched a corpus
+# built as `accession title characteristics`; lowercasing and whitespace normalization do not remove
+# the pipes, so every one of study 50's 21 quotations was rejected for citing evidence it had been
+# given. A separator is presentation, not evidence.
+RECORD_FIELDS = ("geo_accession", "title", "condition")
+RECORD_SEPARATOR = " | "
+# The separators a record might be shown or quoted with. A citation is matched on its FIELDS, so a
+# quote that uses any of them names the same record.
+_PRESENTATION_SEPARATORS = ("|", "\t", ";")
+
+
+def record_reference(record: dict) -> str:
+    """One source record as both the prompt and a citation of it spell it."""
+    return RECORD_SEPARATOR.join(str(record.get(field) or "-").strip() for field in RECORD_FIELDS)
+
+
+def _citation_fields(quote: str) -> list[str]:
+    """The fields a citation names, however it separated them. The placeholder a record shows for a
+    field it does not state carries no information and is not one of them."""
+    text = str(quote or "")
+    for separator in _PRESENTATION_SEPARATORS:
+        text = text.replace(separator, RECORD_SEPARATOR)
+    parts = (_normalized(part) for part in text.split(RECORD_SEPARATOR))
+    return [part for part in parts if part and part != "-"]
+
+
+def source_records(records: list[dict]) -> list[dict]:
+    """The repository's sample records as the decision sees them: the record, its reference, and the
+    fields a citation of it must match."""
+    shown = []
+    for record in records or []:
+        shown.append(
+            {
+                "record": record,
+                "reference": record_reference(record),
+                "fields": {field: _normalized(record.get(field)) for field in RECORD_FIELDS},
+                "identifiers": {
+                    _normalized(record.get(key))
+                    for key in ("title", "geo_accession", "run_accession", "sample_accession", "experiment_accession")
+                    if str(record.get(key) or "").strip()
+                },
+            }
+        )
+    return shown
+
+
+def _cited_record(quote: str, shown: list[dict]) -> tuple[dict | None, str | None]:
+    """``(record, problem)`` for a citation of a sample record.
+
+    A citation names a record when the record's own identifier is among its fields. Whether the REST
+    of the citation matches that record is the second question, and it has its own answer: a real
+    record quoted with a treatment it does not state is a changed quotation, not a missing record.
+    """
+    fields = _citation_fields(quote)
+    if not fields:
+        return None, "cites nothing"
+    # A citation names a record when one of that record's own identifiers is among its fields, or
+    # inside one: a quote whose separators were dropped is one long field naming the same record.
+    named = [
+        entry for entry in shown if any(identifier in field for field in fields for identifier in entry["identifiers"])
+    ]
+    if not named:
+        return None, "names no sample record this deposit holds"
+    for entry in named:
+        stated = _normalized(" ".join([*entry["fields"].values(), *sorted(entry["identifiers"])]))
+        if all(field in stated for field in fields):
+            return entry, None
+    return named[0], "does not match what that record states"
+
+
 def validate_mapping(
-    mapping: list[dict], *, columns: list[str], sample_records: list[dict], texts: list[str] | None = None
+    mapping: list[dict],
+    *,
+    columns: list[str],
+    sample_records: list[dict],
+    texts: list[str] | None = None,
+    contrast: dict | None = None,
 ) -> dict:
     """Accept a proposed mapping only when the evidence supports every assignment.
 
+    plan_8_3 stage 3: a citation is checked against the RECORD it names, not against a corpus of
+    every record's words run together. Three questions are answered separately, because they have
+    three different remedies: does the cited record exist, does it state what the citation says, and
+    does it describe the column it was attached to. Treatment compatibility with the contrast is a
+    fourth, checked where the contrast is given.
+
     Returns ``{"status": "accepted" | "unresolved", "reasons": [...], "mapping": rows}``."""
     reasons: list[str] = []
-    corpus = _normalized(
-        " | ".join(
-            [
-                *(f"{r.get('geo_accession')} {r.get('title')} {r.get('condition')}" for r in sample_records or []),
-                *columns,
-                *(texts or []),
-            ]
-        )
-    )
+    shown = source_records(sample_records)
+    corpus = _normalized(" ".join(texts or []))
+    column_names = {_normalized(c) for c in columns}
+    every_identifier = {identifier for entry in shown for identifier in entry["identifiers"]}
     rows = [r for r in mapping or [] if isinstance(r, dict)]
     seen: dict[str, int] = {}
     for row in rows:
@@ -206,11 +283,48 @@ def validate_mapping(
         if not evidence:
             reasons.append(f"column {column} cites no evidence")
             continue
+        cited_records = []
         for item in evidence:
-            if _normalized(item["quote"]) not in corpus:
-                reasons.append(
-                    f'column {column} cites "{item["quote"]}", which is not in the sample records, the column names or the text given'
-                )
+            source = str(item.get("source") or "").strip()
+            quote = str(item["quote"])
+            if source == "sample_record":
+                record, problem = _cited_record(quote, shown)
+                if problem:
+                    reasons.append(f'column {column} cites "{quote}", which {problem}')
+                    continue
+                cited_records.append(record)
+                # A matrix names its own columns, and they often are not the repository's titles, so
+                # a citation is the decision's stated identity for a column bioAF cannot link by
+                # name. What it may NOT do is attach a record to a column that is another record's:
+                # that is a quote from the wrong sample, and it is refused.
+                if _normalized(column) in every_identifier and _normalized(column) not in record["identifiers"]:
+                    reasons.append(
+                        f'column {column} cites "{quote}", which describes {record["record"].get("title") or "another sample"}, '
+                        f"not column {column}"
+                    )
+            elif source == "column_name":
+                if _normalized(quote) != _normalized(column):
+                    reasons.append(
+                        f'column {column} cites the column name "{quote}", which is not the name of column {column}'
+                    )
+            elif source == "exact_identifier":
+                if _normalized(quote) not in column_names:
+                    reasons.append(f'column {column} cites the identifier "{quote}", which the matrix does not hold')
+            elif _normalized(quote) not in corpus:
+                reasons.append(f'column {column} cites "{quote}", which is not in the text given to the decision')
+
+        if arm in ("test", "reference") and contrast:
+            wanted = _normalized(
+                contrast.get("test_condition") if arm == "test" else contrast.get("reference_condition")
+            )
+            for record in cited_records:
+                stated = record["fields"]["condition"]
+                if wanted and stated and wanted not in stated:
+                    reasons.append(
+                        f"column {column} is put in the {arm} arm, and the treatment its sample record states "
+                        f'("{record["record"].get("condition")}") is not the arm\'s condition '
+                        f'("{contrast.get("test_condition") if arm == "test" else contrast.get("reference_condition")}")'
+                    )
         if arm == "excluded":
             continue
         unit = str(row.get("biological_unit") or "").strip()
@@ -272,16 +386,16 @@ def build_input_prompt(
         "as listed; never invent one, and never choose a result table as the matrix.\n"
         "- Assign EVERY column of the chosen matrix except its identifier column: to an arm, or excluded "
         "when it belongs to a condition or time point outside the contrast.\n"
-        "- Every assignment quotes its evidence exactly from the inputs.\n"
+        "- Every assignment quotes its evidence exactly from the inputs. To cite a sample record, "
+        "quote its whole line as shown, separators and all.\n"
         "- A clone is not a replicate, and a trailing number in a column name is never replicate identity on "
         "its own. State the biological unit only as the evidence defines it.\n"
         "- A technical group is only repeated measurements of ONE biological sample under one condition "
         "and one time point that the evidence names as such; a name pattern never confirms one."
     )
-    records = "\n".join(
-        f"  {r.get('geo_accession') or '-'} | {r.get('title') or '-'} | {r.get('condition') or '-'}"
-        for r in (sample_records or [])[:60]
-    )
+    # plan_8_3 stage 3: the canonical record representation. What is shown here is exactly what a
+    # citation of it is checked against.
+    records = "\n".join(f"  {entry['reference']}" for entry in source_records(sample_records)[:60])
     shown = []
     for preview in previews:
         rows = "\n".join("    " + "\t".join(row) for row in preview.get("rows") or [])

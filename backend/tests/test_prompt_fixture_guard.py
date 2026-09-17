@@ -36,7 +36,9 @@ def _values(readme: pathlib.Path) -> list[str]:
     return re.findall(r"^- `([^`]+)`", section, re.M)
 
 
-_FIXTURE_VALUES = sorted({v for name in ("samd1", "groff") for v in _values(_FIXTURES / name / "README.md")})
+_FIXTURE_VALUES = sorted(
+    {v for name in ("samd1", "groff", "panahipour") for v in _values(_FIXTURES / name / "README.md")}
+)
 
 
 def _prompts() -> dict[str, str]:
@@ -128,6 +130,8 @@ def test_the_fixture_readmes_list_their_values():
     assert "8733" in _FIXTURE_VALUES
     assert "samd1_chip_peaks" in _FIXTURE_VALUES
     assert "194" in _FIXTURE_VALUES
+    # plan_8_3: the Panahipour fixture's own header words, which its defect is about.
+    assert "GeneType" in _FIXTURE_VALUES
 
 
 @pytest.mark.parametrize("name, prompt", sorted(_prompts().items()))

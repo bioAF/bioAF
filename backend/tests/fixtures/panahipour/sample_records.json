@@ -1,0 +1,191 @@
+[
+ {
+  "title": "LP06001",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: Tissue culture surface (TCS)",
+  "geo_accession": "GSM9259432",
+  "run_accession": "SRR35586710",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820550",
+  "experiment_accession": "SRX30659353"
+ },
+ {
+  "title": "LP06012",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: Tissue culture surface (TCS)",
+  "geo_accession": "GSM9259433",
+  "run_accession": "SRR35586709",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820549",
+  "experiment_accession": "SRX30659354"
+ },
+ {
+  "title": "LP06023",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: Tissue culture surface (TCS)",
+  "geo_accession": "GSM9259434",
+  "run_accession": "SRR35586708",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820548",
+  "experiment_accession": "SRX30659355"
+ },
+ {
+  "title": "LP06002",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae",
+  "geo_accession": "GSM9259435",
+  "run_accession": "SRR35586707",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820547",
+  "experiment_accession": "SRX30659356"
+ },
+ {
+  "title": "LP06013",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae",
+  "geo_accession": "GSM9259436",
+  "run_accession": "SRR35586706",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820546",
+  "experiment_accession": "SRX30659357"
+ },
+ {
+  "title": "LP06024",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae",
+  "geo_accession": "GSM9259437",
+  "run_accession": "SRR35586705",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820545",
+  "experiment_accession": "SRX30659358"
+ },
+ {
+  "title": "LP06003",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA",
+  "geo_accession": "GSM9259438",
+  "run_accession": "SRR35586704",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820544",
+  "experiment_accession": "SRX30659359"
+ },
+ {
+  "title": "LP06014",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA",
+  "geo_accession": "GSM9259439",
+  "run_accession": "SRR35586703",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820543",
+  "experiment_accession": "SRX30659360"
+ },
+ {
+  "title": "LP06025",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA",
+  "geo_accession": "GSM9259440",
+  "run_accession": "SRR35586702",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820542",
+  "experiment_accession": "SRX30659361"
+ },
+ {
+  "title": "LP06004",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae + HA",
+  "geo_accession": "GSM9259441",
+  "run_accession": "SRR35586701",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820541",
+  "experiment_accession": "SRX30659362"
+ },
+ {
+  "title": "LP06015",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae + HA",
+  "geo_accession": "GSM9259442",
+  "run_accession": "SRR35586700",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820540",
+  "experiment_accession": "SRX30659363"
+ },
+ {
+  "title": "LP06026",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae + HA",
+  "geo_accession": "GSM9259443",
+  "run_accession": "SRR35586699",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820539",
+  "experiment_accession": "SRX30659364"
+ },
+ {
+  "title": "LP06005",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae + HA",
+  "geo_accession": "GSM9259444",
+  "run_accession": "SRR35586698",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820538",
+  "experiment_accession": "SRX30659365"
+ },
+ {
+  "title": "LP06016",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae + HA",
+  "geo_accession": "GSM9259445",
+  "run_accession": "SRR35586697",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820537",
+  "experiment_accession": "SRX30659366"
+ },
+ {
+  "title": "LP06027",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae + HA",
+  "geo_accession": "GSM9259446",
+  "run_accession": "SRR35586696",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820536",
+  "experiment_accession": "SRX30659367"
+ },
+ {
+  "title": "LP06006",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae",
+  "geo_accession": "GSM9259447",
+  "run_accession": "SRR35586695",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820535",
+  "experiment_accession": "SRX30659368"
+ },
+ {
+  "title": "LP06017",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae",
+  "geo_accession": "GSM9259448",
+  "run_accession": "SRR35586694",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820534",
+  "experiment_accession": "SRX30659369"
+ },
+ {
+  "title": "LP06028",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Collafleece\u00ae",
+  "geo_accession": "GSM9259449",
+  "run_accession": "SRR35586693",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820533",
+  "experiment_accession": "SRX30659370"
+ },
+ {
+  "title": "LP06007",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae",
+  "geo_accession": "GSM9259450",
+  "run_accession": "SRR35586692",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820532",
+  "experiment_accession": "SRX30659371"
+ },
+ {
+  "title": "LP06018",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae",
+  "geo_accession": "GSM9259451",
+  "run_accession": "SRR35586691",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820531",
+  "experiment_accession": "SRX30659372"
+ },
+ {
+  "title": "LP06029",
+  "condition": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Jason\u00ae",
+  "geo_accession": "GSM9259452",
+  "run_accession": "SRR35586690",
+  "library_strategy": "RNA-Seq",
+  "sample_accession": "SAMN51820530",
+  "experiment_accession": "SRX30659373"
+ }
+]

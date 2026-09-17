@@ -119,6 +119,7 @@ BUILTIN_TEMPLATES = [
             "counts_path": "/data/counts.tsv",
             "output_path": "/outputs/de_results.csv",
             "id_column": "gene_id",
+            "id_column_index": "",
             "test_samples": "",
             "reference_samples": "",
             # Default empty (unpaired `~ condition`). build_level3_inputs overrides with per-sample block
@@ -152,6 +153,7 @@ BUILTIN_TEMPLATES = [
             # A deposit often leaves its id column unnamed, so "" means "the first column" rather
             # than an error. The nf-core templates can hard-code a name; this one cannot.
             "id_column": "",
+            "id_column_index": "",
             "test_samples": "",
             "reference_samples": "",
             "block_labels": "",

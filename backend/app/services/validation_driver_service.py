@@ -1794,10 +1794,15 @@ class ValidationDriverService:
         # here would refuse every deposit before the thing that resolves it had run. The association
         # below is the real coverage gate. A transposed matrix still gates, because no association
         # can fix an axis swap.
+        # plan_8_3 stage 4: the repository's own sample records are the strongest evidence that a
+        # column is a measurement, and they are right here. Without them GSE309060's `GeneSymbol` and
+        # `ENSG` columns arrived as samples with zero library sizes.
         inspection = inspect_matrix(
             text,
             claimed_value_type=(evidence.get("deposit_selection") or {}).get("value_type"),
             design_samples=design_samples or None,
+            sample_records=(evidence.get("sample_manifest") or None),
+            source_checksum=((matrices[0].get("decoding") or {}).get("source_checksum")),
             gate_on_coverage=False,
         )
         evidence["deposit_inspection"] = inspection
@@ -2271,6 +2276,9 @@ class ValidationDriverService:
             columns=list(inspection.get("columns") or []),
             sample_records=records,
             texts=[claim_text or "", (experiment or {}).get("assay") or ""],
+            # plan_8_3 stage 3: treatment compatibility with the arm is its own check. A real record,
+            # quoted correctly, for the column it describes, can still be the wrong arm.
+            contrast=contrast,
         )
         choice["mapping_validation"] = validation
         evidence["input_choice"] = choice

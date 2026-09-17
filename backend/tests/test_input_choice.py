@@ -22,6 +22,7 @@ from app.services.validation_input_choice import (
     deterministic_choice,
     input_candidates,
     preview_file,
+    record_reference,
     validate_mapping,
 )
 
@@ -120,6 +121,14 @@ def test_two_matrices_that_both_resolve_are_not_a_deterministic_answer():
 _COLUMNS = ["WT-1", "WT-2", "KO Cl5 repl1", "KO Cl16", "KO Cl5 d7"]
 
 
+# plan_8_3 stage 3 (flagged test change): a `sample_record` citation names the RECORD it cites, as
+# the prompt shows it. A fragment such as "genotype: wild type" belongs to two of these records and
+# identifies neither, and used to validate against a corpus of every record's words run together.
+def _cite(title):
+    record = next(r for r in _RECORDS if r["title"] == title)
+    return [{"source": "sample_record", "quote": record_reference(record)}]
+
+
 def _row(column, arm, unit, *, evidence=None, group=None, time="day 0"):
     return {
         "column": column,
@@ -128,18 +137,17 @@ def _row(column, arm, unit, *, evidence=None, group=None, time="day 0"):
         "biological_sample": f"{unit} {time}",
         "technical_group": group,
         "time_point": time,
-        "evidence": evidence if evidence is not None else [{"source": "sample_record", "quote": "genotype: SAMD1 KO"}],
+        "evidence": evidence if evidence is not None else _cite("KO Cl5"),
     }
 
 
 def _mapping():
-    wt = [{"source": "sample_record", "quote": "genotype: wild type"}]
     return [
-        _row("WT-1", "reference", "WT culture 1", evidence=wt),
-        _row("WT-2", "reference", "WT culture 2", evidence=wt),
-        _row("KO Cl5 repl1", "test", "clone Cl5", evidence=[{"source": "sample_record", "quote": "clone: Cl5"}]),
-        _row("KO Cl16", "test", "clone Cl16", evidence=[{"source": "sample_record", "quote": "clone: Cl16"}]),
-        {"column": "KO Cl5 d7", "arm": "excluded", "evidence": [{"source": "sample_record", "quote": "time: day 7"}]},
+        _row("WT-1", "reference", "WT culture 1", evidence=_cite("WT rep1")),
+        _row("WT-2", "reference", "WT culture 2", evidence=_cite("WT rep2")),
+        _row("KO Cl5 repl1", "test", "clone Cl5", evidence=_cite("KO Cl5")),
+        _row("KO Cl16", "test", "clone Cl16", evidence=_cite("KO Cl16")),
+        {"column": "KO Cl5 d7", "arm": "excluded", "evidence": _cite("KO Cl5 d7")},
     ]
 
 
@@ -154,7 +162,7 @@ def test_a_proposal_that_cites_its_evidence_is_accepted():
 
 def test_an_assignment_citing_evidence_absent_from_the_inputs_is_unresolved():
     mapping = _mapping()
-    mapping[2]["evidence"] = [{"source": "sample_record", "quote": "clone: Cl99"}]
+    mapping[2]["evidence"] = [{"source": "sample_record", "quote": "GSM99 | KO Cl99 | clone: Cl99"}]
     result = _validate(mapping)
     assert result["status"] == "unresolved"
     assert any("Cl99" in r for r in result["reasons"])

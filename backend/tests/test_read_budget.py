@@ -9,7 +9,6 @@ The guard detects a stale measurement. It cannot guarantee that every paper fits
 (section 1.2) covers the rest.
 """
 
-import pytest
 
 from app.services import validation_read_budget as budget
 from app.services.validation_extraction_service import build_extraction_prompt

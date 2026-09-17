@@ -13,39 +13,33 @@ that are confidently wrong rather than obviously wrong.
 The numbers here are not only a gate. They land in the evidence bundle and on the provenance report,
 because a matrix with a 40x library-size spread is a real observation about the deposit and belongs
 in the verdict rather than in a log.
+
+**plan_8_3 stage 4: which column is which is not decided here.** ``matrix_interpretation`` establishes
+it once, from the header, the content and the repository's sample records, and every consumer reads
+that one reading. This module measures the matrix THROUGH it, so an annotation column can no longer
+arrive as a sample with a zero library size.
 """
 
 from __future__ import annotations
 
 import logging
 
-from app.services.result_set_normalizer import _detect_namespace, _sniff_delim
+from app.services.matrix_interpretation import interpret_matrix
+from app.services.result_set_normalizer import _detect_namespace
 
 logger = logging.getLogger("bioaf.deposit_inspection")
 
-# Column sums within this fraction of 1e6 mean the matrix is per-million normalized (TPM or CPM).
-# Generous, because a deposit is often rounded or filtered after normalization and no longer sums
-# exactly.
-_PER_MILLION_TOLERANCE = 0.05
-_PER_MILLION = 1_000_000.0
 
-
-def _to_float(v: str) -> float | None:
-    try:
-        return float((v or "").strip())
-    except (TypeError, ValueError):
-        return None
-
-
-def _unusable(reason: str, **extra) -> dict:
+def _unusable(reason: str, *, interpretation: dict | None = None, **extra) -> dict:
     """A table that could not be read as a matrix at all. change_7.4 section 1.1: its content was not
     identified, which is ``input_unreadable``."""
     from app.services.validation_acquisition_outcome import INPUT_UNREADABLE
 
     return {
-        "n_rows": 0,
+        "n_rows": (interpretation or {}).get("n_rows") or 0,
         "n_columns": 0,
         "columns": [],
+        "annotation_columns": [],
         "id_column": None,
         "id_namespace": None,
         "value_type_observed": "unknown",
@@ -54,12 +48,14 @@ def _unusable(reason: str, **extra) -> dict:
         "library_size_ratio": None,
         "zero_row_fraction": 0.0,
         "zero_columns": [],
+        "columns_without_observations": [],
         "design_samples_found": 0,
         "design_samples_missing": [],
         "looks_transposed": False,
         "usable": False,
         "unusable_reason": reason,
         "unusable_cause": INPUT_UNREADABLE,
+        "interpretation": interpretation,
         **extra,
     }
 
@@ -69,10 +65,12 @@ def inspect_matrix(
     *,
     claimed_value_type: str | None = None,
     design_samples: list[str] | None = None,
+    sample_records: list[dict] | None = None,
+    source_checksum: str | None = None,
     gate_on_coverage: bool = True,
 ) -> dict:
-    """Measure a deposited matrix: shape, what its values are, how even its libraries are, and
-    whether the study's design can actually be run on it.
+    """Measure a deposited matrix: which column is which, what its values are, how even its libraries
+    are, and whether the study's design can actually be run on it.
 
     ``gate_on_coverage=False`` still MEASURES how many design samples were found, but does not let a
     zero make the matrix unusable. The deposit route needs that: its design names GSM accessions
@@ -83,94 +81,44 @@ def inspect_matrix(
     Never raises. An unreadable table returns ``usable: False`` with a reason, because that is a fact
     about the deposit that a scientist can act on (fix the selection, or escalate to raw reads).
     """
-    lines = [ln for ln in (text or "").splitlines() if ln.strip()]
-    if len(lines) < 2:
-        return _unusable("the deposited table has no data rows")
-
-    delim = _sniff_delim(lines[0])
-    header = [c.strip() for c in lines[0].split(delim)]
-    if len(header) < 2:
-        return _unusable("the deposited table has only one column, so it holds no samples")
-
-    # An EMPTY first header cell is the unnamed-index convention and is the common shape in real
-    # deposits: GSE274331's TPM table is exactly this. `result_set_normalizer` already treats an
-    # empty header cell as the index, so the two agree.
-    id_column, sample_columns = header[0], header[1:]
-
-    ids: list[str] = []
-    columns: dict[str, list[float]] = {c: [] for c in sample_columns}
-    zero_rows = 0
-    n_rows = 0
-    saw_negative = False
-    saw_fractional = False
-
-    for line in lines[1:]:
-        cells = [c.strip() for c in line.split(delim)]
-        if len(cells) < 2:
-            continue
-        n_rows += 1
-        ids.append(cells[0])
-        row_values: list[float] = []
-        for i, col in enumerate(sample_columns, start=1):
-            v = _to_float(cells[i]) if i < len(cells) else None
-            if v is None:
-                continue
-            columns[col].append(v)
-            row_values.append(v)
-            if v < 0:
-                saw_negative = True
-            elif v != int(v):
-                saw_fractional = True
-        if row_values and not any(v != 0 for v in row_values):
-            zero_rows += 1
-
-    if n_rows == 0:
-        return _unusable("the deposited table has no data rows")
-
-    library_sizes = {c: round(sum(v), 6) for c, v in columns.items()}
-    positive = [s for s in library_sizes.values() if s > 0]
-    ratio = round(max(positive) / min(positive), 6) if len(positive) > 1 else None
-
-    # Order matters. A negative rules out counts AND per-million before either is considered, and
-    # per-million is checked before "some other normalization" because it is the specific case.
-    if saw_negative:
-        value_type = "log_transformed"
-    elif positive and all(abs(s - _PER_MILLION) / _PER_MILLION <= _PER_MILLION_TOLERANCE for s in positive):
-        # TPM and CPM are indistinguishable from the matrix alone: both sum to 1e6 per column. The
-        # distinction only matters for interpretation, not for which test to run, so it is left
-        # honestly unresolved rather than guessed.
-        value_type = "tpm_or_cpm"
-    elif saw_fractional:
-        value_type = "normalized_other"
-    else:
-        value_type = "counts"
-
-    claimed = (claimed_value_type or "").strip().lower()
-    disagrees = bool(claimed) and claimed != "unknown" and not _compatible(claimed, value_type)
-
-    wanted = [s for s in (design_samples or []) if s]
-    found = [s for s in wanted if s in columns]
-    missing = [s for s in wanted if s not in columns]
-
-    # A matrix whose COLUMNS are genes and whose ROWS are samples. Reading it as-is would treat a
-    # handful of genes as the whole sample set and analyse nothing. Detected by the design: if the
-    # design's samples appear among the row IDS rather than the column headers, it is the wrong way
-    # round.
-    id_set = set(ids)
-    looks_transposed = bool(wanted) and not found and sum(1 for s in wanted if s in id_set) > 0
-
+    from app.services.matrix_interpretation import (
+        UNRESOLVED_DUPLICATE_COLUMNS,
+        UNRESOLVED_FEATURE_ID,
+        UNRESOLVED_ORIENTATION,
+    )
     from app.services.validation_acquisition_outcome import SAMPLE_MAPPING_UNRESOLVED, UNSUPPORTED_PROCESSING
 
-    usable = True
-    reason = None
+    interpretation = interpret_matrix(
+        text,
+        sample_records=sample_records,
+        sample_names=design_samples,
+        claimed_value_type=claimed_value_type,
+        source_checksum=source_checksum,
+    )
+    if interpretation["status"] != "established":
+        reason = interpretation["reason"] or "the deposited table could not be read as a matrix"
+        cause = None
+        if interpretation["unresolved_kind"] in (UNRESOLVED_ORIENTATION, UNRESOLVED_FEATURE_ID):
+            cause = UNSUPPORTED_PROCESSING
+        elif interpretation["unresolved_kind"] == UNRESOLVED_DUPLICATE_COLUMNS:
+            cause = SAMPLE_MAPPING_UNRESOLVED
+        out = _unusable(reason, interpretation=interpretation)
+        if cause:
+            out["unusable_cause"] = cause
+        out["looks_transposed"] = interpretation["unresolved_kind"] == UNRESOLVED_ORIENTATION
+        return out
+
+    sample_columns = list(interpretation["sample_columns"])
+    ids_namespace = interpretation["feature_namespace"]
+    wanted = [s for s in (design_samples or []) if s]
+    found = [s for s in wanted if s in sample_columns]
+    missing = [s for s in wanted if s not in sample_columns]
+
+    usable, reason, cause = True, None, None
     # change_7.4 section 1.1: a matrix read and identified as a shape bioAF cannot analyze is
     # `unsupported_processing`; one whose columns cannot be placed is an unresolved mapping.
-    cause = None
     if len(sample_columns) < 2:
         usable, reason = False, "the deposited matrix has only one sample column, so it cannot carry a contrast"
-        cause = UNSUPPORTED_PROCESSING
-    elif looks_transposed:
-        usable, reason = False, "the deposited matrix appears to be transposed (samples in rows, features in columns)"
         cause = UNSUPPORTED_PROCESSING
     elif gate_on_coverage and wanted and not found:
         usable, reason = (
@@ -181,33 +129,45 @@ def inspect_matrix(
         cause = SAMPLE_MAPPING_UNRESOLVED
 
     return {
-        "n_rows": n_rows,
+        "n_rows": interpretation["n_rows"],
         "n_columns": len(sample_columns),
         "columns": sample_columns,
-        "id_column": id_column,
-        "id_namespace": _detect_namespace(ids),
-        "value_type_observed": value_type,
-        "value_type_claimed": claimed or None,
-        "value_type_disagrees": disagrees,
-        "library_sizes": library_sizes,
-        "library_size_ratio": ratio,
-        "zero_row_fraction": zero_rows / n_rows,
-        "zero_columns": [c for c, s in library_sizes.items() if s == 0],
+        # plan_8_3 stage 4: what the matrix holds BESIDES its measurements, so no reader has to guess
+        # again and no annotation is reported as an excluded experimental sample.
+        "annotation_columns": list(interpretation["annotation_columns"]),
+        "id_column": interpretation["feature_column"],
+        # `_detect_namespace` is what the ground-truth route uses, so the two agree about what an
+        # identifier IS; the interpretation's own stricter reading is on `interpretation`.
+        "id_namespace": _detect_namespace(_feature_values(text, interpretation)) if ids_namespace else None,
+        "value_type_observed": interpretation["value_type"],
+        "value_type_claimed": interpretation["value_type_claimed"],
+        "value_type_disagrees": interpretation["value_type_disagrees"],
+        "library_sizes": interpretation["library_sizes"],
+        "library_size_ratio": interpretation["library_size_ratio"],
+        "zero_row_fraction": interpretation["zero_row_fraction"],
+        "zero_columns": interpretation["zero_columns"],
+        "columns_without_observations": interpretation["columns_without_observations"],
         "design_samples_found": len(found),
         "design_samples_missing": missing,
-        "looks_transposed": looks_transposed,
+        "looks_transposed": False,
         "usable": usable,
         "unusable_reason": reason,
         "unusable_cause": cause,
+        "duplicate_feature_ids": interpretation["duplicate_feature_ids"],
+        "rows_without_feature_id": interpretation["rows_without_feature_id"],
+        "interpretation": {k: v for k, v in interpretation.items() if k not in ("library_sizes", "columns")},
     }
 
 
-def _compatible(claimed: str, observed: str) -> bool:
-    """Whether a claimed value type is consistent with what was measured.
-
-    `tpm` and `cpm` both measure as `tpm_or_cpm`, so neither claim is a disagreement: the matrix
-    genuinely cannot tell them apart and pretending otherwise would manufacture a conflict.
-    """
-    if claimed == observed:
-        return True
-    return observed == "tpm_or_cpm" and claimed in ("tpm", "cpm")
+def _feature_values(text: str, interpretation: dict) -> list[str]:
+    """The identifier column's values, read through the established interpretation."""
+    index = interpretation.get("feature_index")
+    if index is None:
+        return []
+    delimiter = "\t" if interpretation.get("format") == "tsv" else ","
+    values = []
+    for line in [ln for ln in (text or "").splitlines() if ln.strip()][1:]:
+        cells = line.split(delimiter)
+        if index < len(cells):
+            values.append(cells[index].strip().strip('"'))
+    return values
