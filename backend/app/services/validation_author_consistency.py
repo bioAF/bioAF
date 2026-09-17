@@ -369,6 +369,11 @@ def check_claim(
 
     if predicate.get("status") == "not_checkable":
         if list_evidence and count and predicate.get("significance") is None:
+            # plan_8_3 section 1.2: a claim that REFINES the published list (a fold change on top of
+            # the selection the authors already made) is a different operation from counting the list
+            # itself, and a verified parent never satisfies the refinement by itself.
+            if (predicate.get("effect") or {}).get("kind") in ("abs_log2fc", "log2fc"):
+                return _subset_count(record, predicate, table, list_evidence, contrast, _done)
             return _list_count(record, predicate, table, list_evidence, _done)
         return _done(NOT_CHECKABLE, predicate.get("reason"))
     if predicate.get("significance_status") == "unresolved" or predicate.get("status") == "unresolved":
@@ -575,6 +580,53 @@ def _list_count(record: dict, predicate: dict, table: dict, evidence: dict, done
     if status == FAILS:
         return done(DISAGREE, words)
     return done(UNRESOLVED, words)
+
+
+def _subset_count(record: dict, predicate: dict, table: dict, evidence: dict, contrast, done) -> dict:
+    """plan_8_3 section 1.2: the claim's count checked as a documented refinement of the published list.
+
+    The parent has to be established as the claim's complete published selected set first; the
+    refinement's semantics come from the claim's own words and a recorded clarification, never from
+    which reading happens to produce the paper's number.
+    """
+    from app.services.validation_published_subset import SUBSET_NOTE, subset_count
+
+    count = predicate.get("count") or {}
+    parent = {
+        "verified": not evidence.get("partial"),
+        "reason": (
+            f"the passage calls the file part of the list ({evidence['partial']})" if evidence.get("partial") else None
+        ),
+        "source": table.get("name"),
+        "checksum": table.get("checksum"),
+        "count": None,
+    }
+    found = subset_count(
+        table.get("text") or "",
+        parent=parent,
+        statement=predicate.get("stated_as") or (evidence.get("text") or ""),
+        claimed=count.get("value"),
+        confirmation=(table.get("confirmation") or {}).get("filter_semantics"),
+    )
+    record["method"] = found["method"]
+    record["subset"] = {k: v for k, v in found.items() if k not in ("status", "reason")}
+    record["list"] = {
+        "evidence": {"text": evidence.get("text"), "source": evidence.get("source")},
+        "dedup": "distinct identifier",
+        "missing": "rows with no identifier are excluded and reported",
+        "subgroup": None,
+    }
+    record["assumptions"].append(SUBSET_NOTE)
+    record["rows_tested"] = found.get("rows_tested") or 0
+    record["rows_passing"] = found.get("count")
+    record["rows_missing"] = (found.get("rows_without_identifier") or 0) + (found.get("rows_without_value") or 0)
+    if found.get("count") is not None:
+        record["count_range"] = [found["count"], found["count"]]
+    if found["status"] == "agree":
+        return done(AGREE, found["reason"])
+    if found["status"] == "disagree":
+        return done(DISAGREE, found["reason"])
+    return done(UNRESOLVED, found["reason"])
 
 
 def supplement_consistency(

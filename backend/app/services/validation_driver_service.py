@@ -663,14 +663,21 @@ class ValidationDriverService:
                 )
                 return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
         else:
-            text = await paper_text.acquire(session, study, pasted=full_text)
+            # plan_8_3 section 1.4: every route's own answer, kept. Study 49's read failed at Europe
+            # PMC and was recorded as having no text; the account of that ONE source was accurate,
+            # and the two routes that could still supply it were never named.
+            attempts: list[dict] = []
+            text = await paper_text.acquire(session, study, pasted=full_text, attempts=attempts)
+            record = paper_text.acquisition_record(attempts, text_source=text.source if text else None)
+            study.evidence_json = {**(study.evidence_json or {}), "paper_text_acquisition": record}
             if text is None:
                 if resuming:
                     cause = "the read was interrupted, and the paper's text could not be fetched again"
                     return await ValidationDriverService._end_unread(session, study, org_id, user_id, cause=cause)
                 raise ValidationError(
-                    "Could not acquire full text for this study. Provide full_text, or set a source "
-                    "DOI that resolves to an open-access Europe PMC article."
+                    f"Could not acquire full text for this study. {record['reason']} "
+                    "Provide full_text, link the study to a Literature Library paper that holds its text, "
+                    "or set a source DOI that resolves to an open-access Europe PMC article."
                 )
         return await ValidationDriverService._read_text(
             session, study, text, org_id, user_id, checkpoint=_checkpoint, claim=claim, resuming=resuming

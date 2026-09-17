@@ -67,6 +67,8 @@ RESULTS_TABLE = "results_table"
 CODE = "code"
 SUPPORTING_INPUT = "supporting_input"
 UNKNOWN_ROLE = "unknown"
+# plan_8_3 section 1.1: an archive of several files, which is not one supplement to read but several.
+ARCHIVE_ROLE = "archive"
 
 # The tri-state the capability checklist uses, imported rather than re-spelled.
 YES_ANSWER = "yes"
@@ -733,6 +735,7 @@ async def resolve_supplements(
         return rows
 
     claimed: set[str] = set()
+    expanded: list[dict] = []
     for row in rows:
         filename = _bundle_member_for(row, contents)
         if filename is None:
@@ -761,6 +764,7 @@ async def resolve_supplements(
                 **measure_table(contents[filename], thresholds=thresholds),
             )
             _check_claims(row, filename, contents[filename], predicates)
+            _inspect(row, contents[filename], expanded, thresholds=thresholds, predicates=predicates)
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
     # the bundle holds seventeen, and the ones that are not figures can carry real inputs. The
@@ -787,8 +791,63 @@ async def resolve_supplements(
                 role=classify_supplement(filename, blob_bytes), **measure_table(blob_bytes, thresholds=thresholds)
             )
             _check_claims(row, filename, blob_bytes, predicates)
+            _inspect(row, blob_bytes, expanded, thresholds=thresholds, predicates=predicates)
         rows.append(row)
+    # plan_8_3 section 1.1: the members of every archive bioAF opened, each carrying the archive it
+    # came from. A downloaded archive is not proof that its contents were inspected, and until they
+    # are, nothing about what the authors published follows.
+    rows.extend(expanded)
     return rows
+
+
+def _inspect(row: dict, blob: bytes, expanded: list[dict], *, thresholds, predicates) -> None:
+    """plan_8_3 section 1.1: record that this file was opened, and open it further when it is an
+    archive. Never raises: an archive bioAF refused is on the record as refused, not as empty."""
+    from app.services.supplement_archives import EXPANDED, expand_archive, is_archive
+
+    filename = row.get("filename") or row.get("identity") or ""
+    if not is_archive(blob, filename):
+        row["inspected"] = True
+        return
+    found = expand_archive(blob, filename)
+    row["archive"] = {
+        "status": found["status"],
+        "archive_version": found["archive_version"],
+        "reason_kind": found["reason_kind"],
+        "reason": found["reason"],
+        "members": [m["name"] for m in found["members"]],
+    }
+    row["inspected"] = found["status"] == EXPANDED
+    row["role"] = ARCHIVE_ROLE
+    for member in found["members"]:
+        member_row = _new_row(
+            label=member["name"],
+            filename=member["name"],
+            mimetype=None,
+            source=ATTACHED,
+            kind=_bundle_kind(member["name"]),
+            identified_in=IDENTIFIED_IN_BUNDLE,
+        )
+        member_row.update(
+            size_bytes=member["size_bytes"],
+            resolved=True,
+            retrieval=dict(row.get("retrieval") or {}),
+            contained_in=member["contained_in"],
+            archive_version=member["archive_version"],
+            inspected=member["bytes"] is not None,
+        )
+        if member["bytes"] is None:
+            # Named, and honestly not read: a nested archive bioAF does not open, or a member over
+            # the per-member limit.
+            member_row["role"] = ARCHIVE_ROLE if member["nested_archive"] else UNKNOWN_ROLE
+            member_row["over_limit"] = member["over_limit"]
+        elif member_row["kind"] == KIND_ATTACHMENT:
+            member_row.update(
+                role=classify_supplement(member["name"], member["bytes"]),
+                **measure_table(member["bytes"], thresholds=thresholds),
+            )
+            _check_claims(member_row, member["name"], member["bytes"], predicates)
+        expanded.append(member_row)
 
 
 def _check_claims(row: dict, filename: str, blob: bytes, predicates: list[dict] | None) -> None:

@@ -227,8 +227,22 @@ def evaluate_checks(
                 UNRESOLVED, "what this experiment's deposit holds is not established yet", "deposit_listing"
             )
         else:
-            consistency = _check(
-                UNAVAILABLE, "no result table is published for this claim's experiment", "result_table"
+            # plan_8_3 section 1.1: the definitive "no result table is published" is reserved for the
+            # case where bioAF inspected the paper's supplements and found none. An attachment it
+            # never opened, one it could not retrieve, or one in a format it cannot read each hold
+            # the answer open, and saying otherwise makes a claim about the paper out of a gap in
+            # bioAF's own inspection.
+            from app.services.validation_author_table_state import (
+                NO_ELIGIBLE_TABLE,
+                NOT_DEPOSITED,
+                author_table_state,
+            )
+
+            state = author_table_state(supplements=rows, deposits=deposits)
+            consistency = (
+                _check(UNAVAILABLE, state["reason"], "result_table")
+                if state["status"] in (NO_ELIGIBLE_TABLE, NOT_DEPOSITED)
+                else _check(UNRESOLVED, state["reason"], state["status"])
             )
 
         if matrices:

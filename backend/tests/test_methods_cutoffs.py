@@ -224,7 +224,7 @@ def europe_pmc_text(monkeypatch):
 
     paragraphs = ["RNA-seq reads were aligned with STAR. Differential expression was tested with DESeq2. " + _DEFINED]
 
-    async def acquire(session, study, *, pasted=None):
+    async def acquire(session, study, *, pasted=None, attempts=None):
         return paper_text.PaperText(
             text="We deposited the data under GSE000001. " + " ".join(paragraphs),
             source=paper_text.EUROPE_PMC,
