@@ -446,6 +446,16 @@ export interface ReportApplicability {
     claims: number;
     eligible_claims: number;
     supported: boolean;
+    // plan_8_3 section 1.3: what the experiment is supported BY, and why. A workflow name alone is
+    // not support, and a check a failed model decision left open is bioAF's failure, never support.
+    support?:
+      | "supported"
+      | "awaiting_input"
+      | "unresolved_interpretation"
+      | "failed_decision"
+      | "unsupported"
+      | null;
+    support_reason?: string | null;
   }[];
   eligible_claims: number;
 }

@@ -243,6 +243,7 @@
       "not_performed": "this step could not run",
       "refusal": "the model declined to answer",
       "retrieval_failed": "bioAF could not retrieve a file it needed",
+      "schema_rejected": "the model's answer did not hold what bioAF asked for",
       "timed_out": "the model's answer did not finish within bioAF's time limit",
       "truncated": "the model's answer was cut off at its token limit",
       "unparseable": "the model's answer was not in the format bioAF asked for",
@@ -250,6 +251,7 @@
     },
     "limitation_kind": {
       "access_refused": "Access refused to bioAF's automated request",
+      "biological_identity_unresolved": "Which biological unit each sample came from is not established",
       "controlled_access": "Controlled access",
       "design_incompatible": "Acquired input does not contain the compared conditions",
       "failed_discovery": "Could not be established",
@@ -1767,6 +1769,8 @@
           "claims": 0,
           "eligible_claims": 0,
           "id": "e1",
+          "support": "unsupported",
+          "support_reason": "bioAF has no validation method for this experiment's assay",
           "supported": false,
           "workflow": null
         }
@@ -2263,6 +2267,8 @@
           "claims": 2,
           "eligible_claims": 2,
           "id": "e1",
+          "support": "awaiting_input",
+          "support_reason": "bioAF has a validation method for this experiment, and is waiting on what the run establishes",
           "supported": true,
           "workflow": "nf-core/rnaseq"
         }
@@ -2955,6 +2961,8 @@
           "claims": 8,
           "eligible_claims": 3,
           "id": "e1",
+          "support": "supported",
+          "support_reason": "bioAF has a validation method for this experiment's assay",
           "supported": true,
           "workflow": "nf-core/rnaseq"
         }
@@ -9579,6 +9587,8 @@
           "claims": 2,
           "eligible_claims": 2,
           "id": "e1",
+          "support": "awaiting_input",
+          "support_reason": "bioAF has a validation method for this experiment, and is waiting on what the run establishes",
           "supported": true,
           "workflow": "nf-core/rnaseq"
         }
@@ -11758,6 +11768,8 @@
           "claims": 1,
           "eligible_claims": 0,
           "id": "e1",
+          "support": "supported",
+          "support_reason": "bioAF has a validation method for this experiment's assay",
           "supported": true,
           "workflow": "nf-core/chipseq"
         },
@@ -11766,6 +11778,8 @@
           "claims": 2,
           "eligible_claims": 2,
           "id": "e2",
+          "support": "supported",
+          "support_reason": "bioAF has a validation method for this experiment's assay",
           "supported": true,
           "workflow": "nf-core/rnaseq"
         }

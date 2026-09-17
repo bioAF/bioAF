@@ -38,12 +38,102 @@ RESTATABLE = ("missing_data", "not_reproducible")
 _ELIGIBLE = ("available", "unresolved")
 _THIN_METHODS = "insufficient method detail"
 
+# plan_8_3 section 1.3: what an experiment is supported BY, kept apart because the remedies differ.
+SUPPORTED = "supported"
+AWAITING_INPUT = "awaiting_input"
+UNRESOLVED_INTERPRETATION = "unresolved_interpretation"
+FAILED_DECISION = "failed_decision"
+UNSUPPORTED = "unsupported"
+SUPPORT_STATES = (SUPPORTED, AWAITING_INPUT, UNRESOLVED_INTERPRETATION, FAILED_DECISION, UNSUPPORTED)
 
-def _eligible(target: dict) -> bool:
+# The unresolved requirements a RUN establishes. A claim waiting on one of these is a claim bioAF can
+# check, once it has looked.
+_RUN_ESTABLISHES = ("sample_mapping", "deposit_listing")
+# The unresolved requirements that are bioAF's own failure to decide, never evidence of support. A
+# binding that was cut off before it finished says nothing about whether the assay can be validated.
+_FAILED_DECISIONS = ("binding",)
+
+SUPPORT_REASONS = {
+    SUPPORTED: "bioAF has a validation method for this experiment's assay",
+    AWAITING_INPUT: "bioAF has a validation method for this experiment, and is waiting on what the run establishes",
+    UNRESOLVED_INTERPRETATION: (
+        "the only evidence for this experiment's workflow is a word describing its family, not the assay itself, "
+        "so which measurement bioAF would analyze is not established"
+    ),
+    FAILED_DECISION: (
+        "this experiment's checks are open because a decision bioAF asked a model for did not complete, which is "
+        "bioAF's failure and does not establish that the assay can be validated"
+    ),
+    UNSUPPORTED: "bioAF has no validation method for this experiment's assay",
+}
+
+
+def _available(target: dict) -> bool:
     checks = target.get("checks") or {}
     return isinstance(checks, dict) and any(
-        isinstance(c, dict) and c.get("status") in _ELIGIBLE for c in checks.values()
+        isinstance(c, dict) and c.get("status") == "available" for c in checks.values()
     )
+
+
+def _open_requirements(target: dict) -> set[str]:
+    checks = target.get("checks") or {}
+    if not isinstance(checks, dict):
+        return set()
+    return {
+        str(c.get("requirement"))
+        for c in checks.values()
+        if isinstance(c, dict) and c.get("status") == "unresolved" and c.get("requirement")
+    }
+
+
+def _eligible(target: dict) -> bool:
+    """Whether a claim carries a check bioAF can make. A check left open by bioAF's own failed model
+    decision is not one: it says nothing about the assay, and counting it promoted study 48's
+    experiments to supported."""
+    if _available(target):
+        return True
+    open_for = _open_requirements(target)
+    return bool(open_for) and not open_for <= set(_FAILED_DECISIONS)
+
+
+def _workflow_basis(experiment: dict) -> str | None:
+    """What established this experiment's workflow: ``diagnostic`` when the paper's own assay names it,
+    ``contextual`` when only a word describing its family does, None when it has none.
+
+    plan_8_3 section 1.3: an assay is not routed into an RNA-seq workflow merely because its
+    description includes RNA or gene expression. A contextual match is the family's answer of last
+    resort, and by itself it is an unresolved interpretation rather than an established contract.
+    """
+    from app.services.pipeline_mapper import match_route
+
+    if not experiment.get("workflow"):
+        return None
+    if str(experiment.get("library_strategy") or "").strip():
+        # The deposit itself declares what the data is, which settles the measurement type.
+        return "diagnostic"
+    matched = match_route(str(experiment.get("assay") or "").lower())
+    if matched is None:
+        return None
+    return "diagnostic" if matched[1] else "contextual"
+
+
+def support_for(experiment: dict, claims: list[dict]) -> str:
+    """What this experiment is supported by, from what the read actually established."""
+    if any(_available(t) for t in claims):
+        return SUPPORTED
+    basis = _workflow_basis(experiment)
+    open_for = {r for t in claims for r in _open_requirements(t)}
+    # A failed decision first: it is bioAF's own, and it is the one state that must never read as
+    # support however good the workflow looks.
+    if open_for and open_for <= set(_FAILED_DECISIONS):
+        return FAILED_DECISION
+    if open_for & set(_RUN_ESTABLISHES):
+        return AWAITING_INPUT if basis else UNSUPPORTED
+    if basis == "diagnostic":
+        return SUPPORTED
+    if basis == "contextual":
+        return UNRESOLVED_INTERPRETATION
+    return UNSUPPORTED
 
 
 def _limitation(rows: list[dict]) -> str | None:
@@ -73,7 +163,9 @@ def applicability(plan: dict | None, targets: list[dict] | None) -> dict | None:
     for experiment in experiments:
         claims = [t for t in targets if t.get("reported_experiment_id") == experiment.get("id")]
         eligible = sum(1 for t in claims if _eligible(t))
-        supported = bool(experiment.get("workflow")) or eligible > 0
+        # plan_8_3 section 1.3: support comes from implemented capabilities, never from a workflow
+        # name alone and never from a check a failed model decision left open.
+        support = support_for(experiment, claims)
         rows.append(
             {
                 "id": experiment.get("id"),
@@ -81,14 +173,16 @@ def applicability(plan: dict | None, targets: list[dict] | None) -> dict | None:
                 "workflow": experiment.get("workflow"),
                 "claims": len(claims),
                 "eligible_claims": eligible,
-                "supported": supported,
+                "support": support,
+                "support_reason": SUPPORT_REASONS[support],
+                "supported": support in (SUPPORTED, AWAITING_INPUT),
             }
         )
     unsupported = [r for r in rows if not r["supported"]]
     thin = any(_THIN_METHODS in str(b).lower() for b in plan.get("blockers") or [])
     if eligible_total == 0 and (thin or not rows):
         status = UNDETERMINED
-    elif rows and not any(r["supported"] for r in rows) and eligible_total == 0:
+    elif rows and not any(r["supported"] for r in rows):
         status = NOT_APPLICABLE
     elif unsupported:
         status = PARTIAL
