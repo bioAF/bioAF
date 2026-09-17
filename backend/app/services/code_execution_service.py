@@ -40,7 +40,8 @@ import json
 import logging
 import re
 
-from app.services.llm_decision import decide
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery
 
 logger = logging.getLogger("bioaf.code_execution")
 
@@ -213,7 +214,7 @@ async def choose_entry_point(*, files: list[dict], readme: str, client, model: s
     if (readme or "").strip():
         payload += "\n\nREADME:\n" + readme[:8000]
 
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=ENTRY_POINT_INTENT,
         system=_ENTRY_POINT_SYSTEM,
         payload=payload,
@@ -221,6 +222,7 @@ async def choose_entry_point(*, files: list[dict], readme: str, client, model: s
         model=model,
         api_key=api_key,
         allowed=paths,
+        purpose=budgets.CODE_EXECUTION,
     )
     if not decision.ok:
         return {**empty, "reason": decision.reason}

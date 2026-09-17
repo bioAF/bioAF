@@ -105,3 +105,12 @@ def supports_tools(provider: str) -> bool:
     than attempting a tool-calling request a client cannot make."""
     client = CLIENTS.get(provider)
     return bool(getattr(client, "SUPPORTS_TOOLS", False))
+
+
+def provider_of(client) -> str | None:
+    """The provider a client object belongs to, or None for one this module does not own.
+
+    plan_8_3 stage 6: a recovery budget is capped by what the provider's deadline allows, and the
+    callers that ask for a decision hold the client, not the provider's name.
+    """
+    return next((name for name, module in CLIENTS.items() if module is client), None)

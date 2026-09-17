@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import logging
 
-from app.services.llm_decision import confidence_of, decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
 
 logger = logging.getLogger("bioaf.contrast_selection")
 
@@ -228,13 +229,14 @@ async def select_contrast(
     system, payload = build_contrast_prompt(
         contrasts, pipeline_key=pipeline_key, assay=assay, accession=accession, sample_titles=sample_titles
     )
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=CONTRAST_SELECTION_INTENT,
         system=system,
         payload=payload,
         client=client,
         model=model,
         api_key=api_key,
+        purpose=budgets.CONTRAST_SELECTION,
     )
     if not decision.ok:
         # No fallback to contrasts[0]: defaulting to the first one is precisely the defect this

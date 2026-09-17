@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import re
 
-from app.services.llm_decision import confidence_of, decide, fenced_json
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
 
 PREVIEW_ROWS = 5
 PREVIEW_BYTES = 8 * 1024
@@ -356,8 +357,14 @@ async def choose_input(
             previews=previews,
             tables=[e.filename for e in tables],
         )
-        decision = await decide(
-            intent=INPUT_CHOICE_INTENT, system=system, payload=payload, client=client, model=model, api_key=api_key
+        decision = await decide_with_recovery(
+            intent=INPUT_CHOICE_INTENT,
+            system=system,
+            payload=payload,
+            client=client,
+            model=model,
+            api_key=api_key,
+            purpose=budgets.INPUT_CHOICE,
         )
         if not decision.ok:
             if on_issue:
@@ -512,8 +519,14 @@ async def propose_mapping(
         previews=[{"filename": matrix, "header": ["(identifier)", *columns], "rows": []}],
         tables=[],
     )
-    decision = await decide(
-        intent=INPUT_CHOICE_INTENT, system=system, payload=payload, client=client, model=model, api_key=api_key
+    decision = await decide_with_recovery(
+        intent=INPUT_CHOICE_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=model,
+        api_key=api_key,
+        purpose=budgets.MAPPING_PROPOSAL,
     )
     if not decision.ok:
         if on_issue:

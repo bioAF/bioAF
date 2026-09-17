@@ -59,6 +59,10 @@ OUTCOME_TRUNCATED = "truncated"
 # plan_8_1 section 1.1: an answer that did not finish within bioAF's time limit. A budget raised for a
 # long answer can run past the limit, and that is a timeout, never a truncation.
 OUTCOME_TIMED_OUT = "timed_out"
+# plan_8_3 stage 6: an answer that arrived whole and did not satisfy the caller's schema, twice. It is
+# not a truncation (nothing was cut off), not unparseable (it was JSON) and not a refusal, and the three
+# send whoever reads the report to different remedies.
+OUTCOME_SCHEMA_REJECTED = "schema_rejected"
 
 # How much of an unreadable answer reaches the log. It was 400 characters, which is not enough to
 # attribute a failure to a cause: no unparseable response in either of the owner's runs could be
@@ -74,7 +78,12 @@ OUTCOMES = (
     OUTCOME_UNPARSEABLE,
     OUTCOME_TRUNCATED,
     OUTCOME_TIMED_OUT,
+    OUTCOME_SCHEMA_REJECTED,
 )
+
+# plan_8_3 stage 6: the failures one more ask can plausibly fix. A transport failure, a refusal and an
+# internal error are not among them: asking the same question again spends money to fail the same way.
+SEMANTIC_FAILURES = (OUTCOME_TRUNCATED, OUTCOME_UNPARSEABLE, OUTCOME_SCHEMA_REJECTED)
 
 # What each provider failure means to a person. `refusal` names the model so an admin can request an
 # account exception; the reach failures say bioAF could not get to the LLM; everything else says
@@ -140,6 +149,25 @@ class Decision:
     stop_reason: str | None = None
     max_tokens: int | None = None
     elapsed_seconds: float | None = None
+    # plan_8_3 stage 6: the audit entry this call ran under, and one row per attempt it took.
+    purpose: str | None = None
+    attempts: list[dict] = field(default_factory=list)
+
+    def usage(self) -> dict:
+        """What this attempt cost, and how much of its budget was left."""
+        headroom = (
+            self.max_tokens - self.output_tokens
+            if isinstance(self.max_tokens, int) and isinstance(self.output_tokens, int)
+            else None
+        )
+        return {
+            "outcome": self.outcome,
+            "max_tokens": self.max_tokens,
+            "output_tokens": self.output_tokens,
+            "stop_reason": self.stop_reason,
+            "elapsed_seconds": self.elapsed_seconds,
+            "headroom": headroom,
+        }
 
     @property
     def ok(self) -> bool:
@@ -214,6 +242,8 @@ def _failure_reason(outcome: str, *, intent: str, model: str | None) -> str:
             f"The model's answer while {intent} did not finish within bioAF's time limit, so bioAF "
             "received no complete answer."
         )
+    if outcome == OUTCOME_SCHEMA_REJECTED:
+        return f"The model's answer while {intent} did not hold what bioAF asked for."
     return f"bioAF hit an internal error while {intent}."
 
 
@@ -227,6 +257,7 @@ async def decide(
     api_key: str | None,
     allowed: Iterable[str] | None = None,
     max_tokens: int | None = None,
+    purpose: str | None = None,
 ) -> Decision:
     """Ask a model to decide something, and always return an account of what happened.
 
@@ -238,8 +269,16 @@ async def decide(
 
     ``max_tokens`` is the output budget (plan_8_1 section 1.1). It reaches the client only when given,
     so a caller that names none reaches its provider exactly as before.
+
+    ``purpose`` is the decision's entry in plan_8_3 stage 6's audit. It supplies the budget when the
+    caller names no explicit one, and the audit test walks the application for calls that name neither,
+    so a caller added later cannot inherit an unreviewed default.
     """
+    from app.services.validation_decision_budgets import budget_for
+
     allow = tuple(str(a) for a in allowed) if allowed is not None else None
+    if max_tokens is None and purpose is not None:
+        max_tokens = budget_for(purpose, model).max_tokens
     started = time.monotonic()
 
     def _elapsed() -> float:
@@ -267,6 +306,7 @@ async def decide(
             stop_reason=stop_reason,
             max_tokens=max_tokens,
             elapsed_seconds=_elapsed(),
+            purpose=purpose,
         )
 
     try:
@@ -318,4 +358,83 @@ async def decide(
         stop_reason=stop_reason,
         max_tokens=max_tokens,
         elapsed_seconds=_elapsed(),
+        purpose=purpose,
     )
+
+
+_FEEDBACK_HEADER = (
+    "\n\nYour previous answer did not hold what bioAF asked for. Answer the SAME question again, in "
+    "the format above, correcting exactly this:\n"
+)
+_UNPARSEABLE_FEEDBACK = "it was not a single fenced JSON object"
+
+
+async def decide_with_recovery(
+    *,
+    intent: str,
+    system: str,
+    payload: str,
+    client,
+    model: str,
+    api_key: str | None,
+    purpose: str,
+    allowed: Iterable[str] | None = None,
+    max_tokens: int | None = None,
+    validate=None,
+    provider: str | None = None,
+) -> Decision:
+    """plan_8_3 stage 6: one decision, with at most ONE semantic recovery.
+
+    A cut-off answer is asked again with a larger budget, within the model's documented maximum and
+    what its measured rate can produce before the provider's deadline. An answer that arrived whole
+    and did not satisfy ``validate`` is asked again once with exactly what was wrong. Anything else,
+    a transport failure, a refusal, an internal error, is returned as it is: asking again would spend
+    another call to fail the same way.
+
+    ``validate(data) -> list[str]`` is the caller's own schema. Its problems are the feedback, and a
+    second answer that still fails it ends the decision as ``schema_rejected`` rather than as a
+    silently accepted partial result.
+    """
+    from app.services.llm_provider_clients import provider_of
+    from app.services.validation_decision_budgets import larger_budget
+
+    provider = provider or provider_of(client)
+    attempts: list[dict] = []
+    ask_payload, ask_budget, retried = payload, max_tokens, False
+
+    while True:
+        decision = await decide(
+            intent=intent,
+            system=system,
+            payload=ask_payload,
+            client=client,
+            model=model,
+            api_key=api_key,
+            allowed=allowed,
+            max_tokens=ask_budget,
+            purpose=purpose,
+        )
+        problems = [str(p) for p in (validate(decision.data) if validate and decision.ok else []) if str(p).strip()]
+        if decision.ok and problems:
+            decision.outcome = OUTCOME_SCHEMA_REJECTED
+            decision.reason = (
+                f"{_failure_reason(OUTCOME_SCHEMA_REJECTED, intent=intent, model=model)} {'; '.join(problems)}"
+            )
+        attempts.append(
+            {**decision.usage(), "attempt": len(attempts) + 1, **({"problems": problems} if problems else {})}
+        )
+        decision.attempts = attempts
+        if decision.ok or retried or decision.outcome not in SEMANTIC_FAILURES:
+            return decision
+
+        spent = decision.max_tokens or ask_budget
+        if decision.outcome == OUTCOME_TRUNCATED:
+            bigger = larger_budget(spent, model=model, provider=provider, purpose=purpose) if spent else None
+            if bigger is None:
+                return decision
+            ask_budget = bigger
+        else:
+            feedback = problems or [_UNPARSEABLE_FEEDBACK]
+            ask_payload = payload + _FEEDBACK_HEADER + "\n".join(f"- {p}" for p in feedback)
+        retried = True
+        logger.info("llm decision retried once (%s) while %s under budget %s", decision.outcome, intent, ask_budget)

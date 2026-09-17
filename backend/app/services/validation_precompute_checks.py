@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import logging
 
-from app.services.llm_decision import decide
+from app.services import validation_decision_budgets as budgets
+from app.services.llm_decision import decide_with_recovery
 
 logger = logging.getLogger("bioaf.validation_precompute")
 
@@ -265,7 +266,7 @@ async def _judge(
     if not (text or "").strip():
         return _result(check, UNKNOWN, detail="there was no text to judge")
 
-    decision = await decide(
+    decision = await decide_with_recovery(
         intent=intent,
         system=f"{_JUDGMENT_SYSTEM}\n\n{question}",
         payload=text,
@@ -273,6 +274,7 @@ async def _judge(
         model=model,
         api_key=api_key,
         allowed=["yes", "no"],
+        purpose=budgets.PRECOMPUTE_CHECK,
     )
     if not decision.ok:
         if on_issue:

@@ -8,14 +8,14 @@ Usage, inside the backend container, where the organization's model is configure
 plan_8_1 names the papers: SAMD1, Groff, and one multi-assay paper with more claims than either (their DOIs
 are in HANDOFF, never in application code).
 
-Each paper is read once through the prompts a read uses (the extraction, then the finding inventory over
-the claims it returned), under a budget large enough that neither answer is cut off. Each call's output
-tokens, stop reason and elapsed time are printed, and the two records (``extraction.json`` and
-``inventory.json``) are written to ``--out`` for review and check-in under
-``app/services/read_measurements/``. A cut-off answer is reported and sets no budget: raise
-``--max-tokens`` and measure again.
+Each paper is read once through the prompts a read uses (the extraction, the finding inventory over the
+claims it returned, and plan_8_3 stage 6's claim binding over one batch of them), under a budget large
+enough that no answer is cut off. Each call's output tokens, stop reason and elapsed time are printed,
+and the three records (``extraction.json``, ``inventory.json`` and ``claim_binding.json``) are written
+to ``--out`` for review and check-in under ``app/services/read_measurements/``. A cut-off answer is
+reported and sets no budget: raise ``--max-tokens`` and measure again.
 
-Each run spends two model calls per paper on the organization's key.
+Each run spends three model calls per paper on the organization's key.
 """
 
 from __future__ import annotations
@@ -30,6 +30,10 @@ from pathlib import Path
 
 from app.services import validation_read_budget as budget
 from app.services.llm_decision import decide, fenced_json
+
+# plan_8_3 stage 6: the claim binding is measured alongside the read's two calls. Its record is the one
+# ``validation_decision_budgets`` names for the binding purpose.
+CLAIM_BINDING = "claim_binding"
 
 # The budget is the largest complete answer times this, rounded up, never below the starting budget.
 HEADROOM = 1.5
@@ -91,9 +95,18 @@ def _row(paper: str, decision) -> dict:
 
 
 async def measure_paper(paper: str, full_text: str, *, client, cfg, max_tokens: int) -> dict[str, dict]:
-    """Each call's row for one paper: the extraction, then (when it answered) the inventory over its claims."""
+    """Each call's row for one paper: the extraction, then (when it answered) the inventory and the
+    claim binding over the claims it returned.
+
+    plan_8_3 stage 6: the binding is measured here because study 50's sixteen bindings all failed after
+    the answer was cut off, and the only budget that had ever been measured was the read's own.
+    """
+    from app.services import validation_decision_budgets as budgets
     from app.services.validation_extraction_service import (
+        BINDING_BATCH,
+        CLAIM_BINDING_INTENT,
         PAPER_READING_INTENT,
+        build_binding_prompt,
         build_extraction_prompt,
         extraction_from,
     )
@@ -108,6 +121,7 @@ async def measure_paper(paper: str, full_text: str, *, client, cfg, max_tokens: 
         model=cfg.model,
         api_key=cfg.api_key,
         max_tokens=max_tokens,
+        purpose=budgets.PAPER_READING,
     )
     rows = {budget.EXTRACTION: _row(paper, decision)}
     data = (decision.data or fenced_json(decision.text) or None) if decision.ok else None
@@ -128,8 +142,25 @@ async def measure_paper(paper: str, full_text: str, *, client, cfg, max_tokens: 
         model=cfg.model,
         api_key=cfg.api_key,
         max_tokens=max_tokens,
+        purpose=budgets.FINDING_INVENTORY,
     )
     rows[budget.INVENTORY] = _row(paper, decision)
+
+    # The binding's answer grows with the claim count, so the batch the runtime sends is what is
+    # measured: a whole paper in one call would measure a call the runtime never makes.
+    batch = claims[:BINDING_BATCH]
+    system, payload = build_binding_prompt(batch, indexes=list(range(len(batch))))
+    decision = await decide(
+        intent=CLAIM_BINDING_INTENT,
+        system=system,
+        payload=payload,
+        client=client,
+        model=cfg.model,
+        api_key=cfg.api_key,
+        max_tokens=max_tokens,
+        purpose=budgets.CLAIM_BINDING,
+    )
+    rows[CLAIM_BINDING] = {**_row(paper, decision), "claims": len(batch)}
     return rows
 
 
@@ -146,7 +177,7 @@ async def _run(args) -> int:
         print("no language model is configured for literature validation in this organization", file=sys.stderr)
         return 2
     client = get_client(cfg.provider)
-    measured: dict[str, list[dict]] = {budget.EXTRACTION: [], budget.INVENTORY: []}
+    measured: dict[str, list[dict]] = {budget.EXTRACTION: [], budget.INVENTORY: [], CLAIM_BINDING: []}
     for doi in args.doi:
         text = await FullTextFetchService.fetch(doi=doi)
         if text is None:
@@ -156,7 +187,13 @@ async def _run(args) -> int:
         for call, row in rows.items():
             print(json.dumps({"call": call, "model": cfg.model, "chars": len(text.text), **row}), flush=True)
             measured[call].append(row)
-    fingerprints = {budget.EXTRACTION: budget.extraction_fingerprint(), budget.INVENTORY: budget.inventory_fingerprint()}
+    fingerprints = {
+        budget.EXTRACTION: budget.extraction_fingerprint(),
+        budget.INVENTORY: budget.inventory_fingerprint(),
+        # The binding's prompt carries the whole claim list, so it has no input-independent fingerprint
+        # to pin. Its record names the shape it was measured under instead.
+        CLAIM_BINDING: None,
+    }
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     status = 0
