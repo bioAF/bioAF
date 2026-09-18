@@ -155,6 +155,19 @@ export interface ClaimConsistency {
   } | null;
   candidate_roles?: Partial<Record<"id" | "lfc" | "pvalue" | "padj", number[]>> | null;
   columns_count?: number | null;
+  // plan_8_4 defect 1: which reading of a documented refinement's cutoff is open, so the page can
+  // offer the control that settles it. Null where the comparison refines no published list.
+  filter_semantics?: FilterSemantics | null;
+}
+
+export interface FilterSemantics {
+  unresolved: boolean;
+  reason: string | null;
+  statement: string | null;
+  magnitude: boolean | null;
+  resolved_by: string | null;
+  note?: string | null;
+  confirmed_by?: string | null;
 }
 
 export interface ClaimList {

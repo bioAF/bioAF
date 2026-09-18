@@ -465,8 +465,12 @@ async def _run_one(run: _Run, record) -> int:
         if held is not None and held.get("predicate_fingerprint") not in (None, deps.get("predicate_fingerprint")):
             # Compared at a predicate the claim no longer has: not this check's outcome.
             held = None
-        if held is not None and deps.get("confirmation"):
-            # Compared before a person recorded how the table reads (plan_8_2 section 3.1).
+        if held is not None and held.get("confirmation_fingerprint") != deps.get("confirmation"):
+            # plan_8_2 section 3.1: compared before a person recorded how the table reads, or under a
+            # different recording. plan_8_4 defect 1: a comparison made WITH the confirmation that
+            # stands is this build's answer and is reused. Discarding it on the mere existence of a
+            # confirmation sent the queue to re-download a table a bundle member has no address for,
+            # and the study lost the answer bioAF had.
             held = None
         if held is not None:
             if binding.established(held.get("binding")):

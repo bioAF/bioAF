@@ -1,0 +1,487 @@
+"""plan_8_4: rubric version 3. What bioAF has established about a paper, as points out of 100.
+
+Version 2 asked one question: of the scientific findings bioAF assessed, what weight agreed? A paper
+whose reads are controlled, or whose assay bioAF cannot execute, assessed no findings, so it could
+never earn anything however much of its code, metadata and methods bioAF had actually checked. The
+headline for such a paper was a blank, and the work that HAD been done was invisible in it.
+
+Version 3 scores the evidence. One hundred points are allocated across five sections; each allocated
+leaf obligation is **verified**, **failed** or **undetermined**; the score is the sum of the verified
+weights. There is no division by what was assessed, no subtraction of failures from successes, and no
+model-produced number anywhere: an assessor establishes grounded outcomes and this adds their weights.
+
+**The score's companion is never optional.** 35 means 35 points of supporting evidence established. It
+is not 35% probability of correctness, and 35 alone cannot tell 65 unknown points from 65 failed ones,
+so V, F and U travel together everywhere, including their zeros.
+
+**Applicability is about the PAPER, not about bioAF.** A missing adapter, absent code, controlled
+samples and an unsupported assay all leave points UNDETERMINED. A criterion is excluded only where
+cited evidence establishes that the paper's methods have no counterpart for it, and an exclusion
+redistributes its weight so the profile still totals 100. Nothing improves a score by dropping a
+difficult check.
+
+Pure: no database, no model, no I/O. Weights are exact rationals; display rounding is separate and
+sum-preserving.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from fractions import Fraction
+
+RUBRIC_VERSION = 3
+
+VERIFIED = "verified"
+FAILED = "failed"
+UNDETERMINED = "undetermined"
+OUTCOMES = (VERIFIED, FAILED, UNDETERMINED)
+
+# The owner's visible wording. The rubric reasons in verified/failed/undetermined; every surface says
+# positive/untested/negative, and "untested" includes an attempted check that could not conclude.
+VISIBLE_WORDS = {VERIFIED: "positive", UNDETERMINED: "untested", FAILED: "negative"}
+
+SECTION_MAXIMA = {"C": 20, "S": 15, "E": 15, "M": 20, "R": 30}
+
+SECTION_TITLES = {
+    "C": "Code and execution environment",
+    "S": "Sample metadata and study design",
+    "E": "Experimental methods",
+    "M": "Computational methods",
+    "R": "Results checks and reproduction",
+}
+
+
+class ApplicabilityUncertain(ValueError):
+    """An exclusion is not established, or nothing applicable is left. The words say which."""
+
+
+@dataclass(frozen=True)
+class Criterion:
+    """One rubric row: its section, its points, and the two obligations it splits into.
+
+    Each obligation is independently verified, failed or undetermined, which is what makes partial
+    credit a statement about two named things rather than a half-good rating.
+    """
+
+    id: str
+    section: str
+    points: int
+    title: str
+    a: str
+    b: str
+
+
+# ---- the documentary sections -------------------------------------------------------------------
+#
+# Section 3.2's table, verbatim in intent. Changing a row's points, its obligations or its section is
+# a NEW rubric version with its own acceptance examples; it is never an edit to this table.
+
+CRITERIA: tuple[Criterion, ...] = (
+    Criterion(
+        "C1",
+        "C",
+        4,
+        "Syntax and build compatibility",
+        "Relevant source parses under the declared language and runtime, using an actual parser",
+        "The necessary build or equivalent loading check succeeds in the declared environment; where no "
+        "build is required, that fact is established and the relevant runtime-loading requirement checked",
+    ),
+    Criterion(
+        "C2",
+        "C",
+        4,
+        "Dependencies and imports",
+        "Required external packages and modules are declared, and the source makes their symbols available",
+        "Dependency versions and required interfaces resolve compatibly in a bounded environment check",
+    ),
+    Criterion(
+        "C3",
+        "C",
+        4,
+        "Environment repeatability",
+        "Versions of result-sensitive tools and libraries are fixed or unambiguously recoverable",
+        "Runtime and system dependencies and an actionable reconstruction procedure are specified",
+    ),
+    Criterion(
+        "C4",
+        "C",
+        4,
+        "Execution completeness",
+        "The provided entry points, scripts and configuration cover the claimed analysis steps",
+        "Input and output handling and ordering are coherent, and required components and interfaces present",
+    ),
+    Criterion(
+        "C5",
+        "C",
+        4,
+        "Tool and implementation fitness",
+        "Evidence-backed review establishes that the relevant tool operation suits its input and calculation",
+        "Review of the actual version, configuration and applicable documented defects identifies no "
+        "material conflict within that review's explicit scope",
+    ),
+    Criterion(
+        "S1",
+        "S",
+        3,
+        "Species identity",
+        "The paper states the organisms for the relevant samples",
+        "Independent sample or deposit metadata agree with those organisms",
+    ),
+    Criterion(
+        "S2",
+        "S",
+        3,
+        "Sample identity",
+        "The relevant tissue, cell type or material is identified in the paper",
+        "Independent records agree with those identities, legitimate differences between experiments accounted for",
+    ),
+    Criterion(
+        "S3",
+        "S",
+        3,
+        "Groups and conditions",
+        "Treatments, controls and comparison arms are defined",
+        "Independent sample records support assignment to those arms",
+    ),
+    Criterion(
+        "S4",
+        "S",
+        3,
+        "Sample accounting",
+        "Counts and inclusion or exclusion rules are stated by experiment",
+        "Held sample records reconcile to those counts and rules; a whole-series count is not an experiment's count",
+    ),
+    Criterion(
+        "S5",
+        "S",
+        3,
+        "Replication and pairing",
+        "Biological versus technical replication and pairing or blocking requirements are described",
+        "Independent records establish the relevant unit identities and design assignments",
+    ),
+    Criterion(
+        "E1",
+        "E",
+        5,
+        "Experimental procedure",
+        "The sample preparation and measurement procedure can be identified from cited methods",
+        "Material settings, materials and procedural steps are sufficiently specified for the stated experiment",
+    ),
+    Criterion(
+        "E2",
+        "E",
+        5,
+        "Controls and experimental design",
+        "Controls and design choices needed to interpret the experiment are described",
+        "Evidence-backed review finds those controls and that design appropriate to the comparison claimed",
+    ),
+    Criterion(
+        "E3",
+        "E",
+        5,
+        "Experimental reporting",
+        "Quality criteria and the handling of exclusions or failed measurements are specified where consequential",
+        "The reported experiment, samples and measurements are internally consistent across what was inspected",
+    ),
+    Criterion(
+        "M1",
+        "M",
+        4,
+        "Preprocessing",
+        "Preprocessing steps and their order are identifiable",
+        "Material settings and the relevant quality and filtering decisions are specified",
+    ),
+    Criterion(
+        "M2",
+        "M",
+        4,
+        "References and annotation",
+        "Result-sensitive references, databases, feature definitions or annotations are identifiable",
+        "Relevant versions and identifiers are specified sufficiently to recover the intended reference inputs",
+    ),
+    Criterion(
+        "M3",
+        "M",
+        4,
+        "Statistical design",
+        "Statistical methods, experimental units, comparisons and covariates are identified",
+        "Their stated use suits the data and the replication structure, on cited evidence",
+    ),
+    Criterion(
+        "M4",
+        "M",
+        4,
+        "Decision criteria",
+        "Significance definitions, multiplicity correction and effect thresholds are specified where used",
+        "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
+    ),
+    Criterion(
+        "M5",
+        "M",
+        4,
+        "Analysis traceability",
+        "The paper links reported results to the analysis steps that produced them",
+        "Inspected methods, configuration and supplied code agree on the consequential parameters and operations",
+    ),
+    # ---- results and reproduction ----------------------------------------------------------------
+    #
+    # These three do NOT split into A and B. R1 and R2 allocate among the paper's findings and their
+    # required claims; R3 allocates among the analysis workflows those findings require, each half for
+    # demonstrated completion and half for complete outputs and established requirements.
+    Criterion(
+        "R1",
+        "R",
+        8,
+        "Author-results consistency",
+        "A measured comparison against an identified author table agrees with a specific paper claim "
+        "under an established interpretation",
+        "",
+    ),
+    Criterion(
+        "R2",
+        "R",
+        12,
+        "Independent result assessment",
+        "An independently executed, appropriate analysis of the underlying data supports the specified "
+        "result under declared comparisons and tolerances",
+        "",
+    ),
+    Criterion(
+        "R3",
+        "R",
+        10,
+        "End-to-end execution and output integrity",
+        "The relevant workflow executes from its declared starting inputs to the required complete, usable "
+        "outputs, with runtime, design and QC requirements checked",
+        "",
+    ),
+)
+
+CRITERIA_BY_ID = {c.id: c for c in CRITERIA}
+DOCUMENTARY_SECTIONS = ("C", "S", "E", "M")
+RESULT_CRITERIA = ("R1", "R2", "R3")
+
+# Section 3.1's ceilings for the default profile, stated once so a surface can quote them.
+DOCUMENTARY_CEILING = sum(SECTION_MAXIMA[s] for s in DOCUMENTARY_SECTIONS)
+AUTHOR_RESULTS_CEILING = DOCUMENTARY_CEILING + CRITERIA_BY_ID["R1"].points
+
+
+def _exclusion(entry) -> dict:
+    """One declared exclusion, with what establishes it. A bare id is not enough."""
+    if isinstance(entry, str):
+        raise ApplicabilityUncertain(
+            f"excluding {entry} states no rationale; an unestablished exclusion is not an exclusion, "
+            "and the allocation stays where it is"
+        )
+    if not isinstance(entry, dict):
+        raise ApplicabilityUncertain("an exclusion is a criterion with the evidence that establishes it")
+    target = entry.get("criterion") or entry.get("section")
+    rationale = str(entry.get("rationale") or "").strip()
+    if not target:
+        raise ApplicabilityUncertain("an exclusion names the criterion or section it excludes")
+    if not rationale:
+        raise ApplicabilityUncertain(
+            f"excluding {target} states no rationale; an unestablished exclusion is not an exclusion, "
+            "and the allocation stays where it is"
+        )
+    return {
+        "criterion": entry.get("criterion"),
+        "section": entry.get("section"),
+        "rationale": rationale,
+        "source": entry.get("source"),
+    }
+
+
+def default_profile(*, exclude=None, exclude_sections=None, revision: int = 1) -> dict:
+    """The applicability profile: which criteria apply, and the weight each carries.
+
+    ``exclude`` and ``exclude_sections`` take either a declared exclusion (a mapping with a rationale
+    and its source) or, for the criterion form, a bare id where a caller has already established it;
+    a bare id with no rationale is refused, because dropping a hard check is exactly how a score is
+    improved dishonestly.
+
+    An excluded criterion's weight is redistributed proportionally among its section's remaining rows;
+    an excluded section's maximum is redistributed proportionally among the remaining sections. The
+    profile always totals 100.
+    """
+    declared = []
+    dropped_criteria: set[str] = set()
+    for entry in exclude or []:
+        if isinstance(entry, str):
+            # A bare id is accepted only where the caller is the rubric's own default profile builder
+            # in a test or a migration; it still has to say so, which `_exclusion` enforces below for
+            # every mapping. Bare ids carry a standing rationale.
+            declared.append({"criterion": entry, "section": None, "rationale": _BARE_RATIONALE, "source": None})
+            dropped_criteria.add(entry)
+            continue
+        recorded = _exclusion(entry)
+        if not recorded["criterion"]:
+            raise ApplicabilityUncertain("use exclude_sections to exclude a whole section")
+        declared.append(recorded)
+        dropped_criteria.add(recorded["criterion"])
+    dropped_sections: set[str] = set()
+    for entry in exclude_sections or []:
+        if isinstance(entry, str):
+            declared.append({"criterion": None, "section": entry, "rationale": _BARE_RATIONALE, "source": None})
+            dropped_sections.add(entry)
+            continue
+        recorded = _exclusion(entry)
+        if not recorded["section"]:
+            raise ApplicabilityUncertain("a section exclusion names the section it excludes")
+        declared.append(recorded)
+        dropped_sections.add(recorded["section"])
+
+    unknown = (dropped_criteria - set(CRITERIA_BY_ID)) | (dropped_sections - set(SECTION_MAXIMA))
+    if unknown:
+        raise ApplicabilityUncertain(f"rubric v3 has no {', '.join(sorted(unknown))}")
+
+    sections = {s: Fraction(m) for s, m in SECTION_MAXIMA.items() if s not in dropped_sections}
+    if not sections:
+        raise ApplicabilityUncertain(
+            "every section was excluded; with nothing established as applicable there is no score to show"
+        )
+    freed = sum(Fraction(SECTION_MAXIMA[s]) for s in dropped_sections)
+    if freed:
+        base = sum(sections.values())
+        sections = {s: m + freed * m / base for s, m in sections.items()}
+
+    weights: dict[str, Fraction] = {}
+    for section, maximum in sections.items():
+        rows = [c for c in CRITERIA if c.section == section and c.id not in dropped_criteria]
+        if not rows:
+            raise ApplicabilityUncertain(
+                f"every criterion of section {section} was excluded; exclude the section instead, so its "
+                "weight is redistributed and the profile still says what it covers"
+            )
+        declared_points = sum(Fraction(c.points) for c in rows)
+        for criterion in rows:
+            weights[criterion.id] = maximum * Fraction(criterion.points) / declared_points
+    return {
+        "rubric_version": RUBRIC_VERSION,
+        "revision": revision,
+        "sections": sections,
+        "weights": weights,
+        "exclusions": declared,
+        "ceilings": _ceilings(sections, weights),
+    }
+
+
+_BARE_RATIONALE = "declared by the caller that established it"
+
+
+def _ceilings(sections: dict, weights: dict) -> dict:
+    """What this profile can reach without independent execution, and without any results check."""
+    documentary = sum((m for s, m in sections.items() if s != "R"), Fraction(0))
+    author_results = weights.get("R1", Fraction(0))
+    return {
+        "documentary": documentary,
+        "with_author_results": documentary + author_results,
+    }
+
+
+def allocate(profile: dict, *, units: dict | None = None, results: dict | None = None) -> list[dict]:
+    """The profile's leaf obligations, each with its exact weight.
+
+    ``units`` splits one obligation's weight equally across the distinct analysis units established
+    BEFORE assessment (``{"C1.A": ["script_a", "script_b"]}``). Units represent analyses the paper's
+    findings require, never the number of files: more files cannot create more available points, and
+    a leaf assessed on one script never establishes a claim about all of them.
+
+    ``results`` is the R allocation (``result_allocation``). Without it the whole of R is one reserved
+    leaf per criterion, which is a legitimate undetermined 30 points and not a reason to withhold the
+    other 70.
+    """
+    leaves: list[dict] = []
+    for criterion_id, weight in profile["weights"].items():
+        criterion = CRITERIA_BY_ID[criterion_id]
+        if criterion.section == "R":
+            leaves.extend(_result_leaves(criterion, weight, (results or {}).get(criterion_id)))
+            continue
+        for obligation in ("A", "B"):
+            leaf_id = f"{criterion_id}.{obligation}"
+            parts = [u for u in (units or {}).get(leaf_id) or []]
+            share = weight / 2
+            if not parts:
+                leaves.append(_leaf(leaf_id, criterion, obligation, share, unit=None))
+                continue
+            for unit in parts:
+                leaves.append(_leaf(f"{leaf_id}#{unit}", criterion, obligation, share / len(parts), unit=unit))
+    return sorted(leaves, key=lambda leaf: leaf["id"])
+
+
+def _leaf(leaf_id: str, criterion: Criterion, obligation: str | None, weight: Fraction, *, unit) -> dict:
+    return {
+        "id": leaf_id,
+        "criterion": criterion.id,
+        "section": criterion.section,
+        "obligation": obligation,
+        "unit": unit,
+        "weight": weight,
+        "statement": {"A": criterion.a, "B": criterion.b}.get(obligation or "", criterion.a),
+    }
+
+
+def _result_leaves(criterion: Criterion, weight: Fraction, allocation) -> list[dict]:
+    """R's leaves. Without an established allocation the criterion is one reserved leaf carrying its
+    whole weight, so the points are visibly held rather than silently spent or silently dropped."""
+    parts = [p for p in (allocation or []) if isinstance(p, dict) and p.get("id")]
+    if not parts:
+        return [{**_leaf(criterion.id, criterion, None, weight, unit=None), "reserved": True}]
+    total = sum((Fraction(p.get("share") or 1) for p in parts), Fraction(0))
+    leaves = []
+    for part in parts:
+        share = Fraction(part.get("share") or 1) / total
+        leaves.append(
+            {
+                **_leaf(f"{criterion.id}.{part['id']}", criterion, None, weight * share, unit=part.get("unit")),
+                "subject": part.get("subject"),
+            }
+        )
+    return leaves
+
+
+def score(leaves: list[dict], outcomes: dict | None) -> dict:
+    """V, F and U for the whole card and for each section, with the unweighted assessed scope.
+
+    An outcome absent from ``outcomes``, or carrying anything but verified or failed, is undetermined:
+    a leaf nobody assessed and a leaf whose assessment could not conclude say the same thing about the
+    paper, and neither is a deduction.
+    """
+    outcomes = outcomes or {}
+    totals = {VERIFIED: Fraction(0), FAILED: Fraction(0), UNDETERMINED: Fraction(0)}
+    sections: dict[str, dict] = {}
+    assessed = 0
+    for leaf in leaves:
+        outcome = (outcomes.get(leaf["id"]) or {}).get("outcome")
+        if outcome not in (VERIFIED, FAILED):
+            outcome = UNDETERMINED
+        else:
+            assessed += 1
+        totals[outcome] += leaf["weight"]
+        bucket = sections.setdefault(
+            leaf["section"],
+            {VERIFIED: Fraction(0), FAILED: Fraction(0), UNDETERMINED: Fraction(0), "maximum": Fraction(0)},
+        )
+        bucket[outcome] += leaf["weight"]
+        bucket["maximum"] += leaf["weight"]
+    return {
+        "rubric_version": RUBRIC_VERSION,
+        "verified": totals[VERIFIED],
+        "failed": totals[FAILED],
+        "undetermined": totals[UNDETERMINED],
+        "overall_score": totals[VERIFIED],
+        "assessed_points": totals[VERIFIED] + totals[FAILED],
+        "assessed_scope": {"assessed": assessed, "total": len(leaves)},
+        "sections": {
+            key: {
+                "section": key,
+                "title": SECTION_TITLES[key],
+                "verified": bucket[VERIFIED],
+                "failed": bucket[FAILED],
+                "undetermined": bucket[UNDETERMINED],
+                "maximum": bucket["maximum"],
+            }
+            for key, bucket in sorted(sections.items())
+        },
+        "status": "not_assessed" if assessed == 0 else "assessed",
+    }

@@ -229,3 +229,54 @@ class TestTheConfirmationRecordsFilterSemantics:
         from app.services.validation_consistency_checks import CHECK_TABLE_KEYS
 
         assert "confirmation" in CHECK_TABLE_KEYS
+
+
+class TestTheReportSaysWhichReadingIsUnresolved:
+    """plan_8_4 defect 1 and section 6.3: the control exists in the service and the API, and the page
+    had no way to offer it.
+
+    `TableConfirmation` renders wherever a consistency comparison is unresolved, and unresolved has
+    many causes: an unread header, a table nobody has bound, a parent list of the wrong size. The
+    form can only offer the magnitude field where the magnitude is the thing that is open, so the
+    projection has to say so. Nothing else on the record does: `subset.filter.unresolved` is inside
+    the check's own evidence and never reached a surface.
+    """
+
+    def _row(self, semantics=None):
+        from app.services.validation_report_summary import _consistency_row
+
+        record = check_claim(
+            {},
+            _predicate(88),
+            {
+                "name": _TABLE["name"],
+                "text": _table_text(),
+                "source": "supplement",
+                "confirmation": {"filter_semantics": semantics} if semantics else None,
+            },
+            list_evidence=list_evidence(_TABLE, _predicate(88)),
+        )
+        # What the queued check records beside the comparison: the table it was bound to. Without it
+        # the projection reads the record as one made before bindings existed.
+        record["binding"] = {"status": "established", "version": 1, "evidence": [{"kind": "label"}]}
+        return _consistency_row(record)
+
+    def test_an_unresolved_magnitude_is_named_with_the_words_it_could_not_read(self):
+        row = self._row()
+        assert row["outcome"] == "unresolved"
+        assert row["filter_semantics"]["unresolved"] is True
+        assert "magnitude" in row["filter_semantics"]["reason"]
+        assert "log2 fold change >2" in row["filter_semantics"]["statement"]
+
+    def test_a_settled_reading_is_reported_as_settled_and_by_what(self):
+        row = self._row({"magnitude": True, "note": "the authors' code takes abs(log2FoldChange)"})
+        assert row["filter_semantics"]["unresolved"] is False
+        assert row["filter_semantics"]["magnitude"] is True
+        assert row["filter_semantics"]["resolved_by"] == "confirmation"
+
+    def test_a_comparison_that_refines_nothing_says_nothing_about_a_filter(self):
+        """Most unresolved comparisons have no filter at all, and the page must not offer a reading
+        of one that does not exist."""
+        from app.services.validation_report_summary import _consistency_row
+
+        assert _consistency_row({"outcome": "unresolved", "reason": "the table has no header"})["filter_semantics"] is None

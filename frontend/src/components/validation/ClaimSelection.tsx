@@ -163,6 +163,7 @@ export function ClaimItem({
                 contrast={claim.contrast}
                 columnsCount={claim.consistency.columns_count}
                 candidateRoles={claim.consistency.candidate_roles}
+                filterSemantics={claim.consistency.filter_semantics}
                 onChanged={onChanged}
               />
             )}
