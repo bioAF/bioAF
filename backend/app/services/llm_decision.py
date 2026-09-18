@@ -63,6 +63,11 @@ OUTCOME_TIMED_OUT = "timed_out"
 # not a truncation (nothing was cut off), not unparseable (it was JSON) and not a refusal, and the three
 # send whoever reads the report to different remedies.
 OUTCOME_SCHEMA_REJECTED = "schema_rejected"
+# plan_8_3 stage 6: a fact about the ACCOUNT, not about reaching the provider. An exhausted credit
+# balance, an exhausted quota and a model the account is not entitled to are three things an
+# administrator can act on, and they arrived as "bioAF could not reach the language model": study 57's
+# whole finding inventory was discarded on one of them. No retry, semantic or otherwise, can succeed.
+OUTCOME_ACCOUNT = "account"
 
 # How much of an unreadable answer reaches the log. It was 400 characters, which is not enough to
 # attribute a failure to a cause: no unparseable response in either of the owner's runs could be
@@ -79,6 +84,7 @@ OUTCOMES = (
     OUTCOME_TRUNCATED,
     OUTCOME_TIMED_OUT,
     OUTCOME_SCHEMA_REJECTED,
+    OUTCOME_ACCOUNT,
 )
 
 # plan_8_3 stage 6: the failures one more ask can plausibly fix. A transport failure, a refusal and an
@@ -94,6 +100,7 @@ _ERROR_CLASS_OUTCOMES = {
     "rate_limit": OUTCOME_UNREACHABLE,
     "transport": OUTCOME_UNREACHABLE,
     "server": OUTCOME_UNREACHABLE,
+    "account": OUTCOME_ACCOUNT,
     "parse": OUTCOME_UNPARSEABLE,
     "truncated": OUTCOME_TRUNCATED,
     "timeout": OUTCOME_TIMED_OUT,
@@ -222,7 +229,17 @@ class Decision:
         }
 
 
-def _failure_reason(outcome: str, *, intent: str, model: str | None) -> str:
+# plan_8_3 stage 6: what each account fact is, in words a reader can act on. The provider's own
+# sentence (which carries billing links and internal codes) stays in the log. Pending sign-off.
+_ACCOUNT_WORDS = {
+    "credit_exhausted": "its credit balance is used up.",
+    "quota_exhausted": "its quota for this model is used up.",
+    "model_not_entitled": "it is not entitled to the model bioAF is configured to use.",
+    None: "the provider refused the request as a problem with the account itself.",
+}
+
+
+def _failure_reason(outcome: str, *, intent: str, model: str | None, fact: str | None = None) -> str:
     if outcome == OUTCOME_REFUSAL:
         return (
             f"The model {model or 'configured for this feature'} declined to answer while {intent}. "
@@ -230,6 +247,12 @@ def _failure_reason(outcome: str, *, intent: str, model: str | None) -> str:
         )
     if outcome == OUTCOME_UNREACHABLE:
         return f"bioAF could not reach the language model while {intent}."
+    if outcome == OUTCOME_ACCOUNT:
+        return (
+            f"The language model account bioAF uses cannot run this request: {_ACCOUNT_WORDS.get(fact, _ACCOUNT_WORDS[None])} "
+            f"This stopped bioAF while {intent}, and an administrator can put it right. The provider's own "
+            "message is in bioAF's log."
+        )
     if outcome == OUTCOME_UNPARSEABLE:
         return f"The model's answer while {intent} was not in the format bioAF asked for."
     if outcome == OUTCOME_TRUNCATED:
@@ -291,11 +314,12 @@ async def decide(
         full_text: str = "",
         output_tokens: int | None = None,
         stop_reason: str | None = None,
+        fact: str | None = None,
     ) -> Decision:
         logger.warning("llm decision failed (%s) while %s: %s", outcome, intent, detail)
         return Decision(
             outcome=outcome,
-            reason=_failure_reason(outcome, intent=intent, model=model),
+            reason=_failure_reason(outcome, intent=intent, model=model, fact=fact),
             model=model,
             intent=intent,
             allowed=allow,
@@ -324,6 +348,7 @@ async def decide(
             full_text=getattr(exc, "text", None) or "",
             output_tokens=getattr(exc, "output_tokens", None),
             stop_reason=getattr(exc, "stop_reason", None),
+            fact=getattr(exc, "account_fact", None),
         )
     except Exception as exc:  # noqa: BLE001 - asking a model for help cannot be allowed to fail a study
         logger.exception("llm decision raised while %s", intent)
