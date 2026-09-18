@@ -457,12 +457,29 @@ def _numbers(text: str) -> set[float]:
     return {float(n.replace(",", "")) for n in re.findall(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", text or "")}
 
 
+# plan_8_3 section 1.2: words that say a count REFINES the list a sentence just cited. Without one of
+# them two numbers in a passage are two analyses, not a parent and its subset.
+_REFINING = re.compile(
+    r"\brefin(?:e|ed|ing|ement)\b|\bof (?:these|which|those)\b|\bthese \d|\bsubset\b|\bfurther\b|"
+    r"\bnarrow(?:ed|ing)?\b|\bselecting those\b|\bfiltered\b|\brestrict(?:ed|ing)?\b",
+    re.I,
+)
+
+
 def list_evidence(table: dict, predicate: dict, *, confirmation: dict | None = None) -> dict | None:
     """The sentence that establishes ``table`` as the claim's complete selected list, or None.
 
     A recorded confirmation that says so establishes it. Otherwise a verified passage citing the table must
     state the claim's own count in the sentence that cites it. A sentence calling the file a part of the
-    list ("the top N", "selected", "examples") establishes that it is not the complete list."""
+    list ("the top N", "selected", "examples") establishes that it is not the complete list.
+
+    plan_8_3 section 1.2: a REFINEMENT of that list is linked to it across the passage's sentences. Groff
+    states 194 in the sentence citing Supplemental File 3, states the refinement in the sentence after it
+    and states 88 in the sentence after that, so requiring the count and the citation in one sentence
+    established the parent and never reached the refinement. The link is bounded to the passage that
+    cites the table, the refinement's own sentences are its evidence, and the parent's stated counts
+    travel with it so the operation can check that this table is the list the passage named.
+    """
     if (confirmation or {}).get("selected_list"):
         return {"text": confirmation.get("note") or "a recorded confirmation", "source": "confirmation"}
     value = ((predicate or {}).get("count") or {}).get("value")
@@ -476,4 +493,32 @@ def list_evidence(table: dict, predicate: dict, *, confirmation: dict | None = N
                 continue
             partial = next((w.strip() for w in _PARTIAL_WORDS if w in sentence.lower()), None)
             return {"text": sentence, "source": passage.get("source"), "partial": partial}
+    for passage in table.get("passages") or []:
+        if not isinstance(passage, dict) or not _cites(passage.get("text") or "", table):
+            continue
+        found = _refinement_of_a_cited_list(sentences(passage["text"]), table, float(value))
+        if found is not None:
+            return {**found, "source": passage.get("source")}
+    return None
+
+
+def _refinement_of_a_cited_list(parts: list[str], table: dict, value: float) -> dict | None:
+    """The sentences that state a refinement of a list this passage cited, and the claim's count."""
+    for i, sentence in enumerate(parts):
+        counts = _numbers(sentence)
+        if not _cites(sentence, table) or not counts or value in counts:
+            continue
+        for j in range(i + 1, len(parts)):
+            if value not in _numbers(parts[j]):
+                continue
+            span = parts[i + 1 : j + 1]
+            if not any(_REFINING.search(s) for s in span):
+                break
+            text = " ".join(span)
+            partial = next((w.strip() for w in _PARTIAL_WORDS if w in text.lower()), None)
+            return {
+                "text": text,
+                "partial": partial,
+                "refinement": {"parent_text": sentence, "parent_counts": sorted(counts)},
+            }
     return None

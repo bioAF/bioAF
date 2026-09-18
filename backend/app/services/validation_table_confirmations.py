@@ -32,6 +32,7 @@ def confirmation_entry(
     effect_scale: str | None = None,
     orientation: str | None = None,
     selected_list: bool = False,
+    filter_semantics: dict | None = None,
     note: str,
     confirmed_by: str | None,
     at: str,
@@ -40,6 +41,20 @@ def confirmation_entry(
     note = (note or "").strip()
     if not note:
         raise ConfirmationRefused("a confirmation records the evidence it rests on; say what establishes it")
+    if filter_semantics is not None:
+        # plan_8_3 section 1.2: the control for a refinement whose wording does not say whether its
+        # cutoff is on the magnitude of the effect or on its signed value. It settles that and nothing
+        # else about the filter: the cutoff, its operator and its scale stay the paper's own words.
+        unknown = set(filter_semantics) - {"magnitude", "note"}
+        if unknown:
+            raise ConfirmationRefused(
+                f"a filter confirmation states the magnitude reading and nothing else ({', '.join(sorted(unknown))})"
+            )
+        if not isinstance(filter_semantics.get("magnitude"), bool):
+            raise ConfirmationRefused(
+                "say whether the refinement's cutoff is on the magnitude of the fold change (true) or on its "
+                "signed value (false)"
+            )
     if columns:
         for role, index in columns.items():
             if role not in ROLES:
@@ -52,7 +67,7 @@ def confirmation_entry(
         raise ConfirmationRefused("the effect scale must be log2 or linear")
     if orientation is not None and orientation not in ORIENTATIONS:
         raise ConfirmationRefused("the orientation must be test over reference or reference over test")
-    if not (reports_contrast or columns or effect_scale or orientation or selected_list):
+    if not (reports_contrast or columns or effect_scale or orientation or selected_list or filter_semantics):
         raise ConfirmationRefused("the confirmation says nothing about the table")
     return {
         "version": VERSION,
@@ -63,6 +78,8 @@ def confirmation_entry(
         "effect_scale": effect_scale,
         "orientation": orientation,
         "selected_list": bool(selected_list),
+        # plan_8_3 section 1.2: which reading of a documented refinement's cutoff the paper meant.
+        "filter_semantics": dict(filter_semantics) if filter_semantics else None,
         "note": note,
         "confirmed_by": confirmed_by,
         "at": at,

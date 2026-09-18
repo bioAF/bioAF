@@ -12,7 +12,17 @@ import json
 
 import pytest
 
-from tests.replay import SAVED_STUDIES, load, replay_consistency, replay_mapping, replay_report, restore
+from tests.replay import (
+    SAVED_STUDIES,
+    consistency_of,
+    groff_bundle_fetcher,
+    load,
+    replay_recovery,
+    replay_consistency,
+    replay_mapping,
+    replay_report,
+    restore,
+)
 
 
 async def _restored(session, admin_user, study_id: int):
@@ -53,19 +63,89 @@ class TestTheSavedStudiesRestoreAsTheyWereRecorded:
         assert len(restored.checks) == len(bundle["check_records"])
 
 
-class TestGroffsParentCountAgreesAndItsRefinementIsNeverReached:
-    """Study 55's recorded stop. The 194-gene parent list AGREES; the 88-gene refinement of that same
-    list is `not_checkable` because the claim carries no significance cutoff, so section 1.2's subset
-    operation is never reached on the paper it was written for."""
+class TestGroffsParentCountAgreesAndItsRefinementIsNowReached:
+    """Study 55's recorded stop was the 194-gene parent list AGREEING while the 88-gene refinement of
+    that same list came back `not_checkable`: `list_evidence` wanted the claim's count and the table's
+    citation in one sentence, and the paper states the refinement in the sentences after it.
+
+    Section 1.2 links the refinement to the list it refines. The parent's outcome is unchanged, and
+    what the refinement now reaches is the magnitude its wording does not state, which is an unresolved
+    outcome with a control (a recorded filter-semantics confirmation), not credit.
+    """
 
     @pytest.mark.asyncio
-    async def test_replaying_the_checks_reproduces_both_outcomes(self, session, admin_user):
+    async def test_the_parent_count_still_agrees(self, session, admin_user):
         restored = await _restored(session, admin_user, 55)
         outcomes = await replay_consistency(session, restored)
         assert outcomes[10]["outcome"] == "agree"
         assert outcomes[10]["rows_passing"] == 194
+
+    @pytest.mark.asyncio
+    async def test_the_queued_check_still_keeps_the_answer_it_recorded(self, session, admin_user):
+        """A record made while the table's bytes were in hand is bioAF's answer until the stage that
+        made it runs again. Nothing rewrites it in place, and nothing re-downloads on its own."""
+        restored = await _restored(session, admin_user, 55)
+        outcomes = await replay_consistency(session, restored)
         assert outcomes[11]["outcome"] == "not_checkable"
         assert outcomes[11]["reason"] == "the claim states no significance cutoff, and bioAF supplies none"
+
+    @pytest.mark.asyncio
+    async def test_a_recovery_offers_to_read_the_supplements_under_the_current_reading(self, session, admin_user):
+        """How the repair reaches a study that already holds records. A comparison is computed while a
+        supplement's bytes are in hand, and a bundle member has no address of its own to fetch again, so
+        nothing recomputes it by itself. The recovery names it, and spends one download and no model."""
+        from app.services.validation_recovery import preview_recovery
+
+        restored = await _restored(session, admin_user, 55)
+        preview = await preview_recovery(session, restored.study)
+        recheck = next(a for a in preview["actions"] if a["kind"] == "recheck_supplements")
+        assert "earlier reading" in recheck["detail"]
+        assert preview["model_calls"] == 0
+        assert preview["launches_workflow"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_recovery_reaches_the_subset_operation_and_stops_on_its_magnitude(
+        self, session, admin_user, monkeypatch
+    ):
+        """The refinement is linked to the 194-gene list it refines, the operation is reached, and it
+        stops on the magnitude the paper's wording does not state. Not credit: an unresolved outcome
+        with a control."""
+        restored = await _restored(session, admin_user, 55)
+        result = await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        assert result["rechecked_supplements"] is True
+        records = {
+            r["claim_index"]: r
+            for r in consistency_of(
+                restored.study.evidence_json or {}, "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt"
+            )
+        }
+        assert records[10]["outcome"] == "agree"
+        assert records[10]["rows_passing"] == 194
+        assert records[11]["method"] == "published_subset_count"
+        assert records[11]["outcome"] == "unresolved"
+        assert "magnitude" in records[11]["reason"]
+        assert records[11]["subset"]["parent"]["count"] == 194
+
+    @pytest.mark.asyncio
+    async def test_every_record_it_writes_names_the_reading_that_made_it(self, session, admin_user, monkeypatch):
+        from app.services.validation_author_consistency import CONSISTENCY_VERSION
+
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        records = consistency_of(
+            restored.study.evidence_json or {}, "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt"
+        )
+        assert records
+        assert {r.get("consistency_version") for r in records} == {CONSISTENCY_VERSION}
+
+    @pytest.mark.asyncio
+    async def test_the_earlier_comparisons_are_kept(self, session, admin_user, monkeypatch):
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        history = (restored.study.evidence_json or {}).get("recovery_history") or []
+        kept = history[-1]["prior"]["supplement_comparisons"]
+        earlier = next(r for row in kept for r in row["consistency"] or [] if r.get("claim_index") == 11)
+        assert earlier["outcome"] == "not_checkable"
 
     @pytest.mark.asyncio
     async def test_the_replayed_table_is_the_one_the_live_run_read(self, session, admin_user):

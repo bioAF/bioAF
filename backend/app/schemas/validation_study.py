@@ -49,6 +49,9 @@ class TableConfirmationRequest(BaseModel):
     effect_scale: str | None = None
     orientation: str | None = None
     selected_list: bool = False
+    # plan_8_3 section 1.2: which reading of a documented refinement's cutoff the paper meant.
+    # ``{"magnitude": true}`` for a cutoff on the size of the effect, ``false`` for a signed one.
+    filter_semantics: dict[str, bool] | None = None
     note: str = ""
 
 

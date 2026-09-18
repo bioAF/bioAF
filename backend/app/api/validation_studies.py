@@ -501,6 +501,7 @@ async def record_table_confirmation(
                 effect_scale=data.effect_scale,
                 orientation=data.orientation,
                 selected_list=data.selected_list,
+                filter_semantics=data.filter_semantics,
                 note=data.note,
                 confirmed_by=str(current_user.get("email") or f"user {user_id}"),
                 at=datetime.now(timezone.utc).isoformat(),
@@ -526,6 +527,7 @@ async def record_table_confirmation(
                     "effect_scale",
                     "orientation",
                     "selected_list",
+                    "filter_semantics",
                     "note",
                     "version",
                 )

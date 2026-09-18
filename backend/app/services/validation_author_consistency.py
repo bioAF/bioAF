@@ -35,6 +35,19 @@ DISAGREE = "disagree"
 UNRESOLVED = "unresolved"
 NOT_CHECKABLE = "not_checkable"
 
+# plan_8_3 sections 0.1 and 1.2: the version of the consistency READING itself.
+#
+# A comparison made while a table's bytes were in hand is kept and reused by the queued check, so a
+# repair to what the reading establishes does not reach a study that already has a record. Study 55's
+# 88-gene refinement stayed "the claim states no significance cutoff" for exactly that reason, on a
+# build that could now reach the subset operation. The version is a dependency of every check record,
+# so a record made under an earlier reading is superseded and run again, and a held record from an
+# earlier reading is never reused as this build's answer.
+#
+# 1: the deployed reading, which recorded no version at all.
+# 2: a refinement linked to the list it refines across a passage's sentences (section 1.2).
+CONSISTENCY_VERSION = 2
+
 _LOG_WORDS = ("log2", "logfc", "log fc", "log2fc", "logfoldchange", "log fold", "logratio")
 _LINEAR_WORDS = ("foldchange", "fold change", "fold_change", "fc")
 _ID_NAMES = ("gene", "gene_id", "geneid", "gene_symbol", "symbol", "gene_name", "id", "ensembl", "feature", "")
@@ -592,14 +605,28 @@ def _subset_count(record: dict, predicate: dict, table: dict, evidence: dict, co
     from app.services.validation_published_subset import SUBSET_NOTE, subset_count
 
     count = predicate.get("count") or {}
+    # plan_8_3 section 1.2: where the refinement was linked to a list the passage CITED, the counts that
+    # sentence stated travel with it, and the parent is the one that matches this table's rows. A passage
+    # naming a list of another size did not name this table.
+    refinement = evidence.get("refinement") or {}
+    rows = sum(1 for line in (table.get("text") or "").splitlines() if line.strip()) - 1
+    stated_counts = [c for c in refinement.get("parent_counts") or [] if isinstance(c, (int, float))]
+    parent_count = next((int(c) for c in stated_counts if int(c) == rows), None)
     parent = {
-        "verified": not evidence.get("partial"),
+        "verified": not evidence.get("partial") and (parent_count is not None or not stated_counts),
         "reason": (
-            f"the passage calls the file part of the list ({evidence['partial']})" if evidence.get("partial") else None
+            f"the passage calls the file part of the list ({evidence['partial']})"
+            if evidence.get("partial")
+            else (
+                f"the passage states a list of {' or '.join(f'{int(c)}' for c in stated_counts)} rows and this table "
+                f"holds {max(rows, 0)}, so it is not the same list"
+                if stated_counts and parent_count is None
+                else None
+            )
         ),
         "source": table.get("name"),
         "checksum": table.get("checksum"),
-        "count": None,
+        "count": parent_count,
     }
     found = subset_count(
         table.get("text") or "",
@@ -655,6 +682,7 @@ def supplement_consistency(
                 "reason": decoded.reason,
                 "decoding": decoded.provenance(),
                 "claim_index": item.get("claim_index"),
+                "consistency_version": CONSISTENCY_VERSION,
             }
             for item in predicates or []
         ]
@@ -672,6 +700,9 @@ def supplement_consistency(
                     **unbound_record(filename, "supplement", bound),
                     "decoding": decoded.provenance(),
                     "claim_index": item.get("claim_index"),
+                    # Every record names the reading that made it, so a recovery that has already read
+                    # the bundle under the current one is not offered again for ever.
+                    "consistency_version": CONSISTENCY_VERSION,
                 }
             )
             continue
@@ -679,11 +710,22 @@ def supplement_consistency(
             record = check_claim(
                 {},
                 item["predicate"],
-                {"name": filename, "text": text, "source": "supplement"},
+                # plan_8_3 section 1.2: the confirmation travels on the table, so an operation that
+                # reads it reaches it. None here: this comparison is made while the bytes are in hand,
+                # and the queued check recomputes with a confirmation once one is recorded.
+                {
+                    "name": filename,
+                    "text": text,
+                    "source": "supplement",
+                    "checksum": decoded.source_checksum,
+                    "confirmation": item.get("confirmation"),
+                },
                 contrast=item.get("contrast"),
                 interpretation=item.get("interpretation"),
                 selector=bound.get("selector"),
-                list_evidence=binding.list_evidence(candidate, item["predicate"]),
+                list_evidence=binding.list_evidence(
+                    candidate, item["predicate"], confirmation=item.get("confirmation")
+                ),
             )
         except Exception:  # noqa: BLE001 - one unreadable table never costs the inventory
             continue
@@ -696,6 +738,8 @@ def supplement_consistency(
                 "claim_index": item.get("claim_index"),
                 # The predicate this comparison applied; a held comparison is reused only for the same one.
                 "predicate_fingerprint": _fingerprint(item.get("predicate")),
+                # And the reading that made it: a record from an earlier one is not this build's answer.
+                "consistency_version": CONSISTENCY_VERSION,
             }
         )
     return records

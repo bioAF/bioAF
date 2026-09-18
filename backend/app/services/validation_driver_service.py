@@ -2249,7 +2249,7 @@ class ValidationDriverService:
         authors' table, at its own predicate. Never raises; the rows are never kept."""
         from app.models.comparison_target import ComparisonTarget
         from app.services.validation_author_consistency import check_claim, claim_predicates, unbound_record
-        from app.services.validation_consistency_checks import bind_table_text, confirmation_for
+        from app.services.validation_consistency_checks import bind_table_text, check_table, confirmation_for
         from app.services.validation_table_binding import established as binding_established
         from app.services.validation_table_confirmations import interpretation_of
 
@@ -2293,13 +2293,16 @@ class ValidationDriverService:
                     {**unbound_record(table.get("filename"), "deposit", bound), "claim_index": item["claim_index"]}
                 )
                 continue
-            # plan_8_2 section 3.1: a person's recorded confirmation of how the table reads, when there is one.
+            # plan_8_2 section 3.1: a person's recorded confirmation of how the table reads, when there is
+            # one. plan_8_3 section 1.2: the confirmation travels ON the table, so an operation that
+            # reads it (the documented-subset count) can reach it.
+            confirmed = confirmation_for(evidence, candidate, item["contrast"])
             record = check_claim(
                 {},
                 item["predicate"],
-                {"name": table.get("filename"), "text": text, "source": "deposit"},
+                check_table({"name": table.get("filename"), "source": "deposit"}, text, confirmed),
                 contrast=item["contrast"],
-                interpretation=interpretation_of(confirmation_for(evidence, candidate, item["contrast"])),
+                interpretation=interpretation_of(confirmed),
                 selector=bound.get("selector"),
             )
             record.pop("predicate", None)
