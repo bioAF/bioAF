@@ -15,7 +15,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -43,8 +44,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -353,7 +356,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -381,8 +385,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -575,7 +581,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -603,8 +610,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -968,7 +977,8 @@
       "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
     ],
     "claim_counts": {
-      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "4 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 4,
       "tested": 0,
       "total": 8
@@ -1321,8 +1331,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [
           "controlled"
@@ -1551,7 +1563,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -1608,8 +1621,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": true,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -1818,7 +1833,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -1873,8 +1889,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -2053,7 +2071,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 0
@@ -2110,8 +2129,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -2299,7 +2320,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; 1 tested.",
+      "checked": 2,
+      "label": "0 claims mapped to candidate comparison metrics; 2 checked against the authors' published results; 1 tested by reproduction.",
       "mapped": 0,
       "tested": 1,
       "total": 2
@@ -2520,8 +2542,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 2,
       "claims_tested": 1,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -3172,7 +3196,8 @@
       "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
     ],
     "claim_counts": {
-      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "4 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 4,
       "tested": 0,
       "total": 8
@@ -3795,8 +3820,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [
           "controlled"
@@ -4560,7 +4587,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "2 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "2 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 2,
       "tested": 0,
       "total": 2
@@ -4717,8 +4745,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -5106,7 +5136,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 1
@@ -5165,8 +5196,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -5343,7 +5376,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "14 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "14 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 14,
       "tested": 0,
       "total": 14
@@ -6268,8 +6302,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -7445,7 +7481,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "1 claim mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "1 claim mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 1,
       "tested": 0,
       "total": 1
@@ -7538,8 +7575,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -7843,7 +7882,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 2,
+      "label": "0 claims mapped to candidate comparison metrics; 2 checked against the authors' published results; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 2
@@ -7998,9 +8038,9 @@
     ],
     "code_sources": [],
     "comparisons": {
-      "label": "Comparisons not performed",
+      "label": "Reproduction comparisons not performed",
       "performed": false,
-      "reason": "reproduction was not attempted, so no claim was compared"
+      "reason": "no reproduction was attempted; 2 claims were checked against the authors' published results"
     },
     "completion_facts": [
       {
@@ -8055,8 +8095,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 2,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -8260,7 +8302,7 @@
       "Reproduction not attempted.",
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
-      "No analysis inputs were acquired and no scientific claims were tested."
+      "No analysis inputs were acquired and 2 scientific claims were checked against the authors' published results."
     ],
     "unit_confirmation": null,
     "version": 1
@@ -8285,7 +8327,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 1
@@ -8344,8 +8387,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -8522,7 +8567,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "2 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "2 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 2,
       "tested": 0,
       "total": 2
@@ -8679,8 +8725,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -9082,7 +9130,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 2,
+      "label": "0 claims mapped to candidate comparison metrics; 2 checked against the authors' published results; none tested by reproduction.",
       "mapped": 0,
       "tested": 0,
       "total": 2
@@ -9237,9 +9286,9 @@
     ],
     "code_sources": [],
     "comparisons": {
-      "label": "Comparisons not performed",
+      "label": "Reproduction comparisons not performed",
       "performed": false,
-      "reason": "reproduction was not attempted, so no claim was compared"
+      "reason": "no reproduction was attempted; 2 claims were checked against the authors' published results"
     },
     "completion_facts": [
       {
@@ -9294,8 +9343,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 2,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -9591,7 +9642,7 @@
       "Reproduction not attempted.",
       "Whether raw data are deposited could not be established.",
       "No supplementary attachments were identified.",
-      "No analysis inputs were acquired and no scientific claims were tested."
+      "No analysis inputs were acquired and 2 scientific claims were checked against the authors' published results."
     ],
     "unit_confirmation": null,
     "version": 1
@@ -9629,7 +9680,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; 1 tested.",
+      "checked": 2,
+      "label": "0 claims mapped to candidate comparison metrics; 2 checked against the authors' published results; 1 tested by reproduction.",
       "mapped": 0,
       "tested": 1,
       "total": 2
@@ -9850,8 +9902,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 2,
       "claims_tested": 1,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -10266,7 +10320,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "2 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "2 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 2,
       "tested": 0,
       "total": 2
@@ -10423,8 +10478,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -10824,7 +10881,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "5 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "5 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 5,
       "tested": 0,
       "total": 5
@@ -11173,8 +11231,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -11823,7 +11883,8 @@
     "checks_completed": [],
     "checks_not_completed": [],
     "claim_counts": {
-      "label": "0 claims mapped to candidate comparison metrics; 1 tested.",
+      "checked": 0,
+      "label": "0 claims mapped to candidate comparison metrics; 1 tested by reproduction.",
       "mapped": 0,
       "tested": 1,
       "total": 3
@@ -12170,8 +12231,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 1,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [],
         "available_to_bioaf": "unknown",
@@ -12733,7 +12796,8 @@
       "Supplemental Material (supp_gr.252981.119_Supplemental_Materials_.docx), Supplemental File S1, Supplemental File S2, Supplemental File S3: could not be retrieved in this attempt"
     ],
     "claim_counts": {
-      "label": "4 claims mapped to candidate comparison metrics; none tested.",
+      "checked": 0,
+      "label": "4 claims mapped to candidate comparison metrics; none tested by reproduction.",
       "mapped": 4,
       "tested": 0,
       "total": 8
@@ -13081,8 +13145,10 @@
         "not_attempted": 0,
         "retrieved": 0
       },
+      "claims_checked": 0,
       "claims_tested": 0,
       "inputs_acquired": false,
+      "named_files": 0,
       "raw_data": {
         "access": [
           "controlled"

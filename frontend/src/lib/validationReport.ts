@@ -507,7 +507,9 @@ export interface ReportSummary {
   selection?: ReportSelection | null;
   selection_history?: { revision: number | null; artifacts: string[]; invalidated_by: string[]; at: string | null; label: string }[];
   claims: ReportClaim[];
-  claim_counts: { total: number; mapped: number; tested: number; label: string };
+  // plan_8_3 (reporting): `checked` counts the claims checked against the authors' published
+  // results, beside `tested` by reproduction. Absent from a report written before it.
+  claim_counts: { total: number; mapped: number; tested: number; checked?: number; label: string };
   // plan_8_1 section 1.4: on a failed read, a withheld blocker carries the sentence it replaced.
   blockers: { text: string; kind: string | null; basis: string; provisional: boolean; withheld?: string }[];
   // plan_8_1 section 1.4. Null when the read did not fail; absent from a report written before it.

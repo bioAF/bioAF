@@ -209,10 +209,15 @@ class TestAStudyRecordedBeforeTheLedgerReadsCorrectly:
         assert "bioAF computes no QC metric that measures this claim" in declined[0]["mapping"]["explanation"]
 
     def test_mapped_is_not_tested(self):
+        """plan_8_3 (reporting): the label now names the DEPTH it counts. "none tested" beside a
+        conclusive consistency check made study 55's report contradict itself, so a claim checked
+        against the authors' published results is counted beside one tested by reproduction, and this
+        study, which has neither, says so of reproduction."""
         counts = self._summary()["claim_counts"]
         assert counts["mapped"] == 4
         assert counts["tested"] == 0
-        assert counts["label"] == "4 claims mapped to candidate comparison metrics; none tested."
+        assert counts["checked"] == 0
+        assert counts["label"] == "4 claims mapped to candidate comparison metrics; none tested by reproduction."
 
     def test_each_claim_leads_with_its_science(self):
         claim = self._summary()["claims"][0]

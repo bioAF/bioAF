@@ -334,6 +334,8 @@ def summarize(
 
     projection["scorecard"]["units"] = units(projection["scorecard"], claims=claims, applicability=applies)
     projection["sections"] = sections(projection, checks=checks, issues=issues)
+    # plan_8_3 (reporting): the projection checks itself for a section contradicting another.
+    report_contradictions(projection)
     return projection
 
 
@@ -1762,15 +1764,37 @@ def _claims(
                 "result": _claim_result(position, target, contrasts, evidence),
             }
         )
-    counts = {"total": len(claims), "mapped": mapped, "tested": tested, "label": _counts_label(mapped, tested)}
+    # plan_8_3 (reporting): from the claims' own rows, so the counts line, the summary sentence and the
+    # per-claim consistency rows are one answer and cannot disagree.
+    checked = sum(1 for c in claims if (c.get("consistency") or {}).get("outcome") in CONCLUSIVE_OUTCOMES)
+    counts = {
+        "total": len(claims),
+        "mapped": mapped,
+        "tested": tested,
+        "checked": checked,
+        "label": _counts_label(mapped, tested, checked),
+    }
     return claims, counts
 
 
-def _counts_label(mapped: int, tested: int) -> str:
-    """Section 10 item 5: mapped is not tested, and the tested count comes from evidence."""
+# plan_8_3 (reporting): an outcome that settled the claim against the authors' results. An unresolved
+# or not-checkable outcome is not work done, and is never counted as a claim checked.
+CONCLUSIVE_OUTCOMES = ("agree", "disagree")
+
+
+def _counts_label(mapped: int, tested: int, checked: int = 0) -> str:
+    """Section 10 item 5: mapped is not tested, and the tested count comes from evidence.
+
+    plan_8_3 (reporting): a claim CHECKED against the authors' published results is counted beside a
+    claim tested by reproduction. Saying "none tested" beside a conclusive consistency check made one
+    report contradict itself, and the two depths are not interchangeable either.
+    """
     noun = "claim" if mapped == 1 else "claims"
-    tested_text = "none tested" if tested == 0 else f"{tested} tested"
-    return f"{mapped} {noun} mapped to candidate comparison metrics; {tested_text}."
+    parts = []
+    if checked:
+        parts.append(f"{checked} checked against the authors' published results")
+    parts.append("none tested by reproduction" if tested == 0 else f"{tested} tested by reproduction")
+    return f"{mapped} {noun} mapped to candidate comparison metrics; {'; '.join(parts)}."
 
 
 # ---- reconciliation, consistency, checks ---------------------------------------------------------------
@@ -1845,6 +1869,17 @@ def _checks(evidence: dict, reconciliation: dict) -> list[dict]:
 def _comparisons(attempt: dict, counts: dict) -> dict:
     if counts["tested"]:
         return {"performed": True, "label": None, "reason": None}
+    checked = counts.get("checked") or 0
+    if checked:
+        # plan_8_3 (reporting): work that WAS done is not reported as no claim having been compared.
+        noun = "claim was" if checked == 1 else "claims were"
+        return {
+            "performed": False,
+            "label": "Reproduction comparisons not performed",
+            "reason": (
+                f"no reproduction was attempted; {checked} {noun} checked against the authors' published results"
+            ),
+        }
     reason = (
         "reproduction was not attempted, so no claim was compared"
         if attempt["status"] != ATTEMPTED
@@ -1884,6 +1919,10 @@ def _facts(evidence: dict, artifacts: list[dict], attempt: dict, counts: dict, *
         # "Analysis input acquired" row can never disagree.
         "inputs_acquired": bool(attempt["acquired"]) or acquired,
         "claims_tested": counts["tested"],
+        # plan_8_3 (reporting): claims checked against the authors' results, and files the paper names
+        # that are not attachments bioAF holds. Both were absent, and both sentences were wrong for it.
+        "claims_checked": counts.get("checked") or 0,
+        "named_files": sum(1 for a in artifacts if a["kind"] != "attachment"),
     }
 
 
@@ -1935,17 +1974,67 @@ def _summary_lines(headline: dict, facts: dict, applies: dict | None = None) -> 
         else:
             sentence += f"; {attachments['retrieved']} were retrieved."
         lines.append(sentence)
+    elif facts.get("named_files"):
+        # plan_8_3 (reporting): a file the paper names and bioAF does not hold is not an absence of
+        # supplements. Study 56 reported that none were identified beside the two its paper names.
+        named = facts["named_files"]
+        noun = "file is" if named == 1 else "files are"
+        lines.append(
+            f"{_count_word(named)} supplementary {noun} named in the paper, and bioAF holds no copy of "
+            + ("it." if named == 1 else "them.")
+        )
     else:
         lines.append("No supplementary attachments were identified.")
 
     acquired = "No analysis inputs were acquired" if not facts["inputs_acquired"] else "Analysis inputs were acquired"
-    tested = (
-        "no scientific claims were tested"
-        if not facts["claims_tested"]
-        else f"{facts['claims_tested']} scientific claim(s) were tested"
-    )
+    checked = facts.get("claims_checked") or 0
+    if facts["claims_tested"]:
+        tested = f"{facts['claims_tested']} scientific claim(s) were tested"
+    elif checked:
+        # plan_8_3 (reporting): a consistency check acquires no analysis input and it is still work. The
+        # summary says which was done rather than reporting an absence of both.
+        noun = "claim was" if checked == 1 else "claims were"
+        tested = f"{checked} scientific {noun} checked against the authors' published results"
+    else:
+        tested = "no scientific claims were tested"
     lines.append(f"{acquired} and {tested}.")
     return lines
+
+
+def report_contradictions(projection: dict) -> list[str]:
+    """plan_8_3 (Recovery and reporting): where one report states both a thing and its absence.
+
+    Study 55's summary read "no scientific claims were tested" beside its own conclusive consistency
+    check, and study 56 reported no identified supplementary attachments beside the two its paper names.
+    Each sentence was derived from one source and was false about the report it sat in.
+
+    These are INVARIANTS, not wording preferences: a breach is a defect. The projection checks itself
+    and logs a breach rather than blanking a report a reader needs, and the tests over the saved studies
+    and the checked-in contract are what hold it.
+    """
+    import logging
+
+    breaches: list[str] = []
+    summary = " ".join(str(line) for line in projection.get("summary") or [])
+    claims = [c for c in projection.get("claims") or [] if isinstance(c, dict)]
+    conclusive = [c for c in claims if (c.get("consistency") or {}).get("outcome") in CONCLUSIVE_OUTCOMES]
+    if conclusive and "no scientific claims were tested" in summary:
+        breaches.append(
+            f"{len(conclusive)} claim(s) hold a conclusive check and the summary says no claims were tested"
+        )
+    if conclusive and "none tested." in str((projection.get("claim_counts") or {}).get("label") or ""):
+        breaches.append("a claim holds a conclusive check and the claims line says none tested")
+    if conclusive and "no claim was compared" in str((projection.get("comparisons") or {}).get("reason") or ""):
+        breaches.append("a claim holds a conclusive check and the comparisons row says no claim was compared")
+    if projection.get("artifacts") and "No supplementary attachments were identified" in summary:
+        breaches.append(
+            f"{len(projection['artifacts'])} supplement row(s) exist and the summary says none were identified"
+        )
+    if breaches:
+        logging.getLogger("bioaf.validation_report_summary").warning(
+            "the report contradicts itself: %s", "; ".join(breaches)
+        )
+    return breaches
 
 
 # ---- loading, shared by the API and the export ---------------------------------------------------------
