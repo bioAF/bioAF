@@ -52,6 +52,15 @@ class TableConfirmationRequest(BaseModel):
     note: str = ""
 
 
+class UnitConfirmationRequest(BaseModel):
+    """plan_8_3 stage 5: which biological unit each of the input's columns came from, and the evidence
+    for it. ``units`` maps a column of the chosen input to the unit it came from; two columns of one
+    unit state the same identity."""
+
+    units: dict[str, str]
+    note: str = ""
+
+
 class DeclineRequest(BaseModel):
     reason: str | None = None
 

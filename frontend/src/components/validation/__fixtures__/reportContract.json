@@ -181,6 +181,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "enums": {
@@ -521,6 +522,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "failed_read_legacy": {
@@ -743,6 +745,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "groff_failed": {
@@ -1528,6 +1531,7 @@
       "Four supplementary attachments were identified, but their download failed.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "mapping_unresolved": {
@@ -1758,6 +1762,7 @@
       "No supplementary attachments were identified.",
       "Analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "outside_methods": {
@@ -2030,6 +2035,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "reference_unavailable": {
@@ -2256,6 +2262,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_checks_under_way": {
@@ -2950,6 +2957,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and 1 scientific claim(s) were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_groff": {
@@ -4528,6 +4536,7 @@
       "Four supplementary attachments were identified, but their download failed.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_in_progress": {
@@ -5073,6 +5082,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_inventory_failed": {
@@ -5309,6 +5319,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_long": {
@@ -7410,6 +7421,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_not_applicable": {
@@ -7807,6 +7819,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_not_established": {
@@ -8248,6 +8261,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_pending": {
@@ -8484,6 +8498,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_provisional": {
@@ -9043,6 +9058,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_samd1": {
@@ -9576,6 +9592,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_samd1_v2": {
@@ -10225,6 +10242,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and 1 scientific claim(s) were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_score_pending": {
@@ -10782,6 +10800,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "scorecard_scored": {
@@ -11757,6 +11776,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "stage2_selection": {
@@ -12457,6 +12477,7 @@
       "No supplementary attachments were identified.",
       "No analysis inputs were acquired and 1 scientific claim(s) were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   },
   "study_34_legacy": {
@@ -13243,6 +13264,7 @@
       "Four supplementary attachments were identified, but their download failed.",
       "No analysis inputs were acquired and no scientific claims were tested."
     ],
+    "unit_confirmation": null,
     "version": 1
   }
 }

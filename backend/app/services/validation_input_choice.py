@@ -382,6 +382,9 @@ def validate_mapping(
 
     Returns ``{"status": "accepted" | "unresolved", "reasons": [...], "mapping": rows}``."""
     reasons: list[str] = []
+    # plan_8_3 stage 5: the columns whose biological unit is not established, so the report can offer
+    # the control that resolves them instead of only naming the refusal.
+    units_unresolved: list[str] = []
     shown = source_records(sample_records)
     corpus = _normalized(" ".join(texts or []))
     column_names = {_normalized(c) for c in columns}
@@ -482,6 +485,7 @@ def validate_mapping(
             groups.setdefault(str(group), []).append({**row, "_sources": sources})
         if not unit:
             reasons.append(f"the evidence does not state the biological unit of column {column}")
+            units_unresolved.append(column)
             continue
         # The most specific rule first: a trailing number taken off the column's own name is the one
         # inference that has its own sentence, and it is never replicate identity.
@@ -490,6 +494,7 @@ def validate_mapping(
             reasons.append(
                 f"column {column}: a trailing number is a candidate token, never replicate identity on its own"
             )
+            units_unresolved.append(column)
             continue
         # plan_8_3 stage 5: a unit TYPE is not a unit identity. It is the answer to "what kind of
         # thing is this", and the design code groups samples by unit identity.
@@ -499,6 +504,7 @@ def validate_mapping(
                 f'column {column} states its biological unit as "{unit}", which is the kind of unit it is, not '
                 f"which {identity['type_word']} it is; every column carrying the same words would be one unit"
             )
+            units_unresolved.append(column)
             continue
         # An identity has to come from somewhere. A confirmation supplies one the sources do not, and
         # is recorded as assistance; otherwise the cited evidence has to state it.
@@ -510,6 +516,7 @@ def validate_mapping(
                 f'column {column} states its biological unit as "{unit}", which nothing it cites states; a unit '
                 "identity is never read off a sample's order, its trailing digits or a repeating filename pattern"
             )
+            units_unresolved.append(column)
             continue
 
     for group, members in groups.items():
@@ -529,6 +536,9 @@ def validate_mapping(
         "status": "unresolved" if reasons else "accepted",
         "reasons": sorted(set(reasons)),
         "mapping": rows,
+        # plan_8_3 stage 5: which columns a recorded unit confirmation would resolve. The report offers
+        # that control from this, so a refusal names its own way out rather than only itself.
+        "units_unresolved": sorted(set(units_unresolved)),
         # plan_8_3 stage 5: what a person supplied that the published sources did not. A result carrying
         # this is assisted, and is never reported as unattended validation.
         "assistance": None if reasons else assistance,

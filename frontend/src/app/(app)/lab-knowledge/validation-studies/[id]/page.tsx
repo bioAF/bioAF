@@ -45,6 +45,7 @@ import { CodeSection, type CodeEvidence } from "@/components/validation/CodeSect
 import { ExpectedVsObserved, type ExpectedEvidence } from "@/components/validation/ExpectedVsObserved";
 import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
 import { ClaimSelection } from "@/components/validation/ClaimSelection";
+import { UnitConfirmation } from "@/components/validation/UnitConfirmation";
 import { ResourceInventory } from "@/components/validation/ResourceInventory";
 import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
 import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
@@ -279,8 +280,12 @@ export default function ValidationStudyPage() {
         "error",
         "comparing",
       ].includes(study.state));
+  // plan_8_3 stage 5: a mapping held because the paper's biological units are not established waits
+  // on a person recording them, so its control belongs with the others.
+  const unitsUnresolved = (summary?.unit_confirmation?.unresolved?.length ?? 0) > 0;
   const decisionsVisible =
-    (requester && (!!summary?.scorecard?.inventory_retry || !!summary?.recovery?.available)) ||
+    (requester &&
+      (!!summary?.scorecard?.inventory_retry || !!summary?.recovery?.available || unitsUnresolved)) ||
     ["error", "samples_mismatch", "plan_ready"].includes(study.state) ||
     (canPick && hasDeposit) ||
     speciesBlocking ||
@@ -405,6 +410,14 @@ export default function ValidationStudyPage() {
               <div className="space-y-3">
                 {summary?.scorecard?.inventory_retry && (
                   <InventoryRetryNotice studyId={study.id} onChanged={(updated) => setStudy(updated as ValidationStudy)} />
+                )}
+                {/* plan_8_3 stage 5: which biological unit each column came from, where the sources do not say. */}
+                {unitsUnresolved && summary?.unit_confirmation && (
+                  <UnitConfirmation
+                    studyId={study.id}
+                    offer={summary.unit_confirmation}
+                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
+                  />
                 )}
                 {/* plan_8_2 section 2.1: re-evaluation under bioAF's current rules, on request only. */}
                 {summary?.recovery?.available && (
