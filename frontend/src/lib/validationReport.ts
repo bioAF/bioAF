@@ -341,7 +341,20 @@ export interface CompactScorecard {
 }
 
 export interface CheckActivity {
-  counts: { pending: number; retrying: number; running: number; done: number; unresolved: number; blocked: number };
+  // plan_8_4 defect 4: `done` is what the queue finished; `concluded` is what a check settled. A
+  // comparison that ran and could not resolve its claim is in both `done` and
+  // `finished_without_conclusion`, and never in `concluded`.
+  counts: {
+    pending: number;
+    retrying: number;
+    running: number;
+    done: number;
+    unresolved: number;
+    blocked: number;
+    concluded: number;
+    finished_without_conclusion: number;
+    could_not_conclude: number;
+  };
   completed: number;
   total: number;
   under_way: number;

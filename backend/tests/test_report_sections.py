@@ -108,9 +108,12 @@ class TestTheScorecardNamesItsUnits:
         assert card["score_status_label"] is None  # the blank stays a blank; the note explains it
 
     def test_findings_and_checks_are_counted_in_their_own_units(self):
+        # plan_8_4 defect 4: the finished record carries the outcome a finished record always
+        # carries. Every caller that writes `done` writes one, and what the check concluded is now
+        # read from it rather than assumed from the state.
         checks = [
             {"kind": "author_results", "state": "unresolved", "retry_count": 0},
-            {"kind": "author_results", "state": "done", "retry_count": 0},
+            {"kind": "author_results", "state": "done", "retry_count": 0, "outcome": {"outcome": "agree"}},
             {"kind": "author_results", "state": "pending", "retry_count": 1},
         ]
         units = {u["key"]: (u["count"], u["label"]) for u in _summary(checks=checks)["scorecard"]["units"]}
@@ -119,6 +122,39 @@ class TestTheScorecardNamesItsUnits:
         assert units["checks_concluded"] == (1, "check concluded")
         assert units["checks_without_conclusion"] == (1, "check completed without a conclusion")
         assert units["checks_under_way"] == (1, "check under way")
+
+    def test_a_finished_check_that_concluded_nothing_is_not_counted_as_concluded(self):
+        """plan_8_4 defect 4: the queue's STATE says the check finished; the OUTCOME says whether it
+        settled anything. A comparison that ran, read its table and could not resolve the claim is
+        recorded ``done`` with an outcome of ``unresolved``, and counting that as a check concluded
+        tells a reader the paper was checked when nothing about it was established.
+        """
+        checks = [
+            {"kind": "author_results", "state": "done", "retry_count": 0, "outcome": {"outcome": "agree"}},
+            {
+                "kind": "author_results",
+                "state": "done",
+                "retry_count": 0,
+                "outcome": {"outcome": "unresolved", "reason": "the refinement's cutoff reading is not established"},
+            },
+            {
+                "kind": "author_results",
+                "state": "done",
+                "retry_count": 0,
+                "outcome": {"outcome": "not_checkable", "reason": "the claim states no number to compare"},
+            },
+        ]
+        card = _summary(checks=checks)["scorecard"]
+        units = {u["key"]: (u["count"], u["label"]) for u in card["units"]}
+        assert units["checks_concluded"] == (1, "check concluded")
+        assert units["checks_without_conclusion"] == (2, "checks completed without a conclusion")
+        assert "checks_under_way" not in units
+        counts = card["activity"]["counts"]
+        assert counts["done"] == 3, "all three finished; the state is what the queue did"
+        assert counts["concluded"] == 1, "only one settled its question"
+        assert counts["finished_without_conclusion"] == 2
+        assert card["activity"]["completed"] == 3
+        assert "2 checks could not conclude" in card["activity"]["label"]
 
 
 class TestFindings:

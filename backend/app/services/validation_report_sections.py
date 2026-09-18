@@ -46,10 +46,12 @@ def units(card: dict, *, claims: list[dict], applicability: dict | None) -> list
         found.append(_unit("findings_inconclusive", total - assessed, "finding inconclusive", "findings inconclusive"))
     counts = ((card.get("activity") or {}).get("counts")) or {}
     for key, count, singular, plural in (
-        ("checks_concluded", counts.get("done", 0), "check concluded", "checks concluded"),
+        # plan_8_4 defect 4: what the checks CONCLUDED, not what the queue finished. A comparison
+        # recorded `done` with an outcome of `unresolved` is completed work and no conclusion.
+        ("checks_concluded", counts.get("concluded", 0), "check concluded", "checks concluded"),
         (
             "checks_without_conclusion",
-            counts.get("unresolved", 0) + counts.get("blocked", 0),
+            counts.get("unresolved", 0) + counts.get("blocked", 0) + counts.get("finished_without_conclusion", 0),
             "check completed without a conclusion",
             "checks completed without a conclusion",
         ),
