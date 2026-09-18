@@ -482,21 +482,35 @@ _ACTIVITY_WORDS = (
     ("running", "running"),
     ("pending", "pending"),
     ("retrying", "retrying"),
-    ("unresolved", "could not conclude"),
+    # plan_8_4 defect 4: a check that finished without settling its question is counted here beside
+    # one the queue never finished, because to a reader they say the same thing: nothing was
+    # established. The two are still kept apart in the counts.
+    ("could_not_conclude", "could not conclude"),
     ("blocked", "blocked"),
 )
 
 
 def check_activity(checks: list[dict] | None) -> dict:
     """What the study's checks are doing: counts by activity, the checks completed, and a line saying so.
-    Checks are counted as checks, never as findings."""
-    from app.services.validation_check_queue import activity_of
+    Checks are counted as checks, never as findings.
+
+    plan_8_4 defect 4: ``done`` counts what the QUEUE finished. ``concluded`` counts what a check
+    actually settled, which is the smaller number whenever a comparison ran and could not resolve
+    the claim. Every counter states which of the two it means.
+    """
+    from app.services.validation_check_queue import activity_of, concluded
 
     counts = {"pending": 0, "retrying": 0, "running": 0, "done": 0, "unresolved": 0, "blocked": 0}
+    settled = 0
     for check in checks or []:
         activity = activity_of(check)
         if activity in counts:
             counts[activity] += 1
+        if concluded(check):
+            settled += 1
+    counts["concluded"] = settled
+    counts["finished_without_conclusion"] = counts["done"] - settled
+    counts["could_not_conclude"] = counts["unresolved"] + counts["finished_without_conclusion"]
     parts = [
         f"{counts[key]} {'check' if counts[key] == 1 else 'checks'} {words}"
         for key, words in _ACTIVITY_WORDS
@@ -505,7 +519,7 @@ def check_activity(checks: list[dict] | None) -> dict:
     return {
         "counts": counts,
         "completed": counts["done"] + counts["unresolved"] + counts["blocked"],
-        "total": sum(counts.values()),
+        "total": counts["pending"] + counts["retrying"] + counts["running"] + counts["done"] + counts["unresolved"] + counts["blocked"],
         "under_way": counts["pending"] + counts["retrying"] + counts["running"],
         "label": "; ".join(parts) or None,
     }

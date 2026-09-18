@@ -112,6 +112,36 @@ def activity_of(record) -> str:
     return state
 
 
+# plan_8_4 defect 4: a record's STATE is what the QUEUE did with it; its OUTCOME is what the CHECK
+# established. They are not the same fact and must never be counted as one. A comparison that ran,
+# read its table and could not settle the claim finishes in state `done` carrying an outcome of
+# `unresolved`: finished work, and no conclusion. Counting it as a check concluded tells a reader
+# the paper was checked when nothing about it was established.
+INCONCLUSIVE_OUTCOMES = ("unresolved", "not_checkable")
+
+
+def outcome_of(record) -> str | None:
+    """The outcome a record's check reached, or None where it reached none."""
+    outcome = record.outcome_json if not isinstance(record, dict) else record.get("outcome")
+    if not isinstance(outcome, dict):
+        return None
+    value = outcome.get("outcome")
+    return value if isinstance(value, str) else None
+
+
+def concluded(record) -> bool:
+    """Whether a record finished AND settled its question.
+
+    ``done`` alone is not enough: the check has to have reached an outcome, and that outcome has to
+    be one that decided something. A record with no outcome at all has concluded nothing either.
+    """
+    state = record.state if not isinstance(record, dict) else record.get("state")
+    if state != DONE:
+        return False
+    outcome = outcome_of(record)
+    return outcome is not None and outcome not in INCONCLUSIVE_OUTCOMES
+
+
 def backoff_for(retry_count: int) -> int:
     return RETRY_BACKOFF_SECONDS[max(0, min(retry_count - 1, len(RETRY_BACKOFF_SECONDS) - 1))]
 
