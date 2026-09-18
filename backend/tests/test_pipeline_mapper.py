@@ -15,6 +15,7 @@ from app.services.pipeline_mapper import (
     library_strategy_conflict,
     library_strategy_routes,
     map_method,
+    pipelines_named_by,
     route_for_library_strategy,
 )
 from app.services.qc.templates import TEMPLATES
@@ -40,12 +41,36 @@ def test_every_route_maps_every_marker_it_claims():
             )
 
 
+def test_every_qualified_marker_maps_its_route_once_the_measurement_is_named():
+    """plan_8_4 defect 2: the same order law, for a marker that needs its measurement named.
+
+    A qualified marker plus any one of its route's qualifiers must reach that route, and the marker
+    alone must reach no route at all. A qualified marker that maps somewhere on its own is a marker
+    that never became qualified; one that maps nowhere even with its qualifier is declared below a
+    route that swallows it.
+    """
+    for route in _ROUTES:
+        for marker in route.qualified_markers:
+            assert route.qualifiers, f"{route.pipeline_key} qualifies {marker!r} with nothing"
+            alone = map_method(marker)
+            assert alone.pipeline_key is None, (
+                f"{marker!r} names {route.pipeline_key}'s subject, not its measurement, but a paper "
+                f"whose assay is exactly that maps to {alone.pipeline_key}."
+            )
+            for qualifier in route.qualifiers:
+                mapping = map_method(f"{marker} {qualifier}")
+                assert mapping.pipeline_key == route.pipeline_key, (
+                    f"{route.pipeline_key} claims {marker!r} qualified by {qualifier!r}, but "
+                    f"{marker + ' ' + qualifier!r} maps to {mapping.pipeline_key}."
+                )
+
+
 def test_no_two_routes_claim_the_same_marker():
     """The same word cannot mean two pipelines. Whichever is declared first would always win, and
     the loser's entry would read as supported while never firing."""
     claimed: dict[str, str] = {}
     for route in _ROUTES:
-        for marker in route.markers:
+        for marker in (*route.markers, *route.qualified_markers):
             assert marker not in claimed, f"{marker!r} is claimed by both {claimed[marker]} and {route.pipeline_key}"
             claimed[marker] = route.pipeline_key
 
@@ -486,3 +511,62 @@ def test_a_plan_with_no_pipeline_has_nothing_to_contradict():
 def test_an_ordinary_blocker_is_not_read_as_a_conflict():
     for blocker in ("no data accession found in the paper", "insufficient method detail to identify an assay", ""):
         assert not is_library_strategy_conflict(blocker), blocker
+
+
+# ---- plan_8_4 milestone 0, defect 2: a subject is not a measurement ----
+
+
+def test_observing_one_cell_at_a_time_does_not_name_a_sequencing_assay():
+    """plan_8_4 section 2: "single-cell" says WHAT was observed, not HOW. Live-cell tracking, imaging
+    and force spectroscopy are all single-cell work and none of them sequences anything.
+
+    The substrate-stiffness paper (study 57) tracks individual migrating cells by time-lapse
+    microscopy. Read as diagnostic of scRNA-seq, that assay maps to nf-core/scrnaseq, and the study
+    then carries an executable workflow, a reference genome and a sequencing predicate for an
+    experiment that produced no reads at all.
+    """
+    for assay in (
+        "single-cell tracking of migrating cells",
+        "single cell imaging",
+        "single-cell force spectroscopy",
+        "single cell migration assay",
+        "single-cell electrophysiology",
+        "time-lapse tracking of single cells",
+    ):
+        mapping = map_method(assay)
+        assert mapping.pipeline_key is None, f"{assay!r} mapped to {mapping.pipeline_key}"
+        assert mapping.mapping_confidence == "none", assay
+        assert pipelines_named_by(assay) == [], assay
+
+
+def test_single_cell_still_names_scrnaseq_where_the_measurement_is_named():
+    """The other half of the same guard. The qualification is evidence of the measurement, not a
+    narrower spelling: a paper that says "single-cell RNA-seq" or "single cell transcriptomics" has
+    named one, and the abbreviations name it on their own."""
+    for assay in (
+        "single-cell RNA-seq",
+        "single cell RNA sequencing",
+        "single-cell transcriptomics",
+        "single cell transcriptome profiling",
+        "single-cell RNA-sequencing of PBMCs",
+        "scRNA-seq",
+        "snRNA-seq",
+        "10x Chromium single-cell gene expression",
+        "Cell Ranger",
+    ):
+        assert map_method(assay).pipeline_key == "nf-core/scrnaseq", assay
+
+
+def test_a_single_cell_multiome_paper_is_unchanged():
+    """The declared ordering that puts the single-cell route above ATAC is load-bearing and stays:
+    a multiome paper spells both out, and scRNA-seq is the measurement it names first."""
+    assay = "single-cell multiome (scRNA-seq + scATAC-seq)"
+    assert map_method(assay).pipeline_key == "nf-core/scrnaseq"
+    assert pipelines_named_by(assay) == ["nf-core/scrnaseq", "nf-core/atacseq"]
+
+
+def test_single_cell_atac_without_the_rna_measurement_reaches_atacseq():
+    """Before this, "single-cell ATAC-seq" matched the bare single-cell marker and routed to
+    scrnaseq, which reads the wrong data. It names ATAC as its measurement and nothing else."""
+    assert map_method("single-cell ATAC-seq").pipeline_key == "nf-core/atacseq"
+    assert map_method("single cell assay for transposase-accessible chromatin").pipeline_key == "nf-core/atacseq"
