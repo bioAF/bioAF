@@ -873,6 +873,14 @@ class ValidationDriverService:
                     c for c in ((plan.differential_design_json or {}).get("contrasts") or []) if isinstance(c, dict)
                 ],
                 inventory=plan.finding_inventory_json if isinstance(plan.finding_inventory_json, dict) else None,
+                # plan_8_4 defect 3: the revision is built from the newly selected analysis, so the
+                # constructor needs the same evidence the initial selection was built from.
+                experiments=[e for e in (plan.reported_experiments_json or []) if isinstance(e, dict)],
+                methods=(study.evidence_json or {}).get("methods_cutoffs"),
+                # What the deposit declares itself to be, as the plan recorded it. The per-experiment
+                # strategies are read during extraction and not persisted, so a reselection has the
+                # plan's own; a strategy nobody recorded has no opinion, which is what it had before.
+                library_strategy=plan.library_strategy,
             )
         except Exception:  # noqa: BLE001 - a coverage ranking is never a reason to fail a read
             logger.exception("study %s: complete-finding coverage could not be applied", study.id)

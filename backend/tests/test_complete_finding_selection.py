@@ -383,3 +383,234 @@ class TestReselectingOnceTheFindingsAreEstablished:
         )
         assert changed is False
         assert revised["current"] is None
+
+
+class TestAReselectionRebuildsEverythingThatDependsOnTheChoice:
+    """plan_8_4 defect 3: a reselection replaced the claim, the contrast and the check, and KEPT the
+    workflow, the reference, the claim type, the predicate, the chosen input and the sample mapping
+    of the selection it replaced.
+
+    On the substrate-stiffness paper that is how a western-blot claim inherited an RNA-seq workflow
+    and an RNA-seq predicate. Nothing downstream could tell: the record reads as a complete, coherent
+    selection, and every field a run uses came from an analysis nobody selected.
+
+    Both selection paths now build those fields from the chosen analysis alone, through one
+    constructor, and a reselection whose rebuild is refused leaves the earlier selection standing
+    rather than committing a half-built one.
+    """
+
+    # Two experiments that share nothing a run cares about: a sequencing assay with a workflow and a
+    # reference, and a protein assay bioAF cannot execute.
+    _EXPERIMENTS = [
+        {
+            "id": "e1",
+            "assay": "bulk RNA-seq",
+            "workflow": "nf-core/rnaseq",
+            "reference": {"assembly": {"resolved": "GRCh38"}, "annotation": {"resolved": "GENCODE v44"}},
+        },
+        {"id": "e2", "assay": "western blotting", "workflow": None, "reference": {}},
+    ]
+    _CONTRASTS = [
+        {"name": "stiff vs soft (RNA)", "reported_experiment_id": "e1", "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}]},
+        {"name": "stiff vs soft (protein)", "reported_experiment_id": "e2"},
+    ]
+    _TARGETS = [
+        {
+            "claim_index": 0,
+            "reported_experiment_id": "e1",
+            "contrast_index": 0,
+            "claim_text": "812 genes were differentially expressed",
+            "claimed_value": 812,
+            "output_type": "gene_set_size",
+        },
+        {
+            "claim_index": 1,
+            "reported_experiment_id": "e2",
+            "contrast_index": 1,
+            "claim_text": "YAP protein increased 2.4-fold",
+            "claimed_value": 2.4,
+            "output_type": "ratio",
+            "unit": "fold",
+        },
+        {
+            "claim_index": 2,
+            "reported_experiment_id": "e2",
+            "contrast_index": 1,
+            "claim_text": "TAZ protein increased 1.9-fold",
+            "claimed_value": 1.9,
+            "output_type": "ratio",
+            "unit": "fold",
+        },
+    ]
+    # Only the protein finding can be completed whole, so coverage moves the selection to e2.
+    _INVENTORY = {
+        "rubric_version": 2,
+        "findings": [
+            {"id": "F1", "required": [0, 99], "importance": {"category": "primary"}},
+            {"id": "F2", "required": [1, 2], "importance": {"category": "primary"}},
+        ],
+    }
+
+    def _record(self):
+        return {
+            "current": {
+                "revision": 1,
+                "claim_index": 0,
+                "contrast_index": 0,
+                "check": "author_results",
+                "claim_type": "differential",
+                "reported_experiment_id": "e1",
+                "workflow": "nf-core/rnaseq",
+                "reference": {"assembly": "GRCh38", "annotation": "GENCODE v44"},
+                "input": {"accession": "GSE111111", "kind": "processed_matrix"},
+                "sample_mapping": {"GSM1": "stiff", "GSM2": "soft"},
+                "predicate": {"kind": "entity_set", "status": "resolved"},
+                "predicate_words": "genes with adjusted P < 0.05",
+                "decided_by": "model",
+                "coverage": None,
+            },
+            "history": [],
+            "candidates": _pairs(0, check="author_results") + _pairs(1, 2, check="author_results"),
+            "unassessed": [],
+        }
+
+    def _reselect(self, record=None):
+        from app.services.validation_selection import reselect_for_coverage
+
+        return reselect_for_coverage(
+            record if record is not None else self._record(),
+            targets=self._TARGETS,
+            contrasts=self._CONTRASTS,
+            inventory=self._INVENTORY,
+            experiments=self._EXPERIMENTS,
+        )
+
+    def test_the_workflow_comes_from_the_newly_selected_experiment(self):
+        revised, changed = self._reselect()
+        assert changed is True
+        current = revised["current"]
+        assert current["reported_experiment_id"] == "e2"
+        assert current["workflow"] is None, "e2 is a western blot; it has no workflow to run"
+
+    def test_the_reference_is_rebuilt_and_never_inherited(self):
+        revised, _ = self._reselect()
+        assert revised["current"]["reference"] == {"assembly": None, "annotation": None}
+
+    def test_the_predicate_and_the_claim_type_come_from_the_new_claim(self):
+        from app.services.validation_checks import claim_type
+        from app.services.validation_predicate import build_predicate
+
+        record = self._record()
+        record["current"]["claim_type"] = "scalar"  # whatever was stored, the rebuild recomputes it
+        revised, _ = self._reselect(record)
+        current = revised["current"]
+        assert current["claim_index"] == 1
+        assert current["claim_type"] == claim_type(self._TARGETS[1])
+        assert current["predicate_words"] != "genes with adjusted P < 0.05"
+        expected = build_predicate(self._TARGETS[1], contrast=self._CONTRASTS[1])
+        assert current["predicate"] == expected
+        assert current["predicate"]["stated_as"] == "YAP protein increased 2.4-fold"
+
+    def test_the_chosen_input_and_sample_mapping_do_not_survive_the_move(self):
+        """They were chosen for the analysis that was replaced. Carrying them forward would let a run
+        read one experiment's samples under another experiment's name."""
+        revised, _ = self._reselect()
+        assert revised["current"]["input"] is None
+        assert revised["current"]["sample_mapping"] is None
+
+    def test_the_selection_it_replaced_is_kept_whole_as_history(self):
+        revised, _ = self._reselect()
+        (superseded,) = revised["history"]
+        assert superseded["superseded"] is True
+        assert superseded["workflow"] == "nf-core/rnaseq"
+        assert superseded["input"] == {"accession": "GSE111111", "kind": "processed_matrix"}
+        assert revised["current"]["revision"] == 2
+
+    def test_a_selection_that_does_not_move_is_also_rebuilt_from_its_own_analysis(self):
+        """The same constructor, so a stale field cannot survive by standing still either."""
+        record = self._record()
+        record["current"]["workflow"] = "nf-core/atacseq"  # never true of e1
+        record["candidates"] = _pairs(0, check="author_results")
+        revised, changed = self._reselect(record)
+        assert changed is False
+        assert revised["current"]["workflow"] == "nf-core/rnaseq"
+        assert revised["current"]["reported_experiment_id"] == "e1"
+
+    def test_a_choice_a_person_made_is_still_never_replaced(self):
+        record = self._record()
+        record["current"]["decided_by"] = "human"
+        revised, changed = self._reselect(record)
+        assert changed is False
+        assert revised["current"]["claim_index"] == 0
+        assert revised["current"]["coverage"]["partial"] == ["F1"]
+
+    def test_an_analysis_whose_experiment_is_unknown_says_so_rather_than_borrowing_one(self):
+        """The candidate's experiment used to fall back to the FORMER selection's, which is the one
+        value guaranteed to be wrong when the analysis moved. An unknown experiment is unknown, and
+        it takes the workflow and the reference of no experiment at all."""
+        targets = [dict(t) for t in self._TARGETS]
+        targets[1] = {**targets[1], "reported_experiment_id": None}
+        targets[2] = {**targets[2], "reported_experiment_id": None}
+        contrasts = [dict(c) for c in self._CONTRASTS]
+        contrasts[1] = {**contrasts[1], "reported_experiment_id": None}
+        from app.services.validation_selection import reselect_for_coverage
+
+        revised, changed = reselect_for_coverage(
+            self._record(),
+            targets=targets,
+            contrasts=contrasts,
+            inventory=self._INVENTORY,
+            experiments=self._EXPERIMENTS,
+        )
+        assert changed is True
+        assert revised["current"]["reported_experiment_id"] is None
+        assert revised["current"]["workflow"] is None
+        assert revised["current"]["reference"] == {"assembly": None, "annotation": None}
+
+    def test_two_layers_that_name_different_experiments_refuse_the_construction(self):
+        """plan_8_4 section 9: contradictory experiment identities fail explicitly rather than being
+        filled from whichever layer answered first."""
+        import pytest as _pytest
+
+        from app.services.validation_selection import SelectionRefused, construct_selection
+
+        with _pytest.raises(SelectionRefused) as refused:
+            construct_selection(
+                claim_index=1,
+                check="author_results",
+                revision=2,
+                targets=self._TARGETS,
+                experiments=self._EXPERIMENTS,
+                contrasts=self._CONTRASTS,
+                experiment_id="e1",  # the claim says e2
+                decided_by="coverage",
+                reason="test",
+            )
+        assert "e1" in str(refused.value) and "e2" in str(refused.value)
+
+    def test_a_contrast_the_chosen_workflow_cannot_run_refuses_the_move(self):
+        """A rebuild that cannot be made is not committed half-built: the earlier selection stands
+        and the record says which analysis was refused, and why."""
+        experiments = [dict(e) for e in self._EXPERIMENTS]
+        experiments[1] = {**experiments[1], "workflow": "nf-core/rnaseq"}
+        contrasts = [dict(c) for c in self._CONTRASTS]
+        contrasts[1] = {**contrasts[1], "assay": "ATAC-seq"}
+        from app.services.validation_selection import reselect_for_coverage
+
+        revised, changed = reselect_for_coverage(
+            self._record(),
+            targets=self._TARGETS,
+            contrasts=contrasts,
+            inventory=self._INVENTORY,
+            experiments=experiments,
+        )
+        assert changed is False
+        assert revised["current"]["reported_experiment_id"] == "e1"
+        assert revised["current"]["workflow"] == "nf-core/rnaseq"
+        # The better-covering analysis is marked ineligible where it is ranked, and the record says
+        # it was passed over and why, so a reader is not left wondering why coverage did nothing.
+        refused = next(a for a in revised["analyses"] if a["analysis_key"].endswith(":e2:1"))
+        assert refused["eligible"] is False
+        assert "ATAC-seq" in refused["ineligible_reason"]
+        assert revised["reselection_refused"]["completes"] == ["F2"]
+        assert revised["reselection_refused"]["reason"] == refused["ineligible_reason"]
