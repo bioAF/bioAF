@@ -236,6 +236,89 @@ async def replay_consistency(session, restored: Restored, *, fetcher=None) -> di
     return outcomes
 
 
+def saved_supplement_bundle(*files: pathlib.Path) -> bytes:
+    """The paper's supplement bundle, built from committed fixture files under their own names."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for path in files:
+            archive.writestr(path.name, path.read_bytes())
+    return buffer.getvalue()
+
+
+# The Groff supplements as the paper publishes them, under the filenames the study recorded.
+GROFF_BUNDLE = {
+    "supp_gr.252981.119_Supplemental_File_1_embryo_metadata.txt": (
+        FIXTURES / "groff" / "supplemental_file_1_embryo_metadata.txt"
+    ),
+    "supp_gr.252981.119_Supplemental_File_2_AllRCode_Review.docx": (
+        FIXTURES / "groff" / "supplemental_file_2_allrcode.docx"
+    ),
+    "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt": (
+        FIXTURES / "groff" / "supplemental_file_3_siggenes.txt"
+    ),
+}
+
+
+def groff_bundle_fetcher():
+    """The bundle the assessment stage downloads, from the committed supplements."""
+    import io
+    import zipfile
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, path in GROFF_BUNDLE.items():
+            archive.writestr(name, path.read_bytes())
+    blob = buffer.getvalue()
+
+    async def fetch(_url):
+        return blob
+
+    return fetch
+
+
+async def replay_recovery(session, restored: Restored, *, fetcher, monkeypatch) -> dict:
+    """Run the study's own recovery over its saved evidence, with its supplements served from committed
+    bytes. Returns the recovery's result. No model call, no compute, and no workflow is launched."""
+    from app.services.validation_recovery import run_recovery
+
+    monkeypatch.setattr("app.services.validation_assessment.deposit_bytes_fetcher", fetcher)
+    return await run_recovery(session, restored.study, user_id=None)
+
+
+async def replay_assessment(session, restored: Restored, *, fetcher, monkeypatch) -> dict:
+    """Re-run the assessment stage over the saved evidence, with the paper's supplements served from
+    committed bytes.
+
+    This is the production caller that COMPUTES author-result consistency while a table's bytes are in
+    hand; the queued check keeps and reuses what it recorded. A repair to what a check establishes
+    therefore reaches an existing study through this stage, which the study's own recovery runs, and
+    never by rewriting a record in place.
+    """
+    from app.services.validation_assessment import run_assessment
+
+    monkeypatch.setattr("app.services.validation_assessment.deposit_bytes_fetcher", fetcher)
+    restored.study.state = "acquiring_processed"
+    restored.study.classification = None
+    evidence = dict(restored.evidence)
+    evidence.pop("assessment", None)
+    restored.study.evidence_json = evidence
+    await session.flush()
+    await run_assessment(session, restored.study)
+    await session.flush()
+    return restored.study.evidence_json or {}
+
+
+def consistency_of(evidence: dict, filename: str) -> list[dict]:
+    """The consistency records the assessment stage wrote for one supplement."""
+    for row in evidence.get("supplements") or []:
+        if isinstance(row, dict) and row.get("filename") == filename:
+            return list(row.get("consistency") or [])
+    return []
+
+
 async def replay_report(session, restored: Restored) -> dict:
     """Project the saved study exactly as the report API does."""
     from app.services.validation_report_summary import report_summary_for

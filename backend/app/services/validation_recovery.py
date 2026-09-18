@@ -125,12 +125,33 @@ def _unbound_supplement_comparisons(evidence: dict) -> int:
     )
 
 
+def _comparisons_from_an_earlier_reading(evidence: dict) -> int:
+    """plan_8_3 sections 0.1 and 1.2: comparisons made under an earlier consistency READING.
+
+    A comparison is computed while a supplement's bytes are in hand and kept; the queued check reuses
+    it, and a bundle member has no address of its own to fetch again. So a repair to what a check
+    establishes cannot reach a study that already has records, and study 55's 88-gene refinement would
+    have stayed "the claim states no significance cutoff" on a build that can now reach the subset
+    operation. Re-reading the bundle is what recovers it: one download, no model call, and the earlier
+    comparisons are kept in history.
+    """
+    from app.services.validation_author_consistency import CONSISTENCY_VERSION
+
+    return sum(
+        1
+        for s in evidence.get("supplements") or []
+        if isinstance(s, dict)
+        for r in s.get("consistency") or []
+        if isinstance(r, dict) and r.get("consistency_version") != CONSISTENCY_VERSION
+    )
+
+
 def recovery_projection(evidence: dict, checks: list[dict], *, restate: dict | None = None) -> dict:
     """What the report shows about recovery: whether one would change anything, and the last one run.
     ``restate`` is a classification an early exit gave a paper outside bioAF's methods (section 4.1)."""
     affected = [c for c in checks or [] if why_affected(c)]
     pmcid = bool((evidence or {}).get("pmcid"))
-    unbound = _unbound_supplement_comparisons(evidence or {})
+    unbound = _unbound_supplement_comparisons(evidence or {}) + _comparisons_from_an_earlier_reading(evidence or {})
     history = (evidence or {}).get("recovery_history") or []
     last = history[-1] if history else None
     return {
@@ -208,13 +229,20 @@ async def preview_recovery(session, study) -> dict:
                 f"supplement, the paragraphs and legend that cite it{methods}. No model is asked.",
             }
         )
-    if plan is not None and pmcid and _unbound_supplement_comparisons(evidence):
+    stale_reading = _comparisons_from_an_earlier_reading(evidence)
+    if plan is not None and pmcid and (_unbound_supplement_comparisons(evidence) or stale_reading):
+        earlier = (
+            " Some were made under an earlier reading of what a published list and its documented refinement "
+            "establish, and are read again under the current one."
+            if stale_reading
+            else ""
+        )
         actions.append(
             {
                 "kind": "recheck_supplements",
                 "label": "Check each claim against the supplements bound to it",
                 "detail": "bioAF retrieves the article's supplementary bundle again and compares each claim only with a "
-                "results table bound to its contrast. The earlier comparisons are kept in history.",
+                f"results table bound to its contrast. The earlier comparisons are kept in history.{earlier}",
             }
         )
     if affected:

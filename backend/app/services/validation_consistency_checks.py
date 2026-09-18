@@ -623,7 +623,7 @@ async def _run_one(run: _Run, record) -> int:
     result = check_claim(
         {},
         item["predicate"],
-        {"name": table.get("name"), "text": run.texts[url], "source": table.get("source")},
+        check_table(table, run.texts[url], confirmed),
         contrast=item["contrast"],
         interpretation=interpretation_of(confirmed),
         selector=bound.get("selector"),
@@ -634,6 +634,25 @@ async def _run_one(run: _Run, record) -> int:
     result["binding"] = bound
     _note_attempt(record, seconds=round(time.monotonic() - started, 3))
     return await _conclude(run, record, state=queue.DONE, outcome=result, terminal_reason=None)
+
+
+# What a check sees of a table. plan_8_3 sections 0.1 and 1.2: the CONFIRMATION belongs here. The
+# subset operation read `table["confirmation"]["filter_semantics"]` and this caller passed a table
+# holding only its name, its text and its source, so the control could never reach the operation it
+# was written for. The keys are named so a test can hold the contract.
+CHECK_TABLE_KEYS = ("name", "text", "source", "checksum", "confirmation")
+
+
+def check_table(table: dict, text: str, confirmation: dict | None) -> dict:
+    """The table as a check reads it: what it is, its bytes, where they came from, and how a person
+    recorded that it reads."""
+    return {
+        "name": table.get("name"),
+        "text": text,
+        "source": table.get("source"),
+        "checksum": table.get("checksum"),
+        "confirmation": confirmation,
+    }
 
 
 def _bind_with_columns(run: _Run, table: dict, item: dict, text: str) -> dict:
