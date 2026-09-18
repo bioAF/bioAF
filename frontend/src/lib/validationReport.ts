@@ -460,9 +460,29 @@ export interface ReportApplicability {
   eligible_claims: number;
 }
 
+/**
+ * plan_8_3 stage 5: the control for a mapping held because the paper's biological units are not
+ * established. `unresolved` are the columns holding it now; `columns` are the ones a confirmation may
+ * speak about at all. Absent from a report written before it.
+ */
+export interface ReportUnitConfirmation {
+  matrix: string | null;
+  columns: string[];
+  unresolved: string[];
+  recorded: {
+    units: Record<string, string>;
+    note: string | null;
+    confirmed_by: string | null;
+    at: string | null;
+    superseded_count: number;
+  } | null;
+}
+
 export interface ReportSummary {
   version: number;
   recovery?: ReportRecovery | null;
+  // plan_8_3 stage 5. Null where nothing is held on a unit identity and none was recorded.
+  unit_confirmation?: ReportUnitConfirmation | null;
   // plan_8_2 section 4.1: whether bioAF's current methods apply, per experiment.
   applicability?: ReportApplicability | null;
   // plan_8_2 section 4.2: the four sections. Absent from a report written before them.

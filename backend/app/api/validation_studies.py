@@ -35,6 +35,7 @@ from app.schemas.validation_study import (
     RecoveryRequest,
     ReproductionPlanResponse,
     TableConfirmationRequest,
+    UnitConfirmationRequest,
     SampleManifestResponse,
     ValidationStudyRequest,
     ValidationStudyResponse,
@@ -529,6 +530,73 @@ async def record_table_confirmation(
                     "version",
                 )
             },
+        )
+        await session.commit()
+    response = await _study_response(session, study, org_id)
+    return {"confirmation": entry, **response.model_dump(mode="json")}
+
+
+@router.post("/{study_id}/unit-confirmations")
+async def record_unit_confirmation(
+    study_id: int,
+    data: UnitConfirmationRequest,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """plan_8_3 stage 5: record which biological unit each column of the chosen input came from, with the
+    evidence it rests on. This is the control for a mapping held because the published sources do not
+    establish the paper's units; a mapping that rests on it is reported as assisted. Review and resume
+    then re-enters mapping with the same input. 422 for a column the input does not hold, a unit that is
+    only what kind of unit it is, one read off the column's own name, or a confirmation that states no
+    evidence; 409 while the study is being read or another worker holds it."""
+    from app.services.validation_ownership import owned
+    from app.services.validation_unit_confirmations import (
+        ConfirmationRefused,
+        confirmation_entry,
+        record_confirmation,
+    )
+    from app.services.validation_assessment import active_plan
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    async with owned(session, study.id, holder="api") as own:
+        if own is None:
+            raise HTTPException(409, "Another worker is working on this study. Try again when it finishes.")
+        await session.refresh(study)
+        if study.state in ("requested", "acquiring_text", "reading"):
+            raise HTTPException(409, "The study is being read. Record the confirmation once the read has finished.")
+        plan = await active_plan(session, study)
+        evidence = study.evidence_json or {}
+        choice = evidence.get("input_choice") or {}
+        columns = [c for c in (evidence.get("deposit_inspection") or {}).get("columns") or []]
+        if plan is None or not choice.get("primary_matrix"):
+            raise HTTPException(422, "This study has no chosen input whose columns a unit can be confirmed for.")
+        try:
+            entry = confirmation_entry(
+                matrix=choice.get("primary_matrix"),
+                units=data.units,
+                columns=columns,
+                note=data.note,
+                confirmed_by=str(current_user.get("email") or f"user {user_id}"),
+                at=datetime.now(timezone.utc).isoformat(),
+            )
+        except ConfirmationRefused as exc:
+            raise HTTPException(422, str(exc)) from exc
+        await record_confirmation(
+            session,
+            study,
+            plan,
+            entry,
+            reason=f"a person recorded the biological units of {len(entry['units'])} of {choice['primary_matrix']}'s columns",
+        )
+        await log_action(
+            session,
+            user_id,
+            "validation_study",
+            study.id,
+            "unit_confirmation",
+            details={k: entry[k] for k in ("matrix", "units", "note", "version")},
         )
         await session.commit()
     response = await _study_response(session, study, org_id)

@@ -317,6 +317,9 @@ def summarize(
         "issue_count": len(issues or []),
         # plan_8_2 section 2.1: whether an on-request recovery would change anything, and the last one run.
         "recovery": _recovery(evidence, checks, study, applies),
+        # plan_8_3 stage 5: the control for a mapping held because the paper's biological units are
+        # not established, and what a person has already recorded.
+        "unit_confirmation": _unit_confirmation(evidence),
         # plan_8: the Validation Scorecard, built once here for every surface that renders the report.
         "scorecard": scorecard_projection(
             study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
@@ -328,6 +331,39 @@ def summarize(
     projection["scorecard"]["units"] = units(projection["scorecard"], claims=claims, applicability=applies)
     projection["sections"] = sections(projection, checks=checks, issues=issues)
     return projection
+
+
+def _unit_confirmation(evidence: dict) -> dict | None:
+    """plan_8_3 stage 5: the columns whose biological unit a person may record, or None.
+
+    A study whose mapping refused a unit identity is held with no way forward unless the report offers
+    the control. It names the input's own columns (a confirmation may only speak about those), the ones
+    holding the mapping now, and what has already been recorded, with its provenance.
+    """
+    choice = evidence.get("input_choice") or {}
+    validation = choice.get("mapping_validation") or {}
+    recorded = evidence.get("unit_confirmations")
+    recorded = recorded if isinstance(recorded, dict) and recorded.get("units") else None
+    unresolved = [str(c) for c in validation.get("units_unresolved") or []]
+    if not unresolved and recorded is None:
+        return None
+    columns = [str(c) for c in (evidence.get("deposit_inspection") or {}).get("columns") or []]
+    return {
+        "matrix": choice.get("primary_matrix"),
+        "columns": columns or sorted({str(r.get("column")) for r in validation.get("mapping") or []}),
+        "unresolved": sorted(unresolved),
+        "recorded": (
+            {
+                "units": recorded.get("units"),
+                "note": recorded.get("note"),
+                "confirmed_by": recorded.get("confirmed_by"),
+                "at": recorded.get("at"),
+                "superseded_count": len(recorded.get("superseded") or []),
+            }
+            if recorded
+            else None
+        ),
+    }
 
 
 def _recovery(evidence: dict, checks: list[dict] | None, study: dict, applies: dict | None) -> dict:
