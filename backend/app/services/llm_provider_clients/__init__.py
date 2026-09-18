@@ -48,7 +48,7 @@ class ProviderError(Exception):
 
     Carries the provider-supplied error text so the failed-card modal can show
     it verbatim. The error_class string is one of:
-        auth, rate_limit, transport, server, parse, refusal, truncated, timeout, other.
+        auth, rate_limit, transport, server, parse, refusal, truncated, timeout, account, other.
 
     plan_8_1 section 1.2: a truncated answer keeps the text that arrived (``text``) and what it cost, so
     the cut-off answer can be kept for diagnosis. It is never parsed.
@@ -62,12 +62,17 @@ class ProviderError(Exception):
         text: str | None = None,
         output_tokens: int | None = None,
         stop_reason: str | None = None,
+        account_fact: str | None = None,
     ) -> None:
         super().__init__(message)
         self.error_class = error_class
         self.text = text
         self.output_tokens = output_tokens
         self.stop_reason = stop_reason
+        # plan_8_3 stage 6: which account fact this was, where the class is ``account``. An
+        # administrator's remedy differs between an empty balance, an exhausted quota and a model the
+        # account may not use.
+        self.account_fact = account_fact
 
 
 def as_int(value) -> int | None:
@@ -75,6 +80,54 @@ def as_int(value) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int):
         return None
     return value
+
+
+# plan_8_3 stage 6: the account facts, and what each one is.
+#
+# A provider answering "your credit balance is too low", an exhausted quota, and a model the account is
+# not entitled to are three facts about the ACCOUNT, and their remedy belongs to an administrator. The
+# clients mapped them onto `auth` and `other`, so an exhausted account reached a reader as "bioAF could
+# not reach the language model" and the one actionable part was lost: study 57's finding inventory was
+# discarded on exactly that. A bad key, a rate limit and a 5xx are NOT account facts, and each keeps
+# the class it had.
+CREDIT_EXHAUSTED = "credit_exhausted"
+QUOTA_EXHAUSTED = "quota_exhausted"
+MODEL_NOT_ENTITLED = "model_not_entitled"
+ACCOUNT_FACTS = (CREDIT_EXHAUSTED, QUOTA_EXHAUSTED, MODEL_NOT_ENTITLED)
+
+# Matched on what the provider SAID, because the status codes are shared with failures that are not
+# account facts: Anthropic reports an empty balance as a 400, OpenAI an exhausted quota as a 429, and
+# a rate limit is a 429 too.
+_CREDIT_WORDS = ("credit balance", "insufficient funds", "billing", "payment", "purchase credits")
+_QUOTA_WORDS = ("insufficient_quota", "exceeded your current quota", "quota exceeded", "resource_exhausted")
+_ENTITLEMENT_WORDS = (
+    "not authorized to use model",
+    "does not have access to model",
+    "not entitled",
+    "model_not_found_error",
+    "not allowed to use",
+)
+# A rate limit says so in its own words, and some providers put "quota" in a rate-limit message.
+_RATE_LIMIT_WORDS = ("rate limit", "rate_limit", "requests per minute", "tokens per minute")
+
+
+def account_fact(status: int | None, body: str | None) -> str | None:
+    """Which account fact the provider reported, or None when it reported none.
+
+    ``status`` narrows nothing on its own; the provider's own words decide.
+    """
+    text = str(body or "").lower()
+    if not text:
+        return None
+    if any(word in text for word in _RATE_LIMIT_WORDS) and not any(word in text for word in _CREDIT_WORDS):
+        return None
+    if any(word in text for word in _CREDIT_WORDS):
+        return CREDIT_EXHAUSTED
+    if any(word in text for word in _QUOTA_WORDS):
+        return QUOTA_EXHAUSTED
+    if status in (401, 403, 404) and any(word in text for word in _ENTITLEMENT_WORDS):
+        return MODEL_NOT_ENTITLED
+    return None
 
 
 from app.services.llm_provider_clients import (  # noqa: E402

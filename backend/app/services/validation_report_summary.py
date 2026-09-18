@@ -147,6 +147,10 @@ IDENTIFICATION_LABELS = {
 ISSUE_OUTCOME_LABELS = {
     "refusal": "the model declined to answer",
     "unreachable": "bioAF could not reach the language model",
+    # plan_8_3 stage 6, pending the owner's sign-off: a fact about the ACCOUNT. An exhausted credit
+    # balance reached a reader as "bioAF could not reach the language model", and the one actionable
+    # part of it was lost.
+    "account": "the language model account bioAF uses could not run the request",
     "internal": "bioAF hit an internal error",
     "unparseable": "the model's answer was not in the format bioAF asked for",
     "truncated": "the model's answer was cut off at its token limit",

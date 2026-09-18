@@ -896,6 +896,9 @@ _KEPT_ANSWER_CHARS = 250_000
 _ATTEMPT_CAUSES = {
     "refusal": "the model declined to answer",
     "unreachable": "bioAF could not reach the language model",
+    # plan_8_3 stage 6: an account fact, not a failure to reach the provider. Its remedy belongs to an
+    # administrator, and the provider's own sentence stays in the log.
+    "account": "the language model account bioAF uses could not run the request",
     "unparseable": "the model's answer was not in the format bioAF asked for",
     "timed_out": "the model's answer did not finish within bioAF's time limit",
     "schema_rejected": "the model's answer did not hold what bioAF asked for",

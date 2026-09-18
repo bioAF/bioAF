@@ -239,6 +239,7 @@
       "reproduction_not_attempted": "Reproduction not attempted"
     },
     "issue_outcome": {
+      "account": "the language model account bioAF uses could not run the request",
       "incomplete": "the model's answer left out parts bioAF requires",
       "internal": "bioAF hit an internal error",
       "not_performed": "this step could not run",

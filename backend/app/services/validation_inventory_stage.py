@@ -24,7 +24,14 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 
 from app.services import validation_decision_budgets as budgets
-from app.services.llm_decision import decide, fenced_json
+from app.services.llm_decision import (
+    OUTCOME_ACCOUNT,
+    OUTCOME_INTERNAL,
+    OUTCOME_TIMED_OUT,
+    OUTCOME_UNREACHABLE,
+    decide,
+    fenced_json,
+)
 
 logger = logging.getLogger("bioaf.validation_inventory")
 
@@ -119,6 +126,34 @@ def pending_inventory() -> dict:
         "unplaced_claims": [],
         "history": [],
     }
+
+
+# plan_8_3 stage 6: the outcomes that returned no answer at all. A truncation, an unparseable answer
+# and a rejected proposal are answers bioAF learned something from; these are not, and an earlier
+# attempt's established parts survive them.
+NO_ANSWER_OUTCOMES = (OUTCOME_UNREACHABLE, OUTCOME_ACCOUNT, OUTCOME_TIMED_OUT, OUTCOME_INTERNAL)
+
+# The words the record carries where an attempt's answer stands after a failed recovery. Pending sign-off.
+RETAINED_REASON = (
+    "bioAF could not make its second attempt, so what the first one established stands and what it left "
+    "open stays open."
+)
+
+
+def _establishes_scope(inventory: dict | None) -> bool:
+    """Whether a proposal established the membership a scope is counted against.
+
+    Membership is the denominator: without it there is no scope for a provisional outcome to be about,
+    and the stage failed. With it, an open importance is what the rubric already calls provisional.
+    """
+    from app.services.validation_finding_inventory import MEMBERSHIP_ESTABLISHED, UNRESOLVED
+
+    return (
+        isinstance(inventory, dict)
+        and bool(inventory.get("findings"))
+        and inventory.get("status") != UNRESOLVED
+        and (inventory.get("membership") or {}).get("status") == MEMBERSHIP_ESTABLISHED
+    )
 
 
 def failed_inventory(cause: str, *, previous: dict | None = None) -> dict:
@@ -267,6 +302,29 @@ async def run_inventory_stage(
             inventory=failed_inventory(cause, previous=last), failed=True, cause=cause, issues=issues
         )
 
+    def _retain(last: dict, outcome: str, cause: str) -> InventoryResult:
+        """plan_8_3 stage 6: what the first attempt established, standing after a recovery that never
+        returned an answer.
+
+        The cycle still FAILED and its issue is still raised, so the account or transport problem is
+        visible and an administrator can act on it. What does not happen is the established membership
+        being thrown away: the inventory keeps the status the rubric settled on it, which for an
+        inventory with open importances is a provisional scope, and records which findings remain open
+        and why the recovery did not happen.
+        """
+        cycles.finish_cycle(study, INVENTORY_STAGE, status=cycles.FAILED, cause=cause)
+        kept = dict(last)
+        kept["attempts"] = len(_attempts())
+        kept["retained"] = {
+            "reason": RETAINED_REASON,
+            "cause": cause,
+            "attempt_outcome": outcome,
+            "open": [
+                f["id"] for f in kept.get("findings") or [] if (f.get("importance") or {}).get("status") != "validated"
+            ],
+        }
+        return InventoryResult(inventory=kept, failed=False, cause=cause, issues=issues)
+
     last_inventory: dict | None = None
     while len(_attempts()) < cycles.MAX_SUBMISSIONS:
         previous = _attempts()[-1] if _attempts() else None
@@ -335,8 +393,13 @@ async def run_inventory_stage(
 
         finished = cycles.finish_attempt(study, INVENTORY_STAGE, outcome=decision.outcome, **usage)
         recovers = more and decision.outcome == "truncated" and _planned(finished) is not None
-        issues.append(_issue(decision, attempt=finished, impact="degraded" if recovers else "blocked"))
+        # plan_8_3 stage 6: an attempt that returned NO answer says nothing about the answer an earlier
+        # attempt did return, so what that one established is not discarded with it.
+        retains = not recovers and decision.outcome in NO_ANSWER_OUTCOMES and _establishes_scope(last_inventory)
+        issues.append(_issue(decision, attempt=finished, impact="degraded" if (recovers or retains) else "blocked"))
         await _commit()
+        if retains:
+            return _retain(last_inventory, decision.outcome, _cause(_attempts()))
         if not recovers:
             return _end(_cause(_attempts()), last_inventory)
 

@@ -30,6 +30,8 @@ _LEGACY_CAUSES = {
     "schema_rejected": "the model's answer did not hold what bioAF asked for",
     "refusal": "the model declined to answer",
     "unreachable": "bioAF could not reach the language model",
+    # plan_8_3 stage 6: an account fact an administrator can act on, never a failure to reach the provider.
+    "account": "the language model account bioAF uses could not run the request",
     "unparseable": "the model's answer was not in the format bioAF asked for",
     "incomplete": "the model's answer left out parts bioAF requires",
     "internal": "bioAF hit an internal error",

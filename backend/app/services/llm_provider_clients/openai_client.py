@@ -14,7 +14,7 @@ import logging
 
 import httpx
 
-from app.services.llm_provider_clients import ModelAnswer, ProviderError, as_int
+from app.services.llm_provider_clients import ModelAnswer, ProviderError, account_fact, as_int
 from app.services.llm_provider_clients.transport import refusal, request_with_retry
 from app.services.llm_provider_clients.tool_use import ToolCall, ToolUseResult, object_schema
 
@@ -166,6 +166,12 @@ async def submit(
 
 
 def _raise_for_status(resp: httpx.Response) -> None:
+    # plan_8_3 stage 6: an account fact before the class it would otherwise be given. An exhausted
+    # credit balance arrives as a 400, an exhausted quota as a 429 and an entitlement as a 403, and
+    # none of them is bioAF failing to reach the provider.
+    fact = account_fact(resp.status_code, resp.text)
+    if fact is not None:
+        raise ProviderError(resp.text, error_class="account", account_fact=fact)
     if resp.status_code in (401, 403):
         raise ProviderError(resp.text, error_class="auth")
     if resp.status_code == 429:

@@ -32,6 +32,9 @@ export interface ValidationIssue {
 const OUTCOME_LABEL: Record<string, string> = {
   refusal: "the model declined to answer",
   unreachable: "bioAF could not reach the language model",
+  // plan_8_3 stage 6: a fact about the ACCOUNT, whose remedy belongs to an administrator. An exhausted
+  // credit balance read as "bioAF could not reach the language model", and the actionable part was lost.
+  account: "the language model account bioAF uses could not run the request",
   internal: "bioAF hit an internal error",
   unparseable: "the model's answer was not in the format bioAF asked for",
   // change_7.2 section 7: an answer cut off at the token limit is its own event. Reporting it as
