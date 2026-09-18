@@ -183,3 +183,127 @@ class TestExclusionsRedistributeAndTheProfileStillTotalsOneHundred:
         what establishes it; one that cannot is not an exclusion, and the allocation stays."""
         with pytest.raises(ApplicabilityUncertain):
             default_profile(exclude=[{"criterion": "C5", "rationale": "", "source": None}])
+
+
+class TestTheDisplayedNumbersStillAddUp:
+    def test_whole_numbers_display_without_a_decimal_point(self):
+        from app.services.validation_rubric_v3 import display
+
+        shown = display(score(allocate(default_profile()), {}))
+        assert shown["verified"] == "0"
+        assert shown["undetermined"] == "100"
+        assert shown["parts"] == {"verified": 0.0, "failed": 0.0, "undetermined": 100.0}
+
+    def test_the_displayed_parts_still_sum_to_the_profile_total(self):
+        """Section 4: derive the components with a sum-preserving rounding rule. Three independently
+        rounded thirds of 100 are 33.3 each and lose a tenth; the rule gives one of them the residue."""
+        from app.services.validation_rubric_v3 import display
+
+        leaves = [
+            {"id": "a", "criterion": "C1", "section": "C", "obligation": "A", "unit": None, "weight": Fraction(100, 3)},
+            {"id": "b", "criterion": "C1", "section": "C", "obligation": "B", "unit": None, "weight": Fraction(100, 3)},
+            {"id": "c", "criterion": "C2", "section": "C", "obligation": "A", "unit": None, "weight": Fraction(100, 3)},
+        ]
+        card = score(leaves, {"a": {"outcome": VERIFIED}, "b": {"outcome": FAILED}})
+        shown = display(card)
+        assert sum(shown["parts"].values()) == 100.0
+
+    def test_a_nonzero_residual_below_display_precision_is_shown_and_never_rounded_away(self):
+        """Section 4: never round a residual away to claim 100% verified. "<0.1" says a small,
+        genuinely nonzero amount is not verified."""
+        from app.services.validation_rubric_v3 import display
+
+        leaves = [
+            {"id": "a", "criterion": "C1", "section": "C", "obligation": "A", "unit": None, "weight": Fraction(9999, 100)},
+            {"id": "b", "criterion": "C1", "section": "C", "obligation": "B", "unit": None, "weight": Fraction(1, 100)},
+        ]
+        shown = display(score(leaves, {"a": {"outcome": VERIFIED}}))
+        assert shown["verified"] == "99.9"
+        assert shown["undetermined"] == "<0.1"
+        assert shown["exact"]["undetermined"] == "1/100"
+
+    def test_the_exact_values_are_preserved_beside_the_display(self):
+        from app.services.validation_rubric_v3 import display
+
+        leaves = allocate(default_profile(exclude_sections=["R"]))
+        shown = display(score(leaves, {}))
+        assert shown["exact"]["undetermined"] == "100"
+
+
+class TestTheResultsSectionAllocatesAmongTheFindings:
+    _INVENTORY = {
+        "findings": [
+            {"id": "F1", "required": [0, 1], "importance": {"category": "primary"}},
+            {"id": "F2", "required": [2], "importance": {"category": "supporting"}},
+            {"id": "F3", "required": [3], "importance": {"category": "technical"}},
+        ]
+    }
+
+    def _allocation(self, **kw):
+        from app.services.validation_rubric_v3 import result_allocation
+
+        return result_allocation(self._INVENTORY, **kw)
+
+    def test_a_technical_finding_receives_no_result_allocation(self):
+        """Section 3.3: technical and descriptive findings get no R1/R2 weight; the technical checks
+        that matter belong to the other criteria."""
+        allocation = self._allocation()
+        assert not [p for p in allocation["R1"] if p.get("finding") == "F3"]
+        assert not [p for p in allocation["R2"] if p.get("finding") == "F3"]
+
+    def test_primary_weighs_two_and_supporting_one_then_equally_among_the_claims(self):
+        leaves = allocate(default_profile(), results=self._allocation())
+        by_id = {leaf["id"]: leaf["weight"] for leaf in leaves}
+        # F1 is primary (weight 2) with two required claims; F2 is supporting (weight 1) with one.
+        assert by_id["R1.F1.0"] == Fraction(8) * Fraction(2, 3) / 2
+        assert by_id["R1.F1.1"] == by_id["R1.F1.0"]
+        assert by_id["R1.F2.2"] == Fraction(8) * Fraction(1, 3)
+        assert sum((w for k, w in by_id.items() if k.startswith("R1.")), Fraction(0)) == 8
+
+    def test_a_claim_shared_by_two_findings_is_measured_once_and_weighed_once(self):
+        """Section 3.3: de-duplicate logically identical claims before allocation. Two findings that
+        both require claim 2 must not create two R1 leaves for it, or a paper earns points twice for
+        one measurement."""
+        from app.services.validation_rubric_v3 import result_allocation
+
+        inventory = {
+            "findings": [
+                {"id": "F1", "required": [0, 2], "importance": {"category": "primary"}},
+                {"id": "F2", "required": [2], "importance": {"category": "primary"}},
+            ]
+        }
+        allocation = result_allocation(inventory)
+        assert len([p for p in allocation["R1"] if p["claim_index"] == 2]) == 1
+        leaves = allocate(default_profile(), results=allocation)
+        assert sum((l["weight"] for l in leaves if l["criterion"] == "R1"), Fraction(0)) == 8
+
+    def test_the_workflows_split_the_execution_points_in_half_each(self):
+        """Section 3.3: R3 allocates equally per workflow, half for demonstrated completion from the
+        declared starting inputs and half for complete outputs and established requirements."""
+        allocation = self._allocation(workflows=["nf-core/rnaseq", "nf-core/atacseq"])
+        leaves = allocate(default_profile(), results=allocation)
+        r3 = {leaf["id"]: leaf["weight"] for leaf in leaves if leaf["criterion"] == "R3"}
+        assert sum(r3.values(), Fraction(0)) == 10
+        assert set(r3.values()) == {Fraction(10, 4)}
+        assert len(r3) == 4
+
+    def test_an_unresolved_inventory_reserves_the_whole_of_r_as_undetermined(self):
+        """Section 3.3: if no defensible allocation exists yet, all 30 R points are reserved and
+        C/S/E/M still score. It is a legitimate untested 30, not a reason to withhold the other 70."""
+        from app.services.validation_rubric_v3 import result_allocation
+
+        allocation = result_allocation({"status": "pending"})
+        leaves = allocate(default_profile(), results=allocation)
+        reserved = [leaf for leaf in leaves if leaf.get("reserved")]
+        assert {leaf["criterion"] for leaf in reserved} == {"R1", "R2", "R3"}
+        assert sum((leaf["weight"] for leaf in reserved), Fraction(0)) == 30
+        card = score(leaves, {leaf["id"]: {"outcome": VERIFIED} for leaf in leaves if leaf["section"] == "C"})
+        assert card["verified"] == 20
+        assert card["sections"]["R"]["undetermined"] == 30
+
+    def test_adding_the_same_finding_twice_creates_no_extra_points(self):
+        from app.services.validation_rubric_v3 import result_allocation
+
+        doubled = {"findings": [*self._INVENTORY["findings"], *self._INVENTORY["findings"]]}
+        leaves = allocate(default_profile(), results=result_allocation(doubled))
+        assert sum((l["weight"] for l in leaves if l["section"] == "R"), Fraction(0)) == 30
