@@ -215,3 +215,139 @@ class TestTheStiffnessPaperEndsWithScopeNotEstablished:
         report = await replay_report(session, restored)
         assert report["applicability"]["status"] == "not_applicable"
         assert [e["support"] for e in report["applicability"]["experiments"]] == ["unsupported"] * 5
+
+
+class TestGroffsClarificationPathRunsEndToEnd:
+    """plan_8_4 milestone 0: the whole path for the 88-gene claim, through bioAF's own callers.
+
+    The recovery reaches the subset operation and stops on the magnitude the paper's wording does not
+    state. That is the point every earlier piece stopped at: the service takes a clarification, the
+    endpoint takes one, and there was no way to give it one. Here the reading is recorded through the
+    service the API calls, and what it reaches is followed to the projection every surface reads.
+
+    Three readings are exercised. A justified absolute reading reaches the paper's own 88; a signed
+    reading reaches 26 and DISAGREES, which is a legitimate scientific outcome and not a bug to be
+    tuned away; no clarification leaves the magnitude open. Nothing here invents a confirmation to
+    obtain a favourable number: the note states what a person would be resting the reading on, and the
+    count that follows is whatever the table holds.
+    """
+
+    _TABLE = "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt"
+
+    async def _recovered(self, session, admin_user, monkeypatch):
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        return restored
+
+    async def _requeue(self, session, restored):
+        """Run the queue, which is what the production worker does after a recovery. The queued check
+        reuses the comparison the recovery made while the bytes were in hand."""
+        from app.services import validation_consistency_checks as consistency
+
+        await consistency.enqueue(session, restored.study, restored.plan)
+        await consistency.run_pending(session, restored.study, restored.plan, fetcher=_no_fetch)
+        await session.flush()
+
+    def _row(self, restored, claim_index: int) -> dict:
+        records = {r["claim_index"]: r for r in consistency_of(restored.study.evidence_json or {}, self._TABLE)}
+        return records[claim_index]
+
+    async def _confirm(self, session, restored, magnitude: bool, note: str):
+        """The service the endpoint calls, with the entry the endpoint builds."""
+        from app.services.validation_table_confirmations import confirmation_entry, record_confirmation
+
+        target = sorted(restored.targets, key=lambda t: t.id)[11]
+        contrast = (restored.plan.differential_design_json or {})["contrasts"][target.contrast_index]["name"]
+        entry = confirmation_entry(
+            table=self._TABLE,
+            contrast=contrast,
+            filter_semantics={"magnitude": magnitude},
+            note=note,
+            confirmed_by="a person",
+            at="2026-09-18T00:00:00+00:00",
+        )
+        await record_confirmation(session, restored.study, restored.plan, entry, reason="a person recorded the reading")
+        await session.flush()
+        return entry
+
+    @pytest.mark.asyncio
+    async def test_with_no_clarification_the_magnitude_stays_open_and_the_report_says_so(
+        self, session, admin_user, monkeypatch
+    ):
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        row = self._row(restored, 11)
+        assert row["outcome"] == "unresolved"
+        await self._requeue(session, restored)
+        report = await replay_report(session, restored)
+        semantics = report["claims"][11]["consistency"]["filter_semantics"]
+        assert semantics["unresolved"] is True
+        assert "magnitude" in semantics["reason"]
+        assert semantics["statement"]
+
+    @pytest.mark.asyncio
+    async def test_a_recorded_reading_is_persisted_with_the_evidence_it_rests_on(
+        self, session, admin_user, monkeypatch
+    ):
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        await self._confirm(session, restored, True, "the authors' code applies abs(log2FoldChange)")
+        kept = (restored.study.evidence_json or {}).get("table_confirmations") or []
+        assert kept[-1]["filter_semantics"] == {"magnitude": True}
+        assert kept[-1]["note"] == "the authors' code applies abs(log2FoldChange)"
+        assert kept[-1]["confirmed_by"] == "a person"
+
+    @pytest.mark.asyncio
+    async def test_the_absolute_reading_reaches_the_papers_own_count(self, session, admin_user, monkeypatch):
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        await self._confirm(session, restored, True, "the authors' code applies abs(log2FoldChange)")
+        # The comparison is recomputed where it is computed: while the table's bytes are in hand.
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        row = self._row(restored, 11)
+        assert row["outcome"] == "agree"
+        assert row["rows_passing"] == 88
+        assert row["subset"]["filter"]["resolved_by"] == "confirmation"
+        assert row["subset"]["parent"]["count"] == 194
+
+    @pytest.mark.asyncio
+    async def test_a_signed_reading_disagrees_and_that_stands(self, session, admin_user, monkeypatch):
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        await self._confirm(session, restored, False, "the heatmap legend plots only the up-regulated genes")
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        row = self._row(restored, 11)
+        assert row["outcome"] == "disagree"
+        assert row["rows_passing"] == 26
+
+    @pytest.mark.asyncio
+    async def test_the_parent_count_is_untouched_by_either_reading(self, session, admin_user, monkeypatch):
+        """The clarification settles the refinement's magnitude and nothing else. The 194-gene check
+        rests on no filter at all and must not move."""
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        await self._confirm(session, restored, False, "the heatmap legend plots only the up-regulated genes")
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        parent = self._row(restored, 10)
+        assert parent["outcome"] == "agree"
+        assert parent["rows_passing"] == 194
+
+    @pytest.mark.asyncio
+    async def test_the_settled_reading_reaches_the_report_and_its_counts(self, session, admin_user, monkeypatch):
+        restored = await self._recovered(session, admin_user, monkeypatch)
+        await self._confirm(session, restored, True, "the authors' code applies abs(log2FoldChange)")
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        await self._requeue(session, restored)
+        report = await replay_report(session, restored)
+        claim = report["claims"][11]
+        assert claim["consistency"]["outcome"] == "agree"
+        assert claim["consistency"]["filter_semantics"]["unresolved"] is False
+        assert claim["consistency"]["filter_semantics"]["resolved_by"] == "confirmation"
+        # Two claims are now checked against the authors' published results, and the counts line, the
+        # summary sentence and the claims' own rows are still one answer.
+        assert report["claim_counts"]["checked"] == 2
+        assert "2 checked against the authors' published results" in report["claim_counts"]["label"]
+        from app.services.validation_report_summary import report_contradictions
+
+        assert report_contradictions(report) == []
+
+
+async def _no_fetch(url):
+    """A replayed queue holds no bytes of its own: a check that tries to download has lost the answer
+    bioAF already has, and this makes that a failure rather than a silent network call."""
+    raise AssertionError(f"the queued check tried to download {url}; it should reuse what the recovery computed")

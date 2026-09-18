@@ -146,12 +146,74 @@ def _comparisons_from_an_earlier_reading(evidence: dict) -> int:
     )
 
 
+def _comparisons_without_the_recorded_reading(evidence: dict) -> int:
+    """plan_8_4 defect 1: comparisons that stand without the confirmation a person has since recorded.
+
+    A comparison is computed while a supplement's bytes are in hand, and a bundle member has no address
+    of its own to fetch again. So recording how a table reads cannot reach that comparison by itself:
+    the queued check has no way back to the bytes. This is what makes the recorded reading actionable
+    on such a table, with one download and no model call, and it is offered only where a confirmation
+    the standing comparison did not apply actually exists.
+    """
+    from app.services.validation_table_confirmations import fingerprint_of, latest
+
+    confirmations = (evidence or {}).get("table_confirmations") or []
+    if not confirmations:
+        return 0
+    contrasts = {e.get("contrast") for e in confirmations if isinstance(e, dict)}
+    found = 0
+    for supplement in evidence.get("supplements") or []:
+        if not isinstance(supplement, dict):
+            continue
+        filename = supplement.get("filename")
+        for record in supplement.get("consistency") or []:
+            if not isinstance(record, dict):
+                continue
+            for contrast in contrasts:
+                confirmed = latest(evidence, filename, contrast)
+                if confirmed is None:
+                    continue
+                if record.get("confirmation_fingerprint") != fingerprint_of(confirmed):
+                    found += 1
+                    break
+    return found
+
+
+def _comparison_answers(evidence: dict) -> dict:
+    """What each claim's comparison against each supplement currently says, keyed by file and claim.
+
+    Used to tell whether re-reading the bundle actually CHANGED an answer. A queued check reuses the
+    comparison made while the bytes were in hand, and `enqueue` is idempotent, so a recomputed
+    comparison reaches no surface until the record that reuses it is superseded. Without this the
+    report goes on stating the outcome of a reading the evidence no longer holds.
+    """
+    answers = {}
+    for supplement in (evidence or {}).get("supplements") or []:
+        if not isinstance(supplement, dict):
+            continue
+        for record in supplement.get("consistency") or []:
+            if not isinstance(record, dict):
+                continue
+            answers[(supplement.get("filename"), record.get("claim_index"))] = (
+                record.get("outcome"),
+                record.get("reason"),
+                record.get("rows_passing"),
+                record.get("method"),
+                record.get("confirmation_fingerprint"),
+            )
+    return answers
+
+
 def recovery_projection(evidence: dict, checks: list[dict], *, restate: dict | None = None) -> dict:
     """What the report shows about recovery: whether one would change anything, and the last one run.
     ``restate`` is a classification an early exit gave a paper outside bioAF's methods (section 4.1)."""
     affected = [c for c in checks or [] if why_affected(c)]
     pmcid = bool((evidence or {}).get("pmcid"))
-    unbound = _unbound_supplement_comparisons(evidence or {}) + _comparisons_from_an_earlier_reading(evidence or {})
+    unbound = (
+        _unbound_supplement_comparisons(evidence or {})
+        + _comparisons_from_an_earlier_reading(evidence or {})
+        + _comparisons_without_the_recorded_reading(evidence or {})
+    )
     history = (evidence or {}).get("recovery_history") or []
     last = history[-1] if history else None
     return {
@@ -162,6 +224,29 @@ def recovery_projection(evidence: dict, checks: list[dict], *, restate: dict | N
             {k: last.get(k) for k in ("at", "actor", "reason", "requeued", "build")} if isinstance(last, dict) else None
         ),
     }
+
+
+async def _targets_for_claims(session, plan, claims: set) -> set:
+    """The comparison targets at those claim positions. A claim index is the plan's targets in id
+    order, which is the order every other caller reads them in."""
+    if not claims or plan is None:
+        return set()
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+
+    rows = list(
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                .order_by(ComparisonTarget.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return {rows[index].id for index in claims if isinstance(index, int) and 0 <= index < len(rows)}
 
 
 async def _plan_and_records(session, study):
@@ -230,11 +315,16 @@ async def preview_recovery(session, study) -> dict:
             }
         )
     stale_reading = _comparisons_from_an_earlier_reading(evidence)
-    if plan is not None and pmcid and (_unbound_supplement_comparisons(evidence) or stale_reading):
+    unapplied = _comparisons_without_the_recorded_reading(evidence)
+    if plan is not None and pmcid and (_unbound_supplement_comparisons(evidence) or stale_reading or unapplied):
         earlier = (
             " Some were made under an earlier reading of what a published list and its documented refinement "
             "establish, and are read again under the current one."
             if stale_reading
+            else ""
+        ) + (
+            " Some stand without a reading of the table a person has since recorded, and are read again with it."
+            if unapplied
             else ""
         )
         actions.append(
@@ -406,14 +496,29 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
 
                 evidence["methods_cutoffs"] = record_methods((text.sections or {}).get("methods"), source=EUROPE_PMC)
         study.evidence_json = dict(evidence)
+    recomputed_claims: set = set()
     if "recheck_supplements" in kinds:
+        before_answers = _comparison_answers(evidence)
         evidence["supplements"] = await resolve_study_supplements(session, study, evidence)
         result["rechecked_supplements"] = True
         study.evidence_json = dict(evidence)
+        after_answers = _comparison_answers(evidence)
+        recomputed_claims = {
+            claim
+            for (_, claim) in set(before_answers) | set(after_answers)
+            for key in [(_, claim)]
+            if before_answers.get(key) != after_answers.get(key)
+        }
     await session.flush()
 
     affected_ids = {a["check_id"] for a in preview["affected_checks"]}
     affected_targets = {r.comparison_target_id for r in records if r.check_id in affected_ids}
+    # A claim whose comparison the recheck CHANGED is one whose queued record reuses an answer the
+    # evidence no longer holds. It is re-evaluated with the others, so the report cannot go on
+    # stating an outcome bioAF has replaced.
+    recomputed_targets = await _targets_for_claims(session, plan, recomputed_claims)
+    affected_targets |= recomputed_targets
+    affected_ids |= {r.check_id for r in records if r.comparison_target_id in recomputed_targets}
     # Section 3.1: a check whose cutoff the recorded methods now change depends on them, and follows them.
     changed_targets = await _cutoffs_changed(session, study, plan, records)
     result["cutoffs_changed"] = len(changed_targets - affected_targets)

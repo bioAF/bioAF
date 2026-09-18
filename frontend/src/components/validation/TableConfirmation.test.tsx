@@ -78,3 +78,92 @@ test("a person who may only view the study sees no control", () => {
   const { container } = render(<TableConfirmation {...PROPS} onChanged={jest.fn()} />);
   expect(container).toBeEmptyDOMElement();
 });
+
+/**
+ * plan_8_4 defect 1: the magnitude reading of a documented refinement.
+ *
+ * The service takes it, the endpoint takes it, and the form had no field for it, so the one thing
+ * that settles Groff's 88-gene claim could not be recorded through the application at all. The field
+ * appears only where the magnitude is what is open: a comparison unresolved for some other reason
+ * has no reading to state.
+ */
+const FILTER = {
+  unresolved: true,
+  reason:
+    "the statement does not say whether the cutoff is on the magnitude of the fold change or on its signed value, and the two select different genes",
+  statement: "We further refined this list by selecting those with a log2 fold change >2",
+  magnitude: null,
+  resolved_by: null,
+};
+
+test("offers the magnitude reading only where the refinement's magnitude is what is open", () => {
+  const { rerender } = render(<TableConfirmation {...PROPS} onChanged={jest.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Record how this table reads" }));
+  expect(screen.queryByLabelText("What the fold-change cutoff is on")).not.toBeInTheDocument();
+
+  rerender(<TableConfirmation {...PROPS} filterSemantics={FILTER} onChanged={jest.fn()} />);
+  expect(screen.getByLabelText("What the fold-change cutoff is on")).toBeInTheDocument();
+  expect(screen.getByText(/log2 fold change >2/)).toBeInTheDocument();
+});
+
+test("a settled reading is stated rather than asked again", () => {
+  render(
+    <TableConfirmation
+      {...PROPS}
+      filterSemantics={{ ...FILTER, unresolved: false, magnitude: true, resolved_by: "confirmation" }}
+      onChanged={jest.fn()}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Record how this table reads" }));
+  expect(screen.queryByLabelText("What the fold-change cutoff is on")).not.toBeInTheDocument();
+});
+
+test("records the magnitude reading and sends it as the filter semantics", async () => {
+  const onChanged = jest.fn();
+  mockPost.mockResolvedValue({ id: 7 });
+  render(<TableConfirmation {...PROPS} filterSemantics={FILTER} onChanged={onChanged} />);
+  fireEvent.click(screen.getByRole("button", { name: "Record how this table reads" }));
+  fireEvent.change(screen.getByLabelText("What the fold-change cutoff is on"), {
+    target: { value: "magnitude" },
+  });
+  fireEvent.change(screen.getByLabelText("What establishes this"), {
+    target: { value: "The authors' code takes abs(log2FoldChange)." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Record" }));
+
+  await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  expect(mockPost).toHaveBeenCalledWith("/api/validation-studies/7/table-confirmations", {
+    table: PROPS.table,
+    contrast: PROPS.contrast,
+    reports_contrast: false,
+    columns: null,
+    effect_scale: null,
+    orientation: null,
+    filter_semantics: { magnitude: true },
+    note: "The authors' code takes abs(log2FoldChange).",
+  });
+});
+
+test("the signed reading is the other value, and is sent as false", async () => {
+  mockPost.mockResolvedValue({ id: 7 });
+  render(<TableConfirmation {...PROPS} filterSemantics={FILTER} onChanged={jest.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Record how this table reads" }));
+  fireEvent.change(screen.getByLabelText("What the fold-change cutoff is on"), { target: { value: "signed" } });
+  fireEvent.change(screen.getByLabelText("What establishes this"), {
+    target: { value: "The legend plots only the up-regulated genes." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  expect(mockPost.mock.calls[0][1].filter_semantics).toEqual({ magnitude: false });
+});
+
+test("a form that states no reading sends no filter semantics at all", async () => {
+  mockPost.mockResolvedValue({ id: 7 });
+  render(<TableConfirmation {...PROPS} filterSemantics={FILTER} onChanged={jest.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Record how this table reads" }));
+  fireEvent.click(screen.getByLabelText(`This table reports ${PROPS.contrast}`));
+  fireEvent.change(screen.getByLabelText("What establishes this"), { target: { value: "A README." } });
+  fireEvent.click(screen.getByRole("button", { name: "Record" }));
+  await waitFor(() => expect(mockPost).toHaveBeenCalled());
+  expect(mockPost.mock.calls[0][1]).not.toHaveProperty("filter_semantics");
+});

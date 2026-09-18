@@ -691,6 +691,11 @@ def supplement_consistency(
     header = binding.header_of(text)
     records = []
     for item in predicates or []:
+        # plan_8_4 defect 1: the confirmation a person recorded for THIS file and this contrast, applied
+        # where the comparison is actually made. It used to arrive only at the queued check, which for a
+        # bundle member has no address to fetch the table from again, so the one control that settles
+        # Groff's refinement could never reach the operation it was written for.
+        item = {**item, "confirmation": item.get("confirmation") or _confirmation_for_file(item, filename)}
         bound = binding.bind(
             candidate, item.get("contrast") or {}, competitors=item.get("competitors") or [], header=header
         )
@@ -740,9 +745,28 @@ def supplement_consistency(
                 "predicate_fingerprint": _fingerprint(item.get("predicate")),
                 # And the reading that made it: a record from an earlier one is not this build's answer.
                 "consistency_version": CONSISTENCY_VERSION,
+                # Which recorded confirmation this comparison applied, or None for none. A queued check
+                # reuses a held comparison only where the confirmation it was made under is the one that
+                # stands now; before this, ANY confirmation discarded every held comparison.
+                "confirmation_fingerprint": _confirmation_fingerprint(item.get("confirmation")),
             }
         )
     return records
+
+
+def _confirmation_for_file(item: dict, filename: str) -> dict | None:
+    """The latest confirmation recorded for this file and this claim's contrast, or None."""
+    found = None
+    for entry in item.get("confirmations") or []:
+        if isinstance(entry, dict) and entry.get("table") == filename:
+            found = entry
+    return found
+
+
+def _confirmation_fingerprint(confirmation) -> str | None:
+    from app.services.validation_table_confirmations import fingerprint_of
+
+    return fingerprint_of(confirmation)
 
 
 def _fingerprint(predicate) -> str:
@@ -827,6 +851,14 @@ def claim_predicates(targets: list, plan, *, evidence: dict | None = None) -> li
                 # plan_8_2 section 1.1: every other contrast of the paper, which a table's binding must rule out.
                 "contrast_index": position,
                 "competitors": [c for i, c in enumerate(contrasts) if i != position and isinstance(c, dict)],
+                # plan_8_4 defect 1: what a person has recorded about how this contrast's tables read.
+                # Which one applies depends on the file, so the whole list travels and the comparison
+                # picks the entry for the table it is reading.
+                "confirmations": [
+                    entry
+                    for entry in (evidence or {}).get("table_confirmations") or []
+                    if isinstance(entry, dict) and entry.get("contrast") == (contrast or {}).get("name")
+                ],
             }
         )
     return found

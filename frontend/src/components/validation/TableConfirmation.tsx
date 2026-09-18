@@ -25,16 +25,44 @@ const ROLES: { role: Role; label: string }[] = [
   { role: "padj", label: "Adjusted P value column" },
 ];
 
+/**
+ * plan_8_4 defect 1: the magnitude reading of a documented refinement of a published list.
+ *
+ * The paper writes "a log2 fold change >2". Read as the signed value that selects one set of genes;
+ * read as the magnitude it selects another, and only evidence says which the authors meant. The
+ * service and the endpoint have taken this since plan_8_3 and the form had no field for it, so the
+ * one thing that settles Groff's 88-gene claim could not be recorded through the application.
+ *
+ * The field appears only where this is what is open: a comparison unresolved for some other reason
+ * has no reading to state, and a reading already settled is stated rather than asked again.
+ */
+export interface FilterSemantics {
+  unresolved: boolean;
+  reason: string | null;
+  statement: string | null;
+  magnitude: boolean | null;
+  resolved_by: string | null;
+}
+
 interface Props {
   studyId: number;
   table: string;
   contrast: string;
   columnsCount?: number | null;
   candidateRoles?: Partial<Record<Role, number[]>> | null;
+  filterSemantics?: FilterSemantics | null;
   onChanged: (updated: unknown) => void;
 }
 
-export function TableConfirmation({ studyId, table, contrast, columnsCount, candidateRoles, onChanged }: Props) {
+export function TableConfirmation({
+  studyId,
+  table,
+  contrast,
+  columnsCount,
+  candidateRoles,
+  filterSemantics,
+  onChanged,
+}: Props) {
   const { canAccess } = usePermissions();
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -42,6 +70,7 @@ export function TableConfirmation({ studyId, table, contrast, columnsCount, cand
   const [columns, setColumns] = useState<Record<Role, string>>({ id: "", lfc: "", pvalue: "", padj: "" });
   const [scale, setScale] = useState("");
   const [orientation, setOrientation] = useState("");
+  const [magnitude, setMagnitude] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -65,6 +94,9 @@ export function TableConfirmation({ studyId, table, contrast, columnsCount, cand
           columns: Object.keys(chosen).length ? chosen : null,
           effect_scale: scale || null,
           orientation: orientation || null,
+          // Sent only where a reading was stated: an absent field settles nothing, and the server
+          // refuses a filter confirmation that says anything but which of the two readings it is.
+          ...(magnitude ? { filter_semantics: { magnitude: magnitude === "magnitude" } } : {}),
           note: note.trim(),
         }),
       );
@@ -159,6 +191,26 @@ export function TableConfirmation({ studyId, table, contrast, columnsCount, cand
           </select>
         </div>
       </div>
+      {filterSemantics?.unresolved && (
+        <div className="text-gray-600">
+          {filterSemantics.statement && (
+            <p className="text-gray-500">The paper says: &quot;{filterSemantics.statement.trim()}&quot;</p>
+          )}
+          <label htmlFor={`${id}-magnitude`} className="mt-1 block">
+            What the fold-change cutoff is on
+          </label>
+          <select
+            id={`${id}-magnitude`}
+            value={magnitude}
+            onChange={(event) => setMagnitude(event.target.value)}
+            className="mt-1 rounded border border-gray-300 px-2 py-1 text-sm"
+          >
+            <option value="">Not recorded</option>
+            <option value="magnitude">The size of the change, in either direction</option>
+            <option value="signed">The signed value, in one direction</option>
+          </select>
+        </div>
+      )}
       <label htmlFor={`${id}-note`} className="block text-gray-600">
         What establishes this
       </label>

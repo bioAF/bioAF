@@ -973,6 +973,10 @@ def _consistency_row(record: dict) -> dict:
         "interpretation": _interpretation_row(record.get("interpretation")),
         "candidate_roles": record.get("candidate_roles"),
         "columns_count": record.get("columns_count"),
+        # plan_8_4 defect 1: which reading of a documented refinement's cutoff is open, so the page
+        # can offer the control that settles it. Unresolved has many causes and only this one has
+        # this way out; without it the form could offer the field on every unresolved comparison.
+        "filter_semantics": _filter_semantics_row(record.get("subset")),
     }
     superseded = record.get("superseded")
     if isinstance(superseded, dict):
@@ -992,6 +996,23 @@ def _candidates(value) -> list[dict]:
         elif candidate:
             rows.append({"interpretation": str(candidate), "count": None})
     return rows
+
+
+def _filter_semantics_row(subset) -> dict | None:
+    """The refinement's magnitude reading: whether it is open, what the paper's words said, and what
+    settled it. None where the comparison refines no published list at all."""
+    found = (subset or {}).get("filter") if isinstance(subset, dict) else None
+    if not isinstance(found, dict) or found.get("kind") not in ("abs_log2fc", "log2fc"):
+        return None
+    return {
+        "unresolved": bool(found.get("unresolved")),
+        "reason": found.get("unresolved"),
+        "statement": found.get("statement"),
+        "magnitude": found.get("magnitude"),
+        "resolved_by": found.get("resolved_by"),
+        "note": found.get("note"),
+        "confirmed_by": found.get("confirmed_by"),
+    }
 
 
 def _interpretation_row(value) -> dict | None:
