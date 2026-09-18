@@ -45,6 +45,20 @@ class AssayRoute:
     # topic, a tool the paper named) is now ALLOWED TO COMPETE, where before the marker returned
     # first and the registry fallback never ran at all.
     contextual_markers: tuple[str, ...] = ()
+    # QUALIFIED markers: words that name the SUBJECT of a measurement rather than the measurement.
+    # "single-cell" says what was observed, one cell at a time, and is as true of live-cell tracking,
+    # immunofluorescence imaging, force spectroscopy and patch clamp as it is of scRNA-seq. Read as
+    # diagnostic it gave the substrate-stiffness paper's migration-tracking assay an nf-core/scrnaseq
+    # workflow, a reference genome and a sequencing predicate for an experiment that produced no
+    # reads at all (plan_8_4 section 2, defect 2).
+    #
+    # A qualified marker identifies this assay only where the SAME string also names the measurement
+    # (`qualifiers`). Unqualified, it says nothing and the route does not match on it: the paper is
+    # left to the routes below, to the registry fallback, or to `not_reproducible`, which is the
+    # honest answer for an assay bioAF cannot execute.
+    qualified_markers: tuple[str, ...] = ()
+    # The measurement evidence a qualified marker needs. Each is matched the same way a marker is.
+    qualifiers: tuple[str, ...] = ()
 
 
 # ORDER IS LAW. Routes are tried top to bottom and the first marker hit wins, so a narrow assay
@@ -56,7 +70,13 @@ _ROUTES: tuple[AssayRoute, ...] = (
     AssayRoute(
         pipeline_key="nf-core/scrnaseq",
         pipeline_version="2.7.1",
-        markers=("single-cell", "single cell", "scrna", "sc-rna", "snrna", "chromium", "cell ranger"),
+        # These name the measurement themselves: an abbreviation of single-cell RNA, the vendor's
+        # own single-cell gene-expression product, and its cell caller.
+        markers=("scrna", "sc-rna", "snrna", "chromium", "cell ranger"),
+        # "single-cell" is the subject, not the measurement. It reaches scrnaseq only where the
+        # paper also says what was measured.
+        qualified_markers=("single-cell", "single cell"),
+        qualifiers=("rna", "transcriptom", "gene expression", "cdna", "expression profiling"),
         # 10x sells the chemistry for spatial (Visium) and for single-cell ATAC as well as for
         # scRNA-seq, so "10x" names the vendor rather than the assay. It captured every spatial
         # transcriptomics paper for scrnaseq.
@@ -409,6 +429,22 @@ def marker_matches(marker: str, assay: str) -> bool:
     return _marker_pattern(marker).search(assay) is not None
 
 
+def route_names_diagnostically(route: AssayRoute, assay: str) -> bool:
+    """Whether ``assay`` identifies ``route``'s assay outright.
+
+    A plain marker does that on its own. A QUALIFIED marker does it only where the same string also
+    names the measurement: "single-cell" plus "RNA-seq" identifies scRNA-seq, "single-cell" plus
+    "tracking" identifies nothing bioAF sequences (plan_8_4 section 2, defect 2).
+    """
+    if any(marker_matches(marker, assay) for marker in route.markers):
+        return True
+    if not route.qualified_markers:
+        return False
+    return any(marker_matches(marker, assay) for marker in route.qualified_markers) and any(
+        marker_matches(qualifier, assay) for qualifier in route.qualifiers
+    )
+
+
 def match_route(assay: str) -> tuple[AssayRoute, bool] | None:
     """The declared route ``assay`` names, and whether it named it DIAGNOSTICALLY.
 
@@ -421,7 +457,7 @@ def match_route(assay: str) -> tuple[AssayRoute, bool] | None:
     family. Within each tier, declaration order is still law.
     """
     for route in _ROUTES:
-        if any(marker_matches(marker, assay) for marker in route.markers):
+        if route_names_diagnostically(route, assay):
             return route, True
     for route in _ROUTES:
         if any(marker_matches(marker, assay) for marker in route.contextual_markers):
@@ -440,7 +476,7 @@ def pipelines_named_by(assay: str | None) -> list[str]:
     text = (assay or "").lower()
     if not text.strip():
         return []
-    named = [r.pipeline_key for r in _ROUTES if any(marker_matches(m, text) for m in r.markers)]
+    named = [r.pipeline_key for r in _ROUTES if route_names_diagnostically(r, text)]
     if not named:
         named = [r.pipeline_key for r in _ROUTES if any(marker_matches(m, text) for m in r.contextual_markers)]
     return list(dict.fromkeys(named))
