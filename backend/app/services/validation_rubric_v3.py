@@ -485,3 +485,133 @@ def score(leaves: list[dict], outcomes: dict | None) -> dict:
         },
         "status": "not_assessed" if assessed == 0 else "assessed",
     }
+
+
+# ---- the results allocation ----------------------------------------------------------------------
+
+# Section 3.3's finding weights, the same ones rubric v2 declares. A technical or descriptive finding
+# receives NO result allocation: the technical checks that matter are the other criteria's business.
+FINDING_WEIGHTS = {"primary": 2, "supporting": 1, "technical": 0}
+
+
+def result_allocation(inventory: dict | None, *, workflows: list | None = None) -> dict:
+    """How R1, R2 and R3 divide their points, frozen BEFORE any outcome is observed.
+
+    R1 and R2 divide among the paper's findings by importance (primary 2, supporting 1), then equally
+    among each finding's distinct required claim checks. A claim two findings both require is one
+    measurement and one leaf: shared membership cannot buy a second allocation.
+
+    R3 divides equally among the distinct analysis workflows those findings require, each workflow
+    half for demonstrated completion from its declared starting inputs and half for complete outputs
+    with the applicable runtime, design and QC requirements established.
+
+    Where the inventory settles no findings, or names none with any importance weight, every R
+    criterion comes back with NO parts, which `allocate` turns into one reserved leaf carrying the
+    whole weight. Thirty untested points is an honest answer; withholding the other seventy is not.
+    """
+    findings = [f for f in (inventory or {}).get("findings") or [] if isinstance(f, dict) and f.get("id")]
+    seen: set[str] = set()
+    weighted: list[tuple[dict, int]] = []
+    for finding in findings:
+        if finding["id"] in seen:
+            continue
+        seen.add(finding["id"])
+        weight = FINDING_WEIGHTS.get((finding.get("importance") or {}).get("category"), 0)
+        if weight:
+            weighted.append((finding, weight))
+    claim_parts: list[dict] = []
+    claimed: set[int] = set()
+    for finding, weight in weighted:
+        required = [c for c in finding.get("required") or finding.get("claim_indices") or [] if isinstance(c, int)]
+        # De-duplicated within the finding first, so a claim listed twice is still one check.
+        distinct = list(dict.fromkeys(required))
+        if not distinct:
+            continue
+        for claim in distinct:
+            if claim in claimed:
+                # Shared with an earlier finding: one measurement record, one allocation. The share
+                # stays inside the fixed category budget rather than being added on top of it.
+                continue
+            claimed.add(claim)
+            claim_parts.append(
+                {
+                    "id": f"{finding['id']}.{claim}",
+                    "finding": finding["id"],
+                    "claim_index": claim,
+                    "share": Fraction(weight, len(distinct)),
+                    "subject": f"claim {claim} of {finding['id']}",
+                }
+            )
+    execution_parts: list[dict] = []
+    for workflow in list(dict.fromkeys(w for w in workflows or [] if w)):
+        key = str(workflow).replace("/", "_")
+        execution_parts.append(
+            {
+                "id": f"{key}.completion",
+                "unit": workflow,
+                "share": Fraction(1, 2),
+                "subject": f"{workflow} runs from its declared starting inputs to completion",
+            }
+        )
+        execution_parts.append(
+            {
+                "id": f"{key}.outputs",
+                "unit": workflow,
+                "share": Fraction(1, 2),
+                "subject": f"{workflow} produces the required complete outputs and meets its checked requirements",
+            }
+        )
+    return {"R1": list(claim_parts), "R2": [dict(p) for p in claim_parts], "R3": execution_parts}
+
+
+# ---- display --------------------------------------------------------------------------------------
+
+_PRECISION = Fraction(1, 10)
+
+
+def display(card: dict) -> dict:
+    """The card's numbers as a surface shows them: one decimal, summing to the profile's total.
+
+    Rounding each part on its own loses or gains a tenth, and a bar whose three parts do not add up
+    is a bar a reader cannot trust. The parts are rounded down and the residue given to the largest,
+    which preserves the sum exactly. A part that is genuinely nonzero but smaller than a tenth shows
+    "<0.1" rather than "0": rounding a residual away to claim everything verified is the one thing
+    this must never do. The exact rationals travel beside the display and are what is persisted.
+    """
+    parts = {key: card[key] for key in (VERIFIED, FAILED, UNDETERMINED)}
+    total = sum(parts.values(), Fraction(0))
+    floors = {key: int((value / _PRECISION).__floor__()) for key, value in parts.items()}
+    # A genuinely nonzero part below a tenth RESERVES a tenth before anything else is distributed.
+    # Otherwise the residue is handed to the largest part and the card reads 100 verified while a
+    # real, unverified remainder is still outstanding, which is the one thing this must never do.
+    below = {key for key, tenths in floors.items() if tenths == 0 and parts[key] > 0}
+    for key in below:
+        floors[key] = 1
+    tenths_total = int((total / _PRECISION).__floor__())
+    residue = tenths_total - sum(floors.values())
+    if residue > 0:
+        for key in sorted(floors, key=lambda k: (-(parts[k] - floors[k] * _PRECISION), k))[:residue]:
+            floors[key] += 1
+    while residue < 0:
+        # The reservations overshot. The largest part pays, never a reserved one: understating what
+        # was verified is the safe direction.
+        largest = max((k for k in floors if k not in below and floors[k] > 0), key=lambda k: floors[k], default=None)
+        if largest is None:
+            break
+        floors[largest] -= 1
+        residue += 1
+    shown = {}
+    for key, tenths in floors.items():
+        value = Fraction(tenths) * _PRECISION
+        if key in below:
+            shown[key] = "<0.1"
+            continue
+        shown[key] = f"{float(value):g}"
+    return {
+        "verified": shown[VERIFIED],
+        "failed": shown[FAILED],
+        "undetermined": shown[UNDETERMINED],
+        "parts": {key: float(Fraction(tenths) * _PRECISION) for key, tenths in floors.items()},
+        "exact": {key: str(value) for key, value in parts.items()},
+        "total": f"{float(total):g}",
+    }
