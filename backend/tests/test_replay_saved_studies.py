@@ -16,9 +16,7 @@ from tests.replay import SAVED_STUDIES, load, replay_consistency, replay_mapping
 
 
 async def _restored(session, admin_user, study_id: int):
-    return await restore(
-        session, study_id, organization_id=admin_user.organization_id, user_id=admin_user.id
-    )
+    return await restore(session, study_id, organization_id=admin_user.organization_id, user_id=admin_user.id)
 
 
 class TestTheCapturedFixturesAreRedistributable:
@@ -81,17 +79,38 @@ class TestGroffsParentCountAgreesAndItsRefinementIsNeverReached:
         assert outcomes[10]["decoding"]["source_checksum"] == recorded
 
 
-class TestTheSamd1MappingIsRefusedOnEveryRow:
-    """Study 56's recorded stop: eight rows, twelve refusals. Every row is refused for its arm's
-    condition, and the four KO rows also for their clone identity."""
+class TestTheSamd1MappingStopsOnItsClonesAndNoLongerOnItsArms:
+    """Study 56's recorded stop was eight rows and twelve refusals: every row refused for its arm's
+    condition, and the four KO rows also for their clone identity.
+
+    Section 3.1 repaired the first half: the arms' conditions are the genotypes the records state, so
+    all eight rows are accepted on their attributes (the per-row diff, with the superseded rule beside
+    the current one, is `tests/fixtures/refusal_diffs/arm_condition_compatibility.json`). The second
+    half is CORRECT and stands: nothing study 56 cites states which clone a KO column came from, and
+    that is resolved through stage 5's own control, not by loosening the check.
+    """
 
     @pytest.mark.asyncio
-    async def test_replaying_the_mapping_reproduces_the_recorded_refusals(self, session, admin_user):
+    async def test_the_mapping_is_still_held(self, session, admin_user):
         restored = await _restored(session, admin_user, 56)
         recorded = restored.bundle["study"]["evidence_json"]["input_choice"]["mapping_validation"]
         validation = await replay_mapping(session, restored)
         assert validation["status"] == recorded["status"] == "unresolved"
-        assert validation["reasons"] == recorded["reasons"]
+
+    @pytest.mark.asyncio
+    async def test_no_row_is_refused_for_its_arms_condition_any_more(self, session, admin_user):
+        restored = await _restored(session, admin_user, 56)
+        validation = await replay_mapping(session, restored)
+        assert [r for r in validation["reasons"] if "arm" in r] == []
+
+    @pytest.mark.asyncio
+    async def test_the_four_clone_identities_are_what_holds_it(self, session, admin_user):
+        restored = await _restored(session, admin_user, 56)
+        recorded = restored.bundle["study"]["evidence_json"]["input_choice"]["mapping_validation"]["reasons"]
+        validation = await replay_mapping(session, restored)
+        identity = [r for r in recorded if "biological unit" in r]
+        assert len(identity) == 4
+        assert validation["reasons"] == identity
 
 
 class TestTheStiffnessPaperEndsWithScopeNotEstablished:

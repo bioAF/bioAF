@@ -135,11 +135,16 @@ async def restore(session, study_id: int, *, organization_id: int, user_id: int)
 
     # The captured ids were inserted explicitly, so every sequence is behind them. A later insert
     # through the sequence (a new check record, say) would collide.
-    for table in ("validation_studies", "reproduction_plans", "comparison_targets", "validation_check_records", "validation_study_issues"):
+    for table in (
+        "validation_studies",
+        "reproduction_plans",
+        "comparison_targets",
+        "validation_check_records",
+        "validation_study_issues",
+    ):
         await session.execute(
             sa_text(
-                f"select setval(pg_get_serial_sequence('{table}', 'id'), "
-                f"coalesce((select max(id) from {table}), 1))"
+                f"select setval(pg_get_serial_sequence('{table}', 'id'), coalesce((select max(id) from {table}), 1))"
             )
         )
     return Restored(bundle, study, plans, targets, checks, issues)
