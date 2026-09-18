@@ -20,6 +20,14 @@ name, count, cutoff or sample label from it may reach production behaviour.
 - `normalized_counts_header.tsv`: the header row of `GSE144396_RNA-Seq_NormalizedCounts.txt.gz` as
   study 37's inspection recorded it (an unnamed index column, then `WT-1` .. `WT-4`, `KO Cl5 repl1`,
   `KO Cl5 repl2`, `KO Cl16`, `KO Cl33`).
+- `study_56_persisted.json`: the SAME paper read again on 2026-09-17, on build `fbf20d04` (alembic
+  144), captured read-only from the demo as plan_8_3 section 0.2 requires. The account columns are
+  dropped (organization, requesting user, approving user, uuid, and the internal paper/experiment/run
+  ids) and the deposit bucket is replaced; its evidence, plan, 9 comparison targets and 5 check
+  records are verbatim otherwise. This is plan_8_3's LIVE SAMD1 regression, and it holds two
+  independent stops: four author-result checks unresolved on an unestablished table binding, and a
+  sample mapping refused on all eight rows (twelve reasons) by the new treatment check's phrase
+  containment and the new identity-corroboration check.
 - `GSE144396_RNA-Seq_DeSeq2.txt.gz`: the deposited undifferentiated author table, byte for byte as GEO
   serves it (downloaded 2026-09-14, sha256 `4692db0a730dd34427035a29df70b89e5c0ffd05b2d0b12df7611b7a1535a6d9`).
   gzip-compressed UTF-16 little-endian with a byte-order mark and CRLF line ends: seven named columns

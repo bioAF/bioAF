@@ -14,6 +14,14 @@ reproducible benchmark.
 
 - `fulltext_jats.xml`: the article's Europe PMC JATS.
 - `study_34_persisted.json`: the study's state, plan, comparison targets and the evidence it recorded.
+- `study_55_persisted.json`: the SAME paper read again on 2026-09-17, on build `fbf20d04` (alembic
+  144), captured read-only from the demo as plan_8_3 section 0.2 requires. The account columns are
+  dropped (organization, requesting user, approving user, uuid, and the internal paper/experiment/run
+  ids); its evidence, plan, 20 comparison targets and 7 check records are verbatim otherwise. This is
+  plan_8_3's LIVE Groff regression: its 194-gene parent count AGREES against
+  `supplemental_file_3_siggenes.txt` (the same sha256 the live run recorded), and the 88-gene
+  refinement of that same list is `not_checkable` for stating no significance cutoff, so section 1.2's
+  subset operation is never reached on the paper it was written for.
 - `supplemental_file_1_embryo_metadata.txt`, `supplemental_file_2_allrcode.docx`,
   `supplemental_file_3_siggenes.txt`: the article's public supplements.
 

@@ -37,7 +37,11 @@ def _values(readme: pathlib.Path) -> list[str]:
 
 
 _FIXTURE_VALUES = sorted(
-    {v for name in ("samd1", "groff", "panahipour") for v in _values(_FIXTURES / name / "README.md")}
+    {
+        v
+        for name in ("samd1", "groff", "panahipour", "substrate_stiffness")
+        for v in _values(_FIXTURES / name / "README.md")
+    }
 )
 
 
