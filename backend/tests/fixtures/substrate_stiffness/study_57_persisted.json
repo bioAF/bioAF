@@ -1,0 +1,3911 @@
+{
+ "alembic": 144,
+ "build": "fbf20d04",
+ "captured_at": "2026-09-17",
+ "check_records": [],
+ "comparison_targets": [
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "directly measured",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "We also directly measured the Young's modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa)",
+     "scope": "one_sample",
+     "value": "PDMS 50:1 substrate"
+    }
+   },
+   "binding_reason": "Directly measured substrate stiffness, unrelated to any sequencing QC metric.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "We also directly measured the Young's modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa)",
+   "claimed_value": 19,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 489,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_50_1",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 50:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (median)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "exponential fit to estimate",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "we used an exponential fit to estimate the Young's modulus of the 60 : 1 PDMS substrate (8.5 kPa)",
+     "scope": "one_sample",
+     "value": "PDMS 60:1 substrate"
+    }
+   },
+   "binding_reason": "Extrapolated material stiffness estimate from an exponential fit; no matching controlled metric.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "we used an exponential fit to estimate the Young's modulus of the 60 : 1 PDMS substrate (8.5 kPa)",
+   "claimed_value": 8.5,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 490,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_60_1_estimated",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 60:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (estimated by exponential fit)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "exponential fit to estimate",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "and 70 : 1 PDMS substrates (2.4 kPa)",
+     "scope": "one_sample",
+     "value": "PDMS 70:1 substrate"
+    }
+   },
+   "binding_reason": "Extrapolated substrate elasticity value, not a sequencing QC quantity.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "and 70 : 1 PDMS substrates (2.4 kPa)",
+   "claimed_value": 2.4,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 491,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_70_1_estimated",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 70:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (estimated by exponential fit)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "quantitative measurements of cell stiffness shown in Figure 1(b)",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "cell stiffness",
+     "value": null
+    },
+    "population": {
+     "quote": "cells cultured on soft substrates (27 and 107 kPa) are significantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS",
+     "scope": "subset",
+     "value": "A549 cells cultured on soft (27 and 107 kPa) versus stiff (4756 kPa) substrates and TCPS"
+    }
+   },
+   "binding_reason": "Comparison of cellular Young's modulus by AFM across substrates; no controlled QC metric covers cell stiffness.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "quantitative measurements of cell stiffness shown in Figure 1(b), indicate that cells cultured on soft substrates (27 and 107 kPa) are significantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS",
+   "claimed_value": null,
+   "contrast_index": 3,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<",
+     "value": 0.05
+    }
+   ],
+   "direction": "down",
+   "id": 492,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on 27, 107, 4756 kPa PDMS and TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on cell mechanics and structure; Figure 1(b)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "Average values for these migration parameters",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "accumulated distance and average velocity",
+     "value": null
+    },
+    "population": {
+     "quote": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+     "scope": "all_samples",
+     "value": "A549 cells migrating on substrates of increasing stiffness"
+    }
+   },
+   "binding_reason": "Cell migration accumulated distance and velocity are not represented in the controlled QC vocabulary.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+   "claimed_value": null,
+   "contrast_index": 0,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": "up",
+   "id": 493,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e2",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on 27, 107, 1520, 4756 kPa PDMS and TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on cell migration; Figure 3",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "Average values for these migration parameters",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "Euclidian distance",
+     "value": null
+    },
+    "population": {
+     "quote": "there was no statistically significant difference in the Euclidian distance for cells on different stiffness substrates (including TCPS)",
+     "scope": "all_samples",
+     "value": "cells on different stiffness substrates including TCPS"
+    }
+   },
+   "binding_reason": "Euclidean distance and directionality of cell migration are not controlled QC metrics.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "Interestingly, there was no statistically significant difference in the Euclidian distance for cells on different stiffness substrates (including TCPS) and all cells cultured on PDMS substrates had a lower directionality as compared to cells on TCPS.",
+   "claimed_value": null,
+   "contrast_index": 0,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": null,
+   "id": 494,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e2",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on all PDMS substrates and TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on cell migration; Figure 3(c,d)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_experiment",
+   "binding_confidence": 0.95,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "30 cells per experi- ment",
+     "value": "per_experiment"
+    },
+    "denominator": {
+     "quote": "30 cells per experiment",
+     "value": "none"
+    },
+    "population": {
+     "quote": "The NIH image processing software ImageJ was used to manually trace the migration path of 30 cells per experiment",
+     "scope": "subset",
+     "value": "30 cells manually traced per migration experiment"
+    }
+   },
+   "binding_reason": "Number of manually traced migrating cells in a time-lapse microscopy assay is not cells recovered by single-cell cell calling.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "The NIH image processing software ImageJ was used to manually trace the migration path of 30 cells per experiment",
+   "claimed_value": 30,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 495,
+   "measurement_basis": null,
+   "metric_key": "cells_tracked_per_experiment",
+   "output_type": "count",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e2",
+   "reproduction_plan_id": 57,
+   "sample_subset": "migration assay, each experiment",
+   "source_locator": "Materials and Methods, Cell tracking",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "cells per experiment",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.95,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "90 cell tracks per substrate stiffness",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "90 cell tracks per substrate stiffness",
+     "value": "none"
+    },
+    "population": {
+     "quote": "Average values for these migration parameters for 90 cell tracks per substrate stiffness are shown in Figure 3.",
+     "scope": "subset",
+     "value": "90 cell tracks per substrate stiffness"
+    }
+   },
+   "binding_reason": "Count of tracked cell migration paths per substrate stiffness, not a sequencing sample count or cell-calling output.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "Average values for these migration parameters for 90 cell tracks per substrate stiffness are shown in Figure 3.",
+   "claimed_value": 90,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 496,
+   "measurement_basis": null,
+   "metric_key": "cell_tracks_per_substrate",
+   "output_type": "count",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e2",
+   "reproduction_plan_id": 57,
+   "sample_subset": "migration assay, each substrate stiffness (n = 3 experiments)",
+   "source_locator": "Results, Influence of substrate stiffness on cell migration",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "cell tracks per substrate stiffness",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "As shown in Figure 4(a,b)",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "mRNA expression levels",
+     "value": null
+    },
+    "population": {
+     "quote": "cells cultured on the very stiff TCPS exhibited statistically larger mRNA expression levels of E-cadherin and statistically lower mRNA expression levels of N-cadherin compared with cells grown on all PDMS substrates",
+     "scope": "subset",
+     "value": "A549 cells on TCPS compared with all PDMS substrates"
+    }
+   },
+   "binding_reason": "qRT-PCR mRNA expression differences for two specific genes; no controlled QC metric measures gene expression levels.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "cells cultured on the very stiff TCPS exhibited statistically larger mRNA expression levels of E-cadherin and statistically lower mRNA expression levels of N-cadherin compared with cells grown on all PDMS substrates",
+   "claimed_value": null,
+   "contrast_index": 1,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": "down",
+   "id": 497,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e3",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on PDMS substrates vs TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on EMT biomarkers; Figure 4(a,b)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "relative amount of E-cadherin and N-cadherin mRNA expression",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "relative amount",
+     "value": null
+    },
+    "population": {
+     "quote": "the relative amount of E-cadherin and N-cadherin mRNA expression in cells cultured on 27, 107, 1520, and 4756 kPa substrates was not statistically different",
+     "scope": "subset",
+     "value": "cells cultured on 27, 107, 1520, and 4756 kPa substrates"
+    }
+   },
+   "binding_reason": "Null result on relative mRNA expression of two genes; not a controlled QC metric.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "However, the relative amount of E-cadherin and N-cadherin mRNA expression in cells cultured on 27, 107, 1520, and 4756 kPa substrates was not statistically different.",
+   "claimed_value": null,
+   "contrast_index": 1,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": null,
+   "id": 498,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e3",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on 27, 107, 1520 and 4756 kPa PDMS substrates",
+   "source_locator": "Results, Influence of substrate stiffness on EMT biomarkers; Figure 4(a,b)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "for all conditions investigated",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "protein expression",
+     "value": null
+    },
+    "population": {
+     "quote": "TGF-b treatment resulted in a consistent, and statistically significant, decrease in E-cadherin and a consistent increase in N-cadherin for all conditions investigated",
+     "scope": "all_samples",
+     "value": "A549 cells on all PDMS substrates and TCPS exposed to 5 ng/mL TGF-b"
+    }
+   },
+   "binding_reason": "Western blot protein expression change with TGF-b treatment; no controlled QC metric applies.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "TGF-b treatment resulted in a consistent, and statistically significant, decrease in E-cadherin and a consistent increase in N-cadherin for all conditions investigated.",
+   "claimed_value": null,
+   "contrast_index": 2,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": "down",
+   "id": 499,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e4",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on all substrates, TGF-beta treated vs control",
+   "source_locator": "Results, Influence of substrate stiffness on TGF-b induced EMT; Figure 5(a-c)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "for cells on different substrates",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "fold decrease / fold increase",
+     "value": null
+    },
+    "population": {
+     "quote": "there was no statistically significant difference in the fold decrease in E-cadherin or the fold increase in N-cadherin during TGF-b treatment for cells on different substrates",
+     "scope": "all_samples",
+     "value": "cells on different substrates during TGF-b treatment"
+    }
+   },
+   "binding_reason": "Fold-change in protein expression across substrates; not a controlled QC metric.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "there was no statistically significant difference in the fold decrease in E-cadherin or the fold increase in N-cadherin during TGF-b treatment for cells on different substrates",
+   "claimed_value": null,
+   "contrast_index": 2,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": null,
+   "id": 500,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e4",
+   "reproduction_plan_id": 57,
+   "sample_subset": "TGF-beta treated A549 cells across substrate stiffnesses",
+   "source_locator": "Results, Influence of substrate stiffness on TGF-b induced EMT; Figure 5(d)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "among all substrates",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "protein expression",
+     "value": null
+    },
+    "population": {
+     "quote": "N-cadherin protein expression is statistically lower for cells cultured on TCPS and the stiffer 1520 kPa and 4756 kPa substrates",
+     "scope": "subset",
+     "value": "cells cultured on TCPS and the stiffer 1520 kPa and 4756 kPa substrates versus all substrates"
+    }
+   },
+   "binding_reason": "Western blot protein-level comparison of cadherins; no controlled QC metric measures protein expression.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "although Western blot analysis indicates that N-cadherin protein expression is statistically lower for cells cultured on TCPS and the stiffer 1520 kPa and 4756 kPa substrates, there was no statistically significant difference in the level of E-cadherin protein expression among all substrates",
+   "claimed_value": null,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": "down",
+   "id": 501,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e4",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on all PDMS substrates and TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on EMT biomarkers; Figure 4(d,e)",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "expression levels for cells cultured on TCPS",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "expression levels",
+     "value": null
+    },
+    "population": {
+     "quote": "expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS",
+     "scope": "subset",
+     "value": "cells cultured on the softer 27 kPa and 107 kPa substrates versus TCPS"
+    }
+   },
+   "binding_reason": "Phospho-protein (p-FAK, p-PAX) expression from Western blots; not a controlled sequencing QC metric.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no supplementary file, so bioAF found nothing that could hold a result table",
+     "requirement": "result_table",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "what this experiment's deposit holds is not established yet",
+     "requirement": "deposit_listing",
+     "status": "unresolved"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no QC metric measures a differential result",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the paper names no deposit holding this experiment's reads",
+     "requirement": "raw_reads",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS",
+   "claimed_value": null,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": [
+    {
+     "kind": "pvalue",
+     "operator": "<=",
+     "value": 0.05
+    }
+   ],
+   "direction": "up",
+   "id": 502,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e4",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on 27 and 107 kPa PDMS vs TCPS",
+   "source_locator": "Results, Influence of substrate stiffness on focal adhesion markers; Figure 6",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "per_group",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "the immunofluorescence results (Fig. 7)",
+     "value": "per_group"
+    },
+    "denominator": {
+     "quote": "p-PAX staining",
+     "value": null
+    },
+    "population": {
+     "quote": "cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm",
+     "scope": "all_samples",
+     "value": "cells on the softer 27 kPa and 107 kPa versus stiffer 1520 kPa and 4756 kPa substrates"
+    }
+   },
+   "binding_reason": "Qualitative immunofluorescence staining pattern of p-PAX localization; no controlled QC metric applies.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm",
+   "claimed_value": null,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 503,
+   "measurement_basis": null,
+   "metric_key": null,
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e5",
+   "reproduction_plan_id": 57,
+   "sample_subset": "A549 cells on 27, 107, 1520 and 4756 kPa PDMS substrates",
+   "source_locator": "Results, Influence of substrate stiffness on focal adhesion markers; Figure 7",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "The median (with interquartile range) values of Young's moduli for these substrates",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "The median (with interquartile range) values of Young's moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1",
+     "scope": "subset",
+     "value": "PDMS substrates with base to curing agent ratio 10:1"
+    }
+   },
+   "binding_reason": "Young's modulus of a PDMS substrate measured by AFM is a material stiffness in kPa; no controlled QC metric measures substrate elasticity.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "The median (with interquartile range) values of Young's moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1",
+   "claimed_value": 4756,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 485,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_10_1",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 10:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (median)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "median (with interquartile range) values of Young's moduli",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "1520 kPa (1357 21904 kPa) for 20 : 1",
+     "scope": "subset",
+     "value": "PDMS 20:1 substrate"
+    }
+   },
+   "binding_reason": "Substrate elastic modulus in kPa has no counterpart in the sequencing QC vocabulary.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "1520 kPa (1357 21904 kPa) for 20 : 1",
+   "claimed_value": 1520,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 486,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_20_1",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 20:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (median)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "AFM was used to measure the Young's modulus of PDMS substrates",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "107 kPa (58 2181 kPa) for 30 : 1",
+     "scope": "subset",
+     "value": "PDMS 30:1 substrate"
+    }
+   },
+   "binding_reason": "AFM stiffness measurement of a polymer substrate, not any genomics QC quantity.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "107 kPa (58 2181 kPa) for 30 : 1",
+   "claimed_value": 107,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 487,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_30_1",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 30:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (median)",
+   "unresolved_reason": null
+  },
+  {
+   "aggregation": "not_stated",
+   "binding_confidence": 0.98,
+   "binding_facts": {
+    "aggregation": {
+     "quote": "median (with interquartile range) values of Young's moduli",
+     "value": "not_stated"
+    },
+    "denominator": {
+     "quote": "kPa",
+     "value": null
+    },
+    "population": {
+     "quote": "27 kPa (14 2 65 kPa) for 40 : 1",
+     "scope": "subset",
+     "value": "PDMS 40:1 substrate"
+    }
+   },
+   "binding_reason": "Material Young's modulus; no controlled metric measures substrate elasticity.",
+   "bound_by": "model",
+   "bound_by_model": "claude-opus-5",
+   "bound_key": null,
+   "checks": {
+    "author_results": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "no deposited or attached file measures this quantity",
+     "requirement": "measured_file",
+     "status": "unavailable"
+    },
+    "processed_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric from processed files",
+     "requirement": "not_applicable",
+     "status": "unavailable"
+    },
+    "qc_metric": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "bioAF computes no QC metric that measures this claim",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    },
+    "raw_reanalysis": {
+     "basis": {
+      "binding_version": 1,
+      "check_revision": null,
+      "evidence": "88c39527731f5cabf67bdd19b7fbf57d40ee215db7f8dc4a99c9601487e712e8",
+      "outcome_revision": null
+     },
+     "reason": "the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)",
+     "requirement": "qc_binding",
+     "status": "unavailable"
+    }
+   },
+   "claim_text": "27 kPa (14 2 65 kPa) for 40 : 1",
+   "claimed_value": 27,
+   "contrast_index": null,
+   "count_relation": "=",
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "cutoffs": null,
+   "direction": null,
+   "id": 488,
+   "measurement_basis": null,
+   "metric_key": "youngs_modulus_pdms_40_1",
+   "output_type": "ratio",
+   "qc_stage": "as analysed",
+   "reported_experiment_id": "e1",
+   "reproduction_plan_id": 57,
+   "sample_subset": "PDMS 40:1 substrate",
+   "source_locator": "Results, PDMS substrate stiffness",
+   "threshold": null,
+   "threshold_kind": null,
+   "tolerance": null,
+   "unit": "kPa (median)",
+   "unresolved_reason": null
+  }
+ ],
+ "issues": [
+  {
+   "id": 35,
+   "impact": "degraded",
+   "message": "The model's proposal while grouping the paper's claims into findings did not meet the rubric bioAF validates it against.",
+   "model": "claude-opus-5",
+   "occurred_at": "2026-09-17T14:45:52.759379+00:00",
+   "outcome": "incomplete",
+   "step": "grouping the paper's claims into findings",
+   "technical_detail": {
+    "answer_text": "```json\n{\"findings\": [\n  {\n    \"description\": \"AFM calibration of PDMS substrate stiffness across base:crosslinker ratios (2.4 kPa to 4756 kPa)\",\n    \"claim_indices\": [0, 1, 2, 3, 4, 5, 6],\n    \"importance\": \"technical\",\n    \"rationale\": \"Establishes the substrate stiffness values used to define every experimental condition, without which the stiffness-dependent biological comparisons cannot be interpreted.\",\n    \"quote\": \"\",\n    \"prerequisite_for\": [\"1\", \"2\", \"4\", \"5\", \"6\", \"7\"]\n  },\n  {\n    \"description\": \"Cells on soft (27, 107 kPa) substrates are significantly softer than cells on stiff PDMS or TCPS\",\n    \"claim_indices\": [7],\n    \"importance\": \"supporting\",\n    \"rationale\": \"Confirms that substrate stiffness alters cell mechanical/cytoskeletal properties, supporting the mechanotransduction framing of the study.\",\n    \"quote\": \"quantitative measurements of cell stiffness shown in Figure 1(b), indicate that cells cultured on soft substrates (27 and 107 kPa) are significantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS\",\n    \"prerequisite_for\": []\n  },\n  {\n    \"description\": \"Increasing substrate stiffness reduces accumulated distance and migration velocity, with no change in Euclidean distance and lower directionality on PDMS than TCPS\",\n    \"claim_indices\": [8, 9],\n    \"importance\": \"primary\",\n    \"rationale\": \"Establishes the paper's central migration result that stiffness modulates lung cancer cell motility toward slower, more directional migration.\",\n    \"quote\": \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\",\n    \"prerequisite_for\": []\n  },\n  {\n    \"description\": \"Cell tracking sample sizes (30 cells per experiment, 90 tracks per substrate stiffness)\",\n    \"claim_indices\": [10, 11],\n    \"importance\": \"technical\",\n    \"rationale\": \"Documents the number of tracked cells underlying the migration statistics, enabling assessment of the migration comparisons.\",\n    \"quote\": \"\",\n    \"prerequisite_for\": [\"2\"]\n  },\n  {\n    \"description\": \"Substrate stiffness does not induce cadherin switching: E-/N-cadherin mRNA equal across PDMS stiffnesses (differing only from TCPS) and E-cadherin protein unchanged across all substrates\",\n    \"claim_indices\": [12, 13, 16],\n    \"importance\": \"primary\",\n    \"rationale\": \"Establishes the paper's key negative conclusion that stiffness-driven migration changes are not accompanied by spontaneous EMT.\",\n    \"quote\": \"Since loss of E-cadherin is a hallmark feature that is almost always observed during EMT, we conclude that reducing the substrate stiffness from 4756 kPa to 27 kPa does not spontaneously induce EMT in A549 cells.\",\n    \"prerequisite_for\": []\n  },\n  {\n    \"description\": \"TGF-b induces consistent E-cadherin loss and N-cadherin gain on all substrates, with no stiffness dependence in the magnitude of change\",\n    \"claim_indices\": [14, 15],\n    \"importance\": \"primary\",\n    \"rationale\": \"Establishes that growth-factor-induced EMT is robust and independent of substrate stiffness, a headline conclusion of the paper.\",\n    \"quote\": \"We conclude that for A549 cells, TGF-b is a strong inducer of EMT and that the degree of TGF-b induced EMT does not depend on substrate stiffness.\",\n    \"prerequisite_for\": []\n  },\n  {\n    \"description\": \"p-FAK and p-paxillin protein levels are elevated on softer (27, 107 kPa) substrates relative to TCPS\",\n    \"claim_indices\": [17],\n    \"importance\": \"primary\",\n    \"rationale\": \"Provides the alternative focal-adhesion signaling mechanism proposed to explain stiffness-dependent migration in place of EMT.\",\n    \"quote\": \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\",\n    \"prerequisite_for\": []\n  },\n  {\n    \"description\": \"Punctate p-paxillin focal clusters at cell boundaries on soft substrates versus diffuse cytoplasmic staining on stiff substrates\",\n    \"claim_indices\": [18],\n    \"importance\": \"supporting\",\n    \"rationale\": \"Imaging evidence of focal adhesion assembly that corroborates the western blot-based focal adhesion signaling mechanism.\",\n    \"quote\": \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\",\n    \"prerequisite_for\": []\n  }\n]}\n```",
+    "attempt": 1,
+    "elapsed_seconds": 37.314,
+    "max_tokens": 16000,
+    "output_tokens": 3636,
+    "problems": "F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\"); F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\"); F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")",
+    "stop_reason": "end_turn"
+   },
+   "validation_study_id": 57
+  },
+  {
+   "id": 36,
+   "impact": "blocked",
+   "message": "bioAF could not reach the language model while grouping the paper's claims into findings.",
+   "model": "claude-opus-5",
+   "occurred_at": "2026-09-17T14:45:52.759379+00:00",
+   "outcome": "unreachable",
+   "step": "grouping the paper's claims into findings",
+   "technical_detail": {
+    "attempt": 2,
+    "elapsed_seconds": 15.474,
+    "max_tokens": 16000
+   },
+   "validation_study_id": 57
+  }
+ ],
+ "note": "Study 57 as persisted on the demo by build fbf20d04 (2026-09-17), with the account columns dropped and the deposit bucket replaced. The substrate-stiffness paper. Five assay types are correctly outside bioAF's methods, and the finding inventory was discarded when its recovery attempt could not reach the provider. plan_8_3 section 0.2 captures it so every repair is replayed offline against what the live run actually recorded.",
+ "reproduction_plans": [
+  {
+   "accessions_json": [],
+   "analysis_selection_json": {
+    "analyses": [
+     {
+      "analysis_key": "processed_reanalysis:e4:None",
+      "check": "processed_reanalysis",
+      "claim_indices": [
+       16,
+       17
+      ],
+      "contrast_index": null,
+      "cost": 2,
+      "coverage": {
+       "claims_supplied": [
+        16,
+        17
+       ],
+       "completes": [
+        "F7"
+       ],
+       "outstanding": {
+        "F5": [
+         12,
+         13
+        ]
+       },
+       "partial": [
+        "F5"
+       ],
+       "weight": 2
+      },
+      "experiment_id": "e4",
+      "prerequisites": [
+       "deposit_listing"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 1,
+       "version": 1
+      },
+      "ready": false
+     },
+     {
+      "analysis_key": "processed_reanalysis:e2:0",
+      "check": "processed_reanalysis",
+      "claim_indices": [
+       8,
+       9
+      ],
+      "contrast_index": 0,
+      "cost": 2,
+      "coverage": {
+       "claims_supplied": [
+        8,
+        9
+       ],
+       "completes": [
+        "F3"
+       ],
+       "outstanding": {},
+       "partial": [],
+       "weight": 2
+      },
+      "experiment_id": "e2",
+      "prerequisites": [
+       "deposit_listing"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 2,
+       "version": 1
+      },
+      "ready": false
+     },
+     {
+      "analysis_key": "processed_reanalysis:e4:2",
+      "check": "processed_reanalysis",
+      "claim_indices": [
+       14,
+       15
+      ],
+      "contrast_index": 2,
+      "cost": 2,
+      "coverage": {
+       "claims_supplied": [
+        14,
+        15
+       ],
+       "completes": [
+        "F6"
+       ],
+       "outstanding": {},
+       "partial": [],
+       "weight": 2
+      },
+      "experiment_id": "e4",
+      "prerequisites": [
+       "deposit_listing"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 3,
+       "version": 1
+      },
+      "ready": false
+     },
+     {
+      "analysis_key": "processed_reanalysis:e1:3",
+      "check": "processed_reanalysis",
+      "claim_indices": [
+       7
+      ],
+      "contrast_index": 3,
+      "cost": 2,
+      "coverage": {
+       "claims_supplied": [
+        7
+       ],
+       "completes": [
+        "F2"
+       ],
+       "outstanding": {},
+       "partial": [],
+       "weight": 1
+      },
+      "experiment_id": "e1",
+      "prerequisites": [
+       "deposit_listing"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 4,
+       "version": 1
+      },
+      "ready": false
+     },
+     {
+      "analysis_key": "processed_reanalysis:e3:1",
+      "check": "processed_reanalysis",
+      "claim_indices": [
+       12,
+       13
+      ],
+      "contrast_index": 1,
+      "cost": 2,
+      "coverage": {
+       "claims_supplied": [
+        12,
+        13
+       ],
+       "completes": [],
+       "outstanding": {
+        "F5": [
+         16
+        ]
+       },
+       "partial": [
+        "F5"
+       ],
+       "weight": 0
+      },
+      "experiment_id": "e3",
+      "prerequisites": [
+       "deposit_listing"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 5,
+       "version": 1
+      },
+      "ready": false
+     }
+    ],
+    "candidates": [
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 7,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 8,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 9,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 12,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 13,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 14,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 15,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 16,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     },
+     {
+      "check": "processed_reanalysis",
+      "claim_index": 17,
+      "kind": "membership",
+      "requirement": "deposit_listing",
+      "status": "unresolved"
+     }
+    ],
+    "current": {
+     "at": "2026-09-17T14:45:52.782598+00:00",
+     "check": "processed_reanalysis",
+     "claim_index": 16,
+     "claim_type": "membership",
+     "confidence": null,
+     "contrast_index": null,
+     "coverage": {
+      "analysis_key": "processed_reanalysis:e4:None",
+      "claims_supplied": [
+       16,
+       17
+      ],
+      "completes": [
+       "F7"
+      ],
+      "outstanding": {
+       "F5": [
+        12,
+        13
+       ]
+      },
+      "partial": [
+       "F5"
+      ],
+      "ranking": {
+       "policy": "complete_findings_then_weight_then_cost",
+       "rank": 1,
+       "version": 1
+      },
+      "weight": 2
+     },
+     "decided_by": "coverage",
+     "input": null,
+     "model": null,
+     "predicate": {
+      "assumptions": [],
+      "contrast_index": 0,
+      "count": null,
+      "cutoff_source": {
+       "kind": "claim"
+      },
+      "direction": "up",
+      "effect": {
+       "kind": "none"
+      },
+      "orientation": "test_over_reference",
+      "reason": null,
+      "significance": {
+       "adjustment": null,
+       "kind": "pvalue",
+       "operator": "<=",
+       "value": 0.05
+      },
+      "significance_status": "resolved",
+      "stated_as": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+      "status": "resolved"
+     },
+     "predicate_words": "A549 cells on soft PDMS substrates (27 kPa and 107 kPa) versus A549 cells on stiff PDMS substrates (1520 kPa and 4756 kPa), P <= 0.05, up, no fold-change requirement",
+     "reason": "chosen once the paper's findings were established: this analysis can complete F7, and the earlier selection completed F3",
+     "reference": {
+      "annotation": null,
+      "assembly": null
+     },
+     "reported_experiment_id": "e4",
+     "revision": 2,
+     "sample_mapping": null,
+     "superseded": false,
+     "workflow": null
+    },
+    "history": [
+     {
+      "at": "2026-09-17T14:44:44.215809+00:00",
+      "check": "processed_reanalysis",
+      "claim_index": 8,
+      "claim_type": "membership",
+      "confidence": 0.6,
+      "contrast_index": 0,
+      "coverage": null,
+      "decided_by": "model",
+      "input": null,
+      "model": "claude-opus-5",
+      "predicate": {
+       "assumptions": [],
+       "contrast_index": 0,
+       "count": null,
+       "cutoff_source": {
+        "kind": "claim"
+       },
+       "direction": "up",
+       "effect": {
+        "kind": "none"
+       },
+       "orientation": "test_over_reference",
+       "reason": null,
+       "significance": {
+        "adjustment": null,
+        "kind": "pvalue",
+        "operator": "<=",
+        "value": 0.05
+       },
+       "significance_status": "resolved",
+       "stated_as": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+       "status": "resolved"
+      },
+      "predicate_words": "A549 cells on soft PDMS substrates (27 kPa and 107 kPa) versus A549 cells on stiff PDMS substrates (1520 kPa and 4756 kPa), P <= 0.05, up, no fold-change requirement",
+      "reason": "The migration tracking assay yields quantitative per-cell distance and velocity values directly comparable to the paper's reported figures, and it is a substantive biological finding rather than a characterization metric.",
+      "reference": {
+       "annotation": null,
+       "assembly": null
+      },
+      "reported_experiment_id": "e2",
+      "revision": 1,
+      "sample_mapping": null,
+      "superseded": true,
+      "workflow": null
+     }
+    ],
+    "route": "deposit",
+    "unassessed": [
+     {
+      "claim_index": 0,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 1,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 2,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 3,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 4,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 5,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 6,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 7,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 9,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 10,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 11,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 12,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 13,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 14,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 15,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 17,
+      "reason": "not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads"
+     },
+     {
+      "claim_index": 18,
+      "reason": "not selected for this run; QC metric comparison: bioAF computes no QC metric that measures this claim; consistency with the authors' results: no deposited or attached file measures this quantity; reanalysis of processed data: bioAF computes no QC metric from processed files; reanalysis from raw reads: the same run as the QC metric comparison; not a separate check (bioAF computes no QC metric that measures this claim)"
+     },
+     {
+      "claim_index": 8,
+      "reason": "not selected for this run; another analysis completes whole findings"
+     }
+    ]
+   },
+   "blocker_kinds_json": [
+    {
+     "kind": "no_accession",
+     "text": "No sequencing, proteomics or other data repository accession is reported; no raw or processed data are deposited anywhere."
+    },
+    {
+     "kind": "method_mismatch",
+     "text": "The study uses no high-throughput sequencing assay, so no genome assembly or annotation reference is stated and no standard sequencing pipeline applies."
+    },
+    {
+     "kind": "missing_detail",
+     "text": "qRT-PCR primer/probe assay IDs, thermal cycling conditions and antibody catalogue numbers/dilutions are not specified."
+    },
+    {
+     "kind": "missing_detail",
+     "text": "Numerical values for migration parameters (accumulated distance, Euclidean distance, velocity, directionality) and for western blot/qRT-PCR fold changes are shown only in figures and not stated in the text."
+    },
+    {
+     "kind": "sample_assignment",
+     "text": "Sample-level identifiers linking individual replicates to conditions (substrate stiffness, TGF-beta treatment) are not provided."
+    }
+   ],
+   "blockers_json": [
+    "No sequencing, proteomics or other data repository accession is reported; no raw or processed data are deposited anywhere.",
+    "The study uses no high-throughput sequencing assay, so no genome assembly or annotation reference is stated and no standard sequencing pipeline applies.",
+    "qRT-PCR primer/probe assay IDs, thermal cycling conditions and antibody catalogue numbers/dilutions are not specified.",
+    "Numerical values for migration parameters (accumulated distance, Euclidean distance, velocity, directionality) and for western blot/qRT-PCR fold changes are shown only in figures and not stated in the text.",
+    "Sample-level identifiers linking individual replicates to conditions (substrate stiffness, TGF-beta treatment) are not provided.",
+    "no nf-core equivalent for method: live-cell migration tracking assay (Ibidi insert)",
+    "This paper's quantitative claims do not correspond to any metric bioAF computes, so there is nothing to compare at Level 2. The model reviewed every claim and declined each one with a reason."
+   ],
+   "code_availability_json": [],
+   "created_at": "2026-09-17T14:43:02.393974+00:00",
+   "differential_design_json": {
+    "contrasts": [
+     {
+      "assay": "live-cell migration tracking assay (Ibidi insert)",
+      "cutoffs": [
+       {
+        "kind": "pvalue",
+        "operator": "<=",
+        "value": 0.05
+       }
+      ],
+      "finding_claim_index": 8,
+      "name": "soft PDMS (27, 107 kPa) vs stiff PDMS (1520, 4756 kPa) migration",
+      "reference_condition": "A549 cells on stiff PDMS substrates (1520 kPa and 4756 kPa)",
+      "reference_samples": [
+       "A549 on 1520 kPa PDMS",
+       "A549 on 4756 kPa PDMS"
+      ],
+      "reported_experiment_id": "e2",
+      "subjects": {},
+      "test_condition": "A549 cells on soft PDMS substrates (27 kPa and 107 kPa)",
+      "test_samples": [
+       "A549 on 27 kPa PDMS",
+       "A549 on 107 kPa PDMS"
+      ],
+      "thresholds": {
+       "log2fc": null,
+       "padj": null
+      },
+      "thresholds_from_claim": 8
+     },
+     {
+      "assay": "qRT-PCR",
+      "cutoffs": [
+       {
+        "kind": "pvalue",
+        "operator": "<=",
+        "value": 0.05
+       }
+      ],
+      "finding_claim_index": 12,
+      "name": "PDMS substrates vs TCPS cadherin mRNA expression",
+      "reference_condition": "A549 cells cultured on tissue culture polystyrene (TCPS)",
+      "reference_samples": [
+       "A549 on TCPS"
+      ],
+      "reported_experiment_id": "e3",
+      "subjects": {},
+      "test_condition": "A549 cells cultured on PDMS substrates (27, 107, 1520, 4756 kPa)",
+      "test_samples": [
+       "A549 on 27 kPa PDMS",
+       "A549 on 107 kPa PDMS",
+       "A549 on 1520 kPa PDMS",
+       "A549 on 4756 kPa PDMS"
+      ],
+      "thresholds": {
+       "log2fc": null,
+       "padj": null
+      },
+      "thresholds_from_claim": 12
+     },
+     {
+      "assay": "western blotting",
+      "cutoffs": [
+       {
+        "kind": "pvalue",
+        "operator": "<=",
+        "value": 0.05
+       }
+      ],
+      "finding_claim_index": 14,
+      "name": "TGF-beta treated vs non-treated control",
+      "reference_condition": "non-treated cells kept in 10% FBS DMEM for the same time period",
+      "reference_samples": [
+       "non-treated A549 on each substrate stiffness"
+      ],
+      "reported_experiment_id": "e4",
+      "subjects": {},
+      "test_condition": "A549 cells exposed to 5 ng/mL TGF-beta for 48 h",
+      "test_samples": [
+       "TGF-beta treated A549 on each substrate stiffness"
+      ],
+      "thresholds": {
+       "log2fc": null,
+       "padj": null
+      },
+      "thresholds_from_claim": 14
+     },
+     {
+      "assay": "atomic force microscopy (AFM) elasticity measurement",
+      "cutoffs": [
+       {
+        "kind": "pvalue",
+        "operator": "<",
+        "value": 0.05
+       }
+      ],
+      "finding_claim_index": 7,
+      "name": "cells on soft substrates vs cells on stiff substrate/TCPS (cell stiffness)",
+      "reference_condition": "A549 cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS",
+      "reference_samples": [
+       "A549 on 4756 kPa PDMS",
+       "A549 on TCPS"
+      ],
+      "reported_experiment_id": "e1",
+      "subjects": {},
+      "test_condition": "A549 cells cultured on soft substrates (27 and 107 kPa)",
+      "test_samples": [
+       "A549 on 27 kPa PDMS",
+       "A549 on 107 kPa PDMS"
+      ],
+      "thresholds": {
+       "log2fc": null,
+       "padj": null
+      },
+      "thresholds_from_claim": 7
+     }
+    ],
+    "selected_contrast": {
+     "confidence": 0.6,
+     "contrast_index": 0,
+     "decided_by": "claim_selection",
+     "model": "claude-opus-5",
+     "reason": "the selected claim reports on this contrast: The migration tracking assay yields quantitative per-cell distance and velocity values directly comparable to the paper's reported figures, and it is a substantive biological finding rather than a characterization metric."
+    },
+    "thresholds": {
+     "log2fc": null,
+     "padj": null
+    }
+   },
+   "extractor_model": "claude-opus-5",
+   "extractor_provider": "anthropic",
+   "finding_claim_json": null,
+   "finding_inventory_json": {
+    "at": "2026-09-17T14:45:37.187693+00:00",
+    "authority": {
+     "author_sources": "a source's experiment, contrast, statistical definition and documented version or correction status decide its authority; a source a documented correction supersedes stays as history; comparable authoritative sources that conflict are inconclusive until reconciled; neither a filename nor agreement with the paper overrides an eligible source",
+     "order": [
+      "independent",
+      "consistency"
+     ],
+     "required_subchecks": "every claim of a finding",
+     "rubric_version": 2
+    },
+    "cause": "the proposal was rejected (F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\"); F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\"); F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")); the recovery attempt failed too: bioAF could not reach the language model",
+    "decided_by": {
+     "kind": "model",
+     "model": "claude-opus-5"
+    },
+    "failed": true,
+    "findings": [
+     {
+      "claim_indices": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "contrast_index": null,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "AFM calibration of PDMS substrate stiffness across base:crosslinker ratios (2.4 kPa to 4756 kPa)",
+      "experiment_id": "e1",
+      "id": "F1",
+      "importance": {
+       "category": "technical",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": null,
+       "quote": null,
+       "rationale": "Establishes the substrate stiffness values used to define every experimental condition, without which the stiffness-dependent biological comparisons cannot be interpreted.",
+       "status": "validated",
+       "validated_by": "weighted rubric version 2",
+       "weight": 0
+      },
+      "locator": "Results, PDMS substrate stiffness",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ]
+     },
+     {
+      "claim_indices": [
+       7
+      ],
+      "contrast_index": 3,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "Cells on soft (27, 107 kPa) substrates are significantly softer than cells on stiff PDMS or TCPS",
+      "experiment_id": "e1",
+      "id": "F2",
+      "importance": {
+       "category": "supporting",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": null,
+       "quote": "quantitative measurements of cell stiffness shown in Figure 1(b), indicate that cells cultured on soft substrates (27 and 107 kPa) are significantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS",
+       "rationale": "Confirms that substrate stiffness alters cell mechanical/cytoskeletal properties, supporting the mechanotransduction framing of the study.",
+       "status": "validated",
+       "validated_by": "weighted rubric version 2",
+       "weight": 1
+      },
+      "locator": "Results, Influence of substrate stiffness on cell mechanics and structure; Figure 1(b)",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       7
+      ]
+     },
+     {
+      "claim_indices": [
+       8,
+       9
+      ],
+      "contrast_index": 0,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "Increasing substrate stiffness reduces accumulated distance and migration velocity, with no change in Euclidean distance and lower directionality on PDMS than TCPS",
+      "experiment_id": "e2",
+      "id": "F3",
+      "importance": {
+       "category": "primary",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": "its quote is not in the paper's text",
+       "quote": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+       "rationale": "Establishes the paper's central migration result that stiffness modulates lung cancer cell motility toward slower, more directional migration.",
+       "status": "proposed",
+       "validated_by": "weighted rubric version 2",
+       "weight": 2
+      },
+      "locator": "Results, Influence of substrate stiffness on cell migration; Figure 3; Results, Influence of substrate stiffness on cell migration; Figure 3(c,d)",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       8,
+       9
+      ]
+     },
+     {
+      "claim_indices": [
+       10,
+       11
+      ],
+      "contrast_index": null,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "Cell tracking sample sizes (30 cells per experiment, 90 tracks per substrate stiffness)",
+      "experiment_id": "e2",
+      "id": "F4",
+      "importance": {
+       "category": "technical",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": null,
+       "quote": null,
+       "rationale": "Documents the number of tracked cells underlying the migration statistics, enabling assessment of the migration comparisons.",
+       "status": "validated",
+       "validated_by": "weighted rubric version 2",
+       "weight": 0
+      },
+      "locator": "Materials and Methods, Cell tracking; Results, Influence of substrate stiffness on cell migration",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       10,
+       11
+      ]
+     },
+     {
+      "claim_indices": [
+       12,
+       13,
+       16
+      ],
+      "contrast_index": 1,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "Substrate stiffness does not induce cadherin switching: E-/N-cadherin mRNA equal across PDMS stiffnesses (differing only from TCPS) and E-cadherin protein unchanged across all substrates",
+      "experiment_id": null,
+      "id": "F5",
+      "importance": {
+       "category": "primary",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": null,
+       "quote": "Since loss of E-cadherin is a hallmark feature that is almost always observed during EMT, we conclude that reducing the substrate stiffness from 4756 kPa to 27 kPa does not spontaneously induce EMT in A549 cells.",
+       "rationale": "Establishes the paper's key negative conclusion that stiffness-driven migration changes are not accompanied by spontaneous EMT.",
+       "status": "validated",
+       "validated_by": "weighted rubric version 2",
+       "weight": 2
+      },
+      "locator": "Results, Influence of substrate stiffness on EMT biomarkers; Figure 4(a,b); Results, Influence of substrate stiffness on EMT biomarkers; Figure 4(d,e)",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       12,
+       13,
+       16
+      ]
+     },
+     {
+      "claim_indices": [
+       14,
+       15
+      ],
+      "contrast_index": 2,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "TGF-b induces consistent E-cadherin loss and N-cadherin gain on all substrates, with no stiffness dependence in the magnitude of change",
+      "experiment_id": "e4",
+      "id": "F6",
+      "importance": {
+       "category": "primary",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": null,
+       "quote": "We conclude that for A549 cells, TGF-b is a strong inducer of EMT and that the degree of TGF-b induced EMT does not depend on substrate stiffness.",
+       "rationale": "Establishes that growth-factor-induced EMT is robust and independent of substrate stiffness, a headline conclusion of the paper.",
+       "status": "validated",
+       "validated_by": "weighted rubric version 2",
+       "weight": 2
+      },
+      "locator": "Results, Influence of substrate stiffness on TGF-b induced EMT; Figure 5(a-c); Results, Influence of substrate stiffness on TGF-b induced EMT; Figure 5(d)",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       14,
+       15
+      ]
+     },
+     {
+      "claim_indices": [
+       17
+      ],
+      "contrast_index": null,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "p-FAK and p-paxillin protein levels are elevated on softer (27, 107 kPa) substrates relative to TCPS",
+      "experiment_id": "e4",
+      "id": "F7",
+      "importance": {
+       "category": "primary",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": "its quote is not in the paper's text",
+       "quote": "expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS",
+       "rationale": "Provides the alternative focal-adhesion signaling mechanism proposed to explain stiffness-dependent migration in place of EMT.",
+       "status": "proposed",
+       "validated_by": "weighted rubric version 2",
+       "weight": 2
+      },
+      "locator": "Results, Influence of substrate stiffness on focal adhesion markers; Figure 6",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       17
+      ]
+     },
+     {
+      "claim_indices": [
+       18
+      ],
+      "contrast_index": null,
+      "criteria": {
+       "rule": "all_required_subchecks",
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "description": "Punctate p-paxillin focal clusters at cell boundaries on soft substrates versus diffuse cytoplasmic staining on stiff substrates",
+      "experiment_id": "e5",
+      "id": "F8",
+      "importance": {
+       "category": "supporting",
+       "decided_by": "model",
+       "model": "claude-opus-5",
+       "problem": "its quote is not in the paper's text",
+       "quote": "the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm",
+       "rationale": "Imaging evidence of focal adhesion assembly that corroborates the western blot-based focal adhesion signaling mechanism.",
+       "status": "proposed",
+       "validated_by": "weighted rubric version 2",
+       "weight": 1
+      },
+      "locator": "Results, Influence of substrate stiffness on focal adhesion markers; Figure 7",
+      "membership": {
+       "problems": [],
+       "status": "established"
+      },
+      "prerequisite_for": [],
+      "required": [
+       18
+      ]
+     }
+    ],
+    "history": [],
+    "membership": {
+     "reason": null,
+     "status": "established"
+    },
+    "reason": "bioAF could not group the paper's claims into findings: the proposal was rejected (F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\"); F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\"); F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")); the recovery attempt failed too: bioAF could not reach the language model.",
+    "revision": 1,
+    "rubric_version": 2,
+    "status": "unresolved",
+    "unplaced_claims": []
+   },
+   "id": 57,
+   "library_strategy": null,
+   "mapping_confidence": "none",
+   "mapping_notes": "No supported nf-core equivalent identified for assay 'live-cell migration tracking assay (Ibidi insert)'.",
+   "parameters_json": {},
+   "pipeline_key": null,
+   "pipeline_version": null,
+   "reference_build": null,
+   "reference_genome": null,
+   "reported_experiments_json": [
+    {
+     "assay": "atomic force microscopy (AFM) elasticity measurement",
+     "assay_ambiguous": false,
+     "claim_indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+     ],
+     "conditions": [
+      "PDMS 10:1",
+      "PDMS 20:1",
+      "PDMS 30:1",
+      "PDMS 40:1",
+      "PDMS 50:1",
+      "TCPS",
+      "A549 cells on 27 kPa, 107 kPa, 4756 kPa and TCPS"
+     ],
+     "contrast_indices": [
+      3
+     ],
+     "description": "AFM was used to measure the Young's modulus of PDMS substrates with base to curing agent ratios ranging from 10 : 1 to 40 : 1, and to both image the sub-cortical cytoskeleton and measure the Young's modulus of cells cultured on different PDMS substrates",
+     "id": "e1",
+     "organism": "Homo sapiens",
+     "reference": {
+      "annotation": {
+       "quote": null,
+       "reason": "the paper does not state its annotation",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "assembly": {
+       "quote": null,
+       "reason": "the paper does not state its reference",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "workflow": null
+     },
+     "resources": [],
+     "status": "extracted",
+     "time_points": [],
+     "tools": [
+      "Bioscope II AFM (Veeco)",
+      "Axiovert 200 inverted optical microscope",
+      "modified Hertz model",
+      "SigmaPlot 12.0"
+     ],
+     "workflow": null,
+     "workflow_version": null
+    },
+    {
+     "assay": "live-cell migration tracking assay (Ibidi insert)",
+     "assay_ambiguous": false,
+     "claim_indices": [
+      8,
+      9,
+      10,
+      11
+     ],
+     "conditions": [
+      "PDMS 27 kPa",
+      "PDMS 107 kPa",
+      "PDMS 1520 kPa",
+      "PDMS 4756 kPa",
+      "TCPS"
+     ],
+     "contrast_indices": [
+      0
+     ],
+     "description": "We evaluated the migratory phenotype of A549 cells cultured on different PDMS substrates and/or TCPS via live imaging of cell migration; individual cells were tracked over 24 h",
+     "id": "e2",
+     "organism": "Homo sapiens",
+     "reference": {
+      "annotation": {
+       "quote": null,
+       "reason": "the paper does not state its annotation",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "assembly": {
+       "quote": null,
+       "reason": "the paper does not state its reference",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "workflow": null
+     },
+     "resources": [],
+     "status": "extracted",
+     "time_points": [
+      "24 h",
+      "10-min imaging intervals"
+     ],
+     "tools": [
+      "Ibidi silicone insert",
+      "Okolab bold line live-cell imaging system",
+      "Olympus IX81 inverted microscope",
+      "ImageJ",
+      "SigmaPlot 12.0"
+     ],
+     "workflow": null,
+     "workflow_version": null
+    },
+    {
+     "assay": "qRT-PCR",
+     "assay_ambiguous": false,
+     "claim_indices": [
+      12,
+      13
+     ],
+     "conditions": [
+      "PDMS 2.4 kPa",
+      "PDMS 8.5 kPa",
+      "PDMS 19 kPa",
+      "PDMS 27 kPa",
+      "PDMS 107 kPa",
+      "PDMS 1520 kPa",
+      "PDMS 4756 kPa",
+      "TCPS"
+     ],
+     "contrast_indices": [
+      1
+     ],
+     "description": "EMT marker genes were quantified using a two-step real time quantitative PCR ... E-cadherin and N-cadherin ... GAPDH was used as an endogenous control for normalization",
+     "id": "e3",
+     "organism": "Homo sapiens",
+     "reference": {
+      "annotation": {
+       "quote": null,
+       "reason": "the paper does not state its annotation",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "assembly": {
+       "quote": null,
+       "reason": "the paper does not state its reference",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "workflow": "nf-core/nascent"
+     },
+     "resources": [],
+     "status": "extracted",
+     "time_points": [
+      "48 h"
+     ],
+     "tools": [
+      "High Capacity cDNA Reverse Transcription Kit",
+      "TaqMan Universal PCR Master Mix",
+      "Applied Biosystems 7900HT Fast Real-Time PCR System",
+      "SDS 2.3 software",
+      "2^-ddCt method"
+     ],
+     "workflow": "nf-core/nascent",
+     "workflow_version": "2.3.0"
+    },
+    {
+     "assay": "western blotting",
+     "assay_ambiguous": false,
+     "claim_indices": [
+      14,
+      15,
+      16,
+      17
+     ],
+     "conditions": [
+      "PDMS 2.4-27 kPa",
+      "PDMS 107 kPa",
+      "PDMS 1520 kPa",
+      "PDMS 4756 kPa",
+      "TCPS",
+      "TGF-beta treated",
+      "non-treated control"
+     ],
+     "contrast_indices": [
+      2
+     ],
+     "description": "the levels of E-cadherin and N-cadherin proteins via Western blotting; western blotting ... to investigate how changes in substrate stiffness might alter p-FAK and p-PAX protein expression",
+     "id": "e4",
+     "organism": "Homo sapiens",
+     "reference": {
+      "annotation": {
+       "quote": null,
+       "reason": "the paper does not state its annotation",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "assembly": {
+       "quote": null,
+       "reason": "the paper does not state its reference",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "workflow": null
+     },
+     "resources": [],
+     "status": "extracted",
+     "time_points": [
+      "48 h"
+     ],
+     "tools": [
+      "4-15% gradient SDS-PAGE (Biorad)",
+      "nitrocellulose membrane",
+      "ImageJ densitometry",
+      "SigmaPlot 12.0"
+     ],
+     "workflow": null,
+     "workflow_version": null
+    },
+    {
+     "assay": "immunofluorescence microscopy",
+     "assay_ambiguous": false,
+     "claim_indices": [
+      18
+     ],
+     "conditions": [
+      "PDMS 27 kPa",
+      "PDMS 107 kPa",
+      "PDMS 1520 kPa",
+      "PDMS 4756 kPa"
+     ],
+     "contrast_indices": [],
+     "description": "Immunofluorescent staining of A549 cells with phosphorylated paxillin (p-Pax: red), actin cytoskeleton (green) and nucleus (blue) on different stiffness PDMS substrates",
+     "id": "e5",
+     "organism": "Homo sapiens",
+     "reference": {
+      "annotation": {
+       "quote": null,
+       "reason": "the paper does not state its annotation",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "assembly": {
+       "quote": null,
+       "reason": "the paper does not state its reference",
+       "resolved": null,
+       "stated": null,
+       "status": "unstated"
+      },
+      "workflow": null
+     },
+     "resources": [],
+     "status": "extracted",
+     "time_points": [],
+     "tools": [
+      "fluorescence microscopy"
+     ],
+     "workflow": null,
+     "workflow_version": null
+    }
+   ],
+   "resources_json": [],
+   "sample_sheet_json": {
+    "chemistry": "",
+    "conditions": [
+     "PDMS 2.4 kPa",
+     "PDMS 8.5 kPa",
+     "PDMS 19 kPa",
+     "PDMS 27 kPa (40:1)",
+     "PDMS 107 kPa (30:1)",
+     "PDMS 1520 kPa (20:1)",
+     "PDMS 4756 kPa (10:1)",
+     "tissue culture polystyrene (TCPS, 2-4 GPa)",
+     "TGF-beta (5 ng/mL, 48 h) treated",
+     "non-treated control (10% FBS DMEM)"
+    ],
+    "library_layout": "",
+    "organism": "Homo sapiens",
+    "sample_count": 0
+   },
+   "superseded_at": null,
+   "superseded_reason": null,
+   "tools_json": [
+    "ImageJ (NIH image processing software)",
+    "SDS 2.3 software",
+    "SigmaPlot 12.0",
+    "Applied Biosystems 7900HT Fast Real-Time PCR System",
+    "TaqMan Universal PCR Master Mix",
+    "High Capacity cDNA Reverse Transcription Kit",
+    "Bioscope II AFM (Veeco)",
+    "Olympus IX81 inverted microscope",
+    "Ibidi silicone insert migration assay",
+    "Okolab bold line live-cell imaging system"
+   ],
+   "validation_study_id": 57
+  }
+ ],
+ "study": {
+  "approved_at": null,
+  "classification": "inconclusive",
+  "created_at": "2026-09-17T14:41:14.477039+00:00",
+  "evidence_json": {
+   "capabilities": {
+    "code_artifact": {
+     "evidence": null,
+     "failure_reason": null,
+     "value": "no"
+    },
+    "code_repository": {
+     "evidence": null,
+     "failure_reason": null,
+     "value": "no"
+    },
+    "code_sources": [],
+    "deposit_exists": {
+     "evidence": "this paper names no deposited accession",
+     "failure_reason": null,
+     "value": "no"
+    },
+    "deposits": [],
+    "paper_readable": {
+     "evidence": "bioAF read the paper's full text from the Literature Library",
+     "failure_reason": null,
+     "value": "yes"
+    },
+    "preprocessed_data": {
+     "available_reason": "nothing is deposited",
+     "available_to_bioaf": "no",
+     "evidence": "this paper names no deposited accession",
+     "failure_reason": null,
+     "value": "no"
+    },
+    "raw_data": {
+     "available_reason": "nothing is deposited",
+     "available_to_bioaf": "no",
+     "evidence": "this paper names no deposited accession",
+     "failure_reason": null,
+     "value": "no"
+    },
+    "sample_metadata": {
+     "available_reason": "nothing is deposited",
+     "available_to_bioaf": "no",
+     "evidence": "this paper names no deposited accession",
+     "failure_reason": null,
+     "value": "no"
+    }
+   },
+   "extracted_accessions": [],
+   "extraction": {
+    "attempts": [
+     {
+      "attempt": 1,
+      "elapsed_seconds": 94.335,
+      "finished_at": "2026-09-17T14:43:02.381604+00:00",
+      "max_tokens": 16000,
+      "model": "claude-opus-5",
+      "outcome": "ok",
+      "output_tokens": 11130,
+      "started_at": "2026-09-17T14:41:28.039557+00:00",
+      "stop_reason": "end_turn"
+     }
+    ],
+    "budget": {
+     "call": "extraction",
+     "max_tokens": 16000,
+     "measured": false,
+     "note": "budget not measured for this model",
+     "record_fingerprint": "d0a37eca9cb360cd35e97894491871d0830ff52185732dca6e3113ad0bb35dc4"
+    },
+    "cycle": 1,
+    "finished_at": "2026-09-17T14:43:02.381799+00:00",
+    "not_read": [],
+    "plan_id": 57,
+    "started_at": "2026-09-17T14:41:28.026727+00:00",
+    "status": "succeeded",
+    "text": {
+     "chars": 50007,
+     "sha256": "58284e5362a319193ff738c74a3fbbb9a083fb239d9d73def1c2dd75412d7c21",
+     "source": "library",
+     "supplement_limitation": "This route does not supply the paper's supplement manifest, so what supplements it publishes is not established here.",
+     "supplements_established": false
+    }
+   },
+   "extraction_history": [],
+   "inventory_stage": {
+    "attempts": [
+     {
+      "attempt": 1,
+      "elapsed_seconds": 37.314,
+      "finished_at": "2026-09-17T14:45:37.254934+00:00",
+      "max_tokens": 16000,
+      "model": "claude-opus-5",
+      "outcome": "rejected",
+      "output_tokens": 3636,
+      "problems": [
+       "F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\")",
+       "F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\")",
+       "F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")"
+      ],
+      "started_at": "2026-09-17T14:44:59.866725+00:00",
+      "stop_reason": "end_turn"
+     },
+     {
+      "attempt": 2,
+      "elapsed_seconds": 15.474,
+      "finished_at": "2026-09-17T14:45:52.747671+00:00",
+      "max_tokens": 16000,
+      "model": "claude-opus-5",
+      "outcome": "unreachable",
+      "output_tokens": null,
+      "started_at": "2026-09-17T14:45:37.264175+00:00",
+      "stop_reason": null
+     }
+    ],
+    "budget": {
+     "call": "inventory",
+     "max_tokens": 16000,
+     "measured": false,
+     "note": "budget not measured for this model",
+     "record_fingerprint": "5af982bdb853c90110e4f034d4964d789d0bfebb5a2ec231edbd7a8acf92350b"
+    },
+    "cause": "the proposal was rejected (F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\"); F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\"); F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")); the recovery attempt failed too: bioAF could not reach the language model",
+    "cycle": 1,
+    "finished_at": "2026-09-17T14:45:52.757673+00:00",
+    "model": "claude-opus-5",
+    "provider": "anthropic",
+    "started_at": "2026-09-17T14:44:59.866333+00:00",
+    "status": "failed"
+   },
+   "inventory_stage_history": [],
+   "paper_passages": {
+    "claims": [
+     {
+      "claim_text": "The median (with interquartile range) values of Young's moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1",
+      "passage": null
+     },
+     {
+      "claim_text": "1520 kPa (1357 21904 kPa) for 20 : 1",
+      "passage": "range (25th percentile to 75th percentile) the statistical signi\ufb01cance was established using Kruskal-Wallis One Way Analysis of Variance (ANOVA) on ranks with p \u0004 0.05 and Tukey\u2019s HSD test was used for post hoc analysis. RESULTS PDMS substrate stiffness In this study, AFM was used to measure the Young\u2019s modulus of PDMS substrates with base to curing agent ratios ranging from 10 : 1 to 40 : 1. The median (with interquartile range) values of Young\u2019s moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1, 1520 kPa (1357 21904 kPa) for 20 : 1, 107 kPa (58 2181 kPa) for 30 : 1 and 27 kPa (14 2 65 kPa) for 40 : 1. We also directly measured the Young\u2019s modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa) and based on a previous study,23 we used an exponential \ufb01t to estimate the Young\u2019s modulus of the 60 : 1 PDMS substrate (8.5 kPa) and 70 : 1 PDMS substrates (2.4 kPa)."
+     },
+     {
+      "claim_text": "107 kPa (58 2181 kPa) for 30 : 1",
+      "passage": "RESULTS PDMS substrate stiffness In this study, AFM was used to measure the Young\u2019s modulus of PDMS substrates with base to curing agent ratios ranging from 10 : 1 to 40 : 1. The median (with interquartile range) values of Young\u2019s moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1, 1520 kPa (1357 21904 kPa) for 20 : 1, 107 kPa (58 2181 kPa) for 30 : 1 and 27 kPa (14 2 65 kPa) for 40 : 1. We also directly measured the Young\u2019s modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa) and based on a previous study,23 we used an exponential \ufb01t to estimate the Young\u2019s modulus of the 60 : 1 PDMS substrate (8.5 kPa) and 70 : 1 PDMS substrates (2.4 kPa). Since the Young\u2019 modulus of normal lung tissue ranges from 1 kPa to 5 kPa and \ufb01brotic/lung tumor tissue can be \u000230 times stiffer (up to 150 kPa),24,25 the PDMS substrates used in this study capture the stiffness range of"
+     },
+     {
+      "claim_text": "27 kPa (14 2 65 kPa) for 40 : 1",
+      "passage": "RESULTS PDMS substrate stiffness In this study, AFM was used to measure the Young\u2019s modulus of PDMS substrates with base to curing agent ratios ranging from 10 : 1 to 40 : 1. The median (with interquartile range) values of Young\u2019s moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1, 1520 kPa (1357 21904 kPa) for 20 : 1, 107 kPa (58 2181 kPa) for 30 : 1 and 27 kPa (14 2 65 kPa) for 40 : 1. We also directly measured the Young\u2019s modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa) and based on a previous study,23 we used an exponential \ufb01t to estimate the Young\u2019s modulus of the 60 : 1 PDMS substrate (8.5 kPa) and 70 : 1 PDMS substrates (2.4 kPa). Since the Young\u2019 modulus of normal lung tissue ranges from 1 kPa to 5 kPa and \ufb01brotic/lung tumor tissue can be \u000230 times stiffer (up to 150 kPa),24,25 the PDMS substrates used in this study capture the stiffness range of"
+     },
+     {
+      "claim_text": "We also directly measured the Young's modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa)",
+      "passage": null
+     },
+     {
+      "claim_text": "we used an exponential fit to estimate the Young's modulus of the 60 : 1 PDMS substrate (8.5 kPa)",
+      "passage": null
+     },
+     {
+      "claim_text": "and 70 : 1 PDMS substrates (2.4 kPa)",
+      "passage": "e) values of Young\u2019s moduli for these substrates were: 4756 kPa (3710 2 5762 kPa) for 10 : 1, 1520 kPa (1357 21904 kPa) for 20 : 1, 107 kPa (58 2181 kPa) for 30 : 1 and 27 kPa (14 2 65 kPa) for 40 : 1. We also directly measured the Young\u2019s modulus of a 50 : 1 PDMS substrate to be 19 kPa (13 2 27 kPa) and based on a previous study,23 we used an exponential \ufb01t to estimate the Young\u2019s modulus of the 60 : 1 PDMS substrate (8.5 kPa) and 70 : 1 PDMS substrates (2.4 kPa). Since the Young\u2019 modulus of normal lung tissue ranges from 1 kPa to 5 kPa and \ufb01brotic/lung tumor tissue can be \u000230 times stiffer (up to 150 kPa),24,25 the PDMS substrates used in this study capture the stiffness range of both normal lung tissue and \ufb01brotic/lung tumor tissues. We note that although the very stiff PDMS substrates (10 : 1 and 20 : 1) are likely nonphysiological, the stiffness of these substrates approach the stif"
+     },
+     {
+      "claim_text": "quantitative measurements of cell stiffness shown in Figure 1(b), indicate that cells cultured on soft substrates (27 and 107 kPa) are significantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS",
+      "passage": "c- tural/mechanical properties of A549 cells, we used AFM to both image the sub-cortical cytoskeleton and measure the Young\u2019s modulus of cells cultured on different PDMS sub- strates. As shown in Figure 1(a), cells cultured on the very stiff PDMS substrate (4756 kPa) and tissue culture polysty- rene (TCPS) demonstrated signi\ufb01cantly more actin stress \ufb01ber formation than cells cultured on the softer 27 kPa and 107 kPa substrates. Consistent with this qualitative data, quantitative measurements of cell stiffness shown in Figure 1(b), indicate that cells cultured on soft substrates (27 and 107 kPa) are signi\ufb01cantly softer as compared to the cells cultured on the very stiff (4756 kPa) PDMS substrate and TCPS. In\ufb02uence of substrate stiffness on cell migration We evaluated the migratory phenotype of A549 cells cultured on different PDMS substrates and/or TCPS via live imaging of cell migration."
+     },
+     {
+      "claim_text": "Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.",
+      "passage": null
+     },
+     {
+      "claim_text": "Interestingly, there was no statistically significant difference in the Euclidian distance for cells on different stiffness substrates (including TCPS) and all cells cultured on PDMS substrates had a lower directionality as compared to cells on TCPS.",
+      "passage": null
+     },
+     {
+      "claim_text": "The NIH image processing software ImageJ was used to manually trace the migration path of 30 cells per experiment",
+      "passage": "M containing 10% FBS was added to the dish prior to placing the system into a live-cell imaging system (Okolab bold line, Italy) at 378C, 5% CO2 and 95% relative humidity. Phase contrast time lapse images were collected at 10-min intervals over a period of 24 h using an Olympus IX81 inverted microscope (Olympus Corporation, Tokyo, Japan). Experiments were run in triplicate for each treatment condition. Cell tracking The NIH image processing software ImageJ was used to manually trace the migration path of \u000230 cells per experi- ment [Fig. 2(d,h,l)]. The initial location of all cells was nor- malized to the origin and the position of each cell was recorded at each time point. This data was used to calculate both the accumulated distance (daccum) and Euclidean dis- tance (dEuclid) where dEuclid is calculated as the distance from the starting position (time 5 0) to the ending position (time 5"
+     },
+     {
+      "claim_text": "Average values for these migration parameters for 90 cell tracks per substrate stiffness are shown in Figure 3.",
+      "passage": null
+     },
+     {
+      "claim_text": "cells cultured on the very stiff TCPS exhibited statistically larger mRNA expression levels of E-cadherin and statistically lower mRNA expression levels of N-cadherin compared with cells grown on all PDMS substrates",
+      "passage": "ial to mesenchymal phenotype. To investigate if the highly migratory phenotype observed for cells cultured on softer substrates is a result of inducing EMT, we measured changes in both E-cadherin and N-cadherin mRNA expression via qRT-PCR and the levels of E-cadherin and N-cadherin pro- teins via Western blotting. As shown in Figure 4(a,b), cells cultured on the very stiff TCPS exhibited statistically larger mRNA expression levels of E-cadherin and statistically lower mRNA expression levels of N-cadherin compared with cells grown on all PDMS substrates. However, the relative amount of E-cadherin and N-cadherin mRNA expression in cells cul- tured on 27, 107, 1520, and 4756 kPa substrates was not stat- istically different. Therefore, PCR data indicates that reducing substrate stiffness from 4756 kPa to 27 kPa does not induce signi\ufb01cant mesenchymal gene expression as originally hypothesized"
+     },
+     {
+      "claim_text": "However, the relative amount of E-cadherin and N-cadherin mRNA expression in cells cultured on 27, 107, 1520, and 4756 kPa substrates was not statistically different.",
+      "passage": "of inducing EMT, we measured changes in both E-cadherin and N-cadherin mRNA expression via qRT-PCR and the levels of E-cadherin and N-cadherin pro- teins via Western blotting. As shown in Figure 4(a,b), cells cultured on the very stiff TCPS exhibited statistically larger mRNA expression levels of E-cadherin and statistically lower mRNA expression levels of N-cadherin compared with cells grown on all PDMS substrates. However, the relative amount of E-cadherin and N-cadherin mRNA expression in cells cul- tured on 27, 107, 1520, and 4756 kPa substrates was not stat- istically different. Therefore, PCR data indicates that reducing substrate stiffness from 4756 kPa to 27 kPa does not induce signi\ufb01cant mesenchymal gene expression as originally hypothesized. In addition, although Western blot analysis indicates that N-cadherin protein expression is statistically lower for cells cultured on TCPS"
+     },
+     {
+      "claim_text": "TGF-b treatment resulted in a consistent, and statistically significant, decrease in E-cadherin and a consistent increase in N-cadherin for all conditions investigated.",
+      "passage": "ent with TGF-b can induce EMT in A549 cells.28,29 However, to our knowledge, it is not known if this growth factor induction of EMT in A549 cells can be regulated by changes in substrate stiffness. To investigate if substrate stiffness alters TGF-b induced EMT, A549 cells were cultured on the different PDMS substrates and exposed to 5 ng/mL TGF-b for 48 h. Western blots were used to evaluate changes in E-cadherin and N-cadherin pro- tein expression. As shown in Figure 5(a\u2013c), TGF-b treatment resulted in a consistent, and statistically signi\ufb01cant, decrease in E-cadherin and a consistent increase in N-cadherin for all conditions investigated. To investigate if cells cultured on different substrate stiffness exhibit different degrees of EMT during TGF-b treatment, we also evaluated the relative fold decrease in E-cadherin and fold increase in N-cadherin as a function of substrate stiffness."
+     },
+     {
+      "claim_text": "there was no statistically significant difference in the fold decrease in E-cadherin or the fold increase in N-cadherin during TGF-b treatment for cells on different substrates",
+      "passage": null
+     },
+     {
+      "claim_text": "although Western blot analysis indicates that N-cadherin protein expression is statistically lower for cells cultured on TCPS and the stiffer 1520 kPa and 4756 kPa substrates, there was no statistically significant difference in the level of E-cadherin protein expression among all substrates",
+      "passage": "However, the relative amount of E-cadherin and N-cadherin mRNA expression in cells cul- tured on 27, 107, 1520, and 4756 kPa substrates was not stat- istically different. Therefore, PCR data indicates that reducing substrate stiffness from 4756 kPa to 27 kPa does not induce signi\ufb01cant mesenchymal gene expression as originally hypothesized. In addition, although Western blot analysis indicates that N-cadherin protein expression is statistically lower for cells cultured on TCPS and the stiffer 1520 kPa and 4756 kPa substrates, there was no statistically signi\ufb01cant dif- ference in the level of E-cadherin protein expression among all substrates. Since loss of E-cadherin is a hallmark feature that is almost always observed during EMT, we conclude that reducing the substrate stiffness from 4756 kPa to 27 kPa does not spontaneously induce EMT in A549 cells."
+     },
+     {
+      "claim_text": "expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS",
+      "passage": null
+     },
+     {
+      "claim_text": "the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm",
+      "passage": null
+     }
+    ],
+    "statements": []
+   },
+   "paper_text_acquisition": {
+    "attempts": [
+     {
+      "detail": "no open full text for 10.1002/jbm.a.35655",
+      "outcome": "not_open_access",
+      "source": "europe_pmc"
+     },
+     {
+      "detail": null,
+      "outcome": "succeeded",
+      "source": "library"
+     }
+    ],
+    "established": true,
+    "reason": null,
+    "routes_remaining": [],
+    "source": "library"
+   },
+   "precompute_checks": {
+    "methods_detailed_enough": {
+     "basis": "paper_text",
+     "blocking": false,
+     "check": "methods_detailed_enough",
+     "confidence": 0.82,
+     "decided_by": "model",
+     "detail": "The text names the analysis tools and versions (ImageJ for cell-track tracing and blot densitometry, SDS 2.3 with the 2^-ddCt method and GAPDH reference, SigmaPlot 12.0), defines the derived metrics (accumulated/Euclidean distance, directionality = dEuclid/daccum, velocity), specifies the AFM fitting approach (Hooke's law, modified Hertz model, least-squares, 0.05-0.5 nN range, k = 0.01 N/m), and gives normalisation controls (b-actin) and statistical thresholds (Shapiro-Wilk a = 0.05, ANOVA/Kruskal-Wallis p <= 0.05 with Fisher LSD or Tukey post hoc), so an equivalent analysis could be reconstructed.",
+     "model": "claude-opus-5",
+     "reason": "The text names the analysis tools and versions (ImageJ for cell-track tracing and blot densitometry, SDS 2.3 with the 2^-ddCt method and GAPDH reference, SigmaPlot 12.0), defines the derived metrics (accumulated/Euclidean distance, directionality = dEuclid/daccum, velocity), specifies the AFM fitting approach (Hooke's law, modified Hertz model, least-squares, 0.05-0.5 nN range, k = 0.01 N/m), and gives normalisation controls (b-actin) and statistical thresholds (Shapiro-Wilk a = 0.05, ANOVA/Kruskal-Wallis p <= 0.05 with Fisher LSD or Tukey post hoc), so an equivalent analysis could be reconstructed.",
+     "verdict": "ok"
+    },
+    "sample_data_matches_paper": {
+     "basis": "paper_text",
+     "blocking": false,
+     "check": "sample_data_matches_paper",
+     "confidence": 0.0,
+     "decided_by": "measurement",
+     "detail": "the paper does not state how many samples it used",
+     "model": null,
+     "reason": "",
+     "verdict": "unknown"
+    },
+    "samples_described_enough": {
+     "basis": "paper_text",
+     "blocking": false,
+     "check": "samples_described_enough",
+     "confidence": 0.0,
+     "decided_by": "model",
+     "detail": "Each experimental sample is defined by its PDMS base:crosslinker ratio with explicitly mapped Young's moduli (27, 107, 1520, 4756 kPa plus 2.4\u201327 kPa set and TCPS control), the single cell line (A549) is stated, and treatment groups (5 ng/mL TGF-\u03b2 for 48 h vs. untreated 10% FBS control) with replicate numbers are given, so every sample's condition assignment is recoverable.",
+     "model": "claude-opus-5",
+     "reason": "Each experimental sample is defined by its PDMS base:crosslinker ratio with explicitly mapped Young's moduli (27, 107, 1520, 4756 kPa plus 2.4\u201327 kPa set and TCPS control), the single cell line (A549) is stated, and treatment groups (5 ng/mL TGF-\u03b2 for 48 h vs. untreated 10% FBS control) with replicate numbers are given, so every sample's condition assignment is recoverable.",
+     "verdict": "ok"
+    },
+    "species_matches": {
+     "basis": "paper_text",
+     "blocking": false,
+     "check": "species_matches",
+     "confidence": 0.0,
+     "decided_by": "measurement",
+     "detail": "bioAF has no organism declaration for this deposit to compare against",
+     "model": null,
+     "reason": "",
+     "verdict": "unknown"
+    }
+   },
+   "scanned_identifiers": [],
+   "scorecard_record": {
+    "analysis_selection_revision": 2,
+    "at": "2026-09-17T14:45:52.823874+00:00",
+    "compact": {
+     "activity": null,
+     "assessed_count": null,
+     "cause": "bioaf_limitation",
+     "cause_label": "bioAF limitation",
+     "consistency_count": null,
+     "depth_label": null,
+     "display_score": null,
+     "in_progress": false,
+     "in_progress_label": null,
+     "independent_count": null,
+     "indicators": [],
+     "inventory_revision": 1,
+     "primary_discrepancy_count": null,
+     "primary_unassessed_count": null,
+     "provisional": false,
+     "reason": "bioAF could not group the paper's claims into findings: the proposal was rejected (F3: its quote is not in the paper's text (quote: \"Results indicate a statistically significant decrease in both accumulated distance and average velocity with increasing substrate stiffness.\"); F7: its quote is not in the paper's text (quote: \"expression levels for both p-FAK and p-PAX were significantly larger for cells cultured on the softer 27 kPa and 107 kPa substrates as compared to expression levels for cells cultured on TCPS\"); F8: its quote is not in the paper's text (quote: \"the immunofluorescence results (Fig. 7) indicate that cells on the softer 27 kPa and 107 kPa substrates exhibit punctuated focal clusters of p-PAX at cell boundaries while cells on the stiffer 1520 kPa and 4756 kPa substrates exhibit diffuse p-PAX staining within the cytoplasm\")); the recovery attempt failed too: bioAF could not reach the language model.",
+     "rubric_version": 2,
+     "scope_label": null,
+     "score": null,
+     "score_label": null,
+     "score_status_label": null,
+     "status": "not_established",
+     "status_label": "Scope not established",
+     "total_count": null
+    },
+    "inventory_revision": 1,
+    "outcomes": {
+     "F1": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "No deposited or attached file measures this quantity."
+       },
+       {
+        "cause": "bioaf_limitation",
+        "cause_label": "bioAF limitation",
+        "check": "qc_metric",
+        "check_label": "QC metric comparison",
+        "reason": "BioAF computes no QC metric that measures this claim."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e1"
+      ],
+      "finding_id": "F1",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "A limitation of bioAF, not a finding about the paper. QC metric comparison: bioAF computes no QC metric that measures this claim. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+      "status": "blocked",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 0,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 1,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 2,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 3,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 4,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 5,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 6,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F2": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": null,
+      "cause_label": null,
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "The paper names no supplementary file, so bioAF found nothing that could hold a result table."
+       },
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "raw_reanalysis",
+        "check_label": "Reanalysis from raw reads",
+        "reason": "The paper names no deposit holding this experiment's reads."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e1"
+      ],
+      "finding_id": "F2",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "Not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads. Consistency with the authors' results: The paper names no supplementary file, so bioAF found nothing that could hold a result table.",
+      "status": "not_attempted",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 7,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F3": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": null,
+      "cause_label": null,
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "The paper names no supplementary file, so bioAF found nothing that could hold a result table."
+       },
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "raw_reanalysis",
+        "check_label": "Reanalysis from raw reads",
+        "reason": "The paper names no deposit holding this experiment's reads."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e2"
+      ],
+      "finding_id": "F3",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "Not selected for this run; another analysis completes whole findings. Consistency with the authors' results: The paper names no supplementary file, so bioAF found nothing that could hold a result table.",
+      "status": "not_attempted",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 8,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 9,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F4": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "No deposited or attached file measures this quantity."
+       },
+       {
+        "cause": "bioaf_limitation",
+        "cause_label": "bioAF limitation",
+        "check": "qc_metric",
+        "check_label": "QC metric comparison",
+        "reason": "BioAF computes no QC metric that measures this claim."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e2"
+      ],
+      "finding_id": "F4",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "A limitation of bioAF, not a finding about the paper. QC metric comparison: bioAF computes no QC metric that measures this claim. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+      "status": "blocked",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 10,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 11,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F5": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": null,
+      "cause_label": null,
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "The paper names no supplementary file, so bioAF found nothing that could hold a result table."
+       },
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "raw_reanalysis",
+        "check_label": "Reanalysis from raw reads",
+        "reason": "The paper names no deposit holding this experiment's reads."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e3",
+       "e4"
+      ],
+      "finding_id": "F5",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "The run produced no result for it. Consistency with the authors' results: The paper names no supplementary file, so bioAF found nothing that could hold a result table.",
+      "status": "not_attempted",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 12,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 13,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 16,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F6": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": null,
+      "cause_label": null,
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "The paper names no supplementary file, so bioAF found nothing that could hold a result table."
+       },
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "raw_reanalysis",
+        "check_label": "Reanalysis from raw reads",
+        "reason": "The paper names no deposit holding this experiment's reads."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e4"
+      ],
+      "finding_id": "F6",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "Not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads. Consistency with the authors' results: The paper names no supplementary file, so bioAF found nothing that could hold a result table.",
+      "status": "not_attempted",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 14,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       },
+       {
+        "authority": null,
+        "claim_index": 15,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F7": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": null,
+      "cause_label": null,
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "The paper names no supplementary file, so bioAF found nothing that could hold a result table."
+       },
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "raw_reanalysis",
+        "check_label": "Reanalysis from raw reads",
+        "reason": "The paper names no deposit holding this experiment's reads."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e4"
+      ],
+      "finding_id": "F7",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "Not selected for this run; QC metric comparison: no QC metric measures a differential result; consistency with the authors' results: the paper names no supplementary file, so bioAF found nothing that could hold a result table; reanalysis of processed data: what this experiment's deposit holds is not established yet; reanalysis from raw reads: the paper names no deposit holding this experiment's reads. Consistency with the authors' results: The paper names no supplementary file, so bioAF found nothing that could hold a result table.",
+      "status": "not_attempted",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 17,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     },
+     "F8": {
+      "analysis_selection_revision": 2,
+      "assessment_method": null,
+      "cause": "bioaf_limitation",
+      "cause_label": "bioAF limitation",
+      "check_causes": [
+       {
+        "cause": "not_deposited",
+        "cause_label": "Required data not deposited",
+        "check": "author_results",
+        "check_label": "Consistency with the authors' results",
+        "reason": "No deposited or attached file measures this quantity."
+       },
+       {
+        "cause": "bioaf_limitation",
+        "cause_label": "bioAF limitation",
+        "check": "qc_metric",
+        "check_label": "QC metric comparison",
+        "reason": "BioAF computes no QC metric that measures this claim."
+       }
+      ],
+      "comparison_criteria": {
+       "rule": "all_required_subchecks",
+       "subchecks": [],
+       "words": "Supported when every required claim is supported by a valid independent assessment; a discrepancy when every required claim was conclusively assessed and none of them supported; otherwise not conclusively assessed."
+      },
+      "concerns": [],
+      "depth": null,
+      "depth_label": null,
+      "experiment_ids": [
+       "e5"
+      ],
+      "finding_id": "F8",
+      "governing": {
+       "evidence": [],
+       "method": null
+      },
+      "inventory_revision": 1,
+      "method_label": null,
+      "reason": "A limitation of bioAF, not a finding about the paper. QC metric comparison: bioAF computes no QC metric that measures this claim. Consistency with the authors' results: No deposited or attached file measures this quantity.",
+      "status": "blocked",
+      "subchecks": [
+       {
+        "authority": null,
+        "claim_index": 18,
+        "depth": null,
+        "method": null,
+        "reason": null,
+        "status": null
+       }
+      ],
+      "supporting_checks": [],
+      "supporting_evidence_ids": []
+     }
+    },
+    "projection_revision": 1,
+    "provenance": {
+     "analysis_selection_revision": 2,
+     "binding_version": 1,
+     "checks": [],
+     "claims": "4ccb5956c78bf94268aa3486b5b489b5c309b95133fe3ea2ad9e11f3a54a36dd",
+     "decoder_version": 1,
+     "evidence": "492ee6aa36bfd0432b27f5e7aa597f6c3024ff1be9747bd6e895735b33656e45",
+     "inventory_revision": 1,
+     "plan": "ab90fbff4dc5987b242c2b1d460c838ff8df968d41ca4eae34534e66f527897e",
+     "rubric_version": 2
+    },
+    "provenance_fingerprint": "371120020ea3f10c7cff84877ac10a04b4261abe9a3509d9e40278b2b42ebe02",
+    "rubric_version": 2
+   },
+   "stage_provenance": [
+    {
+     "at": "2026-09-17T14:41:27.260307+00:00",
+     "commit": "fbf20d04a8d33c3ded89054c1f7317a40791302b",
+     "image_digest": "unknown",
+     "stage": "requested",
+     "version": "2026.9.1"
+    },
+    {
+     "at": "2026-09-17T14:41:28.013996+00:00",
+     "commit": "fbf20d04a8d33c3ded89054c1f7317a40791302b",
+     "image_digest": "unknown",
+     "stage": "reading",
+     "version": "2026.9.1"
+    }
+   ],
+   "supplements": []
+  },
+  "failure_reason": "No eligible findings were identified for bioAF's current validation methods. This does not establish that the paper contains no quantitative analysis. bioAF has no validation method for atomic force microscopy (AFM) elasticity measurement (experiment e1), live-cell migration tracking assay (Ibidi insert) (experiment e2), qRT-PCR (experiment e3), western blotting (experiment e4) or immunofluorescence microscopy (experiment e5).",
+  "id": 57,
+  "intended_route": "deposit",
+  "reproduction_plan_id": 57,
+  "requested_at": "2026-09-17T14:41:14.477039+00:00",
+  "source_accession": null,
+  "source_doi": "10.1002/jbm.a.35655",
+  "state": "classified",
+  "updated_at": "2026-09-17T14:45:52.759379+00:00"
+ }
+}
