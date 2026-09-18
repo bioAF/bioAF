@@ -1,0 +1,177 @@
+{
+ "check": "arm_condition_compatibility",
+ "deployed_build": "fbf20d04",
+ "inputs": [
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / WT-1",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: WT; cell line: E14TG2a"
+  },
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / WT-2",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: WT; cell line: E14TG2a"
+  },
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / WT-3",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: WT; cell line: E14TG2a"
+  },
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / WT-4",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: WT; cell line: E14TG2a"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / KO Cl5 repl1",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: SAMD1KO; cell line: E14TG2a"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / KO Cl5 repl2",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: SAMD1KO; cell line: E14TG2a"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / KO Cl16",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: SAMD1KO; cell line: E14TG2a"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO mouse ES cells",
+   "current": "compatible",
+   "deployed": "contradicted",
+   "input": "study 56 / KO Cl33",
+   "justification": "the arm's condition is this record's genotype written as prose; the record states it as an attribute, so the phrase test refused correct evidence and the attribute comparison accepts it",
+   "states": "antibody: none; genotype: SAMD1KO; cell line: E14TG2a"
+  },
+  {
+   "arm": "reference",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06002",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae"
+  },
+  {
+   "arm": "reference",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06013",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae"
+  },
+  {
+   "arm": "reference",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06024",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae"
+  },
+  {
+   "arm": "test",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae + HA",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06003",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA"
+  },
+  {
+   "arm": "test",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae + HA",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06014",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA"
+  },
+  {
+   "arm": "test",
+   "attribute": "treatment",
+   "condition": "Mucoderm\u00ae + HA",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "study 50 / LP06025",
+   "states": "tissue: gingiva; cell type: gingival fibroblast; treatment: treated with Mucoderm\u00ae + HA"
+  },
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "driver fixture / WT_a",
+   "states": "genotype: wild type; culture: WT1; time: day 0"
+  },
+  {
+   "arm": "reference",
+   "attribute": "genotype",
+   "condition": "WT",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "driver fixture / WT_b",
+   "states": "genotype: wild type; culture: WT2; time: day 0"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "driver fixture / KO_c5",
+   "states": "genotype: SAMD1 KO; clone: c5; time: day 0"
+  },
+  {
+   "arm": "test",
+   "attribute": "genotype",
+   "condition": "SAMD1 KO",
+   "current": "compatible",
+   "deployed": "compatible",
+   "input": "driver fixture / KO_c16",
+   "states": "genotype: SAMD1 KO; clone: c16; time: day 0"
+  }
+ ],
+ "note": "plan_8_3 sections 0.3 and 3.1. The superseded rule required the arm's condition to OCCUR in the record's condition text; the current rule compares it with the attributes the record states. Every input whose outcome moved is listed with what the arm asked for, what the record states, and why the move is right. An input that moved from accepted to REFUSED and carries no justification fails tests/test_refusal_diff.py."
+}

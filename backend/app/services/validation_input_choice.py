@@ -32,6 +32,9 @@ import re
 
 from app.services import validation_decision_budgets as budgets
 from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
+from app.services.sample_record_attributes import CONTRADICTED
+from app.services.sample_record_attributes import UNRESOLVED as ATTRIBUTE_UNRESOLVED
+from app.services.sample_record_attributes import condition_match
 
 PREVIEW_ROWS = 5
 PREVIEW_BYTES = 8 * 1024
@@ -445,16 +448,28 @@ def validate_mapping(
                 reasons.append(f'column {column} cites "{quote}", which is not in the text given to the decision')
 
         if arm in ("test", "reference") and contrast:
-            wanted = _normalized(
-                contrast.get("test_condition") if arm == "test" else contrast.get("reference_condition")
-            )
+            # plan_8_3 section 3.1: the arm's condition is compared to the ATTRIBUTES the record
+            # states, not to its prose. A paper writes "SAMD1 KO mouse ES cells" and the repository
+            # writes "genotype: SAMD1KO", so asking whether the phrase occurs in the record's text
+            # refused every row of study 56's correct mapping, the reference arm included.
+            wanted = contrast.get("test_condition") if arm == "test" else contrast.get("reference_condition")
             for record in cited_records:
-                stated = record["fields"]["condition"]
-                if wanted and stated and wanted not in stated:
+                found = condition_match(wanted, record["record"], sample_records)
+                if found["status"] == CONTRADICTED:
                     reasons.append(
-                        f"column {column} is put in the {arm} arm, and the treatment its sample record states "
-                        f'("{record["record"].get("condition")}") is not the arm\'s condition '
-                        f'("{contrast.get("test_condition") if arm == "test" else contrast.get("reference_condition")}")'
+                        f"column {column} is put in the {arm} arm, whose condition is \"{wanted}\", and the "
+                        f'{found["attribute"]} its sample record states is "{found["stated"]}"'
+                    )
+                elif found["status"] == ATTRIBUTE_UNRESOLVED:
+                    reasons.append(
+                        f"column {column} is put in the {arm} arm, and bioAF cannot establish that its sample "
+                        f'record states the arm\'s condition ("{wanted}"): '
+                        + (
+                            f'it states no {found["attribute"]}'
+                            if found["attribute"]
+                            else "no attribute its records state carries that condition"
+                        )
+                        + f" (the records state {', '.join(found['available'])})"
                     )
         if arm == "excluded":
             continue
