@@ -100,6 +100,43 @@ class TestAWorkflowIsNotSupportOnItsOwn:
         )
         assert _support(found, "e1") == SUPPORTED
 
+    def test_a_strategy_nobody_has_reasoned_about_settles_nothing(self):
+        """plan_8_4 section 6.1: ANY library-strategy string counted as proof of the measurement type.
+        `pipeline_mapper`'s own rule is that an undeclared strategy has NO OPINION, and this bypassed
+        it: a depositor's free text promoted a contextual match to an established contract."""
+        found = _found(
+            _plan(
+                [
+                    {
+                        "id": "e1",
+                        "assay": "RNA-seq",
+                        "workflow": "nf-core/rnaseq",
+                        "library_strategy": "OTHER",
+                    }
+                ]
+            ),
+            [],
+        )
+        assert _support(found, "e1") == UNRESOLVED_INTERPRETATION
+
+    def test_a_declared_strategy_the_workflow_does_not_consume_settles_nothing_either(self):
+        """A deposit that declares itself Bisulfite-Seq does not establish an RNA-seq contract. It
+        contradicts one, and the deposit guard is what refuses it: this must not read as support."""
+        found = _found(
+            _plan(
+                [
+                    {
+                        "id": "e1",
+                        "assay": "RNA-seq",
+                        "workflow": "nf-core/rnaseq",
+                        "library_strategy": "Bisulfite-Seq",
+                    }
+                ]
+            ),
+            [],
+        )
+        assert _support(found, "e1") != SUPPORTED
+
     def test_a_claim_bioaf_can_check_settles_it_too(self):
         found = _found(
             _plan([{"id": "e1", "assay": "RNA-seq", "workflow": "nf-core/rnaseq"}]),

@@ -104,12 +104,18 @@ def _workflow_basis(experiment: dict) -> str | None:
     description includes RNA or gene expression. A contextual match is the family's answer of last
     resort, and by itself it is an unresolved interpretation rather than an established contract.
     """
-    from app.services.pipeline_mapper import match_route
+    from app.services.pipeline_mapper import match_route, route_for_library_strategy
 
-    if not experiment.get("workflow"):
+    workflow = experiment.get("workflow")
+    if not workflow:
         return None
-    if str(experiment.get("library_strategy") or "").strip():
-        # The deposit itself declares what the data is, which settles the measurement type.
+    # The deposit's own controlled statement of what the data is settles the measurement type, but
+    # only where it actually says something about THIS workflow. plan_8_4 section 6.1: any
+    # library-strategy string counted as proof, which is not `pipeline_mapper`'s rule and never was:
+    # a strategy nobody has reasoned about has NO OPINION, and one the workflow does not consume
+    # contradicts the route rather than establishing it.
+    declared = route_for_library_strategy(experiment.get("library_strategy"))
+    if declared is not None and workflow in declared.compatible:
         return "diagnostic"
     matched = match_route(str(experiment.get("assay") or "").lower())
     if matched is None:
