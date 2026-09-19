@@ -1,0 +1,526 @@
+"""plan_8_4 milestone B: rubric v3's code section, assessed from the source a paper supplied.
+
+**Static inspection only, by a real parser.** A regular expression that thinks it knows a language is
+not a syntax check, and this module refuses to pretend: a language with no declared parser leaves its
+obligations undetermined and says so. Loading, installing, compiling and smoke execution are none of
+this module's business either; they run untrusted code and belong behind the existing isolated
+execution path and its approval, so they are verified only from a RECORDED result of that path.
+
+**What must never cost a point** (section 3.4): style, formatting, lint preferences,
+deprecated-but-functional syntax, the age of a tool, and a newer version merely producing different
+output. Pinning an older version can be exactly what faithful reproduction requires. A failure names a
+specific unmet obligation, its cause and its impact, or it is not a failure.
+
+Pure: no database, no model, no network, and it never imports or executes the source it reads.
+"""
+
+from __future__ import annotations
+
+import ast
+import builtins
+import re
+import sys
+
+from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
+
+MEASUREMENT = "measurement"
+
+# The explicit language capability declaration section 6.2 asks for. A language absent from this is a
+# language bioAF cannot parse, which makes its syntax UNKNOWN rather than wrong.
+SUPPORTED_LANGUAGES = ("python",)
+
+_STDLIB = set(getattr(sys, "stdlib_module_names", ())) | {"__future__"}
+
+# An absolute path under a user's home or desktop is a path that exists on one machine. It is not a
+# style preference: the supplied analysis cannot read it anywhere else.
+_PERSONAL_PATH = re.compile(r"^(/Users/|/home/|/Volumes/|[A-Za-z]:\\\\Users\\\\)")
+
+# A ground that is only "this is old". Section 3.4 forbids deducting for tool age, so a defect record
+# whose evidence says nothing else is not an established defect.
+_AGE_ONLY = re.compile(r"\b(old|older|outdated|ancient|years old|deprecated|unmaintained|legacy)\b", re.I)
+
+_DYNAMIC_IMPORT = ("importlib", "__import__", "pkgutil", "imp")
+
+
+def _finding(outcome: str, rationale: str, *, scope: str, **extra) -> dict:
+    return {"outcome": outcome, "rationale": rationale, "scope": scope, "method": MEASUREMENT, **extra}
+
+
+def _open(rationale: str, *, scope: str, next_action: str, **extra) -> dict:
+    return _finding(UNDETERMINED, rationale, scope=scope, next_action=next_action, **extra)
+
+
+def _language(source: dict) -> str:
+    return str(source.get("language") or "").strip().lower()
+
+
+def _parsed(sources: list[dict]) -> tuple[list[tuple[dict, ast.Module]], list[tuple[dict, SyntaxError]], list[dict]]:
+    """Each supported source parsed, the ones that failed, and the ones in a language bioAF cannot read."""
+    trees, broken, unsupported = [], [], []
+    for source in sources or []:
+        if _language(source) not in SUPPORTED_LANGUAGES:
+            unsupported.append(source)
+            continue
+        try:
+            trees.append((source, ast.parse(source.get("text") or "", filename=source.get("path") or "<source>")))
+        except SyntaxError as exc:
+            broken.append((source, exc))
+    return trees, broken, unsupported
+
+
+def _scope(sources: list[dict]) -> str:
+    names = [str(s.get("path") or "an unnamed file") for s in sources or []]
+    return ", ".join(names) or "no source in hand"
+
+
+def assess_code(
+    *,
+    sources: list[dict] | None,
+    manifests: list[dict] | None = None,
+    defects: list[dict] | None = None,
+    execution: dict | None = None,
+) -> dict:
+    """C1 to C5 from the supplied source, its manifests, a recorded fitness review and a recorded run.
+
+    ``sources`` are ``{"path", "language", "text"}``. ``manifests`` are dependency and environment
+    specifications as text. ``defects`` are recorded evidence-backed reviews. ``execution`` holds the
+    results of the isolated execution path, which is the only thing that verifies C1.B and C2.B.
+    """
+    sources = [s for s in sources or [] if isinstance(s, dict)]
+    manifests = [m for m in manifests or [] if isinstance(m, dict)]
+    if not sources:
+        held = "bioAF holds no source for this paper's analysis"
+        return {
+            leaf: _open(held, scope="no source in hand", next_action="retrieve the paper's supplied code")
+            for leaf in ("C1.A", "C1.B", "C2.A", "C2.B", "C3.A", "C3.B", "C4.A", "C4.B", "C5.A", "C5.B")
+        }
+    trees, broken, unsupported = _parsed(sources)
+    return {
+        **_syntax(sources, trees, broken, unsupported),
+        **_build(sources, execution),
+        **_imports(sources, trees, manifests, unsupported),
+        **_resolution(sources, execution),
+        **_environment(sources, trees, manifests),
+        **_completeness(sources, trees, unsupported),
+        **_fitness(sources, trees, defects),
+    }
+
+
+def _syntax(sources, trees, broken, unsupported) -> dict:
+    if broken:
+        source, exc = broken[0]
+        return {
+            "C1.A": _finding(
+                FAILED,
+                f"{source.get('path')} does not parse as {source.get('language')}: {exc.msg} at line {exc.lineno}",
+                scope=_scope([s for s, _ in trees] + [s for s, _ in broken]),
+                impact="the supplied analysis cannot run as written, so nothing downstream of it can be reproduced",
+                evidence={"path": source.get("path"), "line": exc.lineno, "message": exc.msg},
+            )
+        }
+    if trees:
+        return {
+            "C1.A": _finding(
+                VERIFIED,
+                f"every supplied source parses under its declared language ({_scope([s for s, _ in trees])})",
+                scope=_scope([s for s, _ in trees]),
+                evidence={"parser": "python ast", "files": [s.get("path") for s, _ in trees]},
+            )
+        }
+    languages = sorted({str(s.get("language") or "unknown") for s in unsupported})
+    return {
+        "C1.A": _open(
+            f"bioAF holds no parser for {', '.join(languages)}, so whether this source parses is unknown",
+            scope=_scope(unsupported),
+            next_action=f"add a declared parser for {', '.join(languages)}",
+            capability_limit=True,
+        )
+    }
+
+
+def _build(sources, execution) -> dict:
+    load = (execution or {}).get("load") or {}
+    if load.get("status") == "succeeded":
+        return {
+            "C1.B": _finding(
+                VERIFIED,
+                f"the supplied source loads in {load.get('environment') or 'the declared environment'}",
+                scope=_scope(sources),
+                evidence={"ref": load.get("ref"), "environment": load.get("environment")},
+            )
+        }
+    if load.get("status") == "failed":
+        return {
+            "C1.B": _finding(
+                FAILED,
+                f"loading the supplied source in the declared environment failed: {load.get('reason')}",
+                scope=_scope(sources),
+                impact="the analysis cannot be started from what was supplied",
+                evidence={"ref": load.get("ref")},
+            )
+        }
+    return {
+        "C1.B": _open(
+            "loading the supplied source executes it, so bioAF runs it only through its isolated "
+            "execution path, under the approval that path requires; no such run is recorded",
+            scope=_scope(sources),
+            next_action="approve an isolated load of the supplied source",
+        )
+    }
+
+
+def _declared_packages(manifests) -> dict[str, str | None]:
+    """Each package a manifest declares, and the version it pins, or None for unpinned."""
+    declared: dict[str, str | None] = {}
+    for manifest in manifests:
+        for line in str(manifest.get("text") or "").splitlines():
+            entry = line.split("#", 1)[0].strip().lstrip("-").strip()
+            if not entry or entry.endswith(":") or entry.startswith(("FROM", "RUN", "COPY", "WORKDIR", "ENV")):
+                continue
+            match = re.match(r"^([A-Za-z0-9_.\-]+)\s*(?:([=<>!~]=?)\s*([A-Za-z0-9_.\-]+))?", entry)
+            if not match:
+                continue
+            name = match.group(1).lower().replace("_", "-")
+            pinned = match.group(3) if match.group(2) in ("==", "=") else None
+            if name not in declared or pinned:
+                declared[name] = pinned
+    return declared
+
+
+# What a package is called when imported, where that differs from what it is called when installed.
+_IMPORT_NAMES = {"sklearn": "scikit-learn", "cv2": "opencv-python", "PIL": "pillow", "yaml": "pyyaml"}
+
+
+def _imported(trees) -> tuple[set[str], bool]:
+    """Every top-level module the source imports plainly, and whether it also imports dynamically."""
+    modules: set[str] = set()
+    dynamic = False
+    for _source, tree in trees:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    modules.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:  # a relative import names a sibling of this file, not a package
+                    continue
+                if node.module:
+                    modules.add(node.module.split(".")[0])
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "__import__":
+                dynamic = True
+    if modules & set(_DYNAMIC_IMPORT):
+        dynamic = True
+    return modules, dynamic
+
+
+def _local_modules(sources) -> set[str]:
+    return {str(s.get("path") or "").rsplit("/", 1)[-1].removesuffix(".py") for s in sources}
+
+
+def _imports(sources, trees, manifests, unsupported) -> dict:
+    if not trees:
+        return {
+            "C2.A": _open(
+                "bioAF holds no parser for this source, so its imports are unknown",
+                scope=_scope(unsupported),
+                next_action="add a declared parser for this language",
+                capability_limit=True,
+            )
+        }
+    modules, dynamic = _imported(trees)
+    declared = _declared_packages(manifests)
+    local = _local_modules(sources)
+    missing = sorted(
+        module
+        for module in modules
+        if module not in _STDLIB
+        and module not in local
+        and module.lower().replace("_", "-") not in declared
+        and _IMPORT_NAMES.get(module, "").lower() not in declared
+        and module not in _DYNAMIC_IMPORT
+    )
+    if dynamic:
+        return {
+            "C2.A": _open(
+                "the source imports dynamically, so what it actually requires cannot be established by "
+                "reading it; a name absent from the manifests may still be imported at run time",
+                scope=_scope(sources),
+                next_action="approve an isolated load, which is what establishes the real requirement set",
+            )
+        }
+    if missing:
+        return {
+            "C2.A": _finding(
+                FAILED,
+                f"the source imports {', '.join(missing)}, which nothing supplied declares and which is "
+                "neither standard library nor another supplied file",
+                scope=_scope(sources),
+                impact="the analysis would stop at the import, so nothing it computes can be reproduced",
+                evidence={"missing": missing, "declared": sorted(declared)},
+            )
+        }
+    return {
+        "C2.A": _finding(
+            VERIFIED,
+            "every module the source imports is standard library, another supplied file, or declared in "
+            "a supplied manifest",
+            scope=_scope(sources),
+            evidence={"imports": sorted(modules), "declared": sorted(declared)},
+        )
+    }
+
+
+def _resolution(sources, execution) -> dict:
+    resolution = (execution or {}).get("dependency_resolution") or {}
+    if resolution.get("status") == "succeeded":
+        return {
+            "C2.B": _finding(
+                VERIFIED,
+                "the declared dependency versions and interfaces resolved together in a bounded environment check",
+                scope=_scope(sources),
+                evidence={"ref": resolution.get("ref")},
+            )
+        }
+    if resolution.get("status") == "failed":
+        return {
+            "C2.B": _finding(
+                FAILED,
+                f"the declared dependency versions do not resolve together: {resolution.get('reason')}",
+                scope=_scope(sources),
+                impact="the environment the paper describes cannot be built as described",
+                evidence={"ref": resolution.get("ref")},
+            )
+        }
+    return {
+        "C2.B": _open(
+            "resolving dependency versions installs packages, so bioAF does it only through its isolated "
+            "execution path, under the approval that path requires; no such run is recorded",
+            scope=_scope(sources),
+            next_action="approve a bounded environment check",
+        )
+    }
+
+
+_RUNTIME_VERSION = re.compile(r"\b(?:python|r|julia)[:=\s/-]*\d+\.\d+", re.I)
+
+
+def _environment(sources, trees, manifests) -> dict:
+    declared = _declared_packages(manifests)
+    if not manifests:
+        held = "bioAF holds no dependency or environment specification for this analysis"
+        return {
+            "C3.A": _open(held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"),
+            "C3.B": _open(held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"),
+        }
+    modules, _dynamic = _imported(trees) if trees else (set(), False)
+    used = {
+        module.lower().replace("_", "-")
+        for module in modules
+        if module not in _STDLIB and module not in _local_modules(sources)
+    } | {_IMPORT_NAMES[m].lower() for m in modules if m in _IMPORT_NAMES}
+    # Only a dependency this analysis ACTUALLY uses is result-sensitive. A general "not everything is
+    # pinned" rule is explicitly insufficient (section 3.4).
+    unpinned = sorted(name for name, version in declared.items() if name in used and not version)
+    if unpinned:
+        pinned = _finding(
+            FAILED,
+            f"the supplied environment specification declares {', '.join(unpinned)} without a version, and "
+            "this analysis uses it, so the versions its results depend on cannot be recovered",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+            impact="a rerun would resolve a different version and could produce different numbers",
+            evidence={"unpinned": unpinned},
+        )
+    elif used:
+        pinned = _finding(
+            VERIFIED,
+            "every dependency this analysis uses is declared at a fixed version",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+            evidence={"pinned": sorted(name for name in declared if name in used)},
+        )
+    else:
+        pinned = _open(
+            "bioAF could not establish which of the declared dependencies this analysis uses",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+            next_action="add a declared parser for this source's language",
+        )
+    text = "\n".join(str(m.get("text") or "") for m in manifests)
+    if _RUNTIME_VERSION.search(text):
+        runtime = _finding(
+            VERIFIED,
+            "the supplied specification states the runtime it was built against and how to rebuild it",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+        )
+    else:
+        runtime = _finding(
+            FAILED,
+            "the supplied environment specification states no runtime version, so the environment it "
+            "describes cannot be reconstructed as it was",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+            impact="a rebuild picks whatever runtime is current, which is not the one that produced the results",
+        )
+    return {"C3.A": pinned, "C3.B": runtime}
+
+
+def _entry_points(trees) -> list[str]:
+    found = []
+    for source, tree in trees:
+        for node in tree.body:
+            if isinstance(node, ast.If):
+                test = ast.dump(node.test)
+                if "__main__" in test or "__name__" in test:
+                    found.append(str(source.get("path")))
+                    break
+            elif isinstance(node, (ast.Expr, ast.Assign, ast.AugAssign)) and not isinstance(
+                getattr(node, "value", None), (ast.Constant,)
+            ):
+                found.append(str(source.get("path")))
+                break
+    return found
+
+
+def _bound_names(tree: ast.Module) -> set[str]:
+    bound = set(dir(builtins))
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+            bound |= {a.arg for a in getattr(node, "args", ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[])).posonlyargs}
+            bound |= {a.arg for a in getattr(node, "args", None).args} if getattr(node, "args", None) else set()
+            bound |= {a.arg for a in getattr(node, "args", None).kwonlyargs} if getattr(node, "args", None) else set()
+            for extra in ("vararg", "kwarg"):
+                argument = getattr(getattr(node, "args", None), extra, None)
+                if argument is not None:
+                    bound.add(argument.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bound.add((alias.asname or alias.name).split(".")[0])
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.ExceptHandler,)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound |= set(node.names)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+    return bound
+
+
+def _completeness(sources, trees, unsupported) -> dict:
+    if not trees:
+        held = "bioAF holds no parser for this source, so what it covers cannot be established"
+        return {
+            "C4.A": _open(held, scope=_scope(unsupported), next_action="add a declared parser", capability_limit=True),
+            "C4.B": _open(held, scope=_scope(unsupported), next_action="add a declared parser", capability_limit=True),
+        }
+    entry = _entry_points(trees)
+    if entry:
+        covers = _finding(
+            VERIFIED,
+            f"the supplied source has an entry point that runs the analysis ({', '.join(entry)})",
+            scope=_scope(sources),
+        )
+    else:
+        covers = _open(
+            "the supplied source defines functions and runs none of them, so nothing in it states how the "
+            "analysis is started",
+            scope=_scope(sources),
+            next_action="retrieve the script or notebook that calls this code",
+        )
+    unbound: list[str] = []
+    personal: list[str] = []
+    for source, tree in trees:
+        bound = _bound_names(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound:
+                unbound.append(node.id)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str) and _PERSONAL_PATH.match(node.value):
+                personal.append(node.value)
+    if unbound:
+        coherent = _finding(
+            FAILED,
+            f"the supplied source uses {', '.join(sorted(set(unbound)))}, which nothing in it defines, "
+            "imports, or receives as an argument",
+            scope=_scope(sources),
+            impact="the analysis stops at that line, so what follows it was never run from this source",
+            evidence={"unbound": sorted(set(unbound))},
+        )
+    elif personal:
+        coherent = _finding(
+            FAILED,
+            f"the supplied source reads {', '.join(sorted(set(personal)))}, a path on one machine rather "
+            "than an input the analysis is given",
+            scope=_scope(sources),
+            impact="the analysis cannot find its inputs anywhere but the authors' own computer",
+            evidence={"paths": sorted(set(personal))},
+        )
+    else:
+        coherent = _finding(
+            VERIFIED,
+            "every name the source uses is defined, imported or received, and its inputs are taken rather "
+            "than hard-coded to one machine",
+            scope=_scope(sources),
+        )
+    return {"C4.A": covers, "C4.B": coherent}
+
+
+def _fitness(sources, trees, defects) -> dict:
+    reviews = [d for d in defects or [] if isinstance(d, dict)]
+    appropriate = [d for d in reviews if d.get("kind") == "fitness" and d.get("established") and d.get("evidence")]
+    if appropriate:
+        suits = _finding(
+            VERIFIED,
+            "an evidence-backed review establishes that "
+            + ", ".join(str(d.get("operation")) for d in appropriate)
+            + " suits its input and the calculation it is used for",
+            scope=", ".join(str(d.get("operation")) for d in appropriate),
+            evidence=[d.get("evidence") for d in appropriate],
+        )
+    else:
+        suits = _open(
+            "no evidence-backed review of whether the operations this analysis uses suit their inputs has been made",
+            scope=_scope(sources),
+            next_action="review the operations the analysis uses against their documented behaviour",
+        )
+    claimed = [d for d in reviews if d.get("kind") == "defect"]
+    established = [
+        d
+        for d in claimed
+        if d.get("established") and d.get("evidence") and not _age_only(str(d.get("evidence") or ""))
+    ]
+    age_only = [d for d in claimed if d.get("established") and _age_only(str(d.get("evidence") or ""))]
+    if established:
+        defect = established[0]
+        version = f" at {defect['version']}" if defect.get("version") else ""
+        conflicts = _finding(
+            FAILED,
+            f"a documented defect affects {defect.get('operation')}{version}, which this analysis uses: "
+            f"{defect.get('evidence')}",
+            scope=str(defect.get("operation")),
+            impact=defect.get("impact") or "the operation does not do what the analysis relies on it doing",
+            evidence={"operation": defect.get("operation"), "version": defect.get("version"), "source": defect.get("evidence")},
+        )
+    elif age_only:
+        conflicts = _open(
+            "the only ground offered for a defect is the tool's age, and age alone is not a defect: pinning "
+            "an older version can be exactly what faithful reproduction requires",
+            scope=str(age_only[0].get("operation")),
+            next_action="cite the version-specific evidence that the operation this analysis uses is affected",
+        )
+    elif claimed:
+        conflicts = _open(
+            "a concern was raised about "
+            + ", ".join(str(d.get("operation")) for d in claimed)
+            + " and it is not established against the version and configuration this analysis uses",
+            scope=", ".join(str(d.get("operation")) for d in claimed),
+            next_action="retrieve the version-specific evidence, or record that none was found",
+        )
+    else:
+        conflicts = _open(
+            "no review of the versions and documented defects of the operations this analysis uses has been made",
+            scope=_scope(sources),
+            next_action="review the operations against their version-specific documented defects",
+        )
+    return {"C5.A": suits, "C5.B": conflicts}
+
+
+def _age_only(evidence: str) -> bool:
+    """Whether a defect's only ground is that the tool is old. Section 3.4 forbids deducting for that."""
+    return bool(_AGE_ONLY.search(evidence)) and not re.search(r"\b\d+\.\d+", evidence)

@@ -95,12 +95,13 @@ class TestTheSectionsSayWhatWasDoneAndWhatIsOutstanding:
             assert section["verified"] + section["failed"] + section["undetermined"] == section["maximum"]
             assert section["title"]
 
-    def test_a_section_with_no_implemented_check_says_so_rather_than_reading_as_checked(self):
+    def test_a_section_with_nothing_in_hand_says_so_rather_than_reading_as_checked(self):
         code = next(s for s in _summary()["evidence_score"]["sections"] if s["section"] == "C")
         assert code["verified"] == 0
         assert code["undetermined"] == 20
-        assert code["outstanding"]
-        assert "no implemented check" in code["outstanding"]
+        assert "holds no source" in code["outstanding"]
+        # Two of its obligations cannot be established by reading source at all, whatever is in hand.
+        assert code["unsupported_count"] == 2
 
     def test_the_capability_limits_are_listed_and_counted(self):
         card = _summary()["evidence_score"]

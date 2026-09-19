@@ -41,72 +41,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -294,11 +238,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -695,72 +639,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -948,11 +836,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -1233,72 +1121,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -1486,11 +1318,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -2267,72 +2099,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -2520,11 +2296,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -2875,72 +2651,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -3128,11 +2848,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -3429,72 +3149,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -3682,11 +3346,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -4012,72 +3676,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -4265,11 +3873,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -4713,72 +4321,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -4989,11 +4541,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -6335,72 +5887,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -6616,11 +6112,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -7635,72 +7131,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -7895,11 +7335,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -8409,72 +7849,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -8662,11 +8046,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -9831,72 +9215,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -10175,11 +9503,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -11511,72 +10839,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -11764,11 +11036,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -12349,72 +11621,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -12609,11 +11825,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -12970,72 +12186,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -13223,11 +12383,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -13624,72 +12784,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -13884,11 +12988,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -14567,72 +13671,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -14827,11 +13875,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -15430,72 +14478,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -15706,11 +14698,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -16377,72 +15369,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -16637,11 +15573,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -17453,72 +16389,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -17734,11 +16614,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -18745,72 +17625,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -19019,11 +17843,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {
@@ -20050,72 +18874,16 @@
       "capability_limits": [
         {
           "criterion": "C1",
-          "leaf": "C1.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C1",
           "leaf": "C1.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C2",
-          "leaf": "C2.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
           "criterion": "C2",
           "leaf": "C2.B",
           "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C3",
-          "leaf": "C3.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C4",
-          "leaf": "C4.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.A",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
-          "section": "C"
-        },
-        {
-          "criterion": "C5",
-          "leaf": "C5.B",
-          "points": 2.0,
-          "reason": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "reason": "bioAF holds no source for this paper's analysis",
           "section": "C"
         },
         {
@@ -20303,11 +19071,11 @@
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
-          "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means parsing, resolving and loading the paper's actual source in its declared environment, which runs untrusted code and belongs behind the existing isolated execution path and its approval.",
+          "outstanding": "bioAF holds no source for this paper's analysis",
           "section": "C",
           "title": "Code and execution environment",
           "undetermined": 20.0,
-          "unsupported_count": 10,
+          "unsupported_count": 2,
           "verified": 0.0
         },
         {

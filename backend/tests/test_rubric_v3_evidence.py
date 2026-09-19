@@ -224,9 +224,19 @@ class TestWhatIsNotImplementedIsDeclaredRatherThanGuessed:
         for leaf_id in CAPABILITY_LIMITS:
             assert assessed.get(leaf_id, {}).get("outcome", UNDETERMINED) == UNDETERMINED, leaf_id
 
-    def test_the_whole_code_section_is_declared_unsupported_for_now(self):
+    def test_the_two_obligations_that_need_a_run_are_standing_capability_limits(self):
+        """plan_8_4 milestone B: the static code obligations are implemented. Loading the source and
+        resolving its dependencies execute it, so they stay behind the isolated execution path and its
+        approval however much source is in hand."""
+        assert "C1.B" in CAPABILITY_LIMITS and "C2.B" in CAPABILITY_LIMITS
+        for implemented in ("C1.A", "C2.A", "C3.A", "C3.B", "C4.A", "C4.B", "C5.A", "C5.B"):
+            assert implemented not in CAPABILITY_LIMITS
+
+    def test_with_no_source_in_hand_the_whole_code_section_is_still_grey(self):
+        assessed = _assess()
         for leaf in ("C1.A", "C1.B", "C2.A", "C2.B", "C3.A", "C3.B", "C4.A", "C4.B", "C5.A", "C5.B"):
-            assert leaf in CAPABILITY_LIMITS
+            assert assessed[leaf]["outcome"] == UNDETERMINED, leaf
+            assert assessed[leaf]["next_action"], leaf
 
     def test_a_repository_that_exists_verifies_nothing_about_the_code(self):
         """Section 3.4 and 6.2: repository discovery is not source inspection, and successful
@@ -246,3 +256,41 @@ def _result_allocation(inventory):
     from app.services.validation_rubric_v3 import result_allocation
 
     return result_allocation(inventory)
+
+
+class TestTheCodeSectionIsAssessedWhereTheSourceIsInHand:
+    """plan_8_4 milestone B: the code checks run on the source the study actually holds, and on nothing
+    else. A repository that exists, a file that was retrieved and a role that says "code" are not
+    source text, and none of them verifies a code obligation."""
+
+    _SOURCE = {
+        "path": "analysis.py",
+        "language": "python",
+        "text": "import os\n\n\ndef main():\n    print(os.getcwd())\n\n\nif __name__ == '__main__':\n    main()\n",
+    }
+
+    def test_source_in_hand_verifies_the_syntax_obligation_through_a_parser(self):
+        assessed = _assess(evidence={"code_inspection": {"sources": [self._SOURCE]}})
+        assert assessed["C1.A"]["outcome"] == VERIFIED
+        assert "analysis.py" in assessed["C1.A"]["scope"]
+
+    def test_the_execution_gated_obligations_stay_grey_without_an_approved_run(self):
+        assessed = _assess(evidence={"code_inspection": {"sources": [self._SOURCE]}})
+        assert assessed["C1.B"]["outcome"] == UNDETERMINED
+        assert assessed["C2.B"]["outcome"] == UNDETERMINED
+
+    def test_a_syntax_error_in_the_supplied_source_is_a_real_failure(self):
+        broken = {**self._SOURCE, "text": "def main(:\n    pass\n"}
+        assessed = _assess(evidence={"code_inspection": {"sources": [broken]}})
+        assert assessed["C1.A"]["outcome"] == FAILED
+        assert assessed["C1.A"]["impact"]
+
+    def test_no_source_in_hand_leaves_the_whole_section_grey(self):
+        assessed = _assess(evidence={"capabilities": {"code_repository": {"value": "yes"}}})
+        assert all(assessed[f"C{n}.{o}"]["outcome"] == UNDETERMINED for n in range(1, 6) for o in "AB")
+
+    def test_an_unparseable_language_declares_itself_a_capability_limit(self):
+        r_source = {"path": "AllRCode.R", "language": "r", "text": "f <- function(x) x + 1\n"}
+        assessed = _assess(evidence={"code_inspection": {"sources": [r_source]}})
+        assert assessed["C1.A"]["outcome"] == UNDETERMINED
+        assert assessed["C1.A"]["capability_limit"] is True

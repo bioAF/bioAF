@@ -277,6 +277,9 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
         # resumed study shows the original failure beside the new attempt.
         ledger.extend(recorded_failures(references, pmcid=pmcid, at=(evidence.get("assessment") or {}).get("at")))
     start = len(ledger)
+    # plan_8_4 section 6.2: the paper's code and its environment specifications, while their bytes are
+    # in hand. The bundle has one address and its members have none, so nothing can read them later.
+    code_bytes: dict[str, bytes] = {}
     try:
         resolved = await resolve_supplements(
             pmcid,
@@ -285,6 +288,7 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
             thresholds=await claimed_thresholds(session, study),
             ledger=ledger,
             predicates=await claimed_predicates(session, study),
+            code_bytes=code_bytes,
         )
     except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
         logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
@@ -293,7 +297,25 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     await ValidationIssueService.record(session, study, [retrieval_issue(ledger[start:], resolved)])
     # One file is one resource. The prose reference and the manifest entry resolve to the same
     # bytes, and study 32 listed each of S1, S2 and S3 twice as a result.
-    return merge_resource_identity(resolved)
+    merged = merge_resource_identity(resolved)
+    # plan_8_4 section 6.2: what the paper supplied AS SOURCE, with its file boundaries and its
+    # provenance, and what bioAF could not read back into files. An inspection of nothing is still
+    # recorded: "bioAF never read it" and "bioAF read it and found nothing" are different statements.
+    try:
+        from app.services.validation_code_inspection import inspect_code
+
+        inspected = inspect_code(merged, bytes_for=code_bytes)
+        held = dict(evidence.get("code_inspection") or {})
+        evidence["code_inspection"] = {
+            **inspected,
+            # An earlier inspection's reviews and approved runs are evidence in their own right and
+            # are not discarded because the source was read again.
+            "reviews": held.get("reviews") or [],
+            "execution": held.get("execution") or {},
+        }
+    except Exception as exc:  # noqa: BLE001 - reading the code never fails the assessment
+        logger.warning("code inspection failed for study %s: %s", study.id, exc)
+    return merged
 
 
 async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) -> None:
