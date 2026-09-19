@@ -74,6 +74,7 @@ const CARD: EvidenceScore = {
       impact: "an analysis against the paper's stated organism would answer about the wrong species",
     },
   ],
+  next_checks: [],
 };
 
 test("shows the score out of 100 beside its rubric", () => {
@@ -154,4 +155,31 @@ test("names the obligations bioAF has no check for rather than letting them read
 test("states the assessed scope in checks, not in findings", () => {
   render(<EvidenceScorecard card={CARD} />);
   expect(screen.getByTestId("evidence-score-scope")).toHaveTextContent("Rubric checks assessed: 7 / 41");
+});
+
+/**
+ * plan_8_4 section 6.4: what would be assessed next, what it is worth, and what it requires. A grey
+ * obligation with no stated way forward is indistinguishable from one nobody will ever assess.
+ */
+test("lists what would be assessed next and names what needs an approval", () => {
+  render(
+    <EvidenceScorecard
+      card={{
+        ...CARD,
+        next_checks: [
+          { leaf: "C1.B", criterion: "C1", section: "C", points: 2, action: "approve an isolated load of the supplied source", needs_approval: true },
+          { leaf: "S1.B", criterion: "S1", section: "S", points: 1.5, action: "acquire the deposit's sample metadata", needs_approval: false },
+        ],
+      }}
+    />,
+  );
+  const next = screen.getByTestId("evidence-next-checks");
+  expect(next).toHaveTextContent("approve an isolated load of the supplied source");
+  expect(next).toHaveTextContent("(needs an approval)");
+  expect(next).toHaveTextContent("acquire the deposit's sample metadata");
+});
+
+test("a card with nothing left to assess shows no next-checks list", () => {
+  render(<EvidenceScorecard card={{ ...CARD, next_checks: [] }} />);
+  expect(screen.queryByTestId("evidence-next-checks")).not.toBeInTheDocument();
 });

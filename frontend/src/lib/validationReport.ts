@@ -634,4 +634,13 @@ export interface EvidenceScore {
   capability_limits: EvidenceScoreLimit[];
   reproduction: { attempted: boolean; label: string; reason: string | null };
   concerns: EvidenceScoreConcern[];
+  // plan_8_4 section 6.4: what would be assessed next, what it is worth, and what it requires.
+  next_checks: {
+    leaf: string;
+    criterion: string;
+    section: string;
+    points: number;
+    action: string;
+    needs_approval: boolean;
+  }[];
 }

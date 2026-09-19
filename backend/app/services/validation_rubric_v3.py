@@ -700,6 +700,7 @@ def evidence_card(
             "reason": (reproduction or {}).get("reason"),
         },
         "concerns": _concerns(leaves, assessed),
+        "next_checks": _next_checks(leaves, assessed, limits),
     }
 
 
@@ -764,6 +765,42 @@ def _limit_rows(leaves: list[dict], assessed: dict, declared: dict) -> list[dict
             }
         )
     return rows
+
+
+# A next action that a person cannot take without the approval the isolated execution path requires.
+_NEEDS_APPROVAL = ("approve",)
+
+
+def _next_checks(leaves: list[dict], assessed: dict, limits: list[dict]) -> list[dict]:
+    """plan_8_4 section 6.4: what would be assessed next, what it is worth, and what it requires.
+
+    A grey obligation with no stated way forward is indistinguishable from one nobody will ever
+    assess, so every open obligation that HAS an action is listed with the points it holds. A
+    capability limit is not offered: it is a statement about what bioAF has not built, not an action
+    a person can take. The exception is an obligation whose only obstacle is an approval, which is
+    something a person CAN give.
+    """
+    capped = {row["leaf"] for row in limits}
+    rows = []
+    for leaf in leaves:
+        found = assessed.get(leaf["id"]) or {}
+        action = found.get("next_action")
+        if found.get("outcome", UNDETERMINED) != UNDETERMINED or not action:
+            continue
+        needs_approval = any(word in action.lower() for word in _NEEDS_APPROVAL)
+        if leaf["id"] in capped and not needs_approval:
+            continue
+        rows.append(
+            {
+                "leaf": leaf["id"],
+                "criterion": leaf["criterion"],
+                "section": leaf["section"],
+                "points": float(leaf["weight"]),
+                "action": action,
+                "needs_approval": needs_approval,
+            }
+        )
+    return sorted(rows, key=lambda row: (-row["points"], row["leaf"]))
 
 
 def _concerns(leaves: list[dict], assessed: dict) -> list[dict]:

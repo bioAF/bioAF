@@ -244,3 +244,81 @@ class TestTheStiffnessPapersProfileFitsItsOwnMethods:
         card = (await replay_report(session, await _restored(session, admin_user, 55)))["evidence_score"]
         assert card["profile"]["exclusions"] == []
         assert card["profile"]["documentary_ceiling"] == 70
+
+
+class TestAConfirmationMovesTheScoreIdenticallyEverywhere:
+    """plan_8_4 section 9 (integration): a recorded confirmation changes only the assessments that
+    depend on it, persists, survives a reload, and updates V, F and U identically on the report, the
+    studies list and the markdown export."""
+
+    _TABLE = "supp_gr.252981.119_Supplemental_File_3_XX-v-XY_siggenes.txt"
+
+    async def _settled(self, session, admin_user, monkeypatch):
+        from app.services import validation_consistency_checks as consistency
+        from app.services.validation_table_confirmations import confirmation_entry, record_confirmation
+
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        before = (await replay_report(session, restored))["evidence_score"]
+        target = sorted(restored.targets, key=lambda t: t.id)[11]
+        contrast = (restored.plan.differential_design_json or {})["contrasts"][target.contrast_index]["name"]
+        entry = confirmation_entry(
+            table=self._TABLE,
+            contrast=contrast,
+            filter_semantics={"magnitude": True},
+            note="the authors' code applies abs(log2FoldChange)",
+            confirmed_by="a person",
+            at="2026-09-18T00:00:00+00:00",
+        )
+        await record_confirmation(session, restored.study, restored.plan, entry, reason="a person recorded it")
+        await session.flush()
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        await consistency.enqueue(session, restored.study, restored.plan)
+        await consistency.run_pending(session, restored.study, restored.plan, fetcher=_no_fetch)
+        await session.flush()
+        return restored, before
+
+    @pytest.mark.asyncio
+    async def test_the_score_rises_by_exactly_the_obligations_it_settled(self, session, admin_user, monkeypatch):
+        restored, before = await self._settled(session, admin_user, monkeypatch)
+        after = (await replay_report(session, restored))["evidence_score"]
+        assert after["score"] > before["score"]
+        assert after["score"] + after["failed"] + after["undetermined"] == 100
+        # The documentary sections it says nothing about do not move.
+        was = {s["section"]: s["verified"] for s in before["sections"]}
+        now = {s["section"]: s["verified"] for s in after["sections"]}
+        assert {k: v for k, v in now.items() if k not in ("R", "M")} == {
+            k: v for k, v in was.items() if k not in ("R", "M")
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_list_and_the_export_say_what_the_report_says(self, session, admin_user, monkeypatch):
+        from app.services.provenance.markdown_renderer import MarkdownRenderer
+        from app.services.validation_report_summary import compact_scorecards_for
+
+        restored, _before = await self._settled(session, admin_user, monkeypatch)
+        report = await replay_report(session, restored)
+        listed = await compact_scorecards_for(session, [restored.study])
+        card = report["evidence_score"]
+        assert listed[restored.study.id]["evidence_score"]["headline"] == card["headline"]
+        assert listed[restored.study.id]["evidence_score"]["counts_label"] == card["counts_label"]
+        text = MarkdownRenderer.render(
+            "validation_study",
+            {
+                "generated_at": "2026-09-18T00:00:00+00:00",
+                "generated_by": "a@b.c",
+                "schema_version": 1,
+                "entity": {"id": restored.study.id, "title": "A paper", "report_summary": report},
+            },
+        )
+        assert card["headline"] in text
+        assert card["counts_label"] in text
+
+    @pytest.mark.asyncio
+    async def test_the_confirmation_survives_a_reload(self, session, admin_user, monkeypatch):
+        restored, _before = await self._settled(session, admin_user, monkeypatch)
+        session.expunge_all()
+        again = await replay_report(session, restored)
+        kept = (restored.study.evidence_json or {}).get("table_confirmations") or []
+        assert kept[-1]["filter_semantics"] == {"magnitude": True}
+        assert again["evidence_score"]["score"] > 0

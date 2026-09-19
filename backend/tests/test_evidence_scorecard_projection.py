@@ -135,3 +135,44 @@ class TestTheProfileTravelsWithTheScore:
     def test_the_exact_values_are_carried_beside_the_display(self, field):
         card = _summary()["evidence_score"]
         assert field in card["exact"]
+
+
+class TestTheCardSaysWhatWouldBeAssessedNext:
+    """plan_8_4 section 6.4: show the expected checks and their approval requirements. A grey
+    obligation with no stated way forward is indistinguishable from one nobody will ever assess."""
+
+    def test_every_open_obligation_that_has_a_next_action_is_listed(self):
+        card = _summary()["evidence_score"]
+        assert card["next_checks"]
+        for row in card["next_checks"]:
+            assert row["leaf"] and row["action"] and row["points"] > 0
+
+    def test_with_no_source_in_hand_the_next_step_is_to_get_the_source(self):
+        card = _summary()["evidence_score"]
+        rows = {row["leaf"]: row for row in card["next_checks"]}
+        assert "retrieve" in rows["C1.A"]["action"]
+        assert rows["C1.A"]["needs_approval"] is False
+
+    def test_the_ones_that_need_an_approval_say_so_once_the_source_is_read(self):
+        """Loading and resolving execute the source, so what stands between them and a point is an
+        approval, which is something a person can give."""
+        evidence = {
+            "code_inspection": {
+                "sources": [{"path": "a.py", "language": "python", "text": "x = 1\n"}],
+                "manifests": [{"path": "requirements.txt", "text": "numpy==1.26.4\n"}],
+            }
+        }
+        card = _summary(evidence=evidence)["evidence_score"]
+        gated = {row["leaf"] for row in card["next_checks"] if row["needs_approval"]}
+        assert gated >= {"C1.B", "C2.B"}
+
+    def test_it_is_ordered_by_what_the_points_are_worth(self):
+        rows = _summary()["evidence_score"]["next_checks"]
+        assert [r["points"] for r in rows] == sorted((r["points"] for r in rows), reverse=True)
+
+    def test_an_obligation_nothing_can_resolve_is_not_offered_as_a_next_check(self):
+        """A capability limit is a statement about bioAF, not an action a person can take."""
+        card = _summary()["evidence_score"]
+        limits = {limit["leaf"] for limit in card["capability_limits"]}
+        offered = {row["leaf"] for row in card["next_checks"] if not row["needs_approval"]}
+        assert not (offered & limits)
