@@ -615,3 +615,197 @@ def display(card: dict) -> dict:
         "exact": {key: str(value) for key, value in parts.items()},
         "total": f"{float(total):g}",
     }
+
+
+# ---- the card a surface renders --------------------------------------------------------------------
+
+RUBRIC_LABEL = "Evidence rubric v3"
+
+_NOT_ASSESSED = "Not yet assessed"
+
+
+def evidence_card(
+    *,
+    profile: dict,
+    leaves: list[dict],
+    assessed: dict,
+    reproduction: dict | None = None,
+    capability_limits: dict | None = None,
+) -> dict:
+    """One study's v3 scorecard, in the shape every surface reads.
+
+    The bar's three parts are always present, including their zeros: a lone 35 cannot tell 65 unknown
+    points from 65 failed ones, so V, F and U travel together on the report, the list and both exports.
+    The reproduction statement is separate and is never moved by the score: a paper can earn 78
+    documentary points and still have had no independent reproduction attempted.
+    """
+    card = score(leaves, assessed)
+    shown = display(card)
+    limits = _limit_rows(leaves, assessed, capability_limits or {})
+    sections = [
+        _section_row(key, bucket, leaves, assessed, limits) for key, bucket in sorted(card["sections"].items())
+    ]
+    attempted = bool((reproduction or {}).get("attempted"))
+    return {
+        "rubric_version": RUBRIC_VERSION,
+        "rubric_label": RUBRIC_LABEL,
+        "status": card["status"],
+        "score": float(card["verified"]),
+        "failed": float(card["failed"]),
+        "undetermined": float(card["undetermined"]),
+        "assessed_points": float(card["assessed_points"]),
+        "display": {
+            "verified": shown["verified"],
+            "failed": shown["failed"],
+            "undetermined": shown["undetermined"],
+            "total": shown["total"],
+        },
+        "exact": shown["exact"],
+        "parts": [
+            {"key": "verified", "label": VISIBLE_WORDS[VERIFIED], "points": shown["verified"]},
+            {"key": "untested", "label": VISIBLE_WORDS[UNDETERMINED], "points": shown["undetermined"]},
+            {"key": "negative", "label": VISIBLE_WORDS[FAILED], "points": shown["failed"]},
+        ],
+        "headline": f"{shown['verified']} / {shown['total']}",
+        "counts_label": (
+            f"{shown['verified']} positive points · {shown['undetermined']} untested points · "
+            f"{shown['failed']} negative points"
+        ),
+        "score_note": _NOT_ASSESSED if card["status"] == "not_assessed" else None,
+        "explanation": (
+            f"{shown['verified']} points of supporting evidence have been established out of {shown['total']}. "
+            "It is not a probability that the paper is correct, and not a fraction of the paper reproduced. "
+            "Untested includes checks that were attempted and could not conclude; negative identifies a "
+            "demonstrated problem with a named check, never a judgment about the paper."
+        ),
+        "scope": {
+            **card["assessed_scope"],
+            "label": f"Rubric checks assessed: {card['assessed_scope']['assessed']} / {card['assessed_scope']['total']}",
+        },
+        "sections": sections,
+        "profile": {
+            "revision": profile.get("revision"),
+            "exclusions": list(profile.get("exclusions") or []),
+            "documentary_ceiling": float(profile["ceilings"]["documentary"]),
+            "with_author_results_ceiling": float(profile["ceilings"]["with_author_results"]),
+        },
+        "capability_limits": limits,
+        "reproduction": {
+            "attempted": attempted,
+            "label": (reproduction or {}).get("label")
+            or (
+                "Independent reproduction: Not attempted"
+                + (f" — {(reproduction or {}).get('reason')}" if (reproduction or {}).get("reason") else "")
+            ),
+            "reason": (reproduction or {}).get("reason"),
+        },
+        "concerns": _concerns(leaves, assessed),
+    }
+
+
+def _section_row(key: str, bucket: dict, leaves: list[dict], assessed: dict, limits: list[dict]) -> dict:
+    """One section's totals, what it established, and the most consequential thing still outstanding."""
+    verified = [
+        assessed[leaf["id"]]
+        for leaf in leaves
+        if leaf["section"] == key and (assessed.get(leaf["id"]) or {}).get("outcome") == VERIFIED
+    ]
+    failures = [
+        assessed[leaf["id"]]
+        for leaf in leaves
+        if leaf["section"] == key and (assessed.get(leaf["id"]) or {}).get("outcome") == FAILED
+    ]
+    section_limits = [row for row in limits if row["section"] == key]
+    outstanding = None
+    if failures:
+        outstanding = failures[0].get("rationale")
+    elif section_limits:
+        outstanding = section_limits[0]["reason"]
+    else:
+        open_rows = [
+            assessed[leaf["id"]]
+            for leaf in leaves
+            if leaf["section"] == key
+            and (assessed.get(leaf["id"]) or {}).get("outcome") == UNDETERMINED
+            and (assessed.get(leaf["id"]) or {}).get("next_action")
+        ]
+        outstanding = open_rows[0]["next_action"] if open_rows else None
+    return {
+        "section": key,
+        "title": SECTION_TITLES[key],
+        "verified": float(bucket["verified"]),
+        "failed": float(bucket["failed"]),
+        "undetermined": float(bucket["undetermined"]),
+        "maximum": float(bucket["maximum"]),
+        "established": [row.get("rationale") for row in verified],
+        "outstanding": outstanding,
+        "unsupported_count": len(section_limits),
+    }
+
+
+def _limit_rows(leaves: list[dict], assessed: dict, declared: dict) -> list[dict]:
+    """The allocated obligations with no implemented check, each naming what is missing. A grey leaf
+    that IS implemented and simply could not be established is not one of these."""
+    rows = []
+    for leaf in leaves:
+        found = assessed.get(leaf["id"]) or {}
+        limit = declared.get(leaf["id"]) or declared.get(leaf["criterion"])
+        if not (found.get("capability_limit") or (limit and found.get("outcome", UNDETERMINED) == UNDETERMINED)):
+            continue
+        if not limit:
+            continue
+        rows.append(
+            {
+                "leaf": leaf["id"],
+                "criterion": leaf["criterion"],
+                "section": leaf["section"],
+                "points": float(leaf["weight"]),
+                "reason": found.get("rationale") or limit["reason"],
+            }
+        )
+    return rows
+
+
+def _concerns(leaves: list[dict], assessed: dict) -> list[dict]:
+    """Section 7: a confirmed problem is shown beside the score whatever its point weight. A high
+    score must never hide that the supplied code fails or that a record contradicts the paper."""
+    found = []
+    for leaf in leaves:
+        row = assessed.get(leaf["id"]) or {}
+        if row.get("outcome") != FAILED:
+            continue
+        found.append(
+            {
+                "leaf": leaf["id"],
+                "criterion": leaf["criterion"],
+                "section": leaf["section"],
+                "points": float(leaf["weight"]),
+                "rationale": row.get("rationale"),
+                "impact": row.get("impact"),
+            }
+        )
+    return found
+
+
+# The list cell. A lone number cannot tell an unknown point from a failed one, so V, F and U travel
+# with it; the unweighted scope moves to the detail where width is short (section 7).
+_COMPACT_KEYS = (
+    "rubric_version",
+    "rubric_label",
+    "status",
+    "score",
+    "failed",
+    "undetermined",
+    "display",
+    "parts",
+    "headline",
+    "counts_label",
+    "score_note",
+)
+
+
+def compact_evidence_score(card: dict | None) -> dict | None:
+    """The v3 card as the studies list shows it, cut from the card the report renders."""
+    if not card:
+        return None
+    return {key: card.get(key) for key in _COMPACT_KEYS}

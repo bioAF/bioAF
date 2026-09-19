@@ -171,19 +171,42 @@ test("the page shows the paper's resources and each claim's checks", async () =>
 test("the Validation Scorecard leads the report, above the outcome (plan_8 section 6)", async () => {
   mockGet.mockResolvedValue({ ...study(), report_summary: contract.scorecard_scored });
   render(<ValidationStudyPage />);
+  // plan_8_4 section 7: the evidence score holds the name "Validation Scorecard" and leads; the v2
+  // card follows it, named for what it measures. Both are above the outcome.
   const scorecard = await screen.findByRole("heading", { name: "Validation Scorecard" });
+  const findings = screen.getByRole("heading", { name: "Findings Scorecard" });
   const outcome = screen.getByRole("heading", { name: "Outcome" });
+  expect(scorecard.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(scorecard.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(screen.getByTestId("scorecard-score")).toHaveTextContent("67 / 100");
   expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("5 / 5 assessed");
 });
 
 test("a report projected before the scorecard existed renders no card and no error", async () => {
-  const { scorecard: _omitted, ...older } = contract.groff_failed as Record<string, unknown>;
+  const {
+    scorecard: _omitted,
+    evidence_score: _also,
+    ...older
+  } = contract.groff_failed as Record<string, unknown>;
   mockGet.mockResolvedValue({ ...study(), report_summary: older });
   render(<ValidationStudyPage />);
   await screen.findByText("Reproduction not attempted");
   expect(screen.queryByRole("heading", { name: "Validation Scorecard" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Findings Scorecard" })).not.toBeInTheDocument();
+});
+
+test("a historical report with no evidence score keeps its own card and its own name", async () => {
+  // As the backend projects one: no evidence score, and the v2 card under the title it was stored
+  // with, because nothing renamed it.
+  const { evidence_score: _omitted, ...historical } = contract.scorecard_scored as Record<string, unknown>;
+  const card = historical.scorecard as Record<string, unknown>;
+  mockGet.mockResolvedValue({
+    ...study(),
+    report_summary: { ...historical, scorecard: { ...card, title: "Validation Scorecard" } },
+  });
+  render(<ValidationStudyPage />);
+  expect(await screen.findByRole("heading", { name: "Validation Scorecard" })).toBeInTheDocument();
+  expect(screen.queryByTestId("evidence-score-headline")).not.toBeInTheDocument();
 });
 
 // plan_8_1 sections 1.3 and 1.4: a read that failed is never shown as a fact about the paper.
@@ -321,7 +344,7 @@ describe("the report's layout", () => {
   test("opens on the scorecard, with the outcome and its units in it, then a strip of decisions", async () => {
     mockGet.mockResolvedValue(groff());
     render(<ValidationStudyPage />);
-    const card = await screen.findByRole("region", { name: "Validation Scorecard" });
+    const card = await screen.findByRole("region", { name: "Findings Scorecard" });
     expect(within(card).getByTestId("scorecard-units")).toBeInTheDocument();
     expect(within(card).queryByTestId("scorecard-unassessed")).not.toBeInTheDocument();
     const decisions = screen.getByTestId("needs-a-decision");

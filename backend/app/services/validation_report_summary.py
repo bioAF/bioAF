@@ -328,7 +328,18 @@ def summarize(
         "scorecard": scorecard_projection(
             study=study, evidence=evidence, plan=plan, targets=targets, claims=claims, issues=issues, checks=checks
         ),
+        # plan_8_4: rubric v3's evidence score, beside it. The two are separate cards with separate
+        # semantics and are never read as one another: a v2 score of 100 is not a v3 score of 100.
+        "evidence_score": evidence_scorecard(
+            study=study, evidence=evidence, plan=plan, claims=claims, attempt=attempt
+        ),
     }
+    # plan_8_4 section 7: two cards cannot both be called the Validation Scorecard. Where the v3
+    # evidence score is present it IS that card, and the v2 card is named for what it measures: the
+    # paper's scientific findings. A historical report with no v3 card is untouched and reads exactly
+    # as it did. The label is pending the owner's sign-off, like the others.
+    if projection["evidence_score"] and isinstance(projection["scorecard"], dict):
+        projection["scorecard"] = {**projection["scorecard"], "title": FINDINGS_TITLE}
     # plan_8_2 section 4.2: the scorecard names its units, and the four sections their summaries and counts.
     from app.services.validation_report_sections import sections, units
 
@@ -337,6 +348,54 @@ def summarize(
     # plan_8_3 (reporting): the projection checks itself for a section contradicting another.
     report_contradictions(projection)
     return projection
+
+
+# plan_8_4 section 7, pending the owner's sign-off: what the v2 card is called once the v3 card holds
+# the name "Validation Scorecard". It measures agreement among the paper's assessed scientific findings.
+FINDINGS_TITLE = "Findings Scorecard"
+
+
+def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None, claims, attempt) -> dict:
+    """plan_8_4: the v3 card for one study, from the evidence it already holds.
+
+    It never waits for the finding inventory, an approval, an acquired input or a completed model
+    call: those govern which RESULT points can be allocated, and a study with none of them still has
+    code, metadata and methods obligations whose outcomes are established or honestly grey.
+
+    The v2 scorecard is untouched. Rendering this calls no model, reads no network and writes nothing.
+    """
+    from app.services.validation_rubric_evidence import CAPABILITY_LIMITS, assess_evidence
+    from app.services.validation_rubric_v3 import allocate, default_profile, evidence_card, result_allocation
+
+    plan = plan or {}
+    evidence = evidence or {}
+    inventory = plan.get("finding_inventory") if isinstance(plan.get("finding_inventory"), dict) else None
+    workflows = [
+        e.get("workflow") for e in plan.get("reported_experiments") or [] if isinstance(e, dict) and e.get("workflow")
+    ]
+    profile = default_profile()
+    leaves = allocate(profile, results=result_allocation(inventory, workflows=workflows))
+    assessed = assess_evidence(plan=plan, evidence=evidence, claims=claims, inventory=inventory)
+    return evidence_card(
+        profile=profile,
+        leaves=leaves,
+        assessed=assessed,
+        reproduction=_reproduction_statement(attempt, evidence),
+        capability_limits=CAPABILITY_LIMITS,
+    )
+
+
+def _reproduction_statement(attempt, evidence: dict) -> dict:
+    """Whether an independent reproduction was attempted, and what stopped one. Separate from the
+    score, and never moved by it (plan_8_4 section 3.1)."""
+    status = (attempt or {}).get("status")
+    if status in ("completed", "partial", "running"):
+        return {"attempted": True, "label": f"Independent reproduction: {status}"}
+    reason = None
+    access = ((evidence.get("capabilities") or {}).get("raw_data") or {}).get("evidence")
+    if isinstance(access, str) and access.strip():
+        reason = access.strip()
+    return {"attempted": False, "reason": reason}
 
 
 def _unit_confirmation(evidence: dict) -> dict | None:
@@ -697,8 +756,45 @@ async def compute_scorecard_record(session, study) -> dict | None:
         logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
         return None
     provenance = projection_provenance(plan_dict, evidence, checks, [target_dict(t) for t in rows])
+    # plan_8_4 section 6.4: the v3 numbers travel in the same versioned record, under their own name,
+    # so a later change to how evidence is normalized cannot rewrite a concluded study's score and a
+    # v2 score of 100 is never read as a v3 score of 100.
+    claims, _counts = _claims([target_dict(t) for t in rows], plan_dict, evidence, checks=checks)
+    v3 = evidence_scorecard(
+        study=projected,
+        evidence=evidence,
+        plan=plan_dict,
+        claims=claims,
+        attempt=reproduction_attempt(
+            evidence,
+            analysis_run_id=projected.get("analysis_run_id"),
+            data_run_id=projected.get("data_run_id"),
+        ),
+    )
     return {
         "rubric_version": plan.finding_inventory_json.get("rubric_version") or 1,
+        "evidence_score": {
+            key: v3[key]
+            for key in (
+                "rubric_version",
+                "rubric_label",
+                "status",
+                "score",
+                "failed",
+                "undetermined",
+                "assessed_points",
+                "display",
+                "exact",
+                "headline",
+                "counts_label",
+                "scope",
+                "sections",
+                "profile",
+                "capability_limits",
+                "reproduction",
+                "concerns",
+            )
+        },
         "inventory_revision": plan.finding_inventory_json.get("revision"),
         "analysis_selection_revision": _current_selection_revision(plan_dict),
         "outcomes": outcomes,
@@ -2236,7 +2332,34 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
             issues=reading_issues.get(study.id, []),
             checks=checks.get(plan.id, []) if plan is not None else [],
         )
-        compact[study.id] = compact_scorecard(card)
+        # plan_8_4 section 7: the list shows the v3 score with its three parts, cut from the same
+        # projection the report renders, so the cell and the page cannot disagree.
+        from app.services.validation_rubric_v3 import compact_evidence_score
+
+        compact[study.id] = {
+            **compact_scorecard(card),
+            "evidence_score": compact_evidence_score(
+                evidence_scorecard(
+                    study=study_projection(study),
+                    evidence=study.evidence_json,
+                    plan=plan_projection(plan) if plan is not None else {},
+                    # The SAME claims the report projects. Passing none here made the list's R1 and
+                    # M4 outcomes differ from the page's, which is exactly the disagreement between
+                    # surfaces plan_8_4 section 7 forbids.
+                    claims=_claims(
+                        targets.get(plan.id, []) if plan is not None else [],
+                        plan_projection(plan) if plan is not None else {},
+                        study.evidence_json or {},
+                        checks=checks.get(plan.id, []) if plan is not None else [],
+                    )[0],
+                    attempt=reproduction_attempt(
+                        study.evidence_json or {},
+                        analysis_run_id=getattr(study, "analysis_run_id", None),
+                        data_run_id=getattr(study, "data_run_id", None),
+                    ),
+                )
+            ),
+        }
     return compact
 
 

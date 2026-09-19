@@ -6,20 +6,36 @@
  * the list and the report cannot disagree, and it is never a third number.
  */
 
+import { EvidenceScoreBar } from "@/components/validation/EvidenceScorecard";
 import { NOT_SET } from "@/lib/placeholders";
 import { statusBadgeClass } from "@/lib/statusStyles";
-import type { CompactScorecard } from "@/lib/validationReport";
+import type { CompactScorecard, EvidenceScore } from "@/lib/validationReport";
 
 export function ScorecardCompact({ scorecard }: { scorecard: CompactScorecard | null | undefined }) {
   if (!scorecard) {
     return <span className="text-gray-500">{NOT_SET}</span>;
   }
+  const evidence = scorecard.evidence_score as EvidenceScore | null | undefined;
   const scoreLabel =
     scorecard.display_score === null || scorecard.display_score === undefined
       ? "Overall score: not assessed"
       : `Overall score: ${scorecard.display_score} out of 100`;
   return (
     <div className="space-y-0.5">
+      {/* plan_8_4 section 7: the evidence score leads, with its three quantities beside it. The
+          unweighted scope stays on the report, where there is width for it. */}
+      {evidence && (
+        <>
+          <div data-testid="compact-evidence-score" className="font-semibold tabular-nums text-gray-900">
+            {evidence.headline}
+          </div>
+          <EvidenceScoreBar card={evidence} />
+          <div data-testid="compact-evidence-counts" className="text-xs text-gray-600">
+            {evidence.counts_label}
+          </div>
+          {evidence.score_note && <div className="text-xs font-medium text-gray-700">{evidence.score_note}</div>}
+        </>
+      )}
       <div aria-label={scoreLabel} className="font-semibold tabular-nums text-gray-900">
         {scorecard.score_label ?? NOT_SET}
       </div>
