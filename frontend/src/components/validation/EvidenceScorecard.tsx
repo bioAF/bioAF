@@ -74,13 +74,30 @@ function Section({ section, card }: { section: EvidenceScoreSection; card: Evide
       </p>
       {open && (
         <div className="mt-1 space-y-1 text-xs text-gray-600">
-          {section.established.length > 0 && (
-            <ul className="ml-4 list-disc">
-              {section.established.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          )}
+          {/* Section 7: each obligation as ITSELF. "Positive" here means this named obligation was
+              established, never that the paper is proven. */}
+          {(section.criteria ?? []).map((criterion) => (
+            <div key={criterion.criterion} data-testid={`evidence-criterion-${criterion.criterion}`} className="mt-1">
+              <p className="text-gray-800">
+                {criterion.criterion} {criterion.title}: {criterion.verified} positive, {criterion.undetermined}{" "}
+                untested, {criterion.failed} negative of {criterion.points}
+              </p>
+              <ul className="ml-4 list-disc">
+                {criterion.obligations.map((obligation) => (
+                  <li key={obligation.leaf}>
+                    <span className="text-gray-700">{obligation.statement}</span>{" "}
+                    <span className="font-medium">
+                      ({obligation.label}, {obligation.points})
+                    </span>
+                    {obligation.rationale ? `: ${obligation.rationale}` : ""}
+                    {obligation.impact ? ` ${obligation.impact}.` : ""}
+                    {obligation.next_action ? ` Next: ${obligation.next_action}.` : ""}{" "}
+                    <span className="text-gray-500">{obligation.method_label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
           {section.outstanding && <p className="text-gray-700">Outstanding: {section.outstanding}</p>}
           {section.unsupported_count > 0 && (
             <p data-testid={`evidence-limits-${section.section}`}>
