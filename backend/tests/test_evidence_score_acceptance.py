@@ -43,8 +43,9 @@ class TestGroffEarnsPointsWithoutCompletingAFinding:
         sections = {s["section"]: s for s in report["evidence_score"]["sections"]}
         assert sections["S"]["verified"] > 0
         assert sections["M"]["verified"] > 0
-        assert sections["C"]["verified"] == 0, "bioAF runs no code check yet, and says so"
-        assert sections["C"]["unsupported_count"] == 10
+        assert sections["C"]["verified"] == 0, "bioAF holds no readable source for this paper, and says so"
+        # Loading and resolving execute the source, so they stay behind the approval whatever is held.
+        assert sections["C"]["unsupported_count"] == 2
 
     @pytest.mark.asyncio
     async def test_the_paper_states_its_reference_and_earns_it(self, session, admin_user):
@@ -147,3 +148,70 @@ class TestTheCardIsAlwaysInternallyConsistent:
 
 async def _no_fetch(url):
     raise AssertionError(f"the queued check tried to download {url}")
+
+
+class TestGroffsCodeIsNamedAsUnreadableRatherThanUnchecked:
+    """plan_8_4 milestone B on the paper it actually matters for: Groff's analysis is a word-processed
+    document. bioAF cannot recover the file boundaries of the scripts inside it, so the code section
+    stays grey and says why, rather than reading as a check that found nothing wrong."""
+
+    @pytest.mark.asyncio
+    async def test_the_code_section_says_no_source_is_in_hand(self, session, admin_user, monkeypatch):
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        report = await replay_report(session, restored)
+        code = next(s for s in report["evidence_score"]["sections"] if s["section"] == "C")
+        assert code["verified"] == 0
+        assert code["failed"] == 0
+        assert code["undetermined"] == 20
+        assert code["outstanding"]
+
+    @pytest.mark.asyncio
+    async def test_a_docx_of_code_is_recorded_as_unreadable_with_the_reason(self, session, admin_user):
+        from app.services.validation_code_inspection import inspect_code
+
+        restored = await _restored(session, admin_user, 55)
+        supplements = (restored.study.evidence_json or {}).get("supplements") or []
+        code_rows = [s for s in supplements if isinstance(s, dict) and s.get("role") == "code"]
+        assert code_rows, "study 55 holds a supplement classified as code"
+        found = inspect_code(code_rows, bytes_for={code_rows[0]["filename"]: b"PK\x03\x04"})
+        assert found["sources"] == []
+        assert "boundaries" in found["unreadable"][0]["reason"]
+
+
+class TestASuppliedScriptScoresTheCodeSection:
+    """The other half: a paper whose code IS a file bioAF can read gets real code points, from a real
+    parser, and the obligations that need an approved run stay grey."""
+
+    @pytest.mark.asyncio
+    async def test_a_python_analysis_earns_its_static_obligations(self, session, admin_user):
+        from app.services.validation_report_summary import summarize
+
+        evidence = {
+            "code_inspection": {
+                "sources": [
+                    {
+                        "path": "analysis.py",
+                        "language": "python",
+                        "text": "import os\nimport numpy as np\n\n\ndef main():\n    print(np.mean([1, 2]), os.getcwd())\n\n\nif __name__ == '__main__':\n    main()\n",
+                        "provenance": {"from": "supplement", "sha256": "abc"},
+                    }
+                ],
+                "manifests": [
+                    {"path": "requirements.txt", "text": "numpy==1.26.4\n"},
+                    {"path": "Dockerfile", "text": "FROM python:3.11.8-slim\n"},
+                ],
+            }
+        }
+        summary = summarize(
+            study={"state": "classified", "classification": "inconclusive"},
+            evidence=evidence,
+            plan={},
+            targets=[],
+            issues=[],
+            checks=None,
+        )
+        code = next(s for s in summary["evidence_score"]["sections"] if s["section"] == "C")
+        assert code["verified"] == 12, "syntax, imports, pinning, runtime, entry point and coherence"
+        assert code["failed"] == 0
+        assert code["undetermined"] == 8, "the build, the resolution and the fitness review are not in hand"

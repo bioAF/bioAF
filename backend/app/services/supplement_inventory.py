@@ -703,8 +703,14 @@ async def resolve_supplements(
     thresholds: list[float] | None = None,
     ledger: list[dict] | None = None,
     predicates: list[dict] | None = None,
+    code_bytes: dict | None = None,
 ) -> list[dict]:
     """Resolve named references to real files and classify each by its content. Never raises.
+
+    plan_8_4 section 6.2: ``code_bytes``, where given, collects the bytes of the files that are the
+    paper's CODE and its dependency or environment specifications, keyed by filename. The bundle is
+    downloaded once and its members have no address of their own, so an inspection that ran later
+    would have to fetch the whole bundle again to read a file bioAF had already had in hand.
 
     change_7.5 section 4.1: a results table is checked for each claim's predicate (``predicates``, as
     ``validation_author_consistency.claim_predicates`` builds them) while its bytes are in hand.
@@ -764,6 +770,7 @@ async def resolve_supplements(
                 **measure_table(contents[filename], thresholds=thresholds),
             )
             _check_claims(row, filename, contents[filename], predicates)
+            _keep_code_bytes(code_bytes, row, filename, contents[filename])
             _inspect(row, contents[filename], expanded, thresholds=thresholds, predicates=predicates)
 
     # A file nobody cited is still part of what the paper published. The prose names three files;
@@ -791,6 +798,7 @@ async def resolve_supplements(
                 role=classify_supplement(filename, blob_bytes), **measure_table(blob_bytes, thresholds=thresholds)
             )
             _check_claims(row, filename, blob_bytes, predicates)
+            _keep_code_bytes(code_bytes, row, filename, blob_bytes)
             _inspect(row, blob_bytes, expanded, thresholds=thresholds, predicates=predicates)
         rows.append(row)
     # plan_8_3 section 1.1: the members of every archive bioAF opened, each carrying the archive it
@@ -848,6 +856,17 @@ def _inspect(row: dict, blob: bytes, expanded: list[dict], *, thresholds, predic
             )
             _check_claims(member_row, member["name"], member["bytes"], predicates)
         expanded.append(member_row)
+
+
+def _keep_code_bytes(code_bytes: dict | None, row: dict, filename: str, blob: bytes) -> None:
+    """plan_8_4 section 6.2: keep the bytes of the paper's code and of its dependency and environment
+    specifications, while they are in hand. Nothing else is kept: a results table is not code."""
+    if code_bytes is None:
+        return
+    from app.services.validation_code_inspection import is_code_file
+
+    if is_code_file(filename, role=row.get("role")):
+        code_bytes[filename] = blob
 
 
 def _check_claims(row: dict, filename: str, blob: bytes, predicates: list[dict] | None) -> None:

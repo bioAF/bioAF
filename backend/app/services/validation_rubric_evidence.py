@@ -58,7 +58,10 @@ _COMPUTATIONAL_LIMIT = (
 )
 
 CAPABILITY_LIMITS: dict[str, dict] = {
-    **{f"C{n}.{o}": {"reason": _CODE_LIMIT} for n in range(1, 6) for o in "AB"},
+    # plan_8_4 milestone B: the static code obligations are implemented (`validation_code_checks`).
+    # What remains a standing limit is the two that cannot be established by reading source at all.
+    "C1.B": {"reason": _CODE_LIMIT},
+    "C2.B": {"reason": _CODE_LIMIT},
     **{f"E{n}.{o}": {"reason": _EXPERIMENTAL_LIMIT} for n in range(1, 4) for o in "AB"},
     "S2.A": {
         "reason": "bioAF holds no implemented check that the paper identifies the tissue, cell type or "
@@ -118,12 +121,35 @@ def assess_evidence(
     assessed.update(_references(experiments))
     assessed.update(_decision_criteria(claims or [], contrasts))
     assessed.update(_author_results(claims or [], inventory))
+    assessed.update(_code(evidence))
     for leaf_id, limit in CAPABILITY_LIMITS.items():
         assessed.setdefault(
             leaf_id,
             _finding(UNDETERMINED, limit["reason"], scope="not assessed", method=MEASUREMENT, capability_limit=True),
         )
     return assessed
+
+
+def _code(evidence: dict) -> dict:
+    """plan_8_4 milestone B: the code section, from the source this study actually holds.
+
+    ``evidence["code_inspection"]`` is what an inspection stage recorded: the source text it extracted,
+    the manifests beside it, any evidence-backed fitness review, and the result of an approved isolated
+    run. Nothing else in the study's evidence says anything about the code: a repository that exists, a
+    file that was retrieved and a role that says "code" are not source text, and the checks say so by
+    leaving every obligation grey.
+    """
+    from app.services.validation_code_checks import assess_code
+
+    inspection = evidence.get("code_inspection") or {}
+    if not isinstance(inspection, dict):
+        return {}
+    return assess_code(
+        sources=inspection.get("sources"),
+        manifests=inspection.get("manifests"),
+        defects=inspection.get("reviews"),
+        execution=inspection.get("execution"),
+    )
 
 
 def _species(experiments: list[dict], plan: dict, evidence: dict) -> dict:
