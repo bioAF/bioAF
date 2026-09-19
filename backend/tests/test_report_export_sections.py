@@ -63,7 +63,7 @@ def test_the_earlier_sections_are_nested_under_the_one_they_belong_to():
 
 
 def test_the_scorecard_names_its_units_and_why_the_score_is_blank():
-    section = _section(_export(_summary()), "Validation Scorecard")
+    section = _section(_export(_summary()), "Findings Scorecard")
     assert "No finding has a conclusive assessment yet" in section
     assert "0 findings conclusive; 4 findings inconclusive" in section
 
@@ -74,7 +74,7 @@ def test_a_shared_reason_is_stated_once_and_each_finding_points_to_it():
     text = _export(summary)
     assert text.count(shared["text"]) == 1
     assert f"**{shared['id']}**" in _section(text, "Findings")
-    assert "see R1 under Findings" in _section(text, "Validation Scorecard")
+    assert "see R1 under Findings" in _section(text, "Findings Scorecard")
 
 
 def test_a_check_that_named_its_candidate_tables_renders_on_the_page_and_in_the_export():

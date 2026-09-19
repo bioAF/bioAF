@@ -47,6 +47,7 @@ import { PROVISIONAL_NOTE, type ReportSummary } from "@/lib/validationReport";
 import { ClaimSelection } from "@/components/validation/ClaimSelection";
 import { UnitConfirmation } from "@/components/validation/UnitConfirmation";
 import { ResourceInventory } from "@/components/validation/ResourceInventory";
+import { EvidenceScorecard } from "@/components/validation/EvidenceScorecard";
 import { ValidationScorecard } from "@/components/validation/ValidationScorecard";
 import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
 import { InventoryRetryNotice } from "@/components/validation/InventoryRetryNotice";
@@ -393,6 +394,13 @@ export default function ValidationStudyPage() {
 
         {/* plan_8_2 section 4.2 (approved 2026-09-14): the scorecard, with the outcome in it, leads; a strip of
             the decisions the study is waiting on follows; then four sections, each with its summary. */}
+        {/* plan_8_4 section 7: the evidence score leads, because it is the number that says what bioAF
+            has established about this paper. The v2 findings scorecard follows it, unchanged. */}
+        {summary?.evidence_score && (
+          <div className="mb-4">
+            <EvidenceScorecard card={summary.evidence_score} />
+          </div>
+        )}
         {summary?.scorecard ? (
           <div className="mb-4">
             <ValidationScorecard scorecard={summary.scorecard} variant="summary" header={outcome} />

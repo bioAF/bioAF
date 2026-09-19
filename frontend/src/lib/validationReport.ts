@@ -351,6 +351,9 @@ export interface CompactScorecard {
   consistency_count?: number | null;
   // plan_8_2 section 1.4: the study's checks by what the queue is doing with them. Checks, never findings.
   activity?: CheckActivity | null;
+  // plan_8_4 section 7: the v3 evidence score, cut from the same projection the report renders.
+  // Absent from a study listed before rubric v3 existed.
+  evidence_score?: EvidenceScore | null;
 }
 
 export interface CheckActivity {
@@ -565,7 +568,70 @@ export interface ReportSummary {
   issue_count: number;
   // plan_8. Absent from a report projected before the scorecard existed.
   scorecard?: ValidationScorecardData | null;
+  // plan_8_4. Absent from a report projected before rubric v3 existed.
+  evidence_score?: EvidenceScore | null;
 }
 
 // Shown beside anything that rests on the paper's prose alone (section 6).
 export const PROVISIONAL_NOTE = "from the paper text only; not checked against the attachments";
+
+/**
+ * plan_8_4: rubric v3's evidence score. Separate from the v2 scorecard above and never read as it:
+ * a v2 score of 100 is not a v3 score of 100. Every number is computed by the backend.
+ */
+export interface EvidenceScoreSection {
+  section: string;
+  title: string;
+  verified: number;
+  failed: number;
+  undetermined: number;
+  maximum: number;
+  established: string[];
+  outstanding: string | null;
+  unsupported_count: number;
+}
+
+export interface EvidenceScoreLimit {
+  leaf: string;
+  criterion: string;
+  section: string;
+  points: number;
+  reason: string;
+}
+
+export interface EvidenceScoreConcern {
+  leaf: string;
+  criterion: string;
+  section: string;
+  points: number;
+  rationale: string | null;
+  impact: string | null;
+}
+
+export interface EvidenceScore {
+  rubric_version: number;
+  rubric_label: string;
+  status: string;
+  score: number;
+  failed: number;
+  undetermined: number;
+  assessed_points: number;
+  display: { verified: string; failed: string; undetermined: string; total: string };
+  exact: { verified: string; failed: string; undetermined: string };
+  parts: { key: string; label: string; points: string }[];
+  headline: string;
+  counts_label: string;
+  score_note: string | null;
+  explanation: string;
+  scope: { assessed: number; total: number; label: string };
+  sections: EvidenceScoreSection[];
+  profile: {
+    revision: number | null;
+    exclusions: { criterion: string | null; section: string | null; rationale: string; source: string | null }[];
+    documentary_ceiling: number;
+    with_author_results_ceiling: number;
+  };
+  capability_limits: EvidenceScoreLimit[];
+  reproduction: { attempted: boolean; label: string; reason: string | null };
+  concerns: EvidenceScoreConcern[];
+}

@@ -138,7 +138,10 @@ class TestEverySurfaceShowsTheSameScorecard:
     ):
         study = await _seed(session, admin_user)
         report, row, _, _ = await self._surfaces(client, session, admin_user, admin_token, study)
-        assert row == compact_scorecard(report)
+        # plan_8_4 section 7: the cell also carries the v3 evidence score, which the v2 card has no
+        # field for. Every v2 field the list shows is still cut from the v2 card, unchanged.
+        assert {k: v for k, v in row.items() if k != "evidence_score"} == compact_scorecard(report)
+        assert row["evidence_score"]["rubric_version"] == 3
         assert {key: row[key] for key in _COMPACT} == {key: report[key] for key in _COMPACT}
 
     @pytest.mark.asyncio
@@ -147,7 +150,7 @@ class TestEverySurfaceShowsTheSameScorecard:
     ):
         study = await _seed(session, admin_user)
         report, _, _, text = await self._surfaces(client, session, admin_user, admin_token, study)
-        section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
+        section = text.split("## Findings Scorecard", 1)[1].split("\n## ", 1)[0]
         assert "67 / 100" in section and "5 / 5 assessed" in section
         # plan_8_1 stage 4: a new inventory is scored under version 2, with its depth beside the scope.
         assert "weighted rubric version 2" in section
@@ -318,7 +321,7 @@ class TestTheMarkdownOfAnUnassessedStudy:
             format="md",
         )
         text = markdown.content if isinstance(markdown.content, str) else markdown.content.decode()
-        section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
+        section = text.split("## Findings Scorecard", 1)[1].split("\n## ", 1)[0]
         assert "-- (not assessed)" in section and "0 / 2 assessed" in section
         assert "Weighted agreement" not in section
         assert "weighted rubric version 2" in section

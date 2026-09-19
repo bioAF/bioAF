@@ -44,3 +44,41 @@ test("a card whose checks are all settled shows no activity line", () => {
   render(<ScorecardCompact scorecard={contract.scorecard_samd1_v2.scorecard as unknown as CompactScorecard} />);
   expect(screen.queryByText(/check pending|checks pending/)).not.toBeInTheDocument();
 });
+
+/**
+ * plan_8_4 section 7: the list cell leads with the evidence score and its three-part bar. A lone 35
+ * cannot tell 65 unknown points from 65 failed ones, so V, F and U stay visible in the cell and the
+ * unweighted scope moves to the report.
+ */
+const EVIDENCE = {
+  rubric_version: 3,
+  rubric_label: "Evidence rubric v3",
+  status: "assessed",
+  score: 35,
+  failed: 0,
+  undetermined: 65,
+  display: { verified: "35", failed: "0", undetermined: "65", total: "100" },
+  parts: [
+    { key: "verified", label: "positive", points: "35" },
+    { key: "untested", label: "untested", points: "65" },
+    { key: "negative", label: "negative", points: "0" },
+  ],
+  headline: "35 / 100",
+  counts_label: "35 positive points · 65 untested points · 0 negative points",
+  score_note: null,
+};
+
+const CARD = contract.scorecard_scored.scorecard as unknown as CompactScorecard;
+
+test("the cell leads with the evidence score, its bar and all three quantities", () => {
+  render(<ScorecardCompact scorecard={{ ...CARD, evidence_score: EVIDENCE } as never} />);
+  expect(screen.getByTestId("compact-evidence-score")).toHaveTextContent("35 / 100");
+  expect(screen.getByTestId("compact-evidence-counts")).toHaveTextContent("0 negative points");
+  expect(screen.getByTestId("evidence-score-bar")).toHaveAccessibleName(EVIDENCE.counts_label);
+});
+
+test("a listed study with no evidence score renders the cell it always did", () => {
+  const { evidence_score: _omitted, ...without } = CARD as unknown as Record<string, unknown>;
+  render(<ScorecardCompact scorecard={without as unknown as CompactScorecard} />);
+  expect(screen.queryByTestId("compact-evidence-score")).not.toBeInTheDocument();
+});

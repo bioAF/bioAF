@@ -205,7 +205,7 @@ class TestProvisionalReadsTheSameOnEverySurface:
         # The assessed finding of unestablished importance withholds the score everywhere.
         assert report["score_label"] is None and row["score_label"] is None
         assert report["score_status_label"] == row["score_status_label"] == "Score pending importance review"
-        section = text.split("## Validation Scorecard", 1)[1].split("\n## ", 1)[0]
+        section = text.split("## Findings Scorecard", 1)[1].split("\n## ", 1)[0]
         assert report["scope_label"] in section
         assert "Score pending importance review" in section
         assert "Importance not established: its quote is not in the paper's text" in section

@@ -577,7 +577,9 @@ def _render_validation_study_md(report: dict[str, Any]) -> str:
 
     summary = entity.get("report_summary") or {}
 
-    # plan_8 section 6: the Validation Scorecard leads the report, from the same projection the page renders.
+    # plan_8_4 section 7: the evidence score leads, from the same projection the page renders.
+    _append_evidence_score(parts, summary.get("evidence_score") or {})
+    # plan_8 section 6: the findings scorecard follows it, unchanged.
     _append_scorecard(parts, summary.get("scorecard") or {})
 
     # Verdict
@@ -1618,6 +1620,59 @@ def _statement_line(statement: dict[str, Any]) -> str:
     )
     head = f"- **{statement.get('identifier')}**" + (f" ({context})" if context else "")
     return f"{head}: {statement.get('outcome_label')}" + (f". {checks}" if checks else "")
+
+
+def _append_evidence_score(parts: list[str], card: dict[str, Any]) -> None:
+    """plan_8_4 section 7: the evidence score, its three parts, its sections, and what bioAF cannot
+    yet check. Every number comes from the projection; nothing is recomputed for the export."""
+    if not card:
+        return
+    parts.append("## Validation Scorecard")
+    parts.append("")
+    parts.append(f"**{card.get('headline') or '--'}** ({card.get('rubric_label') or 'Evidence rubric v3'})")
+    parts.append("")
+    if card.get("score_note"):
+        parts.append(f"**{card['score_note']}**")
+        parts.append("")
+    parts.append(card.get("counts_label") or "--")
+    parts.append("")
+    parts.append(card.get("scope", {}).get("label") or "--")
+    parts.append("")
+    parts.append((card.get("reproduction") or {}).get("label") or "Independent reproduction: not stated")
+    parts.append("")
+    if card.get("explanation"):
+        parts.append(card["explanation"])
+        parts.append("")
+    for concern in card.get("concerns") or []:
+        parts.append(
+            f"- **{concern.get('criterion')}**: {concern.get('rationale') or '--'}"
+            + (f" {concern['impact']}." if concern.get("impact") else "")
+        )
+    if card.get("concerns"):
+        parts.append("")
+    rows = [
+        [
+            section.get("title"),
+            f"{_v(section.get('verified'))} / {_v(section.get('maximum'))}",
+            _v(section.get("undetermined")),
+            _v(section.get("failed")),
+            section.get("outstanding") or "--",
+        ]
+        for section in card.get("sections") or []
+    ]
+    if rows:
+        parts.append(_table(["Section", "Positive", "Untested", "Negative", "Outstanding"], rows))
+        parts.append("")
+    limits = card.get("capability_limits") or []
+    if limits:
+        parts.append(
+            f"{len(limits)} allocated {'obligation has' if len(limits) == 1 else 'obligations have'} "
+            "no implemented check in this build:"
+        )
+        parts.append("")
+        for limit in limits:
+            parts.append(f"- {limit.get('leaf')}: {limit.get('reason')}")
+        parts.append("")
 
 
 def _append_scorecard(parts: list[str], card: dict[str, Any]) -> None:
