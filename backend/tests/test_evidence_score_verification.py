@@ -8,7 +8,6 @@ model's recollection cashed as evidence. Every one of those is a test here.
 
 from fractions import Fraction
 
-import pytest
 
 from app.services.validation_rubric_evidence import assess_evidence, profile_for
 from app.services.validation_rubric_v3 import (

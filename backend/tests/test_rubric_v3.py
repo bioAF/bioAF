@@ -43,7 +43,7 @@ class TestTheRubricIsDeclaredOnceAndAddsToOneHundred:
                 if leaf["section"] == section:
                     rows.setdefault(leaf["criterion"], []).append(leaf)
             for criterion, pair in rows.items():
-                assert sorted(l["obligation"] for l in pair) == ["A", "B"], criterion
+                assert sorted(leaf["obligation"] for leaf in pair) == ["A", "B"], criterion
                 assert pair[0]["weight"] == pair[1]["weight"], criterion
 
     def test_the_allocated_weights_sum_to_one_hundred_exactly(self):
@@ -61,8 +61,8 @@ class TestTheRubricIsDeclaredOnceAndAddsToOneHundred:
         most 8. A paper assessed only through its documentation and its authors' own results cannot
         exceed 78, whatever else is true of it."""
         leaves = allocate(default_profile())
-        documentary = sum((l["weight"] for l in leaves if l["section"] != "R"), Fraction(0))
-        author_results = sum((l["weight"] for l in leaves if l["criterion"] == "R1"), Fraction(0))
+        documentary = sum((leaf["weight"] for leaf in leaves if leaf["section"] != "R"), Fraction(0))
+        author_results = sum((leaf["weight"] for leaf in leaves if leaf["criterion"] == "R1"), Fraction(0))
         assert documentary == 70
         assert author_results == 8
         assert documentary + author_results == 78
@@ -151,18 +151,18 @@ class TestExclusionsRedistributeAndTheProfileStillTotalsOneHundred:
         analysis. Its four points go to M's remaining rows, proportionally; nothing leaves the section
         and the total is still 100."""
         leaves = allocate(default_profile(exclude=["M2"]))
-        assert sum((l["weight"] for l in leaves), Fraction(0)) == 100
-        computational = sum((l["weight"] for l in leaves if l["section"] == "M"), Fraction(0))
+        assert sum((leaf["weight"] for leaf in leaves), Fraction(0)) == 100
+        computational = sum((leaf["weight"] for leaf in leaves if leaf["section"] == "M"), Fraction(0))
         assert computational == 20
-        assert not [l for l in leaves if l["criterion"] == "M2"]
-        assert sum((l["weight"] for l in leaves if l["criterion"] == "M1"), Fraction(0)) == 5
+        assert not [leaf for leaf in leaves if leaf["criterion"] == "M2"]
+        assert sum((leaf["weight"] for leaf in leaves if leaf["criterion"] == "M1"), Fraction(0)) == 5
 
     def test_an_excluded_section_redistributes_among_the_remaining_sections(self):
         leaves = allocate(default_profile(exclude_sections=["R"]))
-        assert sum((l["weight"] for l in leaves), Fraction(0)) == 100
-        assert not [l for l in leaves if l["section"] == "R"]
+        assert sum((leaf["weight"] for leaf in leaves), Fraction(0)) == 100
+        assert not [leaf for leaf in leaves if leaf["section"] == "R"]
         # 30 points shared in proportion to 20:15:15:20.
-        assert sum((l["weight"] for l in leaves if l["section"] == "C"), Fraction(0)) == Fraction(200, 7)
+        assert sum((leaf["weight"] for leaf in leaves if leaf["section"] == "C"), Fraction(0)) == Fraction(200, 7)
 
     def test_the_profile_records_every_exclusion_with_its_rationale_and_source(self):
         profile = default_profile(
@@ -275,7 +275,7 @@ class TestTheResultsSectionAllocatesAmongTheFindings:
         allocation = result_allocation(inventory)
         assert len([p for p in allocation["R1"] if p["claim_index"] == 2]) == 1
         leaves = allocate(default_profile(), results=allocation)
-        assert sum((l["weight"] for l in leaves if l["criterion"] == "R1"), Fraction(0)) == 8
+        assert sum((leaf["weight"] for leaf in leaves if leaf["criterion"] == "R1"), Fraction(0)) == 8
 
     def test_the_workflows_split_the_execution_points_in_half_each(self):
         """Section 3.3: R3 allocates equally per workflow, half for demonstrated completion from the
@@ -306,4 +306,4 @@ class TestTheResultsSectionAllocatesAmongTheFindings:
 
         doubled = {"findings": [*self._INVENTORY["findings"], *self._INVENTORY["findings"]]}
         leaves = allocate(default_profile(), results=result_allocation(doubled))
-        assert sum((l["weight"] for l in leaves if l["section"] == "R"), Fraction(0)) == 30
+        assert sum((leaf["weight"] for leaf in leaves if leaf["section"] == "R"), Fraction(0)) == 30

@@ -182,7 +182,9 @@ def construct_selection(
         raise SelectionRefused(f"claim {claim_index} is not one of this plan's claims")
     target = targets[claim_index] or {}
     contrast_index = target.get("contrast_index") if isinstance(target.get("contrast_index"), int) else None
-    contrast = contrasts[contrast_index] if contrast_index is not None and 0 <= contrast_index < len(contrasts) else None
+    contrast = (
+        contrasts[contrast_index] if contrast_index is not None and 0 <= contrast_index < len(contrasts) else None
+    )
     claim_experiment = target.get("reported_experiment_id") or (contrast or {}).get("reported_experiment_id")
     if experiment_id is not _UNSET and experiment_id != claim_experiment:
         raise SelectionRefused(

@@ -10,7 +10,6 @@ syntax and the mere age of a tool never cost a point. A failure names a specific
 its cause and its impact.
 """
 
-import pytest
 
 from app.services.validation_code_checks import SUPPORTED_LANGUAGES, assess_code
 from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
