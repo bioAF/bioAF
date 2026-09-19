@@ -135,6 +135,23 @@ export function EvidenceScorecard({ card }: { card: EvidenceScore }) {
           ))}
         </ul>
       )}
+      {/* Section 6.4: a grey obligation with no stated way forward is indistinguishable from one
+          nobody will ever assess. This says what each would take, and which need an approval. */}
+      {card.next_checks.length > 0 && (
+        <details className="mt-2 text-xs text-gray-700">
+          <summary className="cursor-pointer text-gray-600">
+            {card.next_checks.length} {card.next_checks.length === 1 ? "check" : "checks"} bioAF could still make
+          </summary>
+          <ul data-testid="evidence-next-checks" className="ml-4 mt-1 list-disc space-y-0.5">
+            {card.next_checks.map((next) => (
+              <li key={next.leaf}>
+                <span className="font-medium">{next.leaf}</span> ({next.points} points): {next.action}
+                {next.needs_approval ? " (needs an approval)" : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <ul className="mt-3">
         {card.sections.map((section) => (
           <Section key={section.section} section={section} card={card} />

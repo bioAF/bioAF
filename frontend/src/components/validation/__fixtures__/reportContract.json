@@ -196,6 +196,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -794,6 +932,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -1276,6 +1552,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -2254,6 +2668,120 @@
       "explanation": "5.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "5.5 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -2806,6 +3334,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -3304,6 +3970,136 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.5,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.5,
+          "section": "M"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -3838,6 +4634,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -4506,6 +5440,128 @@
       "explanation": "8 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 4.0,
       "headline": "8 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -6077,6 +7133,160 @@
       "explanation": "6 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "6 / 100",
+      "next_checks": [
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.4",
+          "needs_approval": false,
+          "points": 3.2,
+          "section": "R"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "record the annotation release the authors used, with the evidence for it",
+          "criterion": "M2",
+          "leaf": "M2.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.5",
+          "needs_approval": false,
+          "points": 1.6,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F3.6",
+          "needs_approval": false,
+          "points": 1.6,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F4.7",
+          "needs_approval": false,
+          "points": 1.6,
+          "section": "R"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -7300,6 +8510,160 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.0",
+          "needs_approval": false,
+          "points": 5.333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.1",
+          "needs_approval": false,
+          "points": 2.6666666666666665,
+          "section": "R"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -8011,6 +9375,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -9468,6 +10970,256 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F3.2",
+          "needs_approval": false,
+          "points": 1.0666666666666667,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.0",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F10.9",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F11.10",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F12.11",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F13.12",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F14.13",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.1",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F4.3",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F5.4",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F6.5",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F7.6",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F8.7",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F9.8",
+          "needs_approval": false,
+          "points": 0.5333333333333333,
+          "section": "R"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -11001,6 +12753,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -11790,6 +13680,128 @@
       "explanation": "12 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "12 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -12348,6 +14360,144 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -12953,6 +15103,160 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.0",
+          "needs_approval": false,
+          "points": 5.333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.1",
+          "needs_approval": false,
+          "points": 2.6666666666666665,
+          "section": "R"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -13840,6 +16144,128 @@
       "explanation": "12 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "12 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -14663,6 +17089,128 @@
       "explanation": "8 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 4.0,
       "headline": "8 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -15538,6 +18086,160 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.0",
+          "needs_approval": false,
+          "points": 5.333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.1",
+          "needs_approval": false,
+          "points": 2.6666666666666665,
+          "section": "R"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -16579,6 +19281,184 @@
       "explanation": "0 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "0 / 100",
+      "next_checks": [
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F5.4",
+          "needs_approval": false,
+          "points": 2.6666666666666665,
+          "section": "R"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "record the cutoff from the paper's methods, with its quote",
+          "criterion": "M4",
+          "leaf": "M4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's claims again",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F1.0",
+          "needs_approval": false,
+          "points": 1.3333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F2.1",
+          "needs_approval": false,
+          "points": 1.3333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F3.2",
+          "needs_approval": false,
+          "points": 1.3333333333333333,
+          "section": "R"
+        },
+        {
+          "action": "check this claim against the table the paper binds it to",
+          "criterion": "R1",
+          "leaf": "R1.F4.3",
+          "needs_approval": false,
+          "points": 1.3333333333333333,
+          "section": "R"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -17808,6 +20688,128 @@
       "explanation": "6 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "6 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "record the annotation release the authors used, with the evidence for it",
+          "criterion": "M2",
+          "leaf": "M2.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "record the arms at the gate, or read the paper's design again",
+          "criterion": "S3",
+          "leaf": "S3.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",
@@ -19036,6 +22038,120 @@
       "explanation": "5.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
       "headline": "5.5 / 100",
+      "next_checks": [
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C1",
+          "leaf": "C1.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C2",
+          "leaf": "C2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C3",
+          "leaf": "C3.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C4",
+          "leaf": "C4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "retrieve the paper's supplied code",
+          "criterion": "C5",
+          "leaf": "C5.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "C"
+        },
+        {
+          "action": "read the paper's methods again",
+          "criterion": "M2",
+          "leaf": "M2.A",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
+          "action": "read the paper's samples section again, or record the organism at the gate",
+          "criterion": "S1",
+          "leaf": "S1.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S1",
+          "leaf": "S1.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S3",
+          "leaf": "S3.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's samples section again",
+          "criterion": "S4",
+          "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire an analysis input and map its columns",
+          "criterion": "S5",
+          "leaf": "S5.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        }
+      ],
       "parts": [
         {
           "key": "verified",

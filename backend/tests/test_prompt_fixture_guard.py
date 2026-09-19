@@ -116,6 +116,11 @@ def _prompts() -> dict[str, str]:
             tables=["table.tsv.gz"],
         )
     )
+    # plan_8_4 section 5: the rubric's own judgment contract, rendered for one obligation.
+    from app.services.validation_judgment import build_request
+
+    request = build_request("E1.B", passages=[{"id": "p1", "source": "methods", "text": "a sentence"}])
+    prompts["rubric obligation judgment"] = f"{request['system']}\n{request['payload']}"
     return prompts
 
 
