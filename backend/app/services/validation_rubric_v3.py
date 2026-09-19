@@ -642,9 +642,7 @@ def evidence_card(
     card = score(leaves, assessed)
     shown = display(card)
     limits = _limit_rows(leaves, assessed, capability_limits or {})
-    sections = [
-        _section_row(key, bucket, leaves, assessed, limits) for key, bucket in sorted(card["sections"].items())
-    ]
+    sections = [_section_row(key, bucket, leaves, assessed, limits) for key, bucket in sorted(card["sections"].items())]
     attempted = bool((reproduction or {}).get("attempted"))
     return {
         "rubric_version": RUBRIC_VERSION,

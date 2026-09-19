@@ -325,8 +325,12 @@ def _environment(sources, trees, manifests) -> dict:
     if not manifests:
         held = "bioAF holds no dependency or environment specification for this analysis"
         return {
-            "C3.A": _open(held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"),
-            "C3.B": _open(held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"),
+            "C3.A": _open(
+                held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"
+            ),
+            "C3.B": _open(
+                held, scope="no manifest in hand", next_action="retrieve the paper's environment specification"
+            ),
         }
     modules, _dynamic = _imported(trees) if trees else (set(), False)
     used = {
@@ -399,7 +403,12 @@ def _bound_names(tree: ast.Module) -> set[str]:
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             bound.add(node.name)
-            bound |= {a.arg for a in getattr(node, "args", ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[])).posonlyargs}
+            bound |= {
+                a.arg
+                for a in getattr(
+                    node, "args", ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[])
+                ).posonlyargs
+            }
             bound |= {a.arg for a in getattr(node, "args", None).args} if getattr(node, "args", None) else set()
             bound |= {a.arg for a in getattr(node, "args", None).kwonlyargs} if getattr(node, "args", None) else set()
             for extra in ("vararg", "kwarg"):
@@ -498,9 +507,7 @@ def _fitness(sources, trees, defects) -> dict:
         )
     claimed = [d for d in reviews if d.get("kind") == "defect"]
     established = [
-        d
-        for d in claimed
-        if d.get("established") and d.get("evidence") and not _age_only(str(d.get("evidence") or ""))
+        d for d in claimed if d.get("established") and d.get("evidence") and not _age_only(str(d.get("evidence") or ""))
     ]
     age_only = [d for d in claimed if d.get("established") and _age_only(str(d.get("evidence") or ""))]
     if established:
@@ -512,7 +519,11 @@ def _fitness(sources, trees, defects) -> dict:
             f"{defect.get('evidence')}",
             scope=str(defect.get("operation")),
             impact=defect.get("impact") or "the operation does not do what the analysis relies on it doing",
-            evidence={"operation": defect.get("operation"), "version": defect.get("version"), "source": defect.get("evidence")},
+            evidence={
+                "operation": defect.get("operation"),
+                "version": defect.get("version"),
+                "source": defect.get("evidence"),
+            },
         )
     elif age_only:
         conflicts = _open(

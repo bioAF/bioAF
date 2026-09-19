@@ -89,10 +89,7 @@ CAPABILITY_LIMITS: dict[str, dict] = {
         "reason": "an independent result assessment requires an approved analysis run over acquired "
         "inputs. Nothing is assessed until one has run."
     },
-    "R3": {
-        "reason": "end-to-end execution requires an approved workflow run. Nothing is assessed until "
-        "one has run."
-    },
+    "R3": {"reason": "end-to-end execution requires an approved workflow run. Nothing is assessed until one has run."},
 }
 
 
@@ -310,7 +307,12 @@ def _references(experiments: list[dict]) -> dict:
     ]
     if stated:
         words = ", ".join(
-            sorted({str((r.get("assembly") or {}).get("stated") or (r.get("annotation") or {}).get("stated")) for _, r in stated})
+            sorted(
+                {
+                    str((r.get("assembly") or {}).get("stated") or (r.get("annotation") or {}).get("stated"))
+                    for _, r in stated
+                }
+            )
         )
         identified = _finding(
             VERIFIED,
