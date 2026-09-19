@@ -419,3 +419,74 @@ def _author_results(claims: list[dict], inventory: dict | None) -> dict:
                 next_action="check this claim against the table the paper binds it to",
             )
     return assessed
+
+
+# ---- applicability -------------------------------------------------------------------------------
+#
+# plan_8_4 section 3.5: applicability is about the PAPER's work, never about bioAF's adapters. A
+# criterion is excluded only where cited evidence establishes that the paper's methods have no
+# counterpart for it, and the exclusion redistributes its weight so the profile still totals 100.
+#
+# The one exclusion bioAF can establish deterministically today: a reference genome or annotation has
+# no counterpart in an analysis that sequences nothing. A western blot, a live-cell tracking assay, an
+# immunofluorescence image and a qRT-PCR reaction have feature definitions (an antibody, a primer pair)
+# and no genomic reference to state, and requiring one of them would be requiring a fact that does not
+# exist. This is deliberately NOT keyed on whether bioAF has an adapter: an assay bioAF cannot execute
+# still has a reference to state, and an unsupported assay is a limitation of bioAF's, not the paper's.
+
+_NON_GENOMIC = (
+    "western blot",
+    "immunoblot",
+    "immunofluorescence",
+    "immunohistochem",
+    "microscopy",
+    "imaging",
+    "tracking",
+    "qrt-pcr",
+    "qpcr",
+    "rt-pcr",
+    "elisa",
+    "flow cytometry",
+    "atomic force microscopy",
+    "electrophysiolog",
+    "patch clamp",
+    "mass spectrometr",
+)
+
+
+def _is_non_genomic(assay: str) -> bool:
+    text = (assay or "").strip().lower()
+    return bool(text) and any(word in text for word in _NON_GENOMIC)
+
+
+def profile_for(*, plan: dict | None) -> dict:
+    """The applicability profile for this paper: the default, with what its methods have no counterpart
+    for excluded, each exclusion carrying the evidence that establishes it.
+
+    Uncertainty never excludes. A paper whose assays bioAF could not identify keeps every criterion, so
+    a hard check can never be dropped by failing to read the paper well enough to name its methods.
+    """
+    from app.services.validation_rubric_v3 import ApplicabilityUncertain, default_profile
+
+    experiments = [e for e in (plan or {}).get("reported_experiments") or [] if isinstance(e, dict)]
+    assays = [str(e.get("assay") or "").strip() for e in experiments]
+    named = [a for a in assays if a]
+    exclusions = []
+    if named and len(named) == len(assays) and all(_is_non_genomic(a) for a in named):
+        exclusions.append(
+            {
+                "criterion": "M2",
+                "rationale": (
+                    "every experiment this paper reports measures something other than sequence ("
+                    + ", ".join(sorted(set(named)))
+                    + "), so there is no result-sensitive genome or annotation release for it to state"
+                ),
+                "source": "the assays the paper's own methods state for each reported experiment",
+            }
+        )
+    try:
+        return default_profile(exclude=exclusions)
+    except ApplicabilityUncertain:
+        # An exclusion that cannot be made leaves the allocation where it is, which is the safe
+        # direction: a criterion that stays allocated is grey, and grey costs nothing.
+        return default_profile()

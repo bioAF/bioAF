@@ -3206,42 +3206,42 @@
         {
           "criterion": "M1",
           "leaf": "M1.A",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
         {
           "criterion": "M1",
           "leaf": "M1.B",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
         {
           "criterion": "M3",
           "leaf": "M3.A",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
         {
           "criterion": "M3",
           "leaf": "M3.B",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
         {
           "criterion": "M5",
           "leaf": "M5.A",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
         {
           "criterion": "M5",
           "leaf": "M5.B",
-          "points": 2.0,
+          "points": 2.5,
           "reason": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M"
         },
@@ -3323,7 +3323,14 @@
       ],
       "profile": {
         "documentary_ceiling": 70.0,
-        "exclusions": [],
+        "exclusions": [
+          {
+            "criterion": "M2",
+            "rationale": "every experiment this paper reports measures something other than sequence (qRT-PCR), so there is no result-sensitive genome or annotation release for it to state",
+            "section": null,
+            "source": "the assays the paper's own methods state for each reported experiment"
+          }
+        ],
         "revision": 1,
         "with_author_results_ceiling": 78.0
       },
@@ -3336,8 +3343,8 @@
       "rubric_version": 3,
       "scope": {
         "assessed": 0,
-        "label": "Rubric checks assessed: 0 / 39",
-        "total": 39
+        "label": "Rubric checks assessed: 0 / 37",
+        "total": 37
       },
       "score": 0.0,
       "score_note": "Not yet assessed",

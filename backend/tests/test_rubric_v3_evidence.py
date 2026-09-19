@@ -294,3 +294,54 @@ class TestTheCodeSectionIsAssessedWhereTheSourceIsInHand:
         assessed = _assess(evidence={"code_inspection": {"sources": [r_source]}})
         assert assessed["C1.A"]["outcome"] == UNDETERMINED
         assert assessed["C1.A"]["capability_limit"] is True
+
+
+class TestApplicabilityIsAboutThePaperNotAboutBioaf:
+    """plan_8_4 section 3.5: a criterion is excluded only where cited evidence establishes that the
+    paper's methods have no counterpart for it. A missing adapter, absent code, controlled samples and
+    an unsupported assay are never grounds, and an uncertain exclusion is not made."""
+
+    def _profile(self, assays):
+        from app.services.validation_rubric_evidence import profile_for
+
+        return profile_for(
+            plan={
+                "reported_experiments": [
+                    {"id": f"e{i}", "assay": assay, "reference": {}} for i, assay in enumerate(assays, start=1)
+                ]
+            }
+        )
+
+    def test_a_paper_with_no_genomic_analysis_excludes_the_reference_criterion(self):
+        profile = self._profile(["western blotting", "immunofluorescence microscopy", "qRT-PCR"])
+        assert "M2" not in profile["weights"]
+        (excluded,) = profile["exclusions"]
+        assert excluded["criterion"] == "M2"
+        assert "western blotting" in excluded["rationale"]
+        assert excluded["source"]
+
+    def test_the_excluded_weight_is_redistributed_and_the_profile_still_totals_one_hundred(self):
+        from fractions import Fraction
+
+        from app.services.validation_rubric_v3 import allocate
+
+        profile = self._profile(["western blotting", "qRT-PCR"])
+        assert sum((leaf["weight"] for leaf in allocate(profile)), Fraction(0)) == 100
+        assert sum(profile["sections"].values()) == 100
+
+    def test_one_genomic_experiment_is_enough_to_keep_the_criterion(self):
+        profile = self._profile(["bulk RNA-seq", "western blotting"])
+        assert "M2" in profile["weights"]
+        assert profile["exclusions"] == []
+
+    def test_an_assay_bioaf_cannot_execute_is_never_a_ground_for_exclusion(self):
+        """A missing adapter says what bioAF cannot run. It says nothing about whether the paper's
+        methods have a reference to state."""
+        profile = self._profile(["ribosome profiling"])
+        assert "M2" in profile["weights"]
+        assert profile["exclusions"] == []
+
+    def test_a_paper_whose_assays_are_unknown_excludes_nothing(self):
+        profile = self._profile([None, ""])
+        assert "M2" in profile["weights"]
+        assert profile["exclusions"] == []

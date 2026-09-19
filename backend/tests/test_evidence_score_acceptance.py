@@ -215,3 +215,32 @@ class TestASuppliedScriptScoresTheCodeSection:
         assert code["verified"] == 12, "syntax, imports, pinning, runtime, entry point and coherence"
         assert code["failed"] == 0
         assert code["undetermined"] == 8, "the build, the resolution and the fitness review are not in hand"
+
+
+class TestTheStiffnessPapersProfileFitsItsOwnMethods:
+    """plan_8_4 section 3.5 on the paper it was written about: AFM, live-cell tracking, qRT-PCR,
+    western blotting and immunofluorescence. None of them has a genome to state, so requiring one
+    would be requiring a fact that does not exist, and the criterion is excluded with its rationale."""
+
+    @pytest.mark.asyncio
+    async def test_the_reference_criterion_is_excluded_with_its_evidence(self, session, admin_user):
+        report = await replay_report(session, await _restored(session, admin_user, 57))
+        (excluded,) = report["evidence_score"]["profile"]["exclusions"]
+        assert excluded["criterion"] == "M2"
+        assert "western blotting" in excluded["rationale"]
+        assert excluded["source"]
+
+    @pytest.mark.asyncio
+    async def test_the_profile_still_totals_one_hundred_and_says_it_differs(self, session, admin_user):
+        card = (await replay_report(session, await _restored(session, admin_user, 57)))["evidence_score"]
+        assert sum(s["maximum"] for s in card["sections"]) == 100
+        assert card["score"] + card["failed"] + card["undetermined"] == 100
+        assert card["profile"]["exclusions"], "a reader can see this profile is not the default one"
+
+    @pytest.mark.asyncio
+    async def test_groffs_profile_excludes_nothing(self, session, admin_user):
+        """The other half of the guard: a sequencing paper keeps every criterion, so an exclusion can
+        never be the reason a difficult check disappeared."""
+        card = (await replay_report(session, await _restored(session, admin_user, 55)))["evidence_score"]
+        assert card["profile"]["exclusions"] == []
+        assert card["profile"]["documentary_ceiling"] == 70

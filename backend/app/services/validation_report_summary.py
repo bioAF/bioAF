@@ -364,8 +364,8 @@ def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None,
 
     The v2 scorecard is untouched. Rendering this calls no model, reads no network and writes nothing.
     """
-    from app.services.validation_rubric_evidence import CAPABILITY_LIMITS, assess_evidence
-    from app.services.validation_rubric_v3 import allocate, default_profile, evidence_card, result_allocation
+    from app.services.validation_rubric_evidence import CAPABILITY_LIMITS, assess_evidence, profile_for
+    from app.services.validation_rubric_v3 import allocate, evidence_card, result_allocation
 
     plan = plan or {}
     evidence = evidence or {}
@@ -373,7 +373,8 @@ def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None,
     workflows = [
         e.get("workflow") for e in plan.get("reported_experiments") or [] if isinstance(e, dict) and e.get("workflow")
     ]
-    profile = default_profile()
+    # plan_8_4 section 3.5: what this paper's own methods have a counterpart for. Never what bioAF can run.
+    profile = profile_for(plan=plan)
     leaves = allocate(profile, results=result_allocation(inventory, workflows=workflows))
     assessed = assess_evidence(plan=plan, evidence=evidence, claims=claims, inventory=inventory)
     return evidence_card(
