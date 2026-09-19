@@ -387,16 +387,27 @@ def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None,
 
 
 def _reproduction_statement(attempt, evidence: dict) -> dict:
-    """Whether an independent reproduction was attempted, and what stopped one. Separate from the
-    score, and never moved by it (plan_8_4 section 3.1)."""
-    status = (attempt or {}).get("status")
-    if status in ("completed", "partial", "running"):
-        return {"attempted": True, "label": f"Independent reproduction: {status}"}
-    reason = None
-    access = ((evidence.get("capabilities") or {}).get("raw_data") or {}).get("evidence")
-    if isinstance(access, str) and access.strip():
-        reason = access.strip()
-    return {"attempted": False, "reason": reason}
+    """Whether an independent reproduction was attempted, and what ran or was acquired.
+
+    Separate from the score and never moved by it (plan_8_4 section 3.1). It states ONLY what the
+    attempt record establishes. It used to append the raw-data capability's evidence as a reason, and
+    that sentence describes what the deposit HOLDS: beside "not attempted" it read as though
+    reproduction were possible and had been declined, which is a different claim about the paper.
+    """
+    attempt = attempt or {}
+    executed = [str(w) for w in attempt.get("executed") or []]
+    acquired = [str(w) for w in attempt.get("acquired") or []]
+    if attempt.get("status") == "attempted" or executed:
+        return {
+            "attempted": True,
+            "label": "Independent reproduction: " + (", ".join(executed) if executed else "attempted"),
+            "reason": None,
+        }
+    label = "Independent reproduction: not attempted"
+    if acquired:
+        # What bioAF went and got is a fact worth stating, and on its own it is never an attempt.
+        label += f" ({', '.join(acquired)} acquired)"
+    return {"attempted": False, "label": label, "reason": None}
 
 
 def _unit_confirmation(evidence: dict) -> dict | None:
