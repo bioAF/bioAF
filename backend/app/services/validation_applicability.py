@@ -96,7 +96,7 @@ def _eligible(target: dict) -> bool:
     return bool(open_for) and not open_for <= set(_FAILED_DECISIONS)
 
 
-def _workflow_basis(experiment: dict) -> str | None:
+def workflow_basis(experiment: dict) -> str | None:
     """What established this experiment's workflow: ``diagnostic`` when the paper's own assay names it,
     ``contextual`` when only a word describing its family does, None when it has none.
 
@@ -127,7 +127,7 @@ def support_for(experiment: dict, claims: list[dict]) -> str:
     """What this experiment is supported by, from what the read actually established."""
     if any(_available(t) for t in claims):
         return SUPPORTED
-    basis = _workflow_basis(experiment)
+    basis = workflow_basis(experiment)
     open_for = {r for t in claims for r in _open_requirements(t)}
     # A failed decision first: it is bioAF's own, and it is the one state that must never read as
     # support however good the workflow looks.

@@ -206,3 +206,47 @@ class TestSequencingRequirementsAreSuppressedWhereTheyDoNotApply:
         assert found["status"] == NOT_APPLICABLE
         assert "no quantitative analysis" in found["statement"]
         assert "no artifact" not in found["statement"]
+
+
+class TestAnUnknownDepositListingIsNotAnImplementedAdapter:
+    """plan_8_4 section 6.1: "an unknown deposit listing cannot establish an implemented assay adapter".
+
+    A claim whose experiment's deposit bioAF has not listed yet became a reanalysis CANDIDATE, because
+    what a deposit holds is a requirement the run itself establishes. That is true, and it says nothing
+    about whether bioAF can analyse the assay: the substrate-stiffness paper's qRT-PCR experiment
+    carries a registry-guessed workflow, and on that reading a qRT-PCR claim was a runnable option.
+    """
+
+    def _pairs(self, experiment):
+        from app.services.validation_checks import candidate_pairs, evaluate_checks
+
+        target = {
+            "claim_text": "500 genes changed",
+            "claimed_value": 500,
+            "output_type": "gene_set_size",
+            "contrast_index": 0,
+            "reported_experiment_id": experiment["id"],
+            "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}],
+        }
+        contrast = {"name": "a vs b", "reported_experiment_id": experiment["id"], "test_condition": "a", "reference_condition": "b"}
+        checks = evaluate_checks(
+            target,
+            experiment=experiment,
+            resources=[{"identifier": "GSE1", "type": "sequencing_data", "reported_experiment_ids": [experiment["id"]]}],
+            deposits=[],
+            supplements=[],
+            contrast=contrast,
+        )
+        return candidate_pairs([target], [checks], route="both"), checks
+
+    def test_a_workflow_the_papers_own_assay_names_still_makes_a_candidate(self):
+        pairs, _checks = self._pairs(
+            {"id": "e1", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq", "reference": {}}
+        )
+        assert {p["check"] for p in pairs} & {"processed_reanalysis", "raw_reanalysis"}
+
+    def test_a_workflow_nothing_in_the_paper_names_makes_none(self):
+        pairs, checks = self._pairs({"id": "e1", "assay": "qRT-PCR", "workflow": "nf-core/nascent", "reference": {}})
+        assert not ({p["check"] for p in pairs} & {"processed_reanalysis", "raw_reanalysis"})
+        reason = (checks.get("processed_reanalysis") or {}).get("reason") or ""
+        assert "qRT-PCR" in reason or "analyse" in reason or "analyze" in reason

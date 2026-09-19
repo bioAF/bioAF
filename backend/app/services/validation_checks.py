@@ -56,6 +56,22 @@ _TABLE_KINDS = ("de_table", "da_table")
 _PENDING_REQUIREMENTS = ("sample_mapping", "deposit_listing")
 
 
+def analysable(experiment: dict | None) -> bool:
+    """Whether bioAF's own evidence establishes that it can analyse this experiment's assay.
+
+    plan_8_4 section 6.1: an unknown deposit listing cannot establish an implemented assay adapter.
+    What a deposit holds IS a requirement a run settles for itself, and saying so said nothing about
+    whether there is an adapter to run; the substrate-stiffness paper's qRT-PCR experiment carries a
+    workflow the registry guessed, and on that reading a qRT-PCR claim was a runnable option.
+
+    The same question `validation_applicability` asks, answered from the same experiment evidence, so
+    the two cannot disagree about which experiments bioAF can analyse.
+    """
+    from app.services.validation_applicability import workflow_basis
+
+    return workflow_basis(experiment or {}) == "diagnostic"
+
+
 def _check(status: str, reason: str | None, requirement: str | None) -> dict:
     return {"status": status, "reason": reason, "requirement": requirement}
 
@@ -257,6 +273,14 @@ def evaluate_checks(
                 )
                 if pred_status == AVAILABLE
                 else _check(pred_status, pred_reason, "predicate")
+            )
+        elif not analysable(experiment):
+            # An unlisted deposit leaves what it HOLDS open; it does not make an unanalysable assay
+            # analysable. Naming the assay is what makes this actionable rather than merely negative.
+            processed = _check(
+                UNAVAILABLE,
+                f"bioAF has no validation method for {(experiment or {}).get('assay') or 'this experiment'}",
+                "assay_unsupported",
             )
         elif (linked and not listed) or not linked and not deposits and not resources:
             processed = _check(
