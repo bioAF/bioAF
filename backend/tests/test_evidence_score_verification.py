@@ -208,3 +208,26 @@ class TestDisplay:
         shown = display(card)
         assert Fraction(shown["exact"]["verified"]) >= Fraction(str(shown["parts"]["verified"])) - Fraction(1, 10)
         assert sum(shown["parts"].values()) == 100.0
+
+
+class TestSupersededEvidenceIsNotCurrentCredit:
+    """plan_8_4 section 6.3: superseded evidence cannot remain current credit. A comparison the report
+    marks pending re-evaluation was made under a reading, a binding or a predicate that no longer
+    stands, and a point for it would be a point for an answer bioAF has withdrawn."""
+
+    def test_a_comparison_pending_re_evaluation_earns_nothing(self):
+        claims = [
+            {"index": 0, "consistency": {"outcome": "pending_re_evaluation", "superseded": {"label": "an earlier binding"}}},
+            {"index": 1, "consistency": {"outcome": "agree"}},
+        ]
+        assessed = assess_evidence(plan=_PLAN, evidence={}, claims=claims, inventory=_INVENTORY)
+        assert assessed["R1.F1.0"]["outcome"] == UNDETERMINED
+        assert assessed["R1.F1.1"]["outcome"] == VERIFIED
+
+    def test_withdrawing_an_answer_lowers_the_score_and_the_reason_is_on_the_record(self):
+        agreed = _card(claims=[{"index": 0, "consistency": {"outcome": "agree"}}], inventory=_INVENTORY)
+        withdrawn = _card(
+            claims=[{"index": 0, "consistency": {"outcome": "pending_re_evaluation"}}], inventory=_INVENTORY
+        )
+        assert withdrawn["verified"] < agreed["verified"]
+        assert withdrawn["failed"] == agreed["failed"] == 0

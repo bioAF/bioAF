@@ -42,6 +42,7 @@ const CARD: EvidenceScore = {
       established: [],
       outstanding: "bioAF holds no implemented check for this obligation.",
       unsupported_count: 10,
+      criteria: [],
     },
     {
       section: "S",
@@ -53,6 +54,7 @@ const CARD: EvidenceScore = {
       established: ["the paper states the organism for every relevant experiment: Homo sapiens"],
       outstanding: "the deposit records Mus musculus",
       unsupported_count: 4,
+      criteria: [],
     },
   ],
   profile: { revision: 1, exclusions: [], documentary_ceiling: 70, with_author_results_ceiling: 78 },
@@ -143,7 +145,7 @@ test("each section shows its earned, untested and negative points and expands", 
   expect(code).toHaveTextContent("Code and execution environment");
   expect(code).toHaveTextContent("0 / 20");
   fireEvent.click(screen.getByRole("button", { name: /Sample metadata and study design/ }));
-  expect(screen.getByText(/the paper states the organism/)).toBeInTheDocument();
+  expect(screen.getByText(/6 positive/)).toBeInTheDocument();
 });
 
 test("names the obligations bioAF has no check for rather than letting them read as checked", () => {
@@ -182,4 +184,74 @@ test("lists what would be assessed next and names what needs an approval", () =>
 test("a card with nothing left to assess shows no next-checks list", () => {
   render(<EvidenceScorecard card={{ ...CARD, next_checks: [] }} />);
   expect(screen.queryByTestId("evidence-next-checks")).not.toBeInTheDocument();
+});
+
+/**
+ * plan_8_4 section 7: a section expands into criterion evidence, its partial-credit allocation and
+ * the next action. "Verified" means the named obligation was established, not that the paper is
+ * proven, so each obligation is shown as itself with how it was established.
+ */
+const WITH_CRITERIA: EvidenceScore = {
+  ...CARD,
+  sections: [
+    {
+      ...CARD.sections[1],
+      criteria: [
+        {
+          criterion: "S1",
+          title: "Species identity",
+          points: 3,
+          verified: 1.5,
+          failed: 1.5,
+          undetermined: 0,
+          obligations: [
+            {
+              leaf: "S1.A",
+              obligation: "A",
+              unit: null,
+              points: 1.5,
+              outcome: "verified",
+              label: "positive",
+              statement: "The paper states the organisms for the relevant samples",
+              rationale: "the paper states Homo sapiens",
+              scope: "1 reported experiment",
+              impact: null,
+              next_action: null,
+              method: "measurement",
+              method_label: "Measured",
+              capability_limit: false,
+            },
+            {
+              leaf: "S1.B",
+              obligation: "B",
+              unit: null,
+              points: 1.5,
+              outcome: "failed",
+              label: "negative",
+              statement: "Independent sample metadata agree with those organisms",
+              rationale: "the deposit records Mus musculus",
+              scope: "the sample records bioAF holds",
+              impact: "an analysis would answer about the wrong species",
+              next_action: null,
+              method: "measurement",
+              method_label: "Measured",
+              capability_limit: false,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+} as unknown as EvidenceScore;
+
+test("a section expands into its criteria, each obligation as itself", () => {
+  render(<EvidenceScorecard card={WITH_CRITERIA} />);
+  fireEvent.click(screen.getByRole("button", { name: /Sample metadata and study design/ }));
+  const criterion = screen.getByTestId("evidence-criterion-S1");
+  expect(criterion).toHaveTextContent("Species identity");
+  expect(criterion).toHaveTextContent("1.5 positive");
+  expect(criterion).toHaveTextContent("1.5 negative");
+  expect(criterion).toHaveTextContent("The paper states the organisms for the relevant samples");
+  expect(criterion).toHaveTextContent("the deposit records Mus musculus");
+  expect(criterion).toHaveTextContent("Measured");
 });

@@ -702,6 +702,67 @@ def evidence_card(
     }
 
 
+# Section 7: how an obligation was established, in words a reader can weigh. A measurement and a model
+# review are not the same kind of evidence, and a person's confirmation is neither.
+METHOD_LABELS = {
+    "measurement": "Measured",
+    "model_assisted": "Reviewed by a model",
+    "human_assisted": "Confirmed by a person",
+}
+
+
+def _obligation_row(leaf: dict, assessed: dict) -> dict:
+    """One allocated obligation, as itself. "Verified" here means THIS obligation was established,
+    never that the paper is proven."""
+    found = assessed.get(leaf["id"]) or {}
+    outcome = found.get("outcome") if found.get("outcome") in (VERIFIED, FAILED) else UNDETERMINED
+    method = found.get("method") or "measurement"
+    return {
+        "leaf": leaf["id"],
+        "obligation": leaf.get("obligation"),
+        "unit": leaf.get("unit"),
+        "points": float(leaf["weight"]),
+        "outcome": outcome,
+        "label": VISIBLE_WORDS[outcome],
+        "statement": leaf.get("statement"),
+        "rationale": found.get("rationale"),
+        "scope": found.get("scope"),
+        "impact": found.get("impact"),
+        "next_action": found.get("next_action"),
+        "method": method,
+        "method_label": METHOD_LABELS.get(method, method),
+        "capability_limit": bool(found.get("capability_limit")),
+    }
+
+
+def _criteria_rows(key: str, leaves: list[dict], assessed: dict) -> list[dict]:
+    """A section's criteria, each with its own points and its obligations' allocation. This is what
+    makes "2 verified, 2 failed" a statement about two named things rather than a half-good rating."""
+    grouped: dict[str, list[dict]] = {}
+    for leaf in leaves:
+        if leaf["section"] == key:
+            grouped.setdefault(leaf["criterion"], []).append(leaf)
+    rows = []
+    for criterion_id, members in grouped.items():
+        criterion = CRITERIA_BY_ID[criterion_id]
+        obligations = [_obligation_row(leaf, assessed) for leaf in members]
+        totals = {state: 0.0 for state in (VERIFIED, FAILED, UNDETERMINED)}
+        for row in obligations:
+            totals[row["outcome"]] += row["points"]
+        rows.append(
+            {
+                "criterion": criterion_id,
+                "title": criterion.title,
+                "points": sum(float(leaf["weight"]) for leaf in members),
+                "verified": totals[VERIFIED],
+                "failed": totals[FAILED],
+                "undetermined": totals[UNDETERMINED],
+                "obligations": sorted(obligations, key=lambda row: row["leaf"]),
+            }
+        )
+    return sorted(rows, key=lambda row: row["criterion"])
+
+
 def _section_row(key: str, bucket: dict, leaves: list[dict], assessed: dict, limits: list[dict]) -> dict:
     """One section's totals, what it established, and the most consequential thing still outstanding."""
     verified = [
@@ -739,6 +800,9 @@ def _section_row(key: str, bucket: dict, leaves: list[dict], assessed: dict, lim
         "established": [row.get("rationale") for row in verified],
         "outstanding": outstanding,
         "unsupported_count": len(section_limits),
+        # Section 7: the section expands into its criteria, their partial-credit allocation, what each
+        # obligation required, what was found, how it was established, and what would settle it.
+        "criteria": _criteria_rows(key, leaves, assessed),
     }
 
 

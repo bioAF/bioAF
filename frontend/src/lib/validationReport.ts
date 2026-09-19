@@ -579,6 +579,33 @@ export const PROVISIONAL_NOTE = "from the paper text only; not checked against t
  * plan_8_4: rubric v3's evidence score. Separate from the v2 scorecard above and never read as it:
  * a v2 score of 100 is not a v3 score of 100. Every number is computed by the backend.
  */
+export interface EvidenceScoreObligation {
+  leaf: string;
+  obligation: string | null;
+  unit: string | null;
+  points: number;
+  outcome: "verified" | "failed" | "undetermined";
+  label: string;
+  statement: string | null;
+  rationale: string | null;
+  scope: string | null;
+  impact: string | null;
+  next_action: string | null;
+  method: string;
+  method_label: string;
+  capability_limit: boolean;
+}
+
+export interface EvidenceScoreCriterion {
+  criterion: string;
+  title: string;
+  points: number;
+  verified: number;
+  failed: number;
+  undetermined: number;
+  obligations: EvidenceScoreObligation[];
+}
+
 export interface EvidenceScoreSection {
   section: string;
   title: string;
@@ -589,6 +616,7 @@ export interface EvidenceScoreSection {
   established: string[];
   outstanding: string | null;
   unsupported_count: number;
+  criteria: EvidenceScoreCriterion[];
 }
 
 export interface EvidenceScoreLimit {

@@ -176,3 +176,80 @@ class TestTheCardSaysWhatWouldBeAssessedNext:
         limits = {limit["leaf"] for limit in card["capability_limits"]}
         offered = {row["leaf"] for row in card["next_checks"] if not row["needs_approval"]}
         assert not (offered & limits)
+
+
+class TestASectionExpandsIntoItsCriteria:
+    """plan_8_4 section 7: a section expands into criterion evidence, its partial-credit allocation and
+    the next action. "Verified" means the named obligation was established, not that the paper is
+    proven, so each obligation is shown as itself. Model-assisted and human-assisted judgments are
+    labelled distinctly from a measurement."""
+
+    def _section(self, key, evidence=None):
+        card = _summary(evidence=evidence)["evidence_score"]
+        return next(s for s in card["sections"] if s["section"] == key)
+
+    def test_each_criterion_shows_its_two_obligations_with_their_own_points(self):
+        rows = {row["criterion"]: row for row in self._section("S")["criteria"]}
+        assert rows["S1"]["points"] == 3
+        assert [o["obligation"] for o in rows["S1"]["obligations"]] == ["A", "B"]
+        assert all(o["points"] == 1.5 for o in rows["S1"]["obligations"])
+        assert rows["S1"]["title"]
+
+    def test_partial_credit_reads_as_two_named_obligations_not_a_half_rating(self):
+        evidence = {"precompute_checks": {"species_matches": {"verdict": "mismatch", "detail": "Mus musculus"}}}
+        row = next(r for r in self._section("S", evidence)["criteria"] if r["criterion"] == "S1")
+        outcomes = {o["obligation"]: o["outcome"] for o in row["obligations"]}
+        assert outcomes == {"A": "verified", "B": "failed"}
+        assert row["verified"] == 1.5 and row["failed"] == 1.5
+
+    def test_each_obligation_states_what_it_required_and_what_was_found(self):
+        obligation = next(
+            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A"
+        )
+        assert obligation["statement"]
+        assert obligation["rationale"]
+
+    def test_an_open_obligation_carries_its_next_action(self):
+        obligation = next(
+            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S3.B"
+        )
+        assert obligation["outcome"] == "undetermined"
+        assert obligation["next_action"]
+
+    def test_how_an_obligation_was_assessed_is_labelled(self):
+        obligation = next(
+            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A"
+        )
+        assert obligation["method"] == "measurement"
+        assert obligation["method_label"] == "Measured"
+
+    def test_a_model_assisted_judgment_is_labelled_distinctly(self):
+        from app.services.validation_rubric_v3 import allocate, default_profile, evidence_card
+
+        assessed = {
+            "E1.B": {
+                "outcome": "verified",
+                "rationale": "the fixation time and the stain are stated",
+                "scope": "2 passages",
+                "method": "model_assisted",
+            }
+        }
+        card = evidence_card(profile=default_profile(), leaves=allocate(default_profile()), assessed=assessed)
+        obligation = next(
+            o
+            for s in card["sections"]
+            for r in s["criteria"]
+            for o in r["obligations"]
+            if o["leaf"] == "E1.B"
+        )
+        assert obligation["method_label"] == "Reviewed by a model"
+
+    def test_a_human_assisted_judgment_is_labelled_distinctly(self):
+        from app.services.validation_rubric_v3 import allocate, default_profile, evidence_card
+
+        assessed = {"S5.B": {"outcome": "verified", "rationale": "a person recorded the units", "scope": "4 columns", "method": "human_assisted"}}
+        card = evidence_card(profile=default_profile(), leaves=allocate(default_profile()), assessed=assessed)
+        obligation = next(
+            o for s in card["sections"] for r in s["criteria"] for o in r["obligations"] if o["leaf"] == "S5.B"
+        )
+        assert obligation["method_label"] == "Confirmed by a person"
