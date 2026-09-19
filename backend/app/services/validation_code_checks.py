@@ -402,19 +402,8 @@ def _bound_names(tree: ast.Module) -> set[str]:
     bound = set(dir(builtins))
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # The name itself. Its parameters arrive as `ast.arg` nodes in the same walk.
             bound.add(node.name)
-            bound |= {
-                a.arg
-                for a in getattr(
-                    node, "args", ast.arguments(posonlyargs=[], args=[], kwonlyargs=[], kw_defaults=[], defaults=[])
-                ).posonlyargs
-            }
-            bound |= {a.arg for a in getattr(node, "args", None).args} if getattr(node, "args", None) else set()
-            bound |= {a.arg for a in getattr(node, "args", None).kwonlyargs} if getattr(node, "args", None) else set()
-            for extra in ("vararg", "kwarg"):
-                argument = getattr(getattr(node, "args", None), extra, None)
-                if argument is not None:
-                    bound.add(argument.arg)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 bound.add((alias.asname or alias.name).split(".")[0])

@@ -154,7 +154,10 @@ def _species(experiments: list[dict], plan: dict, evidence: dict) -> dict:
     sheet = str((plan.get("sample_sheet") or {}).get("organism") or "").strip()
     named = [o for o in stated if o] or ([sheet] if sheet else [])
     scope = f"{len(experiments)} reported {'experiment' if len(experiments) == 1 else 'experiments'}"
-    if named and all(o for o in stated) if stated else bool(named):
+    # Every relevant experiment states one, or, where the plan records no experiments at all, the
+    # study's sample sheet does. One experiment left blank is not "the paper states the organism".
+    every_experiment = bool(stated) and all(stated)
+    if every_experiment or (not stated and bool(sheet)):
         found = _finding(
             VERIFIED,
             f"the paper states the organism for every relevant experiment: {', '.join(sorted(set(named)))}",
