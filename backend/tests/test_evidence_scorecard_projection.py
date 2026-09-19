@@ -78,7 +78,7 @@ class TestTheHeadlineIsWhatWasEstablished:
         """Section 3.1: a high documentary score never changes the reproduction statement."""
         card = _summary()["evidence_score"]
         assert card["reproduction"]["attempted"] is False
-        assert card["reproduction"]["label"].startswith("Independent reproduction: Not attempted")
+        assert card["reproduction"]["label"].startswith("Independent reproduction: not attempted")
 
     def test_the_assessed_scope_counts_leaves_and_names_its_unit(self):
         card = _summary()["evidence_score"]
@@ -253,3 +253,53 @@ class TestASectionExpandsIntoItsCriteria:
             o for s in card["sections"] for r in s["criteria"] for o in r["obligations"] if o["leaf"] == "S5.B"
         )
         assert obligation["method_label"] == "Confirmed by a person"
+
+
+class TestTheReproductionStatementSaysOnlyWhatIsEstablished:
+    """Found on the deployed build: the statement read "Not attempted — EGAS00001003667: EGA lists 108
+    fastq.gz file(s) for this dataset", which pairs "not attempted" with a sentence describing what the
+    deposit HOLDS. That is the evidence for a capability, not a reason nothing was run, and beside
+    "not attempted" it reads as though reproduction were possible and had been declined.
+
+    It also carried an em-dash, which this repository does not use.
+    """
+
+    def test_it_states_the_status_and_invents_no_reason(self):
+        card = _summary()["evidence_score"]
+        assert card["reproduction"]["label"] == "Independent reproduction: not attempted"
+        assert card["reproduction"]["reason"] is None
+
+    def test_a_deposits_contents_never_become_a_reason_nothing_ran(self):
+        evidence = {
+            "capabilities": {
+                "raw_data": {"value": "yes", "evidence": "EGA lists 108 fastq.gz files for this dataset"}
+            }
+        }
+        card = _summary(evidence=evidence)["evidence_score"]
+        assert "fastq" not in card["reproduction"]["label"]
+        assert card["reproduction"]["attempted"] is False
+
+    def test_what_bioaf_did_acquire_is_stated_as_that_and_not_as_an_attempt(self):
+        card = _summary(evidence={"deposit": {"accession": "GSE1"}})["evidence_score"]
+        assert card["reproduction"]["attempted"] is False
+        assert "deposited files" in card["reproduction"]["label"]
+        assert "acquired" in card["reproduction"]["label"]
+
+    def test_an_attempt_that_ran_names_what_executed(self):
+        from app.services.validation_report_summary import evidence_scorecard
+
+        card = evidence_scorecard(
+            study={"state": "classified"},
+            evidence={},
+            plan=_PLAN,
+            claims=[],
+            attempt={"status": "attempted", "executed": ["analysis pipeline run"], "acquired": []},
+        )
+        assert card["reproduction"]["attempted"] is True
+        assert "analysis pipeline run" in card["reproduction"]["label"]
+
+    def test_no_em_dash_reaches_the_card(self):
+        for evidence in ({}, {"deposit": {"accession": "GSE1"}}):
+            card = _summary(evidence=evidence)["evidence_score"]
+            for value in (card["reproduction"]["label"], card["explanation"], card["counts_label"]):
+                assert "—" not in value, value

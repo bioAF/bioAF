@@ -690,11 +690,7 @@ def evidence_card(
         "capability_limits": limits,
         "reproduction": {
             "attempted": attempted,
-            "label": (reproduction or {}).get("label")
-            or (
-                "Independent reproduction: Not attempted"
-                + (f" — {(reproduction or {}).get('reason')}" if (reproduction or {}).get("reason") else "")
-            ),
+            "label": (reproduction or {}).get("label") or "Independent reproduction: not attempted",
             "reason": (reproduction or {}).get("reason"),
         },
         "concerns": _concerns(leaves, assessed),

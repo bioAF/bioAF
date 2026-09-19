@@ -358,8 +358,8 @@
         "with_author_results_ceiling": 78.0
       },
       "reproduction": {
-        "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "attempted": true,
+        "label": "Independent reproduction: analysis pipeline run",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -1939,7 +1939,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -3403,7 +3403,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -5339,8 +5339,8 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted \u2014 EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset",
-        "reason": "EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset"
+        "label": "Independent reproduction: not attempted",
+        "reason": null
       },
       "rubric_label": "Evidence rubric v3",
       "rubric_version": 3,
@@ -6873,7 +6873,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted (deposited files acquired)",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -8352,7 +8352,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -9819,7 +9819,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -11452,8 +11452,8 @@
         "with_author_results_ceiling": 78.0
       },
       "reproduction": {
-        "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "attempted": true,
+        "label": "Independent reproduction: reproduction notebook",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -14070,8 +14070,8 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted \u2014 EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset",
-        "reason": "EGAS00001003667: EGA lists 108 fastq.gz file(s) for this dataset"
+        "label": "Independent reproduction: not attempted",
+        "reason": null
       },
       "rubric_label": "Evidence rubric v3",
       "rubric_version": 3,
@@ -16403,7 +16403,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -18128,7 +18128,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -20679,7 +20679,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -23610,7 +23610,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -25365,7 +25365,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -26937,7 +26937,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -28540,7 +28540,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -30425,7 +30425,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -32245,8 +32245,8 @@
         "with_author_results_ceiling": 78.0
       },
       "reproduction": {
-        "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "attempted": true,
+        "label": "Independent reproduction: reproduction notebook",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -34167,7 +34167,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -36262,7 +36262,7 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "label": "Independent reproduction: not attempted",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -38584,8 +38584,8 @@
         "with_author_results_ceiling": 78.0
       },
       "reproduction": {
-        "attempted": false,
-        "label": "Independent reproduction: Not attempted",
+        "attempted": true,
+        "label": "Independent reproduction: reproduction notebook",
         "reason": null
       },
       "rubric_label": "Evidence rubric v3",
@@ -40819,8 +40819,8 @@
       },
       "reproduction": {
         "attempted": false,
-        "label": "Independent reproduction: Not attempted \u2014 EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset",
-        "reason": "EGAS00001003667: EGA dataset EGAD00001005044 is controlled access and registers 54 sample(s); EGA lists 108 fastq.gz file(s) for this dataset"
+        "label": "Independent reproduction: not attempted",
+        "reason": null
       },
       "rubric_label": "Evidence rubric v3",
       "rubric_version": 3,
