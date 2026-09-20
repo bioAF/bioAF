@@ -146,3 +146,41 @@ class TestWhatARunEstablishes:
     def test_a_timeout_establishes_nothing_either(self):
         found = outcome_from_run(exit_code=None, transcript="BIOAF_LOAD numpy ok\n", environment="e", ref="cs-5")
         assert found.get("load", {}).get("status") != "failed"
+
+
+class TestAnEnvironmentBioafDidNotProvisionIsNotThePapersDefect:
+    """plan_8_4 section 3.4: a failure of bioAF's own environment produces undetermined points.
+
+    The isolated run uses whatever image this install configures. If that image simply does not hold
+    the paper's ecosystem, every package "fails to load" and the paper reads as one whose every
+    dependency is broken. A paper whose every single declared package is missing is far more likely
+    an environment nobody provisioned, so it establishes nothing rather than a failure.
+    """
+
+    def test_every_package_missing_establishes_nothing(self):
+        transcript = (
+            "BIOAF_LOAD DESeq2 failed: not installed\n"
+            "BIOAF_LOAD dplyr failed: not installed\n"
+            "BIOAF_RESOLVE failed: DESeq2, dplyr\n"
+        )
+        found = outcome_from_run(exit_code=1, transcript=transcript, environment="python:3.12-slim", ref="cs-9")
+        assert found.get("load", {}).get("status") != "failed"
+        assert found.get("dependency_resolution", {}).get("status") != "failed"
+
+    def test_one_package_missing_among_many_is_still_the_papers_defect(self):
+        transcript = (
+            "BIOAF_LOAD DESeq2 ok\n"
+            "BIOAF_LOAD dplyr ok\n"
+            "BIOAF_LOAD scanpy failed: not installed\n"
+            "BIOAF_RESOLVE failed: scanpy\n"
+        )
+        found = outcome_from_run(exit_code=1, transcript=transcript, environment="e", ref="cs-10")
+        assert found["load"]["status"] == "failed"
+        assert "scanpy" in found["load"]["reason"]
+
+    def test_a_single_package_that_fails_is_not_read_as_a_whole_empty_environment(self):
+        """One declared package and it is missing: that IS what the check establishes."""
+        found = outcome_from_run(
+            exit_code=1, transcript="BIOAF_LOAD DESeq2 failed: not installed\n", environment="e", ref="cs-11"
+        )
+        assert found["load"]["status"] == "failed"

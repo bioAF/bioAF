@@ -250,6 +250,12 @@ def outcome_from_run(*, exit_code: int | None, transcript: str, environment: str
         return {}
     found: dict = {}
     broken = [line[len(LOAD_MARKER) :].strip() for line in loads if " failed:" in line]
+    # plan_8_4 section 3.4: a failure of bioAF's own environment is undetermined, never failed. The
+    # run uses whatever image this install configures, and an image that simply does not hold the
+    # paper's ecosystem makes every package "missing". A paper whose every single declared package
+    # is broken is far more likely an environment nobody provisioned, so it establishes nothing.
+    if len(broken) > 1 and len(broken) == len(loads):
+        return {}
     if broken:
         found["load"] = {
             "status": "failed",
