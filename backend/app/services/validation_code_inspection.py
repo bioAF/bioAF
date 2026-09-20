@@ -36,6 +36,9 @@ LANGUAGES = {
     ".m": "matlab",
     ".nf": "nextflow",
     ".smk": "snakemake",
+    # plan_8_6 section 4: a notebook is source. Study 65 publishes its single-cell analysis as one,
+    # and with no entry here it was a file with no text however many times its bytes arrived.
+    ".ipynb": "notebook",
 }
 
 # Dependency and environment specifications, which answer C2 and C3 rather than C1.
@@ -77,9 +80,15 @@ def _text(blob: bytes) -> str | None:
     return None
 
 
+# plan_8_6 section 4: an environment specification the authors named for themselves. Study 65's is
+# `flow_env.yml`, which is a conda environment under a name no fixed list would hold. The suffix is
+# what says so, and a YAML that is not named as an environment is not read as one.
+_ENVIRONMENT_NAMES = ("env.yml", "env.yaml", "environment.yml", "environment.yaml")
+
+
 def _is_manifest(name: str) -> bool:
     base = pathlib.PurePosixPath(name).name.lower()
-    return base in MANIFESTS or base.startswith("dockerfile")
+    return base in MANIFESTS or base.startswith("dockerfile") or base.endswith(_ENVIRONMENT_NAMES)
 
 
 def inspect_code(supplements: list[dict] | None, *, bytes_for: dict[str, bytes] | None = None) -> dict:
@@ -104,6 +113,18 @@ def inspect_code(supplements: list[dict] | None, *, bytes_for: dict[str, bytes] 
         blob = bytes_for.get(name)
         if blob is None:
             unreadable.append({"path": name, "reason": "bioAF holds no bytes for this file"})
+            continue
+        if name.lower().endswith(".ipynb"):
+            # plan_8_6 section 4: a notebook is source, read as JSON and never executed.
+            notebook = _notebook_source(
+                name, blob, provenance={"from": "supplement", "sha256": _sha256(blob), "bytes": len(blob)}
+            )
+            if notebook is not None:
+                sources.append(notebook)
+            else:
+                unreadable.append(
+                    {"path": name, "reason": "the notebook is not readable JSON", "sha256": _sha256(blob)}
+                )
             continue
         if name.lower().endswith(_DOCUMENTS):
             extracted = _documented_sources(name, blob)
@@ -181,7 +202,7 @@ def _documented_sources(name: str, blob: bytes) -> list[dict]:
         if titles.count(title) > 1:
             # Two of Groff's five documents are both titled "R Notebook". They are still two
             # documents, and a diagnostic has to say which one it is about.
-            title = f"{title} {1 + titles[:index - 1].count(title)}"
+            title = f"{title} {1 + titles[: index - 1].count(title)}"
         for language, segments in by_language.items():
             found.append(
                 {
@@ -201,6 +222,183 @@ def _documented_sources(name: str, blob: bytes) -> list[dict]:
                 }
             )
     return found
+
+
+# A notebook magic is notebook syntax, not Python. `%matplotlib inline` and `!pip install` are the
+# notebook's own language, and handing them to a Python parser would report a paper's code as
+# syntactically broken when it is nothing of the kind.
+_MAGIC = ("%", "!", "?")
+
+
+def read_notebook(blob: bytes | str | None) -> dict | None:
+    """A Jupyter notebook read as JSON: its language, its code cells in order, and where each sits.
+
+    plan_8_6 section 4. ``{"language", "kernel", "cells", "text", "markdown", "magics"}``, or None
+    when this is not a notebook. Markdown and saved outputs are kept apart from source: prose is not
+    code, and an output is not the step that produced it. Nothing is executed and nothing imported;
+    this is `json.loads` and a walk over what it returns.
+    """
+    import json
+
+    try:
+        raw = blob.decode("utf-8") if isinstance(blob, (bytes, bytearray)) else str(blob or "")
+        document = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return None
+    if not isinstance(document, dict) or not isinstance(document.get("cells"), list):
+        return None
+
+    metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+    kernel = metadata.get("kernelspec") if isinstance(metadata.get("kernelspec"), dict) else {}
+    language_info = metadata.get("language_info") if isinstance(metadata.get("language_info"), dict) else {}
+    language = str(kernel.get("language") or language_info.get("name") or "").strip().lower() or "unknown"
+
+    cells: list[dict] = []
+    markdown: list[str] = []
+    magics: list[dict] = []
+    line = 1
+    for order, cell in enumerate(document["cells"], start=1):
+        if not isinstance(cell, dict):
+            continue
+        source = cell.get("source")
+        body = "".join(source) if isinstance(source, list) else str(source or "")
+        if cell.get("cell_type") != "code":
+            if body.strip():
+                markdown.append(body)
+            continue
+        kept: list[str] = []
+        for offset, text in enumerate(body.splitlines()):
+            if text.lstrip().startswith(_MAGIC) and not text.lstrip().startswith("#"):
+                magics.append({"cell": order, "line": line + offset, "text": text.strip()})
+                continue
+            kept.append(text)
+        code = "\n".join(kept).strip("\n")
+        if not code.strip():
+            line += body.count("\n") + 1
+            continue
+        cells.append(
+            {
+                "id": f"cell {order}" + (f" ({cell['id']})" if isinstance(cell.get("id"), str) else ""),
+                "label": f"cell {order}",
+                "order": order,
+                "line": line,
+                "code": code,
+            }
+        )
+        line += body.count("\n") + 1
+    return {
+        "language": language,
+        "kernel": kernel or language_info,
+        "cells": cells,
+        "markdown": markdown,
+        "magics": magics,
+        "text": "\n".join(c["code"] for c in cells),
+    }
+
+
+def _notebook_source(name: str, blob: bytes, *, provenance: dict) -> dict | None:
+    """One notebook as one source, its cells kept as the segments a citation can resolve to."""
+    found = read_notebook(blob)
+    if found is None:
+        return None
+    return {
+        "path": name,
+        "language": found["language"] if found["language"] in ("python", "r", "julia") else "unknown",
+        "text": found["text"],
+        "segments": [
+            {"id": c["id"], "label": c["label"], "line": c["line"], "order": c["order"], "code": c["code"]}
+            for c in found["cells"]
+        ],
+        "notebook": {"kernel": found["kernel"], "cells": len(found["cells"]), "magics": found["magics"]},
+        "provenance": {**provenance, "extracted": "code cells of a Jupyter notebook"},
+    }
+
+
+# plan_8_6 section 4: the same limits the fetched archive was unpacked under. A repository is source
+# code; a member in the hundreds of megabytes is a data drop and is named without being read.
+MAX_SOURCE_BYTES = 2 * 1024 * 1024
+MAX_SOURCES = 400
+
+
+def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
+    """``{"sources", "manifests", "unreadable"}`` from the bytes of a fetched repository or archive.
+
+    plan_8_6 section 4: fetching a list of filenames does not complete inspection. This reads the
+    members bioAF fetched into source a check can parse, under their own paths, each with its own
+    checksum, keeping dependency and environment specifications apart from the scripts.
+
+    Never raises and never executes: an archive bioAF cannot open is recorded as unreadable.
+    """
+    import io
+    import tarfile
+    import zipfile
+
+    sources: list[dict] = []
+    manifests: list[dict] = []
+    unreadable: list[dict] = []
+    if not blob:
+        return {"sources": [], "manifests": [], "unreadable": [{"path": origin or "", "reason": "no bytes were held"}]}
+
+    members: list[tuple[str, bytes]] = []
+    try:
+        if bytes(blob[:2]) == b"PK":
+            with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+                members = [(i.filename, archive.read(i.filename)) for i in archive.infolist() if not i.is_dir()]
+        else:
+            with tarfile.open(fileobj=io.BytesIO(blob), mode="r:*") as archive:
+                for member in archive.getmembers():
+                    if not member.isfile() or member.size > MAX_SOURCE_BYTES:
+                        continue
+                    handle = archive.extractfile(member)
+                    if handle is not None:
+                        members.append((member.name, handle.read()))
+    except Exception as exc:  # noqa: BLE001 - an archive bioAF refused is on the record as refused
+        return {
+            "sources": [],
+            "manifests": [],
+            "unreadable": [{"path": origin or "", "reason": f"the archive could not be read ({exc})"}],
+        }
+
+    # A repository tarball wraps everything in `<repo>-<sha>/`. Stripping it keeps a cited path the
+    # one a reader would type.
+    prefixes = {name.split("/", 1)[0] for name, _ in members if "/" in name}
+    strip = prefixes.pop() + "/" if len(prefixes) == 1 and all("/" in name for name, _ in members) else ""
+
+    for name, member_bytes in members[:MAX_SOURCES]:
+        safe = str(name).removeprefix(strip)
+        if not safe or safe.endswith("/"):
+            continue
+        manifest = _is_manifest(safe)
+        suffix = pathlib.PurePosixPath(safe).suffix.lower()
+        if not manifest and suffix not in LANGUAGES:
+            continue
+        provenance = {
+            "from": "repository",
+            "origin": origin,
+            "sha256": _sha256(member_bytes),
+            "bytes": len(member_bytes),
+        }
+        if suffix == ".ipynb":
+            notebook = _notebook_source(safe, member_bytes, provenance=provenance)
+            if notebook is not None:
+                sources.append(notebook)
+            else:
+                unreadable.append(
+                    {"path": safe, "reason": "the notebook is not readable JSON", "sha256": provenance["sha256"]}
+                )
+            continue
+        text = _text(member_bytes)
+        if text is None:
+            unreadable.append(
+                {"path": safe, "reason": "the bytes do not decode as text", "sha256": provenance["sha256"]}
+            )
+            continue
+        entry = {"path": safe, "text": text, "provenance": provenance}
+        if manifest:
+            manifests.append(entry)
+        else:
+            sources.append({**entry, "language": LANGUAGES.get(suffix, "unknown")})
+    return {"sources": sources, "manifests": manifests, "unreadable": unreadable}
 
 
 def is_code_file(filename: str, *, role: str | None = None) -> bool:

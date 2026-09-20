@@ -18,6 +18,7 @@ must not be classified by this stage.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -356,6 +357,123 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     return merged
 
 
+async def refresh_code_inspection(session: AsyncSession, study, *, sources=None, fetcher=None) -> dict:
+    """plan_8_6 section 4: fetch the code this paper published, and READ it. Never raises.
+
+    Study 65 identified a repository and a cited Software Heritage revision and recorded
+    ``retrieval: not_attempted``, because the only caller of `code_fetch_service` was
+    `_handle_reproducing`, which is post-approval and which this study never reached. So no C
+    obligation could be assessed, and M5.B, which asks whether the inspected methods and the
+    supplied code agree on the consequential parameters, was put to an assessor that had never been
+    shown the code.
+
+    The revision the paper ARCHIVED is what is fetched; its members become source with their own
+    paths and checksums. Nothing is installed and nothing is executed: an archive is opened, a
+    notebook is parsed as JSON, and bytes are decoded as text. The run-only obligations keep every
+    approval prerequisite they had.
+
+    Cached on what it was built from, so a second assessment of unchanged evidence costs no fetch.
+    """
+    from app.services.code_fetch_service import RESOLVED, cited_revisions, resolve_code
+
+    evidence = dict(study.evidence_json or {})
+    if sources is None:
+        plan = await active_plan(session, study)
+        sources = (getattr(plan, "code_availability_json", None) or []) if plan is not None else []
+    rows = [s for s in sources or [] if isinstance(s, dict)]
+    inventory = (evidence.get("deposit_inventory") or {}).get("entries") or []
+    entries = [
+        SimpleNamespace(
+            filename=e.get("filename"), url=e.get("url"), classification=e.get("classification"), level=e.get("level")
+        )
+        for e in inventory
+        if isinstance(e, dict)
+    ]
+    revisions = cited_revisions(_availability_text(evidence))
+    identity = {
+        "sources": [(s.get("kind"), s.get("url"), s.get("identifier")) for s in rows],
+        "deposit_code": [e.url for e in entries if e.classification == "code"],
+        "revisions": [r["value"] for r in revisions],
+    }
+    held = evidence.get("code_resolution") if isinstance(evidence.get("code_resolution"), dict) else None
+    if held is not None and held.get("inputs") == identity:
+        return held
+    if not rows and not entries:
+        return held or {}
+
+    try:
+        resolution = await resolve_code(
+            sources=rows,
+            deposit_entries=entries,
+            fetcher=fetcher or deposit_bytes_fetcher,
+            revisions=revisions,
+        )
+    except Exception as exc:  # noqa: BLE001 - reading the code cannot fail the stage that earned the rest
+        logger.warning("study %s: the authors' code could not be resolved: %s", study.id, exc)
+        return held or {}
+
+    record = {**resolution.record(), "inputs": identity, "at": _now_iso()}
+    evidence["code_resolution"] = record
+    from app.services.validation_code_inspection import inspect_archive
+
+    if resolution.outcome == RESOLVED and resolution.archive:
+        inspected = inspect_archive(resolution.archive, origin=resolution.url)
+    else:
+        # The report has to say bioAF did not read it, rather than implying there was nothing to
+        # read. A location that was never retrieved is one unreadable entry with its reason.
+        inspected = {
+            "sources": [],
+            "manifests": [],
+            "unreadable": [{"path": resolution.url or "", "reason": resolution.reason}],
+        }
+    previous = dict(evidence.get("code_inspection") or {})
+    held_paths = {str(s.get("path")) for s in previous.get("sources") or []}
+    held_manifests = {str(m.get("path")) for m in previous.get("manifests") or []}
+    evidence["code_inspection"] = {
+        "sources": [
+            *(previous.get("sources") or []),
+            *[s for s in inspected["sources"] if s["path"] not in held_paths],
+        ],
+        "manifests": [
+            *(previous.get("manifests") or []),
+            *[m for m in inspected["manifests"] if m["path"] not in held_manifests],
+        ],
+        "unreadable": inspected["unreadable"],
+        # An earlier inspection's reviews, approved runs and environment check are evidence in
+        # their own right and are not discarded because more source arrived.
+        "reviews": previous.get("reviews") or [],
+        "execution": previous.get("execution") or {},
+        **({"environment_check": previous["environment_check"]} if previous.get("environment_check") else {}),
+    }
+    # Step 13 recorded `accessible: not_attempted` on each source. This is the attempt.
+    capabilities = dict(evidence.get("capabilities") or {})
+    if capabilities.get("code_sources"):
+        capabilities["code_sources"] = [
+            {**src, **_accessibility_from(resolution.accessibility.get(src.get("url") or ""))}
+            for src in capabilities["code_sources"]
+        ]
+        evidence["capabilities"] = capabilities
+    study.evidence_json = evidence
+    if session is not None:
+        await session.flush()
+    return record
+
+
+def _availability_text(evidence: dict) -> str:
+    """Where a paper states its code's location and the revision it archived.
+
+    The whole index, because a paper that names its repository in the methods rather than under a
+    data-availability heading has still named it.
+    """
+    return " ".join(str(p.get("text") or "") for p in (evidence.get("paper_index") or {}).get("passages") or [])
+
+
+def _accessibility_from(answer: dict | None) -> dict:
+    if not answer:
+        return {}
+    return {"accessible": answer.get("accessible"), "accessible_reason": answer.get("reason")}
+
+
 async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) -> None:
     """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
     from app.services.validation_reconciliation import not_performed, reconcile
@@ -500,6 +618,12 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # resolved. They answer documentary obligations about species, material, arms, counts and units,
     # so they are held here, before any input is acquired and before anyone approves compute.
     await refresh_sample_records(session, study, fetcher=fetcher)
+
+    # plan_8_6 section 4: the code this paper published, fetched at the revision the paper archived
+    # and READ. Study 65 resolved a repository and a cited revision and recorded `not_attempted`,
+    # because the only caller was post-approval. Static inspection only: nothing is installed and
+    # nothing is executed, and the run-only obligations keep every approval prerequisite they had.
+    await refresh_code_inspection(session, study)
 
     plan = await active_plan(session, study)
     refresh_checks(study, plan)

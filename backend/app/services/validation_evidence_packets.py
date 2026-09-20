@@ -120,8 +120,16 @@ _BENCH_PROCEDURE = _re(
     r"\bIllumina\b|\bNovaSeq\b|\bHiSeq\b|\bNextSeq\b|\bMiSeq\b|\b10x\b|\bChromium\b|\bSmart-seq",
     r"\bpaired-end\b|\bsingle-end\b|\bread length\b|\bdepth of\b|\bmillion reads\b",
 )
+# Subscripts are flattened out of a JATS article, so the paper's own "log2fc" reaches bioAF as
+# "log 2 fc" and its "padj" as "p adj". A selector that knows only the compact spelling misses the
+# thresholds the paper actually states, which is how study 65's stated cutoff reached no obligation.
+_FOLD_CHANGE = r"\blog\s*2\s*(?:fc|fold[\s-]?change)|\bfold[\s-]?change\b|\bFC\s*[<>]"
+_ADJUSTED_P = r"\bp\s*[-.]?\s*adj\w*|\bq\s*[-.]?\s*value|\bFDR\b|\badjusted\s+P\b|\bBenjamini\b|\bBonferroni\b"
+
 _ANALYSIS_ONLY = _re(
-    r"\bDESeq2\b|\bedgeR\b|\blimma\b|\blog2 fold|\blog2FC\b|\bpadj\b|\bFDR\b|\bBenjamini\b",
+    r"\bDESeq2\b|\bedgeR\b|\blimma\b",
+    _FOLD_CHANGE,
+    _ADJUSTED_P,
     r"\bGO enrichment|\benrichment analysis|\bWald test\b|\bclustering resolution\b",
 )
 
@@ -232,9 +240,11 @@ _SELECTORS: dict[str, Selector] = {
         (CODE, SUPPLEMENT),
         _ALWAYS_NEEDS,
         _re(
-            r"\bsignifican\w*|\bp-?value\b|\bpadj\b|\bFDR\b|\bq-?value\b|\bBenjamini\b|\bBonferroni\b",
+            r"\bsignifican\w*|\bp-?value\b",
+            _ADJUSTED_P,
             r"\bmultiple (?:testing|comparison)\b|\bcorrect\w*|\bthreshold\w*|\bcut-?off\b",
-            r"\blog2 fold\b|\blog2FC\b|\bfold change\b|\bup-?regulated\b|\bdown-?regulated\b|\bdirection\b",
+            _FOLD_CHANGE,
+            r"\bup-?regulated\b|\bdown-?regulated\b|\bdirection\b",
         ),
         _BENCH_MATERIALS,
     ),
@@ -254,7 +264,9 @@ _SELECTORS: dict[str, Selector] = {
         (*_ALWAYS_NEEDS, "code"),
         _re(
             r"\bcode\b|\bscript\w*|\bnotebook\b|\bparameter\w*|\bsetting\w*|\bthreshold\w*|\bcut-?off\b",
-            r"\bversion \d|\bconfig\w*|\blog2 fold\b|\bFDR\b|\bpadj\b|\balign\w*|\bfilter\w*|\bnormali[sz]\w*",
+            r"\bversion \d|\bconfig\w*|\balign\w*|\bfilter\w*|\bnormali[sz]\w*|\benrichment\b",
+            _FOLD_CHANGE,
+            _ADJUSTED_P,
         ),
     ),
     "C5": Selector(
