@@ -87,6 +87,12 @@ def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
 
     evidence, plan = evidence or {}, plan or {}
     rows: list[dict] = []
+    # plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words.
+    # E2.B was verified from a list of comparators because nothing else about the design was ever
+    # put in front of it.
+    from app.services.validation_design_summary import design_facts
+
+    rows += design_facts(_index_of(evidence))
     held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else {}
     for deposit in (held or {}).get("deposits") or []:
         for sample in (deposit.get("samples") or [])[:MAX_RECORDS]:

@@ -346,7 +346,10 @@ CRITERION_EVIDENCE: dict[str, dict] = {
         ],
         "excludes": [
             "the mere presence of a comparator or control condition, which does not establish that "
-            "the design supports the claim"
+            "the design supports the claim. For the B obligation, name the replication, the units "
+            "compared, the group sizes and the selection that the claim rests on, and say what "
+            "inference the design supports and what it does not. A small study or a selected clone "
+            "is not automatically invalid; an unstated design fact leaves the obligation untested"
         ],
     },
     "E3": {

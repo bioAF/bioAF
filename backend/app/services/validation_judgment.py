@@ -84,6 +84,24 @@ _POSITIVE_FINDING = re.compile(
 )
 
 
+# plan_8_6 section 7: an obligation whose POSITIVE answer has to rest on a particular kind of
+# evidence, and the words that say why when it does not.
+#
+# Study 65 returned verified for E2.B on rationales that named comparators and asserted their
+# appropriateness. E2.A asks whether the controls and design choices are DESCRIBED; E2.B adds the
+# reasoned evaluation of their adequacy, and that cannot be made from a list of comparators. The
+# rule is structural, not another keyword list: a `met` answer has to cite a design fact bioAF read
+# out of the paper, and where there are none the obligation is untested.
+REQUIRES_CARRIED = {
+    "E2.B": (
+        "design",
+        "E2.B is a reasoned evaluation of whether the design supports the comparison claimed, and "
+        "this answer cites no design fact: the presence of a comparator does not establish the "
+        "replication, the units compared, the group sizes or the selection the claim rests on",
+    )
+}
+
+
 class JudgmentRefused(ValueError):
     """The request cannot be made; the words say why."""
 
@@ -294,6 +312,22 @@ def judgment_from(
             conflict={"outcome": outcome, "rationale": rationale},
             coverage=coverage,
         )
+    required = REQUIRES_CARRIED.get(leaf)
+    if outcome == MET and required is not None:
+        carried = {
+            str(p.get("id"))
+            for p in passages or []
+            if isinstance(p, dict) and str(p.get("carries") or "") == required[0]
+        }
+        if not (carried & set(citations)):
+            return _open(
+                required[1],
+                next_action="cite the design facts this evaluation rests on, or record that bioAF read none",
+                assessor=assessor,
+                confidence=answer.get("confidence"),
+                withheld={"outcome": outcome, "rationale": rationale},
+                coverage=coverage,
+            )
     if outcome == UNMET and needs_coverage(rationale):
         # plan_8_6 section 8: an absence is a claim about what was looked at. A source bioAF never
         # retrieved cannot establish that the authors omitted anything.
