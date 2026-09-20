@@ -161,21 +161,40 @@ async def _no_fetch(url):
     raise AssertionError(f"the queued check tried to download {url}")
 
 
-class TestGroffsCodeIsNamedAsUnreadableRatherThanUnchecked:
-    """plan_8_4 milestone B on the paper it actually matters for: Groff's analysis is a word-processed
-    document. bioAF cannot recover the file boundaries of the scripts inside it, so the code section
-    stays grey and says why, rather than reading as a check that found nothing wrong."""
+class TestGroffsCodeIsReadFromTheDocumentItWasSuppliedIn:
+    """plan_8_5 section 3.5 on the paper it matters for. Groff's analysis is R Markdown inside a Word
+    file. It used to be recorded as unreadable, which left all twenty code points grey for a paper
+    that supplied every line of its analysis. Now it is extracted, parsed by bioAF's R parser, and
+    assessed: what it establishes scores, what it demonstrates scores negative, and the obligations
+    that need a run stay behind the approval that path requires."""
 
     @pytest.mark.asyncio
-    async def test_the_code_section_says_no_source_is_in_hand(self, session, admin_user, monkeypatch):
+    async def test_the_code_section_scores_from_the_r_the_paper_supplied(self, session, admin_user, monkeypatch):
         restored = await _restored(session, admin_user, 55)
         await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
         report = await replay_report(session, restored)
         code = next(s for s in report["evidence_score"]["sections"] if s["section"] == "C")
-        assert code["verified"] == 0
-        assert code["failed"] == 0
-        assert code["undetermined"] == 20
+        assert code["verified"] > 0, "the supplied R parses, declares its packages and runs the analysis"
+        assert code["failed"] > 0, "it also reads its inputs from one machine, which is a named defect"
+        assert code["undetermined"] > 0, "loading and resolving it need an approved isolated run"
+        assert code["verified"] + code["failed"] + code["undetermined"] == 20
         assert code["outstanding"]
+
+    @pytest.mark.asyncio
+    async def test_the_defect_it_names_is_one_found_in_the_source(self, session, admin_user, monkeypatch):
+        restored = await _restored(session, admin_user, 55)
+        await replay_recovery(session, restored, fetcher=groff_bundle_fetcher(), monkeypatch=monkeypatch)
+        report = await replay_report(session, restored)
+        rows = {
+            row["leaf"]: row
+            for section in report["evidence_score"]["sections"]
+            for criterion in section["criteria"]
+            for row in criterion["obligations"]
+        }
+        assert rows["C1.A"]["outcome"] == "verified"
+        assert rows["C4.B"]["outcome"] == "failed"
+        assert rows["C4.B"]["impact"]
+        assert rows["C1.B"]["outcome"] == "undetermined"
 
     @pytest.mark.asyncio
     async def test_a_docx_of_code_is_recorded_as_unreadable_with_the_reason(self, session, admin_user):

@@ -517,8 +517,12 @@ def _balanced(source: str) -> bool:
     """Whether the delimiters and literals of this source close, judged on tokens alone."""
     try:
         tokens = tokenize(source)
-    except (_Refused, _Unreadable):
+    except _Refused:
+        # A literal that never closes IS the source's own defect, whatever else is in the file.
         return False
+    except _Unreadable:
+        # A token bioAF does not know says nothing about whether the brackets close.
+        return True
     stack: list[str] = []
     for token in tokens:
         if token.kind == "open":
