@@ -290,6 +290,12 @@ async def request_environment_check(session, study, *, user_id: int) -> dict:
     from app.services.notebook_execution_service import NotebookExecutionService
     from app.services.untrusted_execution import UNCONFIGURED_MESSAGE, untrusted_identity
 
+    # Found by using it: asking again while a pod was still running launched a second one. The
+    # control a person has is the same one that completes the loop, so a pending check is polled.
+    held = ((study.evidence_json or {}).get("code_inspection") or {}).get("environment_check") or {}
+    if held.get("status") == "running":
+        return await settle_environment_check(session, study)
+
     sources, manifests = _sources_of(study)
     request = environment_check_request(sources=sources, manifests=manifests)
     identity = await untrusted_identity(session)
