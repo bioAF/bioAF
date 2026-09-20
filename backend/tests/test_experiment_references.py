@@ -100,6 +100,16 @@ def test_a_stated_assembly_that_contradicts_its_annotation_is_unresolved_with_bo
     assert ref["assembly"]["status"] == UNRESOLVED
     assert "aligned to GRCh38" in ref["assembly"]["reason"]
     assert "annotated with GENCODE v19" in ref["assembly"]["reason"]
+    # plan_8_5 section 3.3: an assessment must tell the paper's two statements disagreeing from
+    # bioAF recognising neither of them, and the reason sentence is prose. This says which it is.
+    assert ref["assembly"]["conflict"] is True
+    assert ref["annotation"]["conflict"] is True
+
+
+def test_a_reference_naming_nothing_recognisable_is_unresolved_without_a_conflict():
+    ref = _ref(assembly="our in-house build")
+    assert ref["assembly"]["status"] == UNRESOLVED
+    assert ref["assembly"].get("conflict") is None
 
 
 def test_the_pinned_release_is_usable():

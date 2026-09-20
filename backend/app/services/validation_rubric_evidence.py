@@ -116,7 +116,7 @@ def assess_evidence(
     assessed.update(_accounting(experiments, plan))
     assessed.update(_units(evidence))
     assessed.update(_references(experiments))
-    assessed.update(_decision_criteria(claims or [], contrasts))
+    assessed.update(_decision_criteria(claims or [], contrasts, plan.get("differential_design")))
     assessed.update(_author_results(claims or [], inventory))
     assessed.update(_code(evidence))
     for leaf_id, limit in CAPABILITY_LIMITS.items():
@@ -292,6 +292,14 @@ def _units(evidence: dict) -> dict:
 
 
 def _references(experiments: list[dict]) -> dict:
+    """M2: the result-sensitive references a paper's numbers depend on, and whether they can be recovered.
+
+    plan_8_5 section 3.3. B asks whether the paper specified its reference versions and identifiers
+    well enough to recover the inputs it used. That is a question about the PAPER. A release bioAF
+    cannot supply is still a release the paper named, and bioAF choosing a pinned default in its
+    place is a fact about this run, not a defect in the reporting. What fails B is the paper's own
+    statements naming two different references; what leaves it open is bioAF never reading one.
+    """
     references = [(e.get("id"), (e.get("reference") or {})) for e in experiments]
     relevant = [(eid, r) for eid, r in references if r]
     if not relevant:
@@ -302,6 +310,7 @@ def _references(experiments: list[dict]) -> dict:
                 next_action="read the paper's methods again",
             )
         }
+    scope = f"{len(relevant)} reported {'experiment' if len(relevant) == 1 else 'experiments'}"
     stated = [
         (eid, r)
         for eid, r in relevant
@@ -320,75 +329,189 @@ def _references(experiments: list[dict]) -> dict:
         identified = _finding(
             VERIFIED,
             f"the paper names the reference its results depend on ({words})",
-            scope=f"{len(relevant)} reported {'experiment' if len(relevant) == 1 else 'experiments'}",
+            scope=scope,
         )
     else:
         identified = _open(
             "the paper names no reference for the relevant experiments",
-            scope=f"{len(relevant)} reported experiments",
+            scope=scope,
             next_action="read the paper's methods again",
         )
-    assumed = [
-        eid
-        for eid, r in relevant
-        for part in ("assembly", "annotation")
-        if (r.get(part) or {}).get("assumption") or not str((r.get(part) or {}).get("stated") or "").strip()
-    ]
-    if identified["outcome"] == VERIFIED and not assumed:
-        versions = _finding(
-            VERIFIED,
-            "the paper states both the assembly and the annotation release its results depend on",
-            scope=f"{len(relevant)} reported experiments",
-        )
-    else:
-        versions = _open(
-            "the paper does not state every result-sensitive reference release; bioAF supplied one of its own",
-            scope=f"{len(relevant)} reported experiments",
-            next_action="record the annotation release the authors used, with the evidence for it",
-        )
-    return {"M2.A": identified, "M2.B": versions}
+    return {"M2.A": identified, "M2.B": _reference_recoverability(relevant, scope)}
 
 
-def _decision_criteria(claims: list[dict], contrasts: list[dict]) -> dict:
-    """M4: the thresholds a paper's results rest on, and whether their reading is unambiguous."""
-    with_cutoffs = [c for c in contrasts if (c.get("cutoffs") or c.get("thresholds"))]
-    if contrasts and len(with_cutoffs) == len(contrasts):
-        specified = _finding(
-            VERIFIED,
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            scope=f"{len(contrasts)} {'contrast' if len(contrasts) == 1 else 'contrasts'}",
+# What each recorded status says about the PAPER's statement, as `validation_reference` sets them.
+_USABLE, _UNAVAILABLE, _UNRESOLVED, _NOT_READ, _UNSTATED = (
+    "usable",
+    "unavailable",
+    "unresolved",
+    "not_read",
+    "unstated",
+)
+_REFERENCE_PARTS = ("assembly", "annotation")
+
+
+def _reference_recoverability(relevant: list[tuple], scope: str) -> dict:
+    """M2.B: whether every result-sensitive reference the paper states resolves to one identifier."""
+    conflicts: list[str] = []
+    open_parts: list[str] = []
+    recovered: list[str] = []
+    for _eid, reference in relevant:
+        for name in _REFERENCE_PARTS:
+            part = reference.get(name) or {}
+            status = str(part.get("status") or "").strip().lower()
+            statement = str(part.get("stated") or "").strip()
+            if part.get("conflict"):
+                conflicts.append(str(part.get("reason") or f"the paper's {name} statements disagree"))
+            elif status in (_USABLE, _UNAVAILABLE) and statement:
+                # UNAVAILABLE means bioAF cannot SUPPLY what the paper named. The paper named it.
+                recovered.append(statement)
+            elif status == _NOT_READ:
+                open_parts.append(f"the paper's {name} was not read")
+            elif statement and status == _UNRESOLVED:
+                open_parts.append(f"the paper's {name} ('{statement}') names nothing bioAF recognises")
+            else:
+                open_parts.append(f"bioAF's read recorded no {name} release for this experiment")
+    if conflicts:
+        return _finding(
+            FAILED,
+            "; ".join(sorted(set(conflicts))),
+            scope=scope,
+            impact=(
+                "the reference the paper's results depend on cannot be recovered, because the paper's own "
+                "statements name two different ones"
+            ),
         )
-    else:
-        specified = _open(
-            "not every comparison the paper's claims rest on states a threshold",
-            scope=f"{len(contrasts)} contrasts",
+    if open_parts:
+        return _open(
+            "; ".join(sorted(set(open_parts))),
+            scope=scope,
+            next_action="record the reference release the authors used, with the evidence for it",
+        )
+    return _finding(
+        VERIFIED,
+        "the paper states a recoverable release for every result-sensitive reference ("
+        + ", ".join(sorted(set(recovered)))
+        + ")",
+        scope=scope,
+    )
+
+
+def _decision_criteria(claims: list[dict], contrasts: list[dict], design: dict | None) -> dict:
+    """M4: the decision criteria a paper's results rest on, and whether their reading is unambiguous.
+
+    plan_8_5 section 3.3. Both obligations are read from the normalized scientific predicate, never
+    from the shape of an extraction field:
+
+    - **A** asks whether the definitions THIS analysis applies are stated. ``analysis_cutoffs`` is
+      the same normalization an analysis would use: raw versus adjusted significance with its
+      correction, the effect threshold on the log2 scale, and a refusal naming what is missing. The
+      extraction's ``thresholds`` pair exists on every contrast and holds ``None`` where the paper
+      stated nothing, so its presence establishes nothing; an analysis that applies no fold-change
+      requirement is not missing one; and a legitimate zero is a stated threshold.
+    - **B** asks for the reading: direction, scale, contrast orientation and interpretation. It is
+      established from the predicate bioAF built for each claim. A claim carrying no predicate
+      establishes nothing, and its absence is never proof that nothing is ambiguous.
+    """
+    return {
+        "M4.A": _criteria_stated(contrasts, design),
+        "M4.B": _criteria_reading(claims, contrasts),
+    }
+
+
+def _contrast_name(contrast: dict, index: int) -> str:
+    return str(contrast.get("name") or "").strip() or f"comparison {index + 1}"
+
+
+def _criteria_stated(contrasts: list[dict], design: dict | None) -> dict:
+    from app.services.validation_claim_cutoffs import analysis_cutoffs
+
+    scope = f"{len(contrasts)} {'contrast' if len(contrasts) == 1 else 'contrasts'}"
+    if not contrasts:
+        return _open(
+            "bioAF's read recorded no comparison whose decision criteria could be checked",
+            scope="no contrast",
+            next_action="read the paper's design again",
+        )
+    applied: list[str] = []
+    refused: list[str] = []
+    for index, contrast in enumerate(contrasts):
+        cutoffs = analysis_cutoffs(contrast, design or {})
+        if cutoffs.get("refusal"):
+            refused.append(f"{_contrast_name(contrast, index)}: {cutoffs['refusal']}")
+        elif cutoffs.get("statement"):
+            applied.append(f"{_contrast_name(contrast, index)}: {cutoffs['statement']}")
+    if refused:
+        return _open(
+            "; ".join(refused),
+            scope=scope,
             next_action="record the cutoff from the paper's methods, with its quote",
         )
-    ambiguous = [
-        c
-        for c in claims
-        if ((c.get("consistency") or {}).get("filter_semantics") or {}).get("unresolved")
-        or (c.get("predicate_status") == "not_checkable")
-    ]
-    if specified["outcome"] == VERIFIED and claims and not ambiguous:
-        unambiguous = _finding(
-            VERIFIED,
-            "every threshold's direction, scale and orientation reads one way",
-            scope=f"{len(claims)} claims",
+    return _finding(
+        VERIFIED,
+        "every comparison the paper's claims rest on states the criteria it applies (" + "; ".join(applied) + ")",
+        scope=scope,
+    )
+
+
+_ORIENTATIONS = {"test_over_reference": "the test arm over the reference arm"}
+
+
+def _reading_words(detail: dict) -> str:
+    """One claim's established reading, in the words the predicate itself carries."""
+    from app.services.validation_claim_cutoffs import describe_cutoff
+
+    parts = []
+    significance = detail.get("significance") or {}
+    if significance.get("kind"):
+        adjustment = significance.get("adjustment")
+        parts.append(describe_cutoff(significance) + (f" ({adjustment})" if adjustment else ""))
+    effect = detail.get("effect") or {}
+    if effect.get("kind") == "none":
+        parts.append("no fold-change requirement")
+    elif effect.get("kind"):
+        parts.append(describe_cutoff(effect))
+    direction = str(detail.get("direction") or "either").strip()
+    parts.append("either direction" if direction == "either" else direction)
+    orientation = _ORIENTATIONS.get(str(detail.get("orientation") or ""))
+    if orientation:
+        parts.append(orientation)
+    return ", ".join(parts)
+
+
+def _criteria_reading(claims: list[dict], contrasts: list[dict]) -> dict:
+    scope = f"{len(claims)} {'claim' if len(claims) == 1 else 'claims'}"
+    readings: list[str] = []
+    open_reasons: list[str] = []
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        detail = claim.get("predicate_detail")
+        if ((claim.get("consistency") or {}).get("filter_semantics") or {}).get("unresolved"):
+            open_reasons.append("the signed or absolute reading of a claim's filter is unresolved")
+        if not isinstance(detail, dict):
+            continue
+        if str(detail.get("status") or "").strip().lower() == "resolved":
+            readings.append(_reading_words(detail))
+        else:
+            open_reasons.append(str(detail.get("reason") or "a claim's reading could not be established"))
+    if not readings and not open_reasons:
+        return _open(
+            "bioAF built no reading of the paper's decision criteria to check",
+            scope=scope,
+            next_action="read the paper's claims again, or record which reading the paper meant",
         )
-    elif ambiguous:
-        unambiguous = _open(
-            f"{len(ambiguous)} of the paper's claims leave their threshold's reading open",
-            scope=f"{len(claims)} claims",
+    if open_reasons:
+        return _open(
+            "; ".join(sorted(set(open_reasons))),
+            scope=scope,
             next_action="record which reading the paper meant, with the evidence for it",
         )
-    else:
-        unambiguous = _open(
-            "bioAF established no reading of the paper's thresholds to check",
-            scope=f"{len(claims)} claims",
-            next_action="read the paper's claims again",
-        )
-    return {"M4.A": specified, "M4.B": unambiguous}
+    return _finding(
+        VERIFIED,
+        "every claim's reading is established: " + "; ".join(sorted(set(readings))),
+        scope=scope,
+    )
 
 
 def _author_results(claims: list[dict], inventory: dict | None) -> dict:
