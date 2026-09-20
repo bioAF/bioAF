@@ -42,11 +42,17 @@ TRANSIENT = (UNREACHABLE,)
 
 
 def retrievable_again(record: dict | None) -> bool:
-    """Whether a held set of sample records has a failure that asking again could still settle."""
+    """Whether a held set of sample records has a failure that asking again could still settle.
+
+    A limitation recorded before this build says no kind at all, and a record that cannot say which
+    failure it was is not a record to keep: study 64's GSE144396 would have stayed unreachable
+    forever behind one.
+    """
     if not isinstance(record, dict):
         return True
     return any(
-        isinstance(limit, dict) and limit.get("kind") in TRANSIENT for limit in record.get("limitations") or []
+        isinstance(limit, dict) and (limit.get("kind") is None or limit.get("kind") in TRANSIENT)
+        for limit in record.get("limitations") or []
     )
 
 
