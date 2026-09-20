@@ -558,7 +558,12 @@ class KubernetesNotebookProvider(NotebookProvider):
         session_id = session_spec.get("session_id", 0)
         session_type = session_spec.get("session_type", "jupyter")
         user_id = session_spec.get("user_id", 0)
-        namespace = DEFAULT_NOTEBOOK_NAMESPACE
+        # plan_7 step 16a: the SAME namespace `_k8s_launch_session` sends the create request to.
+        # Hardcoding the default here put `bioaf-notebooks` in metadata while the request went to
+        # `bioaf-untrusted`, and Kubernetes refuses that pair outright: "the namespace of the
+        # provided object does not match the namespace sent on the request". Every untrusted run
+        # failed at creation, so the arm that runs a paper's own code could never start.
+        namespace = namespace_for(session_spec)
 
         pod_name = f"bioaf-notebook-{session_id}"
         working_bucket = session_spec.get("working_bucket", "bioaf-working")
