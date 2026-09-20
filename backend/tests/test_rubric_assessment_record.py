@@ -123,3 +123,44 @@ class TestReuseAndInvalidation:
             plan=_PLAN, evidence={"retrieval_ledger": [{"at": "later"}]}, claims=[], inventory=None
         )
         assert reusable(record, noise)
+
+
+class TestTheJudgmentsAreInputsToo:
+    """plan_8_5 section 3.6, caught live on study 62: seventeen judgments were made and accepted,
+    and the score did not move. Reuse is keyed on what the checks read, and the judgments were not
+    in that key, so the assessment was reused and the answers never reached an obligation."""
+
+    _JUDGED = {
+        "rubric_judgments": {
+            "judgments": {
+                "E1.A": {
+                    "outcome": "verified",
+                    "rationale": "the methods state the procedure",
+                    "scope": "23 supplied passages",
+                    "method": "model_assisted",
+                    "evidence": {"citations": ["c2"]},
+                }
+            }
+        }
+    }
+
+    def test_a_new_judgment_changes_the_inputs(self):
+        before = assessment_inputs(plan=_PLAN, evidence={}, claims=[], inventory=None)
+        after = assessment_inputs(plan=_PLAN, evidence=self._JUDGED, claims=[], inventory=None)
+        assert before != after
+
+    def test_a_held_assessment_is_not_reused_once_a_judgment_arrives(self):
+        record = _built()
+        assert not reusable(record, assessment_inputs(plan=_PLAN, evidence=self._JUDGED, claims=[], inventory=None))
+
+    def test_the_judged_obligation_then_earns_its_points(self):
+        before = _built()
+        after = _built(evidence=self._JUDGED)
+        assert before["outcomes"]["E1.A"]["outcome"] == "undetermined"
+        assert after["outcomes"]["E1.A"]["outcome"] == "verified"
+
+    def test_a_recorded_paper_statement_is_an_input_as_well(self):
+        stated = {"paper_statements": {"sample_material": {"value": "HepG2 cells", "quote": "from HepG2 cells"}}}
+        assert assessment_inputs(plan=_PLAN, evidence=stated, claims=[], inventory=None) != assessment_inputs(
+            plan=_PLAN, evidence={}, claims=[], inventory=None
+        )
