@@ -547,7 +547,12 @@ class TestTheBundleFailureModes:
         monkeypatch.setattr(supplement_inventory, "_MAX_BUNDLE_BYTES", 1024)
         study = await _run(session, admin_user, "deposit", "driver")
         summary = await _summary(session, admin_user, study)
-        assert study.evidence_json["retrieval_ledger"][-1]["outcome"] == "too_large"
+        ledger = study.evidence_json["retrieval_ledger"]
+        assert any(e["outcome"] == "too_large" for e in ledger)
+        # plan_8_6 section 5: an oversized bundle is now followed by an attempt at its members, and
+        # this article's page lists none, so the ledger says the members could not be listed. That is
+        # a further account of the same failure, never an established absence.
+        assert ledger[-1]["outcome"] == "members_unresolved"
         assert study.evidence_json["completion"]["processed_results_available"] == "not_established"
         assert len(summary["retrieval_failures"]) == 1
         assert summary["headline"]["key"] == "reproduction_not_attempted"

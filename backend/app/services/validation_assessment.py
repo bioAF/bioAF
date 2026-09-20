@@ -31,15 +31,33 @@ from app.services.validation_issue_service import ValidationIssueService
 logger = logging.getLogger("bioaf.validation_assessment")
 
 
-async def deposit_bytes_fetcher(url: str) -> bytes:
+async def deposit_bytes_fetcher(url: str, max_bytes: int | None = None) -> bytes:
     """Default byte fetcher for a deposited file. Bytes, not text: the format is decided from magic
-    bytes and a text decode would destroy a spreadsheet before it could be recognised."""
+    bytes and a text decode would destroy a spreadsheet before it could be recognised.
+
+    plan_8_6 section 5: with ``max_bytes`` the response is STREAMED and stopped once it passes the
+    cap, rather than downloaded in full and then refused. Study 65's supplementary bundle is 243 MiB
+    against a 200 MiB limit, and every byte of it was transferred before being thrown away.
+    """
     import httpx
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(120.0), follow_redirects=True) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        return r.content
+        if max_bytes is None:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.content
+        chunks: list[bytes] = []
+        spent = 0
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            async for chunk in response.aiter_bytes():
+                chunks.append(chunk)
+                spent += len(chunk)
+                if spent > max_bytes:
+                    # One byte past the cap is enough for the caller to record `too_large`, and the
+                    # connection is closed rather than draining the rest of a file we will refuse.
+                    break
+        return b"".join(chunks)
 
 
 def propagate_retrieval(capabilities: dict, supplements: list[dict]) -> dict:
@@ -255,6 +273,21 @@ def _as_log2_cutoff(kind, value) -> float | None:
     return None
 
 
+def _article_urls(study, pmcid: str) -> list[str]:
+    """Where this article's own pages are, so its attachments can be located one at a time.
+
+    plan_8_6 section 5. The DOI resolves to the publisher's page, which links the files it hosts;
+    Europe PMC's article page is the fallback for a study bioAF has no DOI for.
+    """
+    found: list[str] = []
+    doi = str(getattr(study, "source_doi", "") or "").strip()
+    if doi:
+        found.append(f"https://doi.org/{doi.removeprefix('https://doi.org/')}")
+    if pmcid:
+        found.append(f"https://europepmc.org/articles/{pmcid}")
+    return found
+
+
 async def resolve_study_supplements(session: AsyncSession, study, evidence: dict) -> list[dict]:
     """Download the paper's attachments and establish what each one is. Never raises.
 
@@ -286,6 +319,10 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
             pmcid,
             references,
             fetcher=deposit_bytes_fetcher,
+            # plan_8_6 section 5: where the publisher's own copies of the attachments can be looked
+            # up when the combined bundle is over bioAF's cap. The article record, not a URL pattern
+            # hard-coded per journal.
+            article_urls=_article_urls(study, pmcid),
             thresholds=await claimed_thresholds(session, study),
             ledger=ledger,
             predicates=await claimed_predicates(session, study),
