@@ -51,7 +51,12 @@ def test_methods_and_captions_are_addressable():
 
 
 def test_unparseable_markup_has_no_sections():
-    assert _jats_sections("<not xml") == {"methods": [], "captions": {}}
+    # plan_8_6 section 3 added `index`, the whole document by section. The promise this test makes is
+    # that unparseable markup yields nothing, which is asserted per key rather than by the dict shape.
+    found = _jats_sections("<not xml")
+    assert found["methods"] == []
+    assert found["captions"] == {}
+    assert found["index"] == []
 
 
 # ---- the context each claim is bound with ----
