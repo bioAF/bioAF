@@ -118,12 +118,29 @@ class TestRequestingOne:
 
 class TestSettlingOne:
     def _session(self, status, transcript, exit_code=0):
-        held = SimpleNamespace(id=77, status=status, output_log=transcript, failure_message=None, exit_code=exit_code)
+        """A compute session as the model really is: no transcript on it, and no exit code.
+
+        Caught by running this live. The pod writes its log to `/outputs/transcript.txt` and it is
+        registered as an output file, so the transcript is read through the same output reader the
+        code arm uses. A stub that invented `output_log` hid that for an entire build.
+        """
+        held = SimpleNamespace(id=77, status=status, failure_message=None)
+        self._transcript = transcript
 
         async def _get(session_, session_id):
             return held
 
         return _get
+
+    @pytest.fixture(autouse=True)
+    def _outputs(self, monkeypatch):
+        async def _read(session, cs):
+            return [{"path": "/outputs/transcript.txt", "text": getattr(self, "_transcript", "")}]
+
+        monkeypatch.setattr(
+            "app.services.validation_driver_service.ValidationDriverService._read_code_outputs",
+            staticmethod(_read),
+        )
 
     @pytest.mark.asyncio
     async def test_a_clean_run_verifies_both_obligations_on_the_score(self, session, admin_user, monkeypatch):
