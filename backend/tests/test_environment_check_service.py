@@ -46,8 +46,8 @@ class _Storage:
     def build_uri(self, bucket, path):
         return f"gs://{bucket}/{path}"
 
-    async def write_text(self, uri, text, content_type=None):
-        self.written[uri] = text
+    async def write_bytes(self, uri, data, content_type=None):
+        self.written[uri] = data
 
 
 def _patch(monkeypatch, *, identity=_Identity(), storage=None, submitted=None):
@@ -83,7 +83,7 @@ class TestRequestingOne:
         record = await request_environment_check(session, study, user_id=admin_user.id)
         assert record["session_id"] == 77
         assert submitted["entry_point"] == "bioaf_environment_check.R"
-        assert any("analysis.R" in uri for uri in storage.written)
+        assert any(uri.endswith("environment-check.tar.gz") for uri in storage.written)
         assert record["status"] == "running"
 
     @pytest.mark.asyncio

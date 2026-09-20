@@ -45,40 +45,68 @@ class TestTheScriptThatRuns:
         assert "os" in script
 
 
+class _Storage:
+    def __init__(self):
+        self.written = {}
+
+    def build_uri(self, bucket, path):
+        return f"gs://{bucket}/{path}"
+
+    async def write_text(self, uri, text, content_type=None):
+        raise AssertionError("the runner fetches ONE object; text files staged beside it are never read")
+
+    async def write_bytes(self, uri, data, content_type=None):
+        self.written[uri] = data
+
+
+def _members(data: bytes) -> dict:
+    import io
+    import tarfile
+
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+        return {m.name: archive.extractfile(m).read().decode() for m in archive.getmembers()}
+
+
 class TestWhatIsStaged:
+    """The runner copies ``code_uri`` to one local file and unpacks it, so what is staged is one
+    archive. Staging a directory prefix made a live run fetch nothing and exit clean."""
+
     @pytest.mark.asyncio
-    async def test_it_stages_the_sources_the_manifests_and_the_check(self, session, admin_user):
-        written = {}
-
-        class _Storage:
-            def build_uri(self, bucket, path):
-                return f"gs://{bucket}/{path}"
-
-            async def write_text(self, uri, text, content_type=None):
-                written[uri] = text
-
+    async def test_it_stages_one_archive_holding_the_sources_the_manifests_and_the_check(
+        self, session, admin_user
+    ):
+        storage = _Storage()
         staged = await stage_environment_check(
             sources=[_PY],
             manifests=[{"path": "requirements.txt", "text": "numpy==1.26.4\n"}],
-            storage=_Storage(),
+            storage=storage,
             bucket="untrusted-bucket",
             prefix="study-9",
         )
-        assert staged["entry_point"].endswith(".py")
-        assert any(uri.endswith("analysis.py") for uri in written)
-        assert any(uri.endswith("requirements.txt") for uri in written)
-        assert any(uri.endswith(staged["entry_point"]) for uri in written)
-        assert staged["code_uri"].startswith("gs://untrusted-bucket/study-9/")
+        assert staged["code_uri"] == "gs://untrusted-bucket/study-9/environment-check.tar.gz"
+        assert list(storage.written) == [staged["code_uri"]]
+        members = _members(storage.written[staged["code_uri"]])
+        assert set(members) == {"analysis.py", "requirements.txt", staged["entry_point"]}
+        assert "numpy" in members["requirements.txt"]
+
+    @pytest.mark.asyncio
+    async def test_a_source_extracted_from_a_document_gets_a_name_that_can_be_run(
+        self, session, admin_user
+    ):
+        storage = _Storage()
+        staged = await stage_environment_check(
+            sources=[{**_R, "path": "supp_file_2.docx > Figure1_Embryo"}, {**_R, "path": "supp_file_2.docx > R Notebook"}],
+            manifests=[],
+            storage=storage,
+            bucket="b",
+            prefix="p",
+        )
+        members = _members(storage.written[staged["code_uri"]])
+        assert all(" " not in name and ">" not in name for name in members), members
+        assert len(members) == 3, "two documents and the check, none overwriting another"
 
     @pytest.mark.asyncio
     async def test_nothing_is_staged_for_a_language_with_no_runtime(self, session, admin_user):
-        class _Storage:
-            def build_uri(self, bucket, path):
-                return f"gs://{bucket}/{path}"
-
-            async def write_text(self, uri, text, content_type=None):
-                raise AssertionError("nothing should be staged")
-
         with pytest.raises(EnvironmentCheckRefused):
             await stage_environment_check(
                 sources=[{**_PY, "language": "julia"}],
