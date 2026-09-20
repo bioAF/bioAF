@@ -270,7 +270,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -278,7 +278,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -873,12 +873,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -889,11 +889,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -1850,7 +1850,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -1858,7 +1858,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -2453,12 +2453,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -2469,11 +2469,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -3314,7 +3314,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -3322,7 +3322,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -3917,12 +3917,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -3933,11 +3933,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -4723,6 +4723,7 @@
         },
         "population": "whole embryo and TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4753,6 +4754,7 @@
         },
         "population": "all RNA-seq libraries",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4783,6 +4785,7 @@
         },
         "population": "whole embryo",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4813,6 +4816,7 @@
         },
         "population": "TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4843,6 +4847,7 @@
         },
         "population": "whole embryo XX vs XY",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4873,6 +4878,7 @@
         },
         "population": "whole embryo aneuploid vs euploid",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4903,6 +4909,7 @@
         },
         "population": "whole embryo AA vs CC morphology",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -4933,6 +4940,7 @@
         },
         "population": "whole embryo high vs low morphokinetic quality",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -5041,7 +5049,7 @@
       }
     ],
     "evidence_score": {
-      "assessed_points": 5.5,
+      "assessed_points": 3.5,
       "capability_limits": [
         {
           "criterion": "C1",
@@ -5185,21 +5193,21 @@
         }
       ],
       "concerns": [],
-      "counts_label": "5.5 positive points \u00b7 94.5 untested points \u00b7 0 negative points",
+      "counts_label": "3.5 positive points \u00b7 96.5 untested points \u00b7 0 negative points",
       "display": {
         "failed": "0",
         "total": "100",
-        "undetermined": "94.5",
-        "verified": "5.5"
+        "undetermined": "96.5",
+        "verified": "3.5"
       },
       "exact": {
         "failed": "0",
-        "undetermined": "189/2",
-        "verified": "11/2"
+        "undetermined": "193/2",
+        "verified": "7/2"
       },
-      "explanation": "5.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
+      "explanation": "3.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
-      "headline": "5.5 / 100",
+      "headline": "3.5 / 100",
       "next_checks": [
         {
           "action": "retrieve the paper's supplied code",
@@ -5274,6 +5282,14 @@
           "section": "M"
         },
         {
+          "action": "read the paper's claims again, or record which reading the paper meant",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
           "action": "read the paper's samples section again, or record the organism at the gate",
           "criterion": "S1",
           "leaf": "S1.A",
@@ -5318,12 +5334,12 @@
         {
           "key": "verified",
           "label": "positive",
-          "points": "5.5"
+          "points": "3.5"
         },
         {
           "key": "untested",
           "label": "untested",
-          "points": "94.5"
+          "points": "96.5"
         },
         {
           "key": "negative",
@@ -5345,11 +5361,11 @@
       "rubric_label": "Evidence rubric v3",
       "rubric_version": 3,
       "scope": {
-        "assessed": 3,
-        "label": "Rubric checks assessed: 3 / 39",
+        "assessed": 2,
+        "label": "Rubric checks assessed: 2 / 39",
         "total": 39
       },
-      "score": 5.5,
+      "score": 3.5,
       "score_note": null,
       "sections": [
         {
@@ -5857,7 +5873,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid WE (RNA karyotype): adjusted P <= 0.05, no fold-change requirement; XX vs XY WE (sex chromosome): adjusted P <= 0.05, |log2FC| >= 2; good vs poor morphology (Gardner AA vs CC) WE: adjusted P <= 0.05, no fold-change requirement; high vs low morphokinetic quality WE: adjusted P <= 0.05, no fold-change requirement)",
                   "scope": "4 contrasts",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -5865,15 +5881,15 @@
                 {
                   "capability_limit": false,
                   "impact": null,
-                  "label": "positive",
+                  "label": "untested",
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
-                  "outcome": "verified",
+                  "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "8 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -5881,8 +5897,8 @@
               ],
               "points": 4.0,
               "title": "Decision criteria",
-              "undetermined": 0.0,
-              "verified": 4.0
+              "undetermined": 2.0,
+              "verified": 2.0
             },
             {
               "criterion": "M5",
@@ -5928,17 +5944,16 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid WE (RNA karyotype): adjusted P <= 0.05, no fold-change requirement; XX vs XY WE (sex chromosome): adjusted P <= 0.05, |log2FC| >= 2; good vs poor morphology (Gardner AA vs CC) WE: adjusted P <= 0.05, no fold-change requirement; high vs low morphokinetic quality WE: adjusted P <= 0.05, no fold-change requirement)"
           ],
           "failed": 0.0,
           "maximum": 20.0,
           "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M",
           "title": "Computational methods",
-          "undetermined": 16.0,
+          "undetermined": 18.0,
           "unsupported_count": 6,
-          "verified": 4.0
+          "verified": 2.0
         },
         {
           "criteria": [
@@ -6258,7 +6273,7 @@
         }
       ],
       "status": "assessed",
-      "undetermined": 94.5
+      "undetermined": 96.5
     },
     "experiments": [],
     "facts": {
@@ -6784,7 +6799,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -6792,7 +6807,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -7387,12 +7402,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -7403,11 +7418,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -8192,7 +8207,7 @@
       "headline": "0 / 100",
       "next_checks": [
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -8200,7 +8215,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -8824,12 +8839,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.5,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -8840,11 +8855,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.5,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -9730,7 +9745,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -9738,7 +9753,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -10333,12 +10348,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -10349,11 +10364,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "0 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -11005,6 +11020,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "up",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": {
           "count": null,
@@ -11087,6 +11120,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "down",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -11971,7 +12022,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -11987,7 +12038,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -12042,8 +12093,8 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
+            "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -13175,6 +13226,7 @@
         },
         "population": "whole embryo and TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13237,6 +13289,7 @@
         },
         "population": "all RNA-seq libraries",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13299,6 +13352,7 @@
         },
         "population": "whole embryo",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13361,6 +13415,7 @@
         },
         "population": "TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13425,6 +13480,24 @@
         },
         "population": "whole embryo XX vs XY",
         "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "padj",
+            "operator": "<",
+            "value": 0.05
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13489,6 +13562,24 @@
         },
         "population": "whole embryo aneuploid vs euploid",
         "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "padj",
+            "operator": "<",
+            "value": 0.05
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13553,6 +13644,24 @@
         },
         "population": "whole embryo AA vs CC morphology",
         "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "padj",
+            "operator": "<",
+            "value": 0.05
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13617,6 +13726,24 @@
         },
         "population": "whole embryo high vs low morphokinetic quality",
         "predicate": "aneuploid vs euploid, adjusted P < 0.05, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "padj",
+            "operator": "<",
+            "value": 0.05
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": null,
@@ -13965,7 +14092,7 @@
           "section": "C"
         },
         {
-          "action": "record the annotation release the authors used, with the evidence for it",
+          "action": "record the reference release the authors used, with the evidence for it",
           "criterion": "M2",
           "leaf": "M2.B",
           "needs_approval": false,
@@ -14516,12 +14643,12 @@
                   "leaf": "M2.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the annotation release the authors used, with the evidence for it",
+                  "next_action": "record the reference release the authors used, with the evidence for it",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "the paper does not state every result-sensitive reference release; bioAF supplied one of its own",
-                  "scope": "1 reported experiments",
+                  "rationale": "bioAF's read recorded no annotation release for this experiment",
+                  "scope": "1 reported experiment",
                   "statement": "Relevant versions and identifiers are specified sufficiently to recover the intended reference inputs",
                   "unit": null
                 }
@@ -14588,7 +14715,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid: adjusted P < 0.05, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -14604,7 +14731,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: adjusted P < 0.05, no fold-change requirement, either direction, the test arm over the reference arm",
                   "scope": "8 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -14660,8 +14787,8 @@
           ],
           "established": [
             "the paper names the reference its results depend on (GRCh38)",
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid: adjusted P < 0.05, no fold-change requirement)",
+            "every claim's reading is established: adjusted P < 0.05, no fold-change requirement, either direction, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -15965,6 +16092,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -16029,6 +16157,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -16314,7 +16443,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -16322,7 +16451,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -16917,12 +17046,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -16933,11 +17062,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -17782,6 +17911,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -18039,7 +18169,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -18047,7 +18177,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -18642,12 +18772,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -18658,12 +18788,12 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
-                  "scope": "1 claims",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
+                  "scope": "1 claim",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
                 }
@@ -19293,6 +19423,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19357,6 +19488,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19421,6 +19553,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19485,6 +19618,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19549,6 +19683,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19613,6 +19748,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19677,6 +19813,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19741,6 +19878,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19805,6 +19943,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19869,6 +20008,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19933,6 +20073,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -19997,6 +20138,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -20061,6 +20203,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -20125,6 +20268,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -20478,7 +20622,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -20486,7 +20630,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -21193,12 +21337,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -21209,11 +21353,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "14 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -23259,6 +23403,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -23521,7 +23666,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -23529,7 +23674,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -24124,12 +24269,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -24140,12 +24285,12 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
-                  "scope": "1 claims",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
+                  "scope": "1 claim",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
                 }
@@ -24912,6 +25057,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "up",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -24986,6 +25149,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "down",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -25883,7 +26064,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -25899,7 +26080,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -25954,8 +26135,8 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
+            "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -26591,6 +26772,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -26848,7 +27030,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -26856,7 +27038,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -27451,12 +27633,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -27467,12 +27649,12 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
-                  "scope": "1 claims",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
+                  "scope": "1 claim",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
                 }
@@ -28102,6 +28284,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -28166,6 +28349,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -28451,7 +28635,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -28459,7 +28643,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -29054,12 +29238,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -29070,11 +29254,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -29972,6 +30156,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "up",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -30046,6 +30248,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "down",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -30943,7 +31163,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -30959,7 +31179,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -31014,8 +31234,8 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
+            "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -31798,6 +32018,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, up, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "up",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": {
           "count": null,
@@ -31880,6 +32118,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, down, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "down",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -32764,7 +33020,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -32780,7 +33036,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -32835,8 +33091,8 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
+            "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -33729,6 +33985,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -33793,6 +34050,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -34078,7 +34336,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -34086,7 +34344,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -34681,12 +34939,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -34697,11 +34955,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "2 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -35587,6 +35845,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -35651,6 +35910,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -35715,6 +35975,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -35779,6 +36040,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -35843,6 +36105,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -36141,7 +36404,7 @@
           "section": "M"
         },
         {
-          "action": "record the cutoff from the paper's methods, with its quote",
+          "action": "read the paper's design again",
           "criterion": "M4",
           "leaf": "M4.A",
           "needs_approval": false,
@@ -36149,7 +36412,7 @@
           "section": "M"
         },
         {
-          "action": "read the paper's claims again",
+          "action": "read the paper's claims again, or record which reading the paper meant",
           "criterion": "M4",
           "leaf": "M4.B",
           "needs_approval": false,
@@ -36776,12 +37039,12 @@
                   "leaf": "M4.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the cutoff from the paper's methods, with its quote",
+                  "next_action": "read the paper's design again",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "not every comparison the paper's claims rest on states a threshold",
-                  "scope": "0 contrasts",
+                  "rationale": "bioAF's read recorded no comparison whose decision criteria could be checked",
+                  "scope": "no contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
                 },
@@ -36792,11 +37055,11 @@
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "read the paper's claims again",
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF established no reading of the paper's thresholds to check",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "5 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -38030,6 +38293,7 @@
         },
         "population": null,
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": {
@@ -38142,6 +38406,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": {
           "count": {
@@ -38221,6 +38503,24 @@
         },
         "population": null,
         "predicate": "KO vs WT, P < 0.01, either direction, no fold-change requirement",
+        "predicate_detail": {
+          "assumptions": [
+            "the paper states the count without a qualifier, so it is read as exactly that number"
+          ],
+          "direction": "either",
+          "effect": {
+            "kind": "none"
+          },
+          "orientation": "test_over_reference",
+          "reason": null,
+          "significance": {
+            "adjustment": null,
+            "kind": "pvalue",
+            "operator": "<",
+            "value": 0.01
+          },
+          "status": "resolved"
+        },
         "provisional": true,
         "result": null,
         "selection": {
@@ -38504,7 +38804,7 @@
           "section": "C"
         },
         {
-          "action": "record the annotation release the authors used, with the evidence for it",
+          "action": "record the reference release the authors used, with the evidence for it",
           "criterion": "M2",
           "leaf": "M2.B",
           "needs_approval": false,
@@ -39031,11 +39331,11 @@
                   "leaf": "M2.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "record the annotation release the authors used, with the evidence for it",
+                  "next_action": "record the reference release the authors used, with the evidence for it",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "the paper does not state every result-sensitive reference release; bioAF supplied one of its own",
+                  "rationale": "bioAF's read recorded no annotation release for this experiment; bioAF's read recorded no assembly release for this experiment",
                   "scope": "2 reported experiments",
                   "statement": "Relevant versions and identifiers are specified sufficiently to recover the intended reference inputs",
                   "unit": null
@@ -39103,7 +39403,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
                   "scope": "1 contrast",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -39119,7 +39419,7 @@
                   "obligation": "B",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "every claim's reading is established: P < 0.01, no fold-change requirement, either direction, the test arm over the reference arm",
                   "scope": "3 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -39175,8 +39475,8 @@
           ],
           "established": [
             "the paper names the reference its results depend on (GENCODE M23, mm9)",
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
+            "every claim's reading is established: P < 0.01, no fold-change requirement, either direction, the test arm over the reference arm"
           ],
           "failed": 0.0,
           "maximum": 20.0,
@@ -40208,6 +40508,7 @@
         },
         "population": "whole embryo and TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40238,6 +40539,7 @@
         },
         "population": "all RNA-seq libraries",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40268,6 +40570,7 @@
         },
         "population": "whole embryo",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40298,6 +40601,7 @@
         },
         "population": "TE biopsy",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40328,6 +40632,7 @@
         },
         "population": "whole embryo XX vs XY",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40358,6 +40663,7 @@
         },
         "population": "whole embryo aneuploid vs euploid",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40388,6 +40694,7 @@
         },
         "population": "whole embryo AA vs CC morphology",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40418,6 +40725,7 @@
         },
         "population": "whole embryo high vs low morphokinetic quality",
         "predicate": null,
+        "predicate_detail": null,
         "provisional": true,
         "result": null,
         "selection": null,
@@ -40521,7 +40829,7 @@
       }
     ],
     "evidence_score": {
-      "assessed_points": 5.5,
+      "assessed_points": 3.5,
       "capability_limits": [
         {
           "criterion": "C1",
@@ -40665,21 +40973,21 @@
         }
       ],
       "concerns": [],
-      "counts_label": "5.5 positive points \u00b7 94.5 untested points \u00b7 0 negative points",
+      "counts_label": "3.5 positive points \u00b7 96.5 untested points \u00b7 0 negative points",
       "display": {
         "failed": "0",
         "total": "100",
-        "undetermined": "94.5",
-        "verified": "5.5"
+        "undetermined": "96.5",
+        "verified": "3.5"
       },
       "exact": {
         "failed": "0",
-        "undetermined": "189/2",
-        "verified": "11/2"
+        "undetermined": "193/2",
+        "verified": "7/2"
       },
-      "explanation": "5.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
+      "explanation": "3.5 points of supporting evidence have been established out of 100. It is not a probability that the paper is correct, and not a fraction of the paper reproduced. Untested includes checks that were attempted and could not conclude; negative identifies a demonstrated problem with a named check, never a judgment about the paper.",
       "failed": 0.0,
-      "headline": "5.5 / 100",
+      "headline": "3.5 / 100",
       "next_checks": [
         {
           "action": "retrieve the paper's supplied code",
@@ -40754,6 +41062,14 @@
           "section": "M"
         },
         {
+          "action": "read the paper's claims again, or record which reading the paper meant",
+          "criterion": "M4",
+          "leaf": "M4.B",
+          "needs_approval": false,
+          "points": 2.0,
+          "section": "M"
+        },
+        {
           "action": "read the paper's samples section again, or record the organism at the gate",
           "criterion": "S1",
           "leaf": "S1.A",
@@ -40798,12 +41114,12 @@
         {
           "key": "verified",
           "label": "positive",
-          "points": "5.5"
+          "points": "3.5"
         },
         {
           "key": "untested",
           "label": "untested",
-          "points": "94.5"
+          "points": "96.5"
         },
         {
           "key": "negative",
@@ -40825,11 +41141,11 @@
       "rubric_label": "Evidence rubric v3",
       "rubric_version": 3,
       "scope": {
-        "assessed": 3,
-        "label": "Rubric checks assessed: 3 / 39",
+        "assessed": 2,
+        "label": "Rubric checks assessed: 2 / 39",
         "total": 39
       },
-      "score": 5.5,
+      "score": 3.5,
       "score_note": null,
       "sections": [
         {
@@ -41337,7 +41653,7 @@
                   "obligation": "A",
                   "outcome": "verified",
                   "points": 2.0,
-                  "rationale": "every comparison the paper's claims rest on states its significance or effect threshold",
+                  "rationale": "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid WE (RNA karyotype): adjusted P <= 0.05, no fold-change requirement; XX vs XY WE (sex chromosome): adjusted P <= 0.05, |log2FC| >= 2; good vs poor morphology (Gardner AA vs CC) WE: adjusted P <= 0.05, no fold-change requirement; high vs low morphokinetic quality WE: adjusted P <= 0.05, no fold-change requirement)",
                   "scope": "4 contrasts",
                   "statement": "Significance definitions, multiplicity correction and effect thresholds are specified where used",
                   "unit": null
@@ -41345,15 +41661,15 @@
                 {
                   "capability_limit": false,
                   "impact": null,
-                  "label": "positive",
+                  "label": "untested",
                   "leaf": "M4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "read the paper's claims again, or record which reading the paper meant",
                   "obligation": "B",
-                  "outcome": "verified",
+                  "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "every threshold's direction, scale and orientation reads one way",
+                  "rationale": "bioAF built no reading of the paper's decision criteria to check",
                   "scope": "8 claims",
                   "statement": "Direction, scale, contrast orientation and the interpretation of those criteria are unambiguous",
                   "unit": null
@@ -41361,8 +41677,8 @@
               ],
               "points": 4.0,
               "title": "Decision criteria",
-              "undetermined": 0.0,
-              "verified": 4.0
+              "undetermined": 2.0,
+              "verified": 2.0
             },
             {
               "criterion": "M5",
@@ -41408,17 +41724,16 @@
             }
           ],
           "established": [
-            "every comparison the paper's claims rest on states its significance or effect threshold",
-            "every threshold's direction, scale and orientation reads one way"
+            "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid WE (RNA karyotype): adjusted P <= 0.05, no fold-change requirement; XX vs XY WE (sex chromosome): adjusted P <= 0.05, |log2FC| >= 2; good vs poor morphology (Gardner AA vs CC) WE: adjusted P <= 0.05, no fold-change requirement; high vs low morphokinetic quality WE: adjusted P <= 0.05, no fold-change requirement)"
           ],
           "failed": 0.0,
           "maximum": 20.0,
           "outstanding": "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed review of the paper's computational methods against its cited sources and supplied code.",
           "section": "M",
           "title": "Computational methods",
-          "undetermined": 16.0,
+          "undetermined": 18.0,
           "unsupported_count": 6,
-          "verified": 4.0
+          "verified": 2.0
         },
         {
           "criteria": [
@@ -41738,7 +42053,7 @@
         }
       ],
       "status": "assessed",
-      "undetermined": 94.5
+      "undetermined": 96.5
     },
     "experiments": [],
     "facts": {

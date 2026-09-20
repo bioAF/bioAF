@@ -1028,15 +1028,28 @@ def _claim_checks(target: dict) -> list[dict]:
     ]
 
 
-def _claim_predicate(target: dict, contrasts: list[dict], plan: dict, evidence: dict) -> tuple[str | None, dict | None]:
-    """A differential claim's predicate in words and where its cutoffs came from, or (None, None) for a claim
-    that reports on no contrast. plan_8_2 section 3.1: a cutoff inherited from the methods names its quote."""
+# plan_8_5 section 3.3: the fields of the normalized predicate an assessment of the paper's decision
+# criteria is entitled to read. The words beside them are for a reader; an obligation needs the reading.
+_PREDICATE_DETAIL = ("status", "reason", "direction", "orientation", "significance", "effect", "assumptions")
+
+
+def _predicate_detail(predicate: dict) -> dict:
+    return {key: predicate.get(key) for key in _PREDICATE_DETAIL}
+
+
+def _claim_predicate(
+    target: dict, contrasts: list[dict], plan: dict, evidence: dict
+) -> tuple[str | None, dict | None, dict | None]:
+    """A differential claim's predicate in words, where its cutoffs came from, and the reading itself.
+
+    (None, None, None) for a claim that reports on no contrast. plan_8_2 section 3.1: a cutoff
+    inherited from the methods names its quote."""
     from app.services.validation_methods_cutoffs import inherited_cutoffs
     from app.services.validation_predicate import build_predicate, predicate_words
 
     index = target.get("contrast_index")
     if not isinstance(index, int) or not 0 <= index < len(contrasts):
-        return None, None
+        return None, None, None
     contrast = contrasts[index]
     inherited = inherited_cutoffs(
         target.get("reported_experiment_id") or (contrast or {}).get("reported_experiment_id"),
@@ -1051,7 +1064,7 @@ def _claim_predicate(target: dict, contrasts: list[dict], plan: dict, evidence: 
         finding_claim=plan.get("finding_claim"),
         inherited=inherited,
     )
-    return predicate_words(predicate, contrast=contrast), predicate.get("cutoff_source")
+    return predicate_words(predicate, contrast=contrast), predicate.get("cutoff_source"), _predicate_detail(predicate)
 
 
 def _consistency_row(record: dict) -> dict:
@@ -1861,7 +1874,7 @@ def _claims(
         else:
             status, label, explanation = "unmapped", "Not mapped", "No mapping decision was recorded for this claim."
         index = target.get("contrast_index")
-        predicate_words, cutoff_source = _claim_predicate(target, contrasts, plan, evidence)
+        predicate_words, cutoff_source, predicate_detail = _claim_predicate(target, contrasts, plan, evidence)
         claims.append(
             {
                 "description": target.get("claim_text") or str(target.get("metric_key") or "claim").replace("_", " "),
@@ -1901,6 +1914,8 @@ def _claims(
                 # change_7.5 section 3.1: the claim's statistical definition, in words, and (plan_8_2
                 # section 3.1) where its cutoffs came from.
                 "predicate": predicate_words,
+                # plan_8_5 section 3.3: the reading itself, which is what M4.B is assessed from.
+                "predicate_detail": predicate_detail,
                 "cutoff_source": cutoff_source,
                 # change_7.5 section 4: the authors' results and the reanalysis, on the claim itself.
                 "consistency": _claim_consistency(position, target, contrasts, evidence, checks=checks),
