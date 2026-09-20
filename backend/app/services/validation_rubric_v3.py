@@ -793,6 +793,9 @@ def _section_row(key: str, bucket: dict, leaves: list[dict], assessed: dict, lim
         "failed": float(bucket["failed"]),
         "undetermined": float(bucket["undetermined"]),
         "maximum": float(bucket["maximum"]),
+        # plan_8_4 section 4: a section is shown the way the headline is, one decimal under the same
+        # sum-preserving rule. A row reading "0.2857142857142857 / 30" is a number nobody can read.
+        "display": {**display(bucket), "maximum": f"{float(bucket['maximum']):g}"},
         "established": [row.get("rationale") for row in verified],
         "outstanding": outstanding,
         "unsupported_count": len(section_limits),

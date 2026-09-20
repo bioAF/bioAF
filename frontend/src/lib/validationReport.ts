@@ -613,6 +613,9 @@ export interface EvidenceScoreSection {
   failed: number;
   undetermined: number;
   maximum: number;
+  // plan_8_4 section 4: the same numbers as a reader sees them, one decimal, summing to the
+  // maximum. The numbers above stay exact for anything that computes with them.
+  display?: { verified: string; failed: string; undetermined: string; maximum: string } | null;
   established: string[];
   outstanding: string | null;
   unsupported_count: number;
