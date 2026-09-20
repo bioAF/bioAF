@@ -765,6 +765,15 @@ class KubernetesNotebookProvider(NotebookProvider):
         volume_mounts.append({"name": "outputs", "mountPath": "/outputs"})
         volumes.append({"name": "outputs", "emptyDir": {"sizeLimit": "50Gi"}})
 
+        # plan_7 step 17, found by watching a real untrusted pod: it died on its first command with
+        # `mkdir: cannot create directory '/work': Permission denied`. The script unpacks the fetched
+        # code into /work and nothing was mounted there, so on an image whose root filesystem its own
+        # user cannot write, there was nowhere to put it. Every untrusted run ended that way, with no
+        # transcript and a session that looked completed.
+        if session_spec.get("fetched_code"):
+            volume_mounts.append({"name": "work", "mountPath": _FETCHED_CODE_DIR})
+            volumes.append({"name": "work", "emptyDir": {"sizeLimit": "20Gi"}})
+
         # Pod annotations the read-only input mounts require (e.g. GCS gcsfuse
         # CSI sidecar injection); accumulated from the ReadOnlyInputMount seam.
         input_mount_annotations: dict[str, str] = {}

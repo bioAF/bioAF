@@ -187,3 +187,47 @@ class TestThePodIsBuiltForTheNamespaceItIsSentTo:
         for requested in ("bioaf-untrusted", "bioaf-notebooks", "kube-system", None):
             spec = {"namespace": requested} if requested else {}
             assert self._manifest(spec)["metadata"]["namespace"] == namespace_for(spec)
+
+
+class TestThePodCanWriteWhereItUnpacksTheCode:
+    """plan_7 step 17, found by watching a real untrusted pod: it died on its first command.
+
+        mkdir: cannot create directory '/work': Permission denied
+
+    The script unpacks the fetched code into ``/work`` and the pod mounts nothing there, so on an
+    image whose root filesystem is not writable by its own user there is nowhere to unpack it. Every
+    untrusted run ended that way: no transcript, no outcome, and a session that looked like it had
+    completed. The other working directories this pod uses are emptyDir volumes; so is this one.
+    """
+
+    _FETCHED = {"code_uri": "gs://b/study-1/code.tar.gz", "entry_point": "check.R", "arguments": ""}
+
+    def _manifest(self, spec):
+        from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+
+        adapter = KubernetesNotebookProvider.__new__(KubernetesNotebookProvider)
+        return adapter._build_pod_manifest({"session_type": "headless", "session_id": 4, **spec})
+
+    def _mounts(self, manifest):
+        container = manifest["spec"]["containers"][0]
+        return {m["mountPath"]: m for m in container.get("volumeMounts") or []}
+
+    def test_a_fetched_code_pod_mounts_a_writable_working_directory(self):
+        manifest = self._manifest({"fetched_code": self._FETCHED, "namespace": "bioaf-untrusted"})
+        mounts = self._mounts(manifest)
+        assert "/work" in mounts
+        assert mounts["/work"].get("readOnly") is not True
+        volumes = {v["name"]: v for v in manifest["spec"]["volumes"]}
+        assert "emptyDir" in volumes[mounts["/work"]["name"]]
+
+    def test_it_is_the_directory_the_script_unpacks_into(self):
+        from app.adapters.notebooks.kubernetes import _FETCHED_CODE_DIR, build_fetched_code_script
+
+        script = build_fetched_code_script(self._FETCHED, copy_in="cp {uri} {local}", auth="", timeout_seconds=60)
+        mounts = self._mounts(self._manifest({"fetched_code": self._FETCHED}))
+        assert _FETCHED_CODE_DIR in mounts
+        assert f"cd {_FETCHED_CODE_DIR}" in script
+
+    def test_a_template_run_is_unchanged(self):
+        manifest = self._manifest({"notebook_json": {"cells": []}})
+        assert "/work" not in self._mounts(manifest)
