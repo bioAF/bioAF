@@ -169,29 +169,112 @@ def _species(experiments: list[dict], plan: dict, evidence: dict) -> dict:
             scope=scope,
             next_action="read the paper's samples section again, or record the organism at the gate",
         )
+    return {"S1.A": found, "S1.B": _species_agreement(named, evidence)}
+
+
+def _norm_organism(name: str) -> str:
+    return " ".join(str(name or "").strip().lower().split())
+
+
+def deposit_samples(evidence: dict) -> list[tuple[dict, dict]]:
+    """(deposit, sample) for every sample record this study holds, keeping each sample's deposit."""
+    held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else {}
+    pairs = []
+    for deposit in held.get("deposits") or []:
+        if not isinstance(deposit, dict):
+            continue
+        for sample in deposit.get("samples") or []:
+            if isinstance(sample, dict):
+                pairs.append((deposit, sample))
+    return pairs
+
+
+def record_limitations(evidence: dict) -> list[str]:
+    """Why bioAF holds no sample records for a deposit, in the words the retrieval recorded."""
+    held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else {}
+    return [str(lim.get("reason") or "") for lim in held.get("limitations") or [] if isinstance(lim, dict)]
+
+
+def _records_scope(pairs: list[tuple[dict, dict]]) -> str:
+    accessions = sorted({str(deposit.get("accession") or "") for deposit, _ in pairs} - {""})
+    samples = len(pairs)
+    return f"{samples} sample {'record' if samples == 1 else 'records'} from {', '.join(accessions) or 'no deposit'}"
+
+
+def _species_agreement(named: list[str], evidence: dict) -> dict:
+    """S1.B: the organisms the paper states, against the ones the deposit states for its samples.
+
+    plan_8_5 section 3.4. The deposit's own per-sample declaration is the authority, and a deposit
+    holding two organisms (a xenograft, a spike-in) agrees with a paper that names the one it
+    analysed. What bioAF could not retrieve is named as bioAF's limitation, never as a deposit that
+    declares nothing.
+    """
+    pairs = deposit_samples(evidence)
+    if pairs:
+        declared = {_norm_organism(sample.get("organism")): str(sample.get("organism") or "") for _, sample in pairs}
+        declared.pop("", None)
+        scope = _records_scope(pairs)
+        if not declared:
+            return _open(
+                "every sample record bioAF read states no organism",
+                scope=scope,
+                next_action="read the deposit's sample metadata again, or record the organism at the gate",
+            )
+        if not named:
+            return _open(
+                "bioAF's read of the paper recorded no organism to compare with the deposit's records",
+                scope=scope,
+                next_action="record the organism the paper states, with its quote",
+            )
+        missing = [organism for organism in named if _norm_organism(organism) not in declared]
+        if missing:
+            disagreeing = sorted({sample.get("accession") or "" for _, sample in pairs} - {""})[:4]
+            return _finding(
+                FAILED,
+                f"the paper states {', '.join(sorted(set(missing)))} and the deposit's sample records state "
+                f"{', '.join(sorted(declared.values()))}"
+                + (f" ({', '.join(disagreeing)})" if disagreeing else ""),
+                scope=scope,
+                impact=(
+                    "an analysis against the paper's stated organism would align the wrong species and answer "
+                    "confidently about it"
+                ),
+            )
+        return _finding(
+            VERIFIED,
+            f"the deposit's own sample records state {', '.join(sorted(set(named)))} for the samples the paper uses",
+            scope=scope,
+        )
+    limitations = record_limitations(evidence)
+    if limitations:
+        return _open(
+            "; ".join(sorted(set(limitations))),
+            scope="no sample record bioAF could read",
+            next_action="acquire the deposit's sample metadata",
+        )
+    # Nothing retrieved this run: an older check that DID compare the deposit's declaration still
+    # establishes what it measured, and one that compared nothing still establishes nothing.
     check = (evidence.get("precompute_checks") or {}).get("species_matches") or {}
     verdict = check.get("verdict")
     detail = str(check.get("detail") or "").strip()
     if verdict == "ok":
-        agreement = _finding(
+        return _finding(
             VERIFIED,
             detail or "the deposited sample records state the organisms the paper states",
             scope="the sample records bioAF holds",
         )
-    elif verdict == "mismatch":
-        agreement = _finding(
+    if verdict == "mismatch":
+        return _finding(
             FAILED,
             detail or "the deposited sample records contradict the organism the paper states",
             scope="the sample records bioAF holds",
             impact="an analysis against the paper's stated organism would answer confidently about the wrong species",
         )
-    else:
-        agreement = _open(
-            detail or "bioAF holds no sample records stating an organism to compare",
-            scope="the sample records bioAF holds",
-            next_action="acquire the deposit's sample metadata",
-        )
-    return {"S1.A": found, "S1.B": agreement}
+    return _open(
+        "bioAF holds no sample records stating an organism to compare",
+        scope="no sample record bioAF could read",
+        next_action="acquire the deposit's sample metadata",
+    )
 
 
 def _groups(contrasts: list[dict], evidence: dict) -> dict:
