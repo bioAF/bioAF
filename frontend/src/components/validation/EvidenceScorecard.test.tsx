@@ -61,6 +61,7 @@ const CARD: EvidenceScore = {
   capability_limits: [
     { leaf: "C1.A", criterion: "C1", section: "C", points: 2, reason: "bioAF holds no implemented check." },
   ],
+  evidence_limits: [],
   reproduction: {
     attempted: false,
     label: "Independent reproduction: Not attempted — controlled data unavailable",
@@ -281,4 +282,49 @@ test("a section is shown the way the headline is, one decimal", () => {
   expect(row).toHaveTextContent("0.3 / 30");
   expect(row).toHaveTextContent("0.3 positive · 29.7 untested · 0 negative");
   expect(row).not.toHaveTextContent("0.2857142857142857");
+});
+
+/**
+ * plan_8_6 section 9: what "0 negative" is allowed to mean.
+ *
+ * A card showing zero negative points can mean either "bioAF examined the relevant evidence and
+ * found no demonstrated problem" or "bioAF's checks were not given the evidence that would show
+ * one". No new surface and no new vocabulary: the untested count and its reasons carry it.
+ */
+const NOT_GIVEN_THE_EVIDENCE: EvidenceScore = {
+  ...CARD,
+  explanation:
+    "35 points of supporting evidence have been established out of 100. Untested includes checks that " +
+    "were attempted and could not conclude; negative identifies a demonstrated problem with a named " +
+    "check, never a judgment about the paper. 2 of the untested obligations were not given the " +
+    "evidence that would settle them, so what they might have found is not established either way.",
+  evidence_limits: [
+    {
+      leaf: "M1.B",
+      criterion: "M1",
+      section: "S",
+      points: 2,
+      reason: "the supplementary bundle was too large to retrieve",
+    },
+  ],
+};
+
+test("a zero negative count over evidence bioAF never got says so", () => {
+  render(<EvidenceScorecard card={NOT_GIVEN_THE_EVIDENCE} />);
+  expect(screen.getByTestId("evidence-score-counts")).toHaveTextContent("0 negative points");
+  expect(screen.getByText(/were not given the evidence that would settle them/)).toBeInTheDocument();
+});
+
+test("a section names the obligations whose evidence never arrived", () => {
+  render(<EvidenceScorecard card={NOT_GIVEN_THE_EVIDENCE} />);
+  fireEvent.click(screen.getByText("Sample metadata and study design"));
+  const row = screen.getByTestId("evidence-evidence-limits-S");
+  expect(row).toHaveTextContent("M1.B");
+  expect(row).toHaveTextContent("too large to retrieve");
+});
+
+test("a section with nothing missing shows no such row", () => {
+  render(<EvidenceScorecard card={{ ...CARD, evidence_limits: [] }} />);
+  fireEvent.click(screen.getByText("Sample metadata and study design"));
+  expect(screen.queryByTestId("evidence-evidence-limits-S")).toBeNull();
 });

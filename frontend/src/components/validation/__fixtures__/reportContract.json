@@ -1377,6 +1377,7 @@
         "undetermined": "96.5",
         "verified": "3.5"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "193/2",
@@ -5322,6 +5323,7 @@
         "undetermined": "94",
         "verified": "6"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "94",
@@ -7761,6 +7763,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",
@@ -10822,6 +10825,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",
@@ -13970,6 +13974,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",
@@ -16522,6 +16527,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",
@@ -18579,6 +18585,7 @@
         "undetermined": "88",
         "verified": "12"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "88",
@@ -21133,6 +21140,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",
@@ -23313,6 +23321,7 @@
         "undetermined": "100",
         "verified": "0"
       },
+      "evidence_limits": [],
       "exact": {
         "failed": "0",
         "undetermined": "100",

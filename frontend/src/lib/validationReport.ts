@@ -663,6 +663,10 @@ export interface EvidenceScore {
     with_author_results_ceiling: number;
   };
   capability_limits: EvidenceScoreLimit[];
+  // plan_8_6 section 9: the untested obligations whose EVIDENCE was never supplied or retrieved,
+  // told apart from the ones bioAF inspected and could not settle. A card showing zero negative
+  // points means one of two things, and a reader has to be able to tell which.
+  evidence_limits: EvidenceScoreLimit[];
   reproduction: { attempted: boolean; label: string; reason: string | null };
   concerns: EvidenceScoreConcern[];
   // plan_8_4 section 6.4: what would be assessed next, what it is worth, and what it requires.
