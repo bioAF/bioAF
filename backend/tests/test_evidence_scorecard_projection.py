@@ -303,3 +303,42 @@ class TestTheReproductionStatementSaysOnlyWhatIsEstablished:
             card = _summary(evidence=evidence)["evidence_score"]
             for value in (card["reproduction"]["label"], card["explanation"], card["counts_label"]):
                 assert "—" not in value, value
+
+
+class TestTheReadingOfAClaimReachesTheScore:
+    """plan_8_5 section 3.3: M4.B rests on the normalized predicate, so the projection must carry it.
+
+    The claim row already showed the predicate in words. Words are for a reader; an obligation needs
+    the structured reading, and without it every paper's M4.B was settled by a field nothing sets.
+    """
+
+    _TARGET = {
+        "id": 1,
+        "claim_text": "1204 genes were downregulated",
+        "claimed_value": 1204,
+        "output_type": "gene_set_size",
+        "direction": "down",
+        "contrast_index": 0,
+        "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05, "adjustment": "BH"}],
+        "count_relation": "=",
+    }
+
+    def test_a_claim_carries_its_reading_and_not_only_its_words(self):
+        claim = _summary(targets=[self._TARGET])["claims"][0]
+        assert claim["predicate"], "the words a reader sees"
+        detail = claim["predicate_detail"]
+        assert detail["status"] == "resolved"
+        assert detail["direction"] == "down"
+        assert detail["orientation"] == "test_over_reference"
+        assert detail["significance"]["kind"] == "padj"
+        assert detail["significance"]["adjustment"] == "BH"
+
+    def test_that_reading_is_what_verifies_the_decision_criteria(self):
+        card = _summary(targets=[self._TARGET])["evidence_score"]
+        methods = next(s for s in card["sections"] if s["section"] == "M")
+        rows = {row["leaf"]: row for criterion in methods["criteria"] for row in criterion["obligations"]}
+        assert rows["M4.B"]["outcome"] == "verified"
+
+    def test_a_claim_reporting_on_no_comparison_carries_no_reading(self):
+        claim = _summary(targets=[{"id": 2, "claim_text": "the QC passed", "contrast_index": None}])["claims"][0]
+        assert claim["predicate_detail"] is None
