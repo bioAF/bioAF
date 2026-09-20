@@ -332,10 +332,33 @@ async def request_environment_check(session, study, *, user_id: int) -> dict:
     return record
 
 
+# The pod writes its log to `/outputs/transcript.txt` and it is registered as an output file, so the
+# transcript arrives the way every other fetched-code run's does. Caught by running this live: there
+# is no `output_log` on a compute session, and reading one would have made every check inconclusive.
+TRANSCRIPT_FILENAME = "transcript.txt"
+
+
 async def _compute_session(session, session_id: int):
-    from app.models.compute_session import ComputeSession
+    from app.models.notebook_session import ComputeSession
 
     return await session.get(ComputeSession, session_id)
+
+
+async def _transcript_of(session, compute) -> str:
+    """What the isolated run said: its failure message and the log it wrote, the way the code arm
+    reads them. Never raises: an unreadable transcript is a check that established nothing."""
+    from app.services.validation_driver_service import ValidationDriverService
+
+    transcript = str(getattr(compute, "failure_message", "") or "")
+    try:
+        outputs = await ValidationDriverService._read_code_outputs(session, compute)
+    except Exception as exc:  # noqa: BLE001 - an unreadable output is not a paper's defect
+        logger.warning("the environment check's transcript could not be read: %s", exc)
+        return transcript
+    for out in outputs or []:
+        if str(out.get("path", "")).rsplit("/", 1)[-1] == TRANSCRIPT_FILENAME:
+            transcript = f"{transcript}\n{out.get('text') or ''}".strip()
+    return transcript
 
 
 async def settle_environment_check(session, study) -> dict:
@@ -362,9 +385,10 @@ async def settle_environment_check(session, study) -> dict:
         return record
     if getattr(compute, "status", None) in ("running", "pending", "starting"):
         return record
-    transcript = str(getattr(compute, "output_log", "") or "")
+    transcript = await _transcript_of(session, compute)
     found = outcome_from_run(
-        exit_code=getattr(compute, "exit_code", None),
+        # A compute session carries no exit code of its own: a pod that ended in `failed` is the 1.
+        exit_code=1 if getattr(compute, "status", None) == "failed" else 0,
         transcript=transcript,
         environment=record.get("runtime") or "the declared environment",
         ref=f"compute-session-{record.get('session_id')}",
