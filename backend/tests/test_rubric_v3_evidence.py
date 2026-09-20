@@ -800,3 +800,38 @@ class TestAJudgmentSettlesWhatNoMeasurementCould:
     def test_the_experimental_obligations_are_no_longer_capability_limits(self):
         for leaf in ("E1.A", "E1.B", "E2.A", "E2.B", "E3.A", "E3.B", "M1.A", "M1.B", "M3.A", "M3.B", "M5.A", "M5.B"):
             assert leaf not in CAPABILITY_LIMITS, leaf
+
+
+class TestWhatCompletionOfTheDocumentaryRubricMeans:
+    """plan_8_5 gate 3: every C, S, E and M obligation has an implemented assessor.
+
+    The gate is a list, not a judgment call: the only obligations that may remain declared capability
+    limits are the ones that cannot be settled by reading anything, because they need an approved run.
+    A narrower release than that is unfinished work, however correct its grey presentation.
+    """
+
+    _NEEDS_A_RUN = {"C1.B", "C2.B", "R2", "R3"}
+
+    def test_only_the_obligations_that_need_a_run_remain_capability_limits(self):
+        assert set(CAPABILITY_LIMITS) == self._NEEDS_A_RUN
+
+    def test_every_documentary_obligation_has_an_assessor(self):
+        from app.services.validation_rubric_v3 import CRITERIA
+
+        documentary = {
+            f"{criterion.id}.{obligation}"
+            for criterion in CRITERIA
+            if criterion.section in ("C", "S", "E", "M")
+            for obligation in ("A", "B")
+        }
+        assert not (documentary & set(CAPABILITY_LIMITS)) - self._NEEDS_A_RUN
+
+    def test_the_two_that_need_a_run_have_a_route_a_person_can_approve(self):
+        """A standing limit is only honest where the way to settle it exists."""
+        from app.services.validation_environment_check import environment_check_request
+
+        request = environment_check_request(
+            sources=[{"path": "a.R", "language": "r", "text": "library(DESeq2)\n"}], manifests=[]
+        )
+        assert set(request["establishes"]) == {"C1.B", "C2.B"}
+        assert request["approval"]["required"] is True
