@@ -112,7 +112,12 @@ def quiet_discovery(monkeypatch):
         return []
 
     monkeypatch.setattr(ValidationDriverService, "_discover_capabilities", staticmethod(_discover))
-    monkeypatch.setattr(ValidationDriverService, "_deposit_organisms", staticmethod(_no_entries))
+    # plan_8_5 section 3.4: the lookup says whether it opened a deposit, so "nothing declared"
+    # and "nothing was opened" are not the same answer.
+    async def _no_organisms(study, *, fetcher=None):
+        return [], False
+
+    monkeypatch.setattr(ValidationDriverService, "_deposit_organisms", staticmethod(_no_organisms))
     monkeypatch.setattr(ValidationDriverService, "_deposit_entries", staticmethod(_no_entries))
     return seen
 

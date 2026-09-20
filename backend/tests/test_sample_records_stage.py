@@ -85,3 +85,36 @@ class TestTheDepositsSampleRecordsAreHeldBeforeAnyInputIsAcquired:
         record = await run_assessment(session, study, fetcher=_serving(_MATRIX))
         assert record is not None
         assert (study.evidence_json.get("sample_records") or {"deposits": []})["deposits"] == []
+
+
+class TestTheSpeciesCheckReadsWhatWasActuallyOpened:
+    """plan_8_5 section 3.4: the read-time check compares the records bioAF retrieved.
+
+    It used to build one URL from ``study.source_accession``. A paper submitted by DOI has none, so
+    nothing was fetched, and the check reported "the deposit declares no organism to compare
+    against" about a series nobody had opened. Absence of a lookup is not absence of an organism.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_doi_submitted_study_compares_against_the_series_the_paper_names(self, session, admin_user):
+        from app.services.validation_driver_service import ValidationDriverService
+
+        study = await _study(
+            session, admin_user, deposits=[{"accession": "GSE144396", "archive": "geo", "provenance": "extracted"}]
+        )
+        organisms, looked = await ValidationDriverService._deposit_organisms(study, fetcher=_serving(_MATRIX))
+        assert organisms == ["Homo sapiens"]
+        assert looked is True
+
+    @pytest.mark.asyncio
+    async def test_a_deposit_that_was_never_opened_says_that_rather_than_declaring_nothing(self, session, admin_user):
+        from app.services.validation_driver_service import ValidationDriverService
+        from app.services.validation_precompute_checks import UNKNOWN, check_species
+
+        study = await _study(session, admin_user, deposits=[{"accession": "EGAS1", "archive": "ega"}])
+        organisms, looked = await ValidationDriverService._deposit_organisms(study, fetcher=_serving(_MATRIX))
+        assert organisms == []
+        assert looked is False
+        check = check_species("Homo sapiens", organisms, organism_source=looked)
+        assert check["verdict"] == UNKNOWN
+        assert "declares no organism" not in check["detail"]
