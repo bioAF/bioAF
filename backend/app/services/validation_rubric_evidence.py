@@ -17,6 +17,7 @@ Pure: no database, no model, no I/O. Everything here is read from evidence the s
 
 from __future__ import annotations
 
+from app.services.validation_documentary_review import JUDGED_LEAVES
 from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
 
 MEASUREMENT = "measurement"
@@ -30,6 +31,20 @@ _DISAGREES = "disagree"
 
 def _finding(outcome: str, rationale: str, *, scope: str, method: str = MEASUREMENT, **extra) -> dict:
     return {"outcome": outcome, "rationale": rationale, "scope": scope, "method": method, **extra}
+
+
+def _unjudged(leaf: str) -> dict:
+    """plan_8_5 section 3.6: an obligation whose assessor exists and had nothing to work with.
+
+    It is not a capability limit: bioAF implements the check. What it lacks for THIS study is the
+    paper's own passages or a configured model, and the documentary review records which.
+    """
+    return _finding(
+        UNDETERMINED,
+        "bioAF holds no passages of this paper for its assessor to judge this obligation on",
+        scope="the paper's own text",
+        next_action="read the paper again so its methods are held, and run the documentary review",
+    )
 
 
 def _open(rationale: str, *, scope: str, next_action: str, **extra) -> dict:
@@ -47,15 +62,6 @@ _CODE_LIMIT = (
     "and loading the paper's actual source in its declared environment, which runs untrusted code and "
     "belongs behind the existing isolated execution path and its approval."
 )
-_EXPERIMENTAL_LIMIT = (
-    "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed "
-    "review of the paper's experimental procedure against its cited methods, which is a bounded model "
-    "judgment bioAF has not yet defined a contract for."
-)
-_COMPUTATIONAL_LIMIT = (
-    "bioAF holds no implemented check for this obligation. Establishing it means an evidence-backed "
-    "review of the paper's computational methods against its cited sources and supplied code."
-)
 
 CAPABILITY_LIMITS: dict[str, dict] = {
     # plan_8_4 milestone B: the static code obligations are implemented (`validation_code_checks`).
@@ -63,13 +69,6 @@ CAPABILITY_LIMITS: dict[str, dict] = {
     # plan_8_5 gate 2: the sample obligations (S2, S4.B, S5.A) are implemented and are no longer here.
     "C1.B": {"reason": _CODE_LIMIT},
     "C2.B": {"reason": _CODE_LIMIT},
-    **{f"E{n}.{o}": {"reason": _EXPERIMENTAL_LIMIT} for n in range(1, 4) for o in "AB"},
-    "M1.A": {"reason": _COMPUTATIONAL_LIMIT},
-    "M1.B": {"reason": _COMPUTATIONAL_LIMIT},
-    "M3.A": {"reason": _COMPUTATIONAL_LIMIT},
-    "M3.B": {"reason": _COMPUTATIONAL_LIMIT},
-    "M5.A": {"reason": _COMPUTATIONAL_LIMIT},
-    "M5.B": {"reason": _COMPUTATIONAL_LIMIT},
     "R2": {
         "reason": "an independent result assessment requires an approved analysis run over acquired "
         "inputs. Nothing is assessed until one has run."
@@ -106,12 +105,42 @@ def assess_evidence(
     assessed.update(_decision_criteria(claims or [], contrasts, plan.get("differential_design")))
     assessed.update(_author_results(claims or [], inventory))
     assessed.update(_code(evidence))
+    assessed = _with_judgments(assessed, evidence)
+    for leaf_id in JUDGED_LEAVES:
+        assessed.setdefault(leaf_id, _unjudged(leaf_id))
     for leaf_id, limit in CAPABILITY_LIMITS.items():
         assessed.setdefault(
             leaf_id,
             _finding(UNDETERMINED, limit["reason"], scope="not assessed", method=MEASUREMENT, capability_limit=True),
         )
     return assessed
+
+
+def _with_judgments(assessed: dict, evidence: dict) -> dict:
+    """The accepted documentary judgments, over the obligations no measurement settled.
+
+    plan_8_5 section 3.6. A measurement outranks a judgment: where bioAF compared something and got
+    an answer, that answer stands and the model's opinion about the same obligation does not
+    overwrite it. Where the measurement could not conclude, an evidence-backed judgment is what the
+    obligation has, and it carries its own citations and the assessor that made it.
+    """
+    held = evidence.get("rubric_judgments")
+    judgments = (held or {}).get("judgments") if isinstance(held, dict) else None
+    if not isinstance(judgments, dict):
+        return assessed
+    merged = dict(assessed)
+    for leaf_id, judgment in judgments.items():
+        if not isinstance(judgment, dict) or judgment.get("outcome") not in (VERIFIED, FAILED, UNDETERMINED):
+            continue
+        settled = merged.get(leaf_id) or {}
+        if settled.get("outcome") in (VERIFIED, FAILED):
+            continue
+        if judgment["outcome"] == UNDETERMINED and settled and not settled.get("capability_limit"):
+            # Two open answers about one obligation: keep the one that says what would settle it.
+            if settled.get("next_action") and not judgment.get("next_action"):
+                continue
+        merged[leaf_id] = judgment
+    return merged
 
 
 def _code(evidence: dict) -> dict:
