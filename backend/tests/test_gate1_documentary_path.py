@@ -154,3 +154,66 @@ class TestTheWholeApplicationShowsTheSameAnswer:
         before = dict(study.evidence_json or {})
         await report_summary_for(session, study, admin_user.organization_id)
         assert (study.evidence_json or {}) == before
+
+
+class TestTheSampleObligationsDoNotWaitForAnAnalysisInput:
+    """plan_8_5 gate 2: S2 to S5 are documentary checks. They are settled from the deposit's own
+    records, before any count matrix is selected and before any mapping is accepted."""
+
+    _RICH = "\n".join(
+        [
+            '!Sample_title\t"WT rep1"\t"WT rep2"\t"KO rep1"\t"KO rep2"',
+            '!Sample_geo_accession\t"GSM1"\t"GSM2"\t"GSM3"\t"GSM4"',
+            '!Sample_organism_ch1\t"Homo sapiens"\t"Homo sapiens"\t"Homo sapiens"\t"Homo sapiens"',
+            '!Sample_source_name_ch1\t"HepG2 cells"\t"HepG2 cells"\t"HepG2 cells"\t"HepG2 cells"',
+            '!Sample_characteristics_ch1\t"condition: WT"\t"condition: WT"\t"condition: KO"\t"condition: KO"',
+            '!Sample_characteristics_ch1\t"replicate: 1"\t"replicate: 2"\t"replicate: 1"\t"replicate: 2"',
+            "",
+        ]
+    )
+
+    async def _study(self, session, admin_user):
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_doi="10.1/gate2", intended_route="deposit"
+        )
+        plan = await ReproductionPlanService.create_plan(session, study, admin_user.id, accessions=[])
+        plan.reported_experiments_json = _EXPERIMENTS
+        plan.sample_sheet_json = {"organism": "Homo sapiens", "sample_count": 4}
+        plan.differential_design_json = {
+            "contrasts": [{"name": "KO vs WT", "test_condition": "KO", "reference_condition": "WT"}]
+        }
+        study.state = "acquiring_processed"
+        study.evidence_json = {"capabilities": {"deposits": [{"accession": "GSE9", "archive": "geo"}]}}
+        await session.flush()
+        await run_assessment(session, study, fetcher=_serving(self._RICH))
+        await session.flush()
+        return study
+
+    @pytest.mark.asyncio
+    async def test_the_counts_reconcile_without_a_chosen_input(self, session, admin_user):
+        study = await self._study(session, admin_user)
+        card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
+        assert _obligation(card, "S4.B")["outcome"] == "verified"
+        assert "input_choice" not in (study.evidence_json or {})
+
+    @pytest.mark.asyncio
+    async def test_the_arms_are_supported_by_the_deposits_own_records(self, session, admin_user):
+        study = await self._study(session, admin_user)
+        card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
+        assert _obligation(card, "S3.B")["outcome"] == "verified"
+
+    @pytest.mark.asyncio
+    async def test_the_replication_the_records_describe_settles_its_obligation(self, session, admin_user):
+        study = await self._study(session, admin_user)
+        card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
+        assert _obligation(card, "S5.A")["outcome"] == "verified"
+
+    @pytest.mark.asyncio
+    async def test_what_the_paper_says_about_its_material_is_still_owed(self, session, admin_user):
+        """S2.A needs the paper's own statement, which the documentary judgment records. Until it
+        does, the obligation is untested and says what would settle it."""
+        study = await self._study(session, admin_user)
+        card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
+        row = _obligation(card, "S2.A")
+        assert row["outcome"] == "undetermined"
+        assert row["next_action"]

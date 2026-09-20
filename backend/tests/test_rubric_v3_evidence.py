@@ -572,3 +572,174 @@ class TestSpeciesAgreementIsMeasuredAgainstTheRecordsThemselves:
             "precompute_checks": {"species_matches": {"verdict": "ok", "detail": "an older run agreed"}},
         }
         assert _assess(evidence=evidence)["S1.B"]["outcome"] == FAILED
+
+
+def _sample(accession, **fields):
+    return {
+        "accession": accession,
+        "title": fields.pop("title", accession),
+        "organism": fields.pop("organism", "Homo sapiens"),
+        "source_name": fields.pop("source_name", ""),
+        "molecule": fields.pop("molecule", ""),
+        "library_strategy": fields.pop("library_strategy", ""),
+        "characteristics": fields.pop("characteristics", {}),
+        "unkeyed": fields.pop("unkeyed", []),
+    }
+
+
+def _deposit(*samples, accession="GSE1"):
+    return {
+        "sample_records": {
+            "deposits": [
+                {
+                    "accession": accession,
+                    "source": f"https://example/{accession}",
+                    "sample_count": len(samples),
+                    "samples": list(samples),
+                }
+            ],
+            "limitations": [],
+        }
+    }
+
+
+class TestTheMaterialTheSamplesCameFrom:
+    """plan_8_5 section 3.4: S2, from the paper and from the deposit's own records.
+
+    Species, material, group assignment, counts and unit identity are decoupled: each one is
+    established by its own evidence, and an unresolved one does not hold the others open.
+    """
+
+    _STATED = {
+        "paper_statements": {
+            "sample_material": {
+                "value": "HepG2 cells",
+                "quote": "RNA was prepared from HepG2 cells",
+                "method": "model_assisted",
+            }
+        }
+    }
+
+    def test_the_material_the_paper_states_verifies_the_first_obligation(self):
+        assessed = _assess(evidence=self._STATED)
+        assert assessed["S2.A"]["outcome"] == VERIFIED
+        assert "HepG2" in assessed["S2.A"]["rationale"]
+        assert assessed["S2.A"]["method"] == "model_assisted"
+
+    def test_a_paper_that_names_no_material_leaves_it_untested_not_failed(self):
+        assert _assess()["S2.A"]["outcome"] == UNDETERMINED
+        assert _assess()["S2.A"]["next_action"]
+
+    def test_records_that_name_the_same_material_verify_the_agreement(self):
+        evidence = {
+            **self._STATED,
+            **_deposit(_sample("GSM1", source_name="HepG2 cells"), _sample("GSM2", source_name="HepG2 cells")),
+        }
+        assessed = _assess(evidence=evidence)
+        assert assessed["S2.B"]["outcome"] == VERIFIED
+
+    def test_records_that_name_a_different_material_leave_it_open_rather_than_failing_it(self):
+        """A paper's experiments legitimately differ, so a disagreement here is a question, not a
+        contradiction: what fails S2.B is beyond what a name comparison establishes."""
+        evidence = {**self._STATED, **_deposit(_sample("GSM1", source_name="primary fibroblast"))}
+        assessed = _assess(evidence=evidence)
+        assert assessed["S2.B"]["outcome"] == UNDETERMINED
+        assert "fibroblast" in assessed["S2.B"]["rationale"]
+
+    def test_records_with_no_material_at_all_say_that_about_the_deposit(self):
+        assessed = _assess(evidence={**self._STATED, **_deposit(_sample("GSM1"))})
+        assert assessed["S2.B"]["outcome"] == UNDETERMINED
+
+
+class TestTheSamplesAreCountedAgainstTheRecords:
+    """S4.B: the held records reconciled to the counts the paper states, per experiment."""
+
+    def test_records_that_match_the_stated_count_verify_it(self):
+        evidence = _deposit(*[_sample(f"GSM{i}") for i in range(1, 55)])
+        assessed = _assess(evidence=evidence)
+        assert assessed["S4.B"]["outcome"] == VERIFIED
+        assert "54" in assessed["S4.B"]["rationale"]
+
+    def test_records_that_contradict_the_stated_count_fail_it_with_both_numbers(self):
+        evidence = _deposit(*[_sample(f"GSM{i}") for i in range(1, 9)])
+        assessed = _assess(evidence=evidence)
+        assert assessed["S4.B"]["outcome"] == FAILED
+        assert "8" in assessed["S4.B"]["rationale"] and "54" in assessed["S4.B"]["rationale"]
+        assert assessed["S4.B"]["impact"]
+
+    def test_a_series_wide_count_is_not_substituted_for_an_experiments_count(self):
+        """Section 3.2: a whole-series count is not an experiment's count. Where the paper states a
+        per-experiment count and the deposit holds a whole series, the two are not compared."""
+        plan = {
+            **_PLAN,
+            "reported_experiments": [
+                {**_EXPERIMENTS[0], "sample_count": 12},
+                {**_EXPERIMENTS[0], "id": "e2", "sample_count": 42},
+            ],
+        }
+        assessed = _assess(plan=plan, evidence=_deposit(*[_sample(f"GSM{i}") for i in range(1, 55)]))
+        assert assessed["S4.B"]["outcome"] == UNDETERMINED
+        assert assessed["S4.B"]["next_action"]
+
+    def test_no_records_leaves_it_untested(self):
+        assert _assess()["S4.B"]["outcome"] == UNDETERMINED
+
+
+class TestReplicationIsDescribedBeforeItIsChecked:
+    """S5.A: what the paper says about biological versus technical replication and pairing."""
+
+    def test_a_stated_replication_design_verifies_it(self):
+        evidence = {
+            "paper_statements": {
+                "replication": {"value": "three biological replicates per condition", "quote": "n = 3 embryos"}
+            }
+        }
+        assessed = _assess(evidence=evidence)
+        assert assessed["S5.A"]["outcome"] == VERIFIED
+        assert "biological" in assessed["S5.A"]["rationale"]
+
+    def test_records_that_key_a_replicate_establish_it_where_the_paper_did_not(self):
+        evidence = _deposit(
+            _sample("GSM1", characteristics={"replicate": "1"}),
+            _sample("GSM2", characteristics={"replicate": "2"}),
+        )
+        assessed = _assess(evidence=evidence)
+        assert assessed["S5.A"]["outcome"] == VERIFIED
+
+    def test_nothing_about_replication_leaves_it_untested(self):
+        assert _assess()["S5.A"]["outcome"] == UNDETERMINED
+
+    def test_a_sample_name_pattern_is_never_read_as_a_donor(self):
+        """Section 3.4: do not infer donor identity from a sample-name pattern."""
+        evidence = _deposit(_sample("GSM1", title="Donor3_rep1"), _sample("GSM2", title="Donor3_rep2"))
+        assert _assess(evidence=evidence)["S5.A"]["outcome"] == UNDETERMINED
+
+
+class TestGroupAssignmentIsNotHeldByTheComputeInput:
+    """plan_8_5 section 3.4: a documentary check does not wait for an analysis input to be chosen."""
+
+    def test_records_that_carry_the_papers_arms_support_the_assignment(self):
+        evidence = _deposit(
+            _sample("GSM1", characteristics={"condition": "XX whole embryos"}),
+            _sample("GSM2", characteristics={"condition": "XY whole embryos"}),
+        )
+        assessed = _assess(evidence=evidence)
+        assert assessed["S3.B"]["outcome"] == VERIFIED
+        assert "GSE1" in assessed["S3.B"]["scope"]
+
+    def test_records_that_carry_none_of_them_leave_it_open(self):
+        evidence = _deposit(_sample("GSM1", characteristics={"condition": "something else"}))
+        assert _assess(evidence=evidence)["S3.B"]["outcome"] == UNDETERMINED
+
+    def test_an_accepted_mapping_still_establishes_it(self):
+        evidence = {
+            "input_choice": {
+                "mapping_validation": {
+                    "status": "accepted",
+                    "reasons": [],
+                    "units_unresolved": [],
+                    "mapping": [{"column": "c1", "arm": "test"}, {"column": "c2", "arm": "reference"}],
+                }
+            }
+        }
+        assert _assess(evidence=evidence)["S3.B"]["outcome"] == VERIFIED

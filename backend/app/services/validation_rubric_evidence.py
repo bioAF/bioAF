@@ -60,25 +60,10 @@ _COMPUTATIONAL_LIMIT = (
 CAPABILITY_LIMITS: dict[str, dict] = {
     # plan_8_4 milestone B: the static code obligations are implemented (`validation_code_checks`).
     # What remains a standing limit is the two that cannot be established by reading source at all.
+    # plan_8_5 gate 2: the sample obligations (S2, S4.B, S5.A) are implemented and are no longer here.
     "C1.B": {"reason": _CODE_LIMIT},
     "C2.B": {"reason": _CODE_LIMIT},
     **{f"E{n}.{o}": {"reason": _EXPERIMENTAL_LIMIT} for n in range(1, 4) for o in "AB"},
-    "S2.A": {
-        "reason": "bioAF holds no implemented check that the paper identifies the tissue, cell type or "
-        "material of the relevant samples apart from the conditions its contrasts name."
-    },
-    "S2.B": {
-        "reason": "bioAF holds no implemented check that independent records agree with the paper's "
-        "stated sample identities, with legitimate differences between experiments accounted for."
-    },
-    "S4.B": {
-        "reason": "bioAF holds no implemented check reconciling held sample records to the counts and "
-        "inclusion rules each experiment states."
-    },
-    "S5.A": {
-        "reason": "bioAF holds no implemented check that the paper describes biological versus technical "
-        "replication and its pairing or blocking requirements."
-    },
     "M1.A": {"reason": _COMPUTATIONAL_LIMIT},
     "M1.B": {"reason": _COMPUTATIONAL_LIMIT},
     "M3.A": {"reason": _COMPUTATIONAL_LIMIT},
@@ -112,8 +97,10 @@ def assess_evidence(
     contrasts = [c for c in (plan.get("differential_design") or {}).get("contrasts") or [] if isinstance(c, dict)]
     assessed: dict[str, dict] = {}
     assessed.update(_species(experiments, plan, evidence))
+    assessed.update(_material(evidence))
     assessed.update(_groups(contrasts, evidence))
-    assessed.update(_accounting(experiments, plan))
+    assessed.update(_accounting(experiments, plan, evidence))
+    assessed.update(_replication(evidence))
     assessed.update(_units(evidence))
     assessed.update(_references(experiments))
     assessed.update(_decision_criteria(claims or [], contrasts, plan.get("differential_design")))
@@ -300,49 +287,140 @@ def _groups(contrasts: list[dict], evidence: dict) -> dict:
             scope=scope,
             next_action="record the arms at the gate, or read the paper's design again",
         )
+    return {"S3.A": defined, "S3.B": _arm_support(contrasts, evidence)}
+
+
+def _conditions(contrast: dict) -> list[str]:
+    return [
+        str(contrast.get(key) or "").strip()
+        for key in ("test_condition", "reference_condition")
+        if str(contrast.get(key) or "").strip()
+    ]
+
+
+def _arm_support(contrasts: list[dict], evidence: dict) -> dict:
+    """S3.B: whether independent records support assigning samples to the arms the paper defines.
+
+    plan_8_5 section 3.4: this is a documentary check, and it does not wait for an analysis input to
+    be selected. The deposit's own per-sample characteristics answer it where they name the paper's
+    arms; an accepted column mapping answers it too, and neither is a prerequisite for the other.
+    """
+    pairs = deposit_samples(evidence)
+    wanted = {_norm_organism(c) for contrast in contrasts for c in _conditions(contrast)} - {""}
+    if pairs and wanted:
+        described = {
+            _norm_organism(value)
+            for _d, sample in pairs
+            for value in list((sample.get("characteristics") or {}).values())
+            + list(sample.get("unkeyed") or [])
+            + [sample.get("title"), sample.get("source_name")]
+            if str(value or "").strip()
+        }
+        matched = sorted(
+            arm for arm in wanted if any(arm in value or value in arm for value in described if value)
+        )
+        if matched:
+            return _finding(
+                VERIFIED,
+                f"the deposit's own sample records name the arms the paper compares ({', '.join(matched)})",
+                scope=_records_scope(pairs),
+            )
     validation = ((evidence.get("input_choice") or {}).get("mapping_validation")) or {}
     rows = [r for r in validation.get("mapping") or [] if isinstance(r, dict)]
     if validation.get("status") == "accepted" and rows:
-        supported = _finding(
+        return _finding(
             VERIFIED,
             f"every one of the {len(rows)} chosen columns was placed in an arm the sample records support",
             scope=f"{len(rows)} columns of the chosen input",
             method=HUMAN_ASSISTED if validation.get("assistance") else MEASUREMENT,
         )
-    elif validation:
-        supported = _open(
+    if pairs and wanted:
+        return _open(
+            "the deposit's sample records name none of the arms the paper compares",
+            scope=_records_scope(pairs),
+            next_action="check which deposited samples belong to each arm, and record what says so",
+        )
+    if validation:
+        return _open(
             "; ".join(validation.get("reasons") or []) or "the sample mapping is not accepted",
             scope="the chosen input's columns",
             next_action="resolve the mapping's refusals at the gate",
         )
-    else:
-        supported = _open(
-            "no analysis input was chosen, so no sample records were placed against the paper's arms",
-            scope="no chosen input",
-            next_action="acquire an analysis input and map its columns",
-        )
-    return {"S3.A": defined, "S3.B": supported}
+    return _open(
+        "; ".join(sorted(set(record_limitations(evidence))))
+        or "bioAF holds no sample records placing this paper's samples in its arms",
+        scope=_records_scope(pairs) if pairs else "no sample record bioAF could read",
+        next_action="acquire the deposit's sample metadata, or an analysis input and map its columns",
+    )
 
 
-def _accounting(experiments: list[dict], plan: dict) -> dict:
+def _accounting(experiments: list[dict], plan: dict, evidence: dict) -> dict:
+    """S4: the counts the paper states, and the records reconciled to them."""
     count = (plan.get("sample_sheet") or {}).get("sample_count")
     per_experiment = [e.get("sample_count") for e in experiments]
     stated = [c for c in [*per_experiment, count] if isinstance(c, int) and c > 0]
     if stated:
-        return {
-            "S4.A": _finding(
-                VERIFIED,
-                f"the paper states how many samples the study used ({stated[0]})",
-                scope="the study's stated sample counts",
-            )
-        }
-    return {
-        "S4.A": _open(
+        states = _finding(
+            VERIFIED,
+            f"the paper states how many samples the study used ({stated[0]})",
+            scope="the study's stated sample counts",
+        )
+    else:
+        states = _open(
             "bioAF's read of the paper recorded no sample count for the relevant experiments",
             scope="the study's stated sample counts",
             next_action="read the paper's samples section again",
         )
-    }
+    return {"S4.A": states, "S4.B": _reconciled_counts(experiments, plan, evidence, stated)}
+
+
+def _reconciled_counts(experiments: list[dict], plan: dict, evidence: dict, stated: list[int]) -> dict:
+    """S4.B: the held sample records against the count the paper states for the same set.
+
+    plan_8_5 section 3.4 and plan_8_4 section 3.2: a whole-series count is never substituted for an
+    experiment's count. Where the paper states a count per experiment and the deposit holds one
+    series covering several of them, the two are not describing the same set, and comparing them
+    would manufacture a contradiction out of a scope difference.
+    """
+    pairs = deposit_samples(evidence)
+    if not pairs:
+        return _open(
+            "; ".join(sorted(set(record_limitations(evidence))))
+            or "bioAF holds no sample records to reconcile the paper's counts against",
+            scope="no sample record bioAF could read",
+            next_action="acquire the deposit's sample metadata",
+        )
+    scope = _records_scope(pairs)
+    if not stated:
+        return _open(
+            "bioAF's read of the paper recorded no sample count to reconcile these records against",
+            scope=scope,
+            next_action="read the paper's samples section again",
+        )
+    per_experiment = [c for c in (e.get("sample_count") for e in experiments) if isinstance(c, int) and c > 0]
+    deposits = {str(deposit.get("accession") or "") for deposit, _s in pairs}
+    if len(per_experiment) > 1 and len(deposits) < len(per_experiment):
+        return _open(
+            f"the paper states a count for each of {len(per_experiment)} experiments and the records bioAF "
+            f"holds are {len(deposits)} deposit(s); a whole-series count is not an experiment's count",
+            scope=scope,
+            next_action="establish which deposited samples belong to each reported experiment",
+        )
+    held = len(pairs)
+    expected = stated[0]
+    if held == expected:
+        return _finding(
+            VERIFIED,
+            f"the {held} sample records bioAF holds reconcile to the {expected} the paper states",
+            scope=scope,
+        )
+    return _finding(
+        FAILED,
+        f"the paper states {expected} sample(s) and the deposit holds {held} record(s) for the same set",
+        scope=scope,
+        impact="one of the two is not describing the set that was analysed, so a count taken from either is unsafe",
+        evidence={"stated": expected, "held": held, "deposits": sorted(deposits)},
+    )
 
 
 def _units(evidence: dict) -> dict:
@@ -370,6 +448,130 @@ def _units(evidence: dict) -> dict:
             "no analysis input was chosen, so no column's biological unit was established",
             scope="no chosen input",
             next_action="acquire an analysis input and map its columns",
+        )
+    }
+
+
+def paper_statement(evidence: dict, name: str) -> dict | None:
+    """One fact about the paper that bioAF recorded, with how it was established, or None.
+
+    plan_8_5 sections 3.4 and 3.6: a documentary obligation about what the PAPER says needs the
+    paper's own statement, and bioAF's extraction fills no field for the material a sample came from
+    or the replication a design used. They are recorded here by the documentary stage, with the
+    passage each rests on, and an obligation that has no statement stays untested rather than being
+    guessed at from a sample's name.
+    """
+    statements = evidence.get("paper_statements")
+    statement = (statements or {}).get(name) if isinstance(statements, dict) else None
+    if not isinstance(statement, dict) or not str(statement.get("value") or "").strip():
+        return None
+    return statement
+
+
+def _material(evidence: dict) -> dict:
+    """S2: the tissue, cell type or material the samples came from, as stated and as deposited."""
+    statement = paper_statement(evidence, "sample_material")
+    if statement is None:
+        stated = _open(
+            "bioAF holds no statement of the tissue, cell type or material the relevant samples came from",
+            scope="the paper's samples section",
+            next_action="read the paper's samples section for the material it used",
+        )
+    else:
+        stated = _finding(
+            VERIFIED,
+            f"the paper identifies the material its relevant samples came from: {statement['value']}",
+            scope=str(statement.get("scope") or "the paper's samples section"),
+            method=str(statement.get("method") or MEASUREMENT),
+            evidence={"quote": statement.get("quote"), "citations": statement.get("citations")},
+        )
+    pairs = deposit_samples(evidence)
+    named = sorted({str(s.get("source_name") or "").strip() for _d, s in pairs} - {""})
+    if statement is None or not pairs:
+        limitations = record_limitations(evidence)
+        return {
+            "S2.A": stated,
+            "S2.B": _open(
+                "; ".join(sorted(set(limitations)))
+                or (
+                    "bioAF holds no sample records to compare the paper's stated material with"
+                    if not pairs
+                    else "bioAF holds no statement of the paper's material to compare the records with"
+                ),
+                scope=_records_scope(pairs) if pairs else "no sample record bioAF could read",
+                next_action="acquire the deposit's sample metadata, and record the material the paper states",
+            ),
+        }
+    if not named:
+        return {
+            "S2.A": stated,
+            "S2.B": _open(
+                "every sample record bioAF read names no material",
+                scope=_records_scope(pairs),
+                next_action="read the deposit's sample metadata again",
+            ),
+        }
+    wanted = _norm_organism(statement["value"])
+    agreeing = [name for name in named if _norm_organism(name) in wanted or wanted in _norm_organism(name)]
+    if agreeing:
+        return {
+            "S2.A": stated,
+            "S2.B": _finding(
+                VERIFIED,
+                f"the deposit's own sample records name {', '.join(sorted(set(agreeing)))}, the material the "
+                "paper states",
+                scope=_records_scope(pairs),
+            ),
+        }
+    # A paper's experiments legitimately use different materials, and a name is not a taxonomy, so a
+    # difference here is a question for the reader rather than a contradiction bioAF established.
+    return {
+        "S2.A": stated,
+        "S2.B": _open(
+            f"the paper states {statement['value']} and the deposit's records name {', '.join(named)}; bioAF "
+            "cannot establish from the names alone whether these are the same material or two experiments",
+            scope=_records_scope(pairs),
+            next_action="check which experiment these records belong to, and what material the paper used for it",
+        ),
+    }
+
+
+def _replication(evidence: dict) -> dict:
+    """S5.A: whether the replication and pairing the design needs is described anywhere held."""
+    statement = paper_statement(evidence, "replication")
+    if statement is not None:
+        return {
+            "S5.A": _finding(
+                VERIFIED,
+                f"the paper describes its replication: {statement['value']}",
+                scope=str(statement.get("scope") or "the paper's design"),
+                method=str(statement.get("method") or MEASUREMENT),
+                evidence={"quote": statement.get("quote"), "citations": statement.get("citations")},
+            )
+        }
+    pairs = deposit_samples(evidence)
+    keyed = sorted(
+        {
+            key
+            for _d, sample in pairs
+            for key in (sample.get("characteristics") or {})
+            if key in ("replicate", "biological replicate", "technical replicate", "batch", "pair", "donor", "subject")
+        }
+    )
+    if keyed:
+        return {
+            "S5.A": _finding(
+                VERIFIED,
+                f"the deposited records describe the design's units, keyed as {', '.join(keyed)}",
+                scope=_records_scope(pairs),
+            )
+        }
+    return {
+        "S5.A": _open(
+            "nothing bioAF holds describes biological versus technical replication, or the pairing this "
+            "design requires",
+            scope=_records_scope(pairs) if pairs else "the paper's design",
+            next_action="read the paper's design for its replication, and record the passage it rests on",
         )
     }
 
