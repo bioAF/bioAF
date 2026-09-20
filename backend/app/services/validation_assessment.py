@@ -525,7 +525,9 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # plan_8_5 section 3.6: the documentary obligations a bounded model review can settle, judged on
     # the passages this study holds. It is cached on those passages, so the stage running again costs
     # nothing, and a provider failure leaves only the obligations it was asked about grey.
-    cfg = await llm_provider_config_service.get_for_feature(session, study.organization_id, FEATURE_LITERATURE_VALIDATION)
+    cfg = await llm_provider_config_service.get_for_feature(
+        session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+    )
     await refresh_documentary_review(
         session,
         study,
@@ -609,7 +611,7 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     assessment do not reroll a paper's score. Never raises: a provider failure leaves the obligations
     it was asked about grey, with what would settle them, and everything already established stands.
     """
-    from app.services.validation_documentary_review import passages_for, review_documents
+    from app.services.validation_documentary_review import JUDGED_LEAVES, packets_for, review_documents
 
     evidence = dict(study.evidence_json or {})
     plan = await active_plan(session, study)
@@ -618,17 +620,20 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
         from app.services.validation_report_summary import plan_projection
 
         plan_dict = plan_projection(plan)
-    passages = passages_for(evidence=evidence, plan=plan_dict)
+    # plan_8_6 section 3: one packet per obligation, built from this study's section-aware index,
+    # so a computational question is not answered from the culture protocol and an absence finding
+    # rests on what the packet actually covered.
+    packets = packets_for(evidence=evidence, plan=plan_dict, leaves=JUDGED_LEAVES)
     identity = {
-        "passages": [p["id"] for p in passages],
-        "fingerprint": _passage_fingerprint(passages),
+        "packets": {leaf: [p["id"] for p in packet["passages"]] for leaf, packet in packets.items()},
+        "fingerprint": _passage_fingerprint(packets),
         "model": model,
     }
     held = evidence.get("rubric_judgments") if isinstance(evidence.get("rubric_judgments"), dict) else None
     if held is not None and held.get("inputs") == identity:
         return held
     try:
-        reviewed = await review_documents(passages=passages, client=client, model=model or "", api_key=api_key)
+        reviewed = await review_documents(packets=packets, client=client, model=model or "", api_key=api_key)
     except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
         logger.warning("study %s: the documentary review could not run: %s", study.id, exc)
         return held or {"judgments": {}, "failures": [], "reason": str(exc)}
@@ -639,16 +644,32 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     return record
 
 
-def _passage_fingerprint(passages: list[dict]) -> str:
-    """What the assessor was shown, as one hash, so a changed passage is judged again."""
+def _passage_fingerprint(packets: dict[str, dict]) -> str:
+    """What each obligation was shown, as one hash, so a changed packet is judged again.
+
+    plan_8_6 section 11: keyed per obligation, so one changed source reruns the checks that depend
+    on it rather than every judgment this study has ever made. The contract, the review and the
+    packet versions are in it, because a corrected question is a different question.
+    """
     import hashlib
     import json as _json
 
     from app.services.validation_documentary_review import REVIEW_VERSION
+    from app.services.validation_evidence_packets import PACKET_VERSION
     from app.services.validation_judgment import CONTRACT_VERSION
 
     payload = _json.dumps(
-        {"passages": passages, "contract": CONTRACT_VERSION, "review": REVIEW_VERSION}, sort_keys=True, default=str
+        {
+            "packets": {
+                leaf: {"passages": packet.get("passages"), "coverage": packet.get("coverage")}
+                for leaf, packet in sorted((packets or {}).items())
+            },
+            "contract": CONTRACT_VERSION,
+            "review": REVIEW_VERSION,
+            "packet": PACKET_VERSION,
+        },
+        sort_keys=True,
+        default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

@@ -125,7 +125,19 @@ class TestItNeverAsksWithoutEvidence:
 
 class TestTheEvidenceTheAssessorIsGiven:
     """plan_8_5 section 3.6: the paper's own passages, the deposit's own records, and the tools the
-    analysis declares. Each one carries where it came from, so a citation can be resolved."""
+    analysis declares. Each one carries where it came from, so a citation can be resolved.
+
+    plan_8_6 section 3 changed WHICH obligation is given which of them: `passages_for` handed every
+    obligation one flat list, and `packets_for` builds one packet per obligation. The promises below
+    are the same; what they are asserted through is the packet each obligation is actually asked on.
+    """
+
+    _LEAVES = ("M1.A", "S2.B", "M5.A")
+
+    def _packets(self):
+        from app.services.validation_documentary_review import packets_for
+
+        return packets_for(evidence=self._EVIDENCE, plan=self._PLAN, leaves=self._LEAVES)
 
     _EVIDENCE = {
         "paper_passages": {
@@ -156,34 +168,28 @@ class TestTheEvidenceTheAssessorIsGiven:
     _PLAN = {"method": {"assay": "bulk RNA-seq", "tools": ["STAR", "RSEM", "DESeq2"]}}
 
     def test_the_methods_sentences_are_passages_with_their_source(self):
-        from app.services.validation_documentary_review import passages_for
-
-        rows = passages_for(evidence=self._EVIDENCE, plan=self._PLAN)
-        methods = [p for p in rows if p["source"] == "the paper's methods"]
+        rows = self._packets()["M1.A"]["passages"]
+        methods = [p for p in rows if "methods" in p["source"]]
         assert methods and "STAR" in methods[0]["text"]
         assert all(p["id"] for p in rows)
 
     def test_a_deposited_sample_record_is_its_own_citable_passage(self):
-        from app.services.validation_documentary_review import passages_for
-
-        rows = passages_for(evidence=self._EVIDENCE, plan=self._PLAN)
+        rows = self._packets()["S2.B"]["passages"]
         records = [p for p in rows if "GSM1" in p["id"]]
         assert records and "HepG2" in records[0]["text"]
 
     def test_the_tools_the_analysis_declares_travel_with_it(self):
-        from app.services.validation_documentary_review import passages_for
-
-        rows = passages_for(evidence=self._EVIDENCE, plan=self._PLAN)
+        rows = self._packets()["M5.A"]["passages"]
         tools = [p for p in rows if p["source"] == "the tools this analysis declares"]
         assert tools and "DESeq2" in tools[0]["text"]
 
     def test_every_passage_id_is_unique_so_a_citation_resolves_to_one_thing(self):
-        from app.services.validation_documentary_review import passages_for
-
-        rows = passages_for(evidence=self._EVIDENCE, plan=self._PLAN)
-        assert len({p["id"] for p in rows}) == len(rows)
+        for packet in self._packets().values():
+            rows = packet["passages"]
+            assert len({p["id"] for p in rows}) == len(rows)
 
     def test_a_study_holding_nothing_yields_no_passages(self):
-        from app.services.validation_documentary_review import passages_for
+        from app.services.validation_documentary_review import packets_for
 
-        assert passages_for(evidence={}, plan={}) == []
+        packets = packets_for(evidence={}, plan={}, leaves=self._LEAVES)
+        assert all(packet["passages"] == [] for packet in packets.values())

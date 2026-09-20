@@ -28,8 +28,11 @@ class _Client:
 
     async def submit(self, *, prompt, payload, model=None, api_key=None, max_tokens=None, **kw):
         self.calls += 1
+        # plan_8_6 section 3: the evidence ids come from the packet this obligation was given, so a
+        # citation is read out of what was actually supplied rather than hard-coded.
+        cited = payload.partition("Evidence:\n")[2].partition("[")[2].partition("]")[0]
         return json.dumps(
-            {"outcome": self.outcome, "rationale": "the methods state it", "citations": ["m1"], "confidence": 0.7}
+            {"outcome": self.outcome, "rationale": "the methods state it", "citations": [cited], "confidence": 0.7}
         )
 
 
@@ -50,7 +53,7 @@ class TestItRunsWhereTheEvidenceIs:
         await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
         held = study.evidence_json["rubric_judgments"]
         assert held["judgments"]["E1.A"]["outcome"] == "verified"
-        assert held["inputs"]["passages"], "the evidence the judgments rest on is identified"
+        assert held["inputs"]["packets"], "the evidence each obligation was judged on is identified"
         assert held["model"] == "m"
         assert client.calls > 0
 
