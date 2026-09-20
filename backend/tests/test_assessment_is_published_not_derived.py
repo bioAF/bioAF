@@ -133,3 +133,42 @@ class TestAStudyWithNoFindingInventoryStillPublishesItsScore:
         assert record["evidence_score"]["score"] >= 0
         assert record["assessment_revision"] == 1
         assert "outcomes" not in record, "there is no finding inventory to score findings from"
+
+
+class TestTheSnapshotFollowsTheAssessmentItCites:
+    """plan_8_5 section 3.2: a new assessment revision is a new snapshot.
+
+    The snapshot is deduplicated on the provenance its v2 outcomes were read from, and the rubric
+    reads evidence that provenance never covered (the source a code inspection extracted, the
+    deposit's sample records). So a study could settle new obligations, publish the assessment, and
+    keep serving the score it had: the record was cut from a revision it no longer cites.
+    """
+
+    @pytest.mark.asyncio
+    async def test_newly_inspected_code_reaches_the_published_score(self, session, admin_user):
+        study = await ValidationStudyService.create_study(
+            session, admin_user.organization_id, admin_user.id, source_accession="GSE1", intended_route="deposit"
+        )
+        study.state = "acquiring_processed"
+        await session.flush()
+        from app.services.validation_assessment import publish_assessment
+
+        await publish_assessment(session, study, reason="first")
+        before = study.evidence_json["scorecard_record"]["evidence_score"]["score"]
+        study.evidence_json = {
+            **study.evidence_json,
+            "code_inspection": {
+                "sources": [
+                    {
+                        "path": "analysis.R",
+                        "language": "r",
+                        "text": 'library(DESeq2)\ncounts <- read.table("counts.tab")\nprint(nrow(counts))\n',
+                    }
+                ]
+            },
+        }
+        await session.flush()
+        await publish_assessment(session, study, reason="the code was read")
+        after = study.evidence_json["scorecard_record"]["evidence_score"]["score"]
+        assert after > before, "the code this study now holds earns its obligations on the published record"
+        assert study.evidence_json["scorecard_record"]["assessment_revision"] == 2

@@ -560,9 +560,15 @@ def projection_provenance(
     from app.services.validation_table_binding import BINDING_VERSION
 
     inventory = plan.get("finding_inventory") or {}
+    held = (evidence or {}).get("rubric_assessment")
     return {
         "rubric_version": inventory.get("rubric_version") or 1,
         "inventory_revision": inventory.get("revision"),
+        # plan_8_5 section 3.2: the v3 half of this record is cut from an assessment revision, and the
+        # rubric reads evidence this provenance never covered (source a code inspection extracted, the
+        # deposit's own sample records). Without the revision here, a study could settle new
+        # obligations, publish the assessment, and go on serving the score it had.
+        "assessment_revision": (held or {}).get("revision") if isinstance(held, dict) else None,
         "analysis_selection_revision": _current_selection_revision(plan),
         "binding_version": BINDING_VERSION,
         "decoder_version": DECODER_VERSION,
