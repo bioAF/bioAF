@@ -89,33 +89,63 @@ def _flat(node) -> str:
 _METHODS_TITLE = re.compile(r"\b(?:methods?|materials)\b", re.IGNORECASE)
 _CAPTION_LABEL = re.compile(r"^\s*(?P<kind>fig(?:ure)?|table)\.?\s*(?P<n>S?\d+)", re.IGNORECASE)
 
+# plan_8_6 section 3: which kind of section a title names, so the evidence index can prefer the
+# article's own structure over headings guessed from flattened prose. An unrecognised title is
+# `other`, which is indexed and rankable: a paper that writes its methods under a heading nobody
+# recognises still has its methods read.
+_SECTION_KINDS: tuple[tuple[str, re.Pattern], ...] = (
+    ("methods", re.compile(r"\b(?:methods?|materials|experimental procedures?|star methods)\b", re.I)),
+    ("results", re.compile(r"\bresults?\b|\bfindings\b", re.I)),
+    ("introduction", re.compile(r"\bintroduction\b|\bbackground\b", re.I)),
+    ("discussion", re.compile(r"\bdiscussion\b|\bconclusions?\b|\blimitations?\b", re.I)),
+    ("abstract", re.compile(r"\babstract\b|\bsummary\b", re.I)),
+    (
+        "availability",
+        re.compile(r"\b(?:data|code|software|materials?)\s+availability\b|\baccession\b|\bresource sharing\b", re.I),
+    ),
+)
+
+
+def _section_kind(sec_type: str, title: str, inherited: str | None) -> str:
+    """The kind of a section, from its ``sec-type`` or its title, else the kind it sits inside."""
+    for kind, pattern in _SECTION_KINDS:
+        if pattern.search(sec_type or "") or pattern.search(title or ""):
+            return kind
+    return inherited or "other"
+
 
 def _jats_sections(xml_text: str) -> dict:
-    """The methods paragraphs and the figure and table captions of a JATS article, addressable.
+    """A JATS article's sections, addressable: its methods paragraphs, its legends and its structure.
 
-    ``{"methods": [paragraph, ...], "captions": {"figure 1": "...", "table 2": "..."}}``. A methods
-    section is one whose ``sec-type`` or title says so; its nested sections' paragraphs are its own.
+    ``{"methods": [paragraph, ...], "captions": {"figure 1": "...", "table 2": "..."},
+    "index": [{"title", "kind", "paragraphs"}, ...]}``. A methods section is one whose ``sec-type``
+    or title says so; its nested sections' paragraphs are its own.
+
+    plan_8_6 section 3: ``index`` is the whole document by section, in document order, each entry
+    keeping the title the authors wrote. A methods subsection ("Bulk RNA-seq analysis") is its own
+    entry, so a passage can say which part of the methods it came from, and the results, the
+    discussion and the availability statement are no longer left to be guessed from flattened prose.
     Never raises: unparseable markup has no sections.
     """
-    empty: dict = {"methods": [], "captions": {}}
+    empty: dict = {"methods": [], "captions": {}, "index": []}
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return empty
     methods: list[str] = []
-    for sec in root.iter():
-        if _local_name(sec.tag) != "sec":
-            continue
+    index: list[dict] = []
+    for sec, inherited in _walk_sections(root):
         sec_type = next((v for k, v in sec.attrib.items() if k.endswith("sec-type")), "") or ""
         title = next((c for c in sec if _local_name(c.tag) == "title"), None)
         title_text = _flat(title) if title is not None else ""
-        if not (_METHODS_TITLE.search(sec_type) or _METHODS_TITLE.search(title_text)):
-            continue
-        for para in sec.iter():
-            if _local_name(para.tag) == "p":
-                text = _flat(para)
-                if text and text not in methods:
-                    methods.append(text)
+        kind = _section_kind(sec_type, title_text, inherited)
+        # Only this section's OWN paragraphs: a nested subsection is its own entry, so a paragraph
+        # is never indexed twice under a parent and a child heading.
+        own = [text for text in (_flat(p) for p in _own_paragraphs(sec)) if text]
+        if own:
+            index.append({"title": title_text, "kind": kind, "paragraphs": own})
+        if kind == "methods":
+            methods.extend(text for text in own if text not in methods)
     captions: dict[str, str] = {}
     for node in root.iter():
         if _local_name(node.tag) not in ("fig", "table-wrap"):
@@ -125,8 +155,35 @@ def _jats_sections(xml_text: str) -> dict:
         match = _CAPTION_LABEL.match(_flat(label)) if label is not None else None
         if match and caption is not None:
             kind = "table" if match.group("kind").lower().startswith("t") else "figure"
-            captions.setdefault(f"{kind} {match.group('n').lower()}", _flat(caption))
-    return {"methods": methods, "captions": captions}
+            key = f"{kind} {match.group('n').lower()}"
+            if key not in captions:
+                captions[key] = _flat(caption)
+                index.append({"title": key, "kind": "legend", "paragraphs": [captions[key]]})
+    return {"methods": methods, "captions": captions, "index": index}
+
+
+def _walk_sections(root, node=None, inherited: str | None = None):
+    """Every ``sec`` in document order, each with the kind of the section it sits inside."""
+    parent = root if node is None else node
+    for child in parent:
+        if _local_name(child.tag) != "sec":
+            yield from _walk_sections(root, child, inherited)
+            continue
+        sec_type = next((v for k, v in child.attrib.items() if k.endswith("sec-type")), "") or ""
+        title = next((c for c in child if _local_name(c.tag) == "title"), None)
+        kind = _section_kind(sec_type, _flat(title) if title is not None else "", inherited)
+        yield child, inherited
+        yield from _walk_sections(root, child, kind)
+
+
+def _own_paragraphs(sec):
+    """A section's own ``p`` elements: not a nested subsection's, and not a figure legend's."""
+    for child in sec:
+        name = _local_name(child.tag)
+        if name == "p":
+            yield child
+        elif name not in ("sec", "fig", "table-wrap"):
+            yield from _own_paragraphs(child)
 
 
 async def _resolve_open_access_id(
