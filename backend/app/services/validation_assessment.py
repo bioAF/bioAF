@@ -521,7 +521,26 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     evidence["assessment"] = record
     study.evidence_json = evidence
     await session.flush()
+    # plan_8_5 sections 3.1 and 3.2: settle the rubric's obligations from what this study now holds,
+    # and publish them. The score follows the evidence as it settles; it does not wait for approval,
+    # for an acquired input or for a finding inventory, and nothing is judged at render time.
+    await publish_assessment(session, study, reason="the assessment stage ran")
     return record
+
+
+async def publish_assessment(session: AsyncSession, study, *, reason: str) -> None:
+    """Record this study's rubric assessment and the score snapshot that cites it. Never raises.
+
+    ``record_scorecard`` settles the obligations first, so this is the one call a production path
+    makes when its evidence has moved: the assessment and the snapshot that cites it are published
+    together, and neither can be left behind by the other.
+    """
+    from app.services.validation_report_summary import record_scorecard
+
+    try:
+        await record_scorecard(session, study, reason=reason, force=False)
+    except Exception as exc:  # noqa: BLE001 - publishing a score cannot fail the stage that earned it
+        logger.warning("study %s: the rubric assessment could not be published: %s", study.id, exc)
 
 
 def _deposit_identity(deposits: list[dict]) -> list[str]:

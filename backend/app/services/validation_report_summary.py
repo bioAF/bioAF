@@ -355,35 +355,87 @@ def summarize(
 FINDINGS_TITLE = "Findings Scorecard"
 
 
-def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None, claims, attempt) -> dict:
-    """plan_8_4: the v3 card for one study, from the evidence it already holds.
+def evidence_scorecard(*, study: dict, evidence: dict | None, plan: dict | None, claims, attempt) -> dict | None:
+    """plan_8_5 section 3.2: the v3 card this study PUBLISHED, or None where it published none.
 
-    It never waits for the finding inventory, an approval, an acquired input or a completed model
-    call: those govern which RESULT points can be allocated, and a study with none of them still has
-    code, metadata and methods obligations whose outcomes are established or honestly grey.
+    It judges nothing. The obligations are settled by ``record_evidence_assessment`` where the
+    evidence is gathered, and this projects the stored revision, so the report, the list and both
+    exports show one answer and a refresh cannot rescore old evidence.
 
-    The v2 scorecard is untouched. Rendering this calls no model, reads no network and writes nothing.
+    None for a study assessed before rubric v3 existed: a historical report carries no v3 card and
+    reads exactly as it did, rather than gaining a number bioAF never established for it.
     """
-    from app.services.validation_rubric_evidence import CAPABILITY_LIMITS, assess_evidence, profile_for
-    from app.services.validation_rubric_v3 import allocate, evidence_card, result_allocation
+    from app.services.validation_rubric_assessment import card_from
+
+    held = (evidence or {}).get("rubric_assessment")
+    if not isinstance(held, dict) or not held.get("outcomes"):
+        return None
+    return card_from(held, reproduction=_reproduction_statement(attempt, evidence or {}))
+
+
+def assessment_for(*, study: dict, evidence: dict | None, plan: dict | None, targets, checks=None) -> dict:
+    """The assessment this study's held evidence supports, as a record, without persisting it.
+
+    One place builds the claims the obligations are read from, so what the recorder stores and what
+    the report shows cannot come from two different readings of the same study.
+    """
+    from app.services.validation_rubric_assessment import build_assessment
 
     plan = plan or {}
     evidence = evidence or {}
+    claims, _counts = _claims([t for t in targets or [] if isinstance(t, dict)], plan, evidence, checks=checks)
     inventory = plan.get("finding_inventory") if isinstance(plan.get("finding_inventory"), dict) else None
-    workflows = [
-        e.get("workflow") for e in plan.get("reported_experiments") or [] if isinstance(e, dict) and e.get("workflow")
-    ]
-    # plan_8_4 section 3.5: what this paper's own methods have a counterpart for. Never what bioAF can run.
-    profile = profile_for(plan=plan)
-    leaves = allocate(profile, results=result_allocation(inventory, workflows=workflows))
-    assessed = assess_evidence(plan=plan, evidence=evidence, claims=claims, inventory=inventory)
-    return evidence_card(
-        profile=profile,
-        leaves=leaves,
-        assessed=assessed,
-        reproduction=_reproduction_statement(attempt, evidence),
-        capability_limits=CAPABILITY_LIMITS,
-    )
+    return build_assessment(plan=plan, evidence=evidence, claims=claims, inventory=inventory)
+
+
+async def record_evidence_assessment(session, study, *, reason: str) -> dict:
+    """plan_8_5 sections 3.1 and 3.2: settle this study's rubric obligations and publish them.
+
+    Called where the evidence is gathered and whenever a contributing check settles, never from a
+    render. An unchanged study keeps the revision it published; a changed one publishes the next
+    revision and keeps its predecessor with the reason it was superseded, so withdrawn credit stays
+    inspectable instead of vanishing.
+    """
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+    from app.services.validation_assessment import active_plan
+    from app.services.validation_rubric_assessment import assessment_inputs, reusable
+
+    plan = await active_plan(session, study)
+    plan_dict = plan_projection(plan) if plan is not None else {}
+    targets = []
+    if plan is not None:
+        rows = (
+            (
+                await session.execute(
+                    select(ComparisonTarget)
+                    .where(ComparisonTarget.reproduction_plan_id == plan.id)
+                    .order_by(ComparisonTarget.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        targets = [target_dict(t) for t in rows]
+    evidence = dict(study.evidence_json or {})
+    checks = await _plan_checks(session, study, plan) if plan is not None else None
+    claims, _counts = _claims(targets, plan_dict, evidence, checks=checks)
+    inventory = plan_dict.get("finding_inventory") if isinstance(plan_dict.get("finding_inventory"), dict) else None
+    inputs = assessment_inputs(plan=plan_dict, evidence=evidence, claims=claims, inventory=inventory)
+    held = evidence.get("rubric_assessment") if isinstance(evidence.get("rubric_assessment"), dict) else None
+    if reusable(held, inputs):
+        return held
+    record = assessment_for(study=study_projection(study), evidence=evidence, plan=plan_dict, targets=targets, checks=checks)
+    record["revision"] = int((held or {}).get("revision") or 0) + 1
+    if held is not None:
+        evidence["rubric_assessment_history"] = list(evidence.get("rubric_assessment_history") or []) + [
+            {**held, "superseded_at": record["at"], "superseded_because": reason}
+        ]
+    evidence["rubric_assessment"] = record
+    study.evidence_json = evidence
+    await session.flush()
+    return record
 
 
 def _reproduction_statement(attempt, evidence: dict) -> dict:
@@ -719,10 +771,77 @@ async def _plan_checks(session, study, plan) -> list[dict]:
     ]
 
 
+# plan_8_4 section 6.4: the v3 fields that travel in the versioned record, under their own name, so
+# a later change to how evidence is normalized cannot rewrite a concluded study's score and a v2
+# score of 100 is never read as a v3 score of 100.
+_EVIDENCE_SCORE_KEYS = (
+    "rubric_version",
+    "rubric_label",
+    "status",
+    "score",
+    "failed",
+    "undetermined",
+    "assessed_points",
+    "display",
+    "exact",
+    "headline",
+    "counts_label",
+    "scope",
+    "sections",
+    "profile",
+    "capability_limits",
+    "reproduction",
+    "concerns",
+    "assessment_revision",
+    "assessed_at",
+)
+
+
+def _evidence_score_fields(card: dict | None) -> dict | None:
+    return None if card is None else {key: card.get(key) for key in _EVIDENCE_SCORE_KEYS}
+
+
+def _documentary_record(study, plan, assessment: dict | None) -> dict | None:
+    """plan_8_5 section 3.1: the snapshot of a study with no scorable finding inventory.
+
+    A paper whose results bioAF cannot allocate still has code, metadata and methods obligations it
+    settled, and holding its score back until an inventory exists was the inventory deciding whether
+    documentary evidence counts. There are no v2 outcomes in this record, so nothing reads it as one.
+    """
+    from datetime import datetime, timezone
+
+    from app.services.validation_rubric_assessment import card_from
+
+    if assessment is None:
+        return None
+    evidence = dict(study.evidence_json or {})
+    projected = {**study_projection(study), "state": "classified"}
+    card = card_from(
+        assessment,
+        reproduction=_reproduction_statement(
+            reproduction_attempt(
+                evidence,
+                analysis_run_id=projected.get("analysis_run_id"),
+                data_run_id=projected.get("data_run_id"),
+            ),
+            evidence,
+        ),
+    )
+    provenance = projection_provenance(plan_projection(plan) if plan is not None else {}, evidence, [], [])
+    return {
+        "rubric_version": 3,
+        "assessment_revision": assessment.get("revision"),
+        "evidence_score": _evidence_score_fields(card),
+        "at": datetime.now(timezone.utc).isoformat(),
+        "provenance": provenance,
+        "provenance_fingerprint": provenance_fingerprint(provenance),
+    }
+
+
 async def compute_scorecard_record(session, study) -> dict | None:
     """plan_8_2 section 1.4: a concluded study's scorecard record, built from its committed evidence and
     check records, with the provenance that says what it was built from. None when there is nothing to
-    score (no plan or no inventory) or the records breach an invariant (logged)."""
+    score (no plan, no inventory and no assessment) or the records breach an invariant (logged)."""
     import logging
     from datetime import datetime, timezone
 
@@ -733,8 +852,11 @@ async def compute_scorecard_record(session, study) -> dict | None:
     from app.services.validation_scorecard import ScorecardInvariantError, build_scorecard, compact_scorecard
 
     plan = await active_plan(session, study)
+    # plan_8_5 section 3.1: a documentary score does not wait for a result inventory to exist.
+    held = (study.evidence_json or {}).get("rubric_assessment")
+    assessment = held if isinstance(held, dict) and held.get("outcomes") else None
     if plan is None or not isinstance(plan.finding_inventory_json, dict):
-        return None
+        return _documentary_record(study, plan, assessment)
     rows = (
         (
             await session.execute(
@@ -766,17 +888,13 @@ async def compute_scorecard_record(session, study) -> dict | None:
         )
     except ScorecardInvariantError:
         logging.getLogger("bioaf.validation_scorecard").exception("study %s: no scorecard record", study.id)
-        return None
+        return _documentary_record(study, plan, assessment)
     provenance = projection_provenance(plan_dict, evidence, checks, [target_dict(t) for t in rows])
-    # plan_8_4 section 6.4: the v3 numbers travel in the same versioned record, under their own name,
-    # so a later change to how evidence is normalized cannot rewrite a concluded study's score and a
-    # v2 score of 100 is never read as a v3 score of 100.
-    claims, _counts = _claims([target_dict(t) for t in rows], plan_dict, evidence, checks=checks)
     v3 = evidence_scorecard(
         study=projected,
         evidence=evidence,
         plan=plan_dict,
-        claims=claims,
+        claims=None,
         attempt=reproduction_attempt(
             evidence,
             analysis_run_id=projected.get("analysis_run_id"),
@@ -785,28 +903,10 @@ async def compute_scorecard_record(session, study) -> dict | None:
     )
     return {
         "rubric_version": plan.finding_inventory_json.get("rubric_version") or 1,
-        "evidence_score": {
-            key: v3[key]
-            for key in (
-                "rubric_version",
-                "rubric_label",
-                "status",
-                "score",
-                "failed",
-                "undetermined",
-                "assessed_points",
-                "display",
-                "exact",
-                "headline",
-                "counts_label",
-                "scope",
-                "sections",
-                "profile",
-                "capability_limits",
-                "reproduction",
-                "concerns",
-            )
-        },
+        # plan_8_5 section 3.2: the snapshot names the assessment revision it was cut from, so the
+        # score and the obligations behind it can always be put back together.
+        "assessment_revision": (assessment or {}).get("revision"),
+        "evidence_score": _evidence_score_fields(v3),
         "inventory_revision": plan.finding_inventory_json.get("revision"),
         "analysis_selection_revision": _current_selection_revision(plan_dict),
         "outcomes": outcomes,
@@ -879,7 +979,13 @@ async def record_scorecard(session, study, *, reason: str = "the study concluded
     """plan_8 section 4: store a concluding study's outcome records with what they were read from, so a
     later change to how evidence is normalized cannot rewrite its score. plan_8_2 section 1.4: called again
     whenever a contributing check or its evidence changes; the record it replaces is kept in
-    ``scorecard_history`` with the reason."""
+    ``scorecard_history`` with the reason.
+
+    plan_8_5 section 3.2: the rubric's obligations are settled here too, before the snapshot is cut, so
+    every publisher (a study concluding, a check settling, a recovery) publishes one consistent pair.
+    Settling them costs no model call and no request: it reads the evidence the study already holds.
+    """
+    await record_evidence_assessment(session, study, reason=reason)
     await publish_scorecard_record(
         session, study, await compute_scorecard_record(session, study), reason=reason, force=force
     )
@@ -2365,24 +2471,18 @@ async def compact_scorecards_for(session, studies: list) -> dict[int, dict]:
 
         compact[study.id] = {
             **compact_scorecard(card),
+            # plan_8_5 section 3.2: the SAME published revision the report projects. The list used
+            # to derive its own card, so a cell and a page could disagree about one study.
             "evidence_score": compact_evidence_score(
                 evidence_scorecard(
                     study=study_projection(study),
                     evidence=study.evidence_json,
                     plan=plan_projection(plan) if plan is not None else {},
-                    # The SAME claims the report projects. Passing none here made the list's R1 and
-                    # M4 outcomes differ from the page's, which is exactly the disagreement between
-                    # surfaces plan_8_4 section 7 forbids.
-                    claims=_claims(
-                        targets.get(plan.id, []) if plan is not None else [],
-                        plan_projection(plan) if plan is not None else {},
-                        study.evidence_json or {},
-                        checks=checks.get(plan.id, []) if plan is not None else [],
-                    )[0],
+                    claims=None,
                     attempt=reproduction_attempt(
                         study.evidence_json or {},
-                        analysis_run_id=getattr(study, "analysis_run_id", None),
-                        data_run_id=getattr(study, "data_run_id", None),
+                        analysis_run_id=study.analysis_run_id,
+                        data_run_id=study.data_run_id,
                     ),
                 )
             ),

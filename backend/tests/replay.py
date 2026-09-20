@@ -319,6 +319,36 @@ def consistency_of(evidence: dict, filename: str) -> list[dict]:
     return []
 
 
+async def replay_publish(session, restored: Restored, *, reason: str = "replayed") -> dict:
+    """Publish the restored study's rubric assessment through the production publisher.
+
+    plan_8_5 section 3.2: a report shows the assessment its study PUBLISHED, so a captured study has
+    to go through the publisher before anything renders, exactly as a live one does when its
+    assessment stage runs or a person asks for a recovery. It reads the saved evidence only: no
+    model call, no request, no compute.
+    """
+    from app.services.validation_assessment import publish_assessment
+
+    await publish_assessment(session, restored.study, reason=reason)
+    await session.flush()
+    return (restored.study.evidence_json or {}).get("rubric_assessment") or {}
+
+
+def with_assessment(evidence: dict | None, *, plan: dict | None, targets=None, checks=None) -> dict:
+    """The evidence a study holds once its rubric assessment has been published (plan_8_5 section 3.2).
+
+    The same production function the publisher uses, for tests that project a study without a
+    database. Nothing here judges anything a production caller would not.
+    """
+    from app.services.validation_report_summary import assessment_for
+
+    evidence = dict(evidence or {})
+    evidence["rubric_assessment"] = assessment_for(
+        study={}, evidence=evidence, plan=plan, targets=targets or [], checks=checks
+    )
+    return evidence
+
+
 async def replay_report(session, restored: Restored) -> dict:
     """Project the saved study exactly as the report API does."""
     from app.services.validation_report_summary import report_summary_for

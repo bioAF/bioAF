@@ -90,9 +90,13 @@ def _groff_like():
 def _summary(plan=None, targets=None, checks=None, issues=None):
     if plan is None:
         plan, targets = _groff_like()
+    # plan_8_5 section 3.2: the report projects the assessment the study published, so the production
+    # publisher runs over this evidence first, as it does for a live study.
+    from tests.replay import with_assessment
+
     return summarize(
         study={"state": "classified", "classification": "access_restricted"},
-        evidence={},
+        evidence=with_assessment({}, plan=plan, targets=targets, checks=checks),
         plan=plan,
         targets=targets,
         issues=issues or [],

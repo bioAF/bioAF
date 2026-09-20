@@ -85,6 +85,12 @@ async def _seed(session, user, *, verdicts=("agree", "agree", "agree", "agree", 
             "divergence_attribution": {},
         },
     }
+    # plan_8_5 section 3.2: a seeded study publishes its rubric assessment the way a live one does,
+    # because every surface now shows what was published rather than deriving a card while rendering.
+    # The v2 snapshot is left to the study concluding, which is what records that one.
+    from app.services.validation_report_summary import record_evidence_assessment
+
+    await record_evidence_assessment(session, study, reason="seeded")
     await session.commit()
     return study
 

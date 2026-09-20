@@ -33,9 +33,19 @@ async def _contract() -> dict:
     # Times are the one thing that differs between runs; the contract is about shape and wording.
     for entry in evidence["retrieval_ledger"]:
         entry["at"] = _FROZEN
+    # plan_8_5 section 3.2: the frontend renders the assessment a study published, so the contract's
+    # own example carries one, published by the same production function a live study uses.
+    from tests.replay import with_assessment
+
+    published = with_assessment(
+        evidence,
+        plan=_STUDY_34["reproduction_plan"],
+        targets=_STUDY_34["reproduction_plan"]["comparison_targets"],
+    )
+    published["rubric_assessment"]["at"] = _FROZEN
     groff = summarize(
         study={"state": "classified", "classification": "access_restricted"},
-        evidence=evidence,
+        evidence=published,
         plan=_STUDY_34["reproduction_plan"],
         targets=_STUDY_34["reproduction_plan"]["comparison_targets"],
         issues=[],

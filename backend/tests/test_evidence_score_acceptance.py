@@ -11,11 +11,22 @@ grey, and that nothing invents a finding, an execution or an agreement that did 
 
 import pytest
 
-from tests.replay import groff_bundle_fetcher, replay_recovery, replay_report, restore
+from tests.replay import (
+    groff_bundle_fetcher,
+    replay_publish,
+    replay_recovery,
+    replay_report,
+    restore,
+    with_assessment,
+)
 
 
 async def _restored(session, admin_user, study_id: int):
-    return await restore(session, study_id, organization_id=admin_user.organization_id, user_id=admin_user.id)
+    restored = await restore(session, study_id, organization_id=admin_user.organization_id, user_id=admin_user.id)
+    # plan_8_5 section 3.2: a report shows what the study published, so the production publisher runs
+    # over the restored evidence before anything is rendered.
+    await replay_publish(session, restored, reason="restored for acceptance")
+    return restored
 
 
 class TestGroffEarnsPointsWithoutCompletingAFinding:
@@ -205,7 +216,7 @@ class TestASuppliedScriptScoresTheCodeSection:
         }
         summary = summarize(
             study={"state": "classified", "classification": "inconclusive"},
-            evidence=evidence,
+            evidence=with_assessment(evidence, plan={}),
             plan={},
             targets=[],
             issues=[],

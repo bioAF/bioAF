@@ -11,6 +11,7 @@ v1 and v2 records keep their own semantics: a v2 score of 100 is not relabelled 
 import pytest
 
 from app.services.validation_report_summary import summarize
+from tests.replay import with_assessment
 
 _PLAN = {
     "reported_experiments": [
@@ -41,10 +42,13 @@ _PLAN = {
 
 
 def _summary(plan=None, evidence=None, targets=None):
+    # plan_8_5 section 3.2: every surface projects the assessment the study PUBLISHED, so the
+    # production publisher runs over this evidence before the report is built.
+    plan = plan if plan is not None else _PLAN
     return summarize(
         study={"state": "classified", "classification": "access_restricted"},
-        evidence=evidence or {},
-        plan=plan if plan is not None else _PLAN,
+        evidence=with_assessment(evidence or {}, plan=plan, targets=targets or []),
+        plan=plan,
         targets=targets or [],
         issues=[],
         checks=None,
@@ -290,7 +294,7 @@ class TestTheReproductionStatementSaysOnlyWhatIsEstablished:
 
         card = evidence_scorecard(
             study={"state": "classified"},
-            evidence={},
+            evidence=with_assessment({}, plan=_PLAN),
             plan=_PLAN,
             claims=[],
             attempt={"status": "attempted", "executed": ["analysis pipeline run"], "acquired": []},

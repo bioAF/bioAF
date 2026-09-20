@@ -444,7 +444,7 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
     from app.services.validation_claim_capabilities import refresh_claim_capabilities
     from app.services.validation_consistency_checks import enqueue
     from app.services.validation_provenance import current_build
-    from app.services.validation_report_summary import record_scorecard
+    from app.services.validation_report_summary import record_evidence_assessment, record_scorecard
 
     if study.state in _BUSY:
         raise RecoveryRefused("the study is being read; recover it once the read has finished")
@@ -558,8 +558,13 @@ async def run_recovery(session, study, *, user_id: int | None, preview_fingerpri
     evidence = dict(study.evidence_json or {})
     evidence["recovery_history"] = list(evidence.get("recovery_history") or []) + [entry]
     study.evidence_json = evidence
+    # plan_8_5 section 3.1: recovery is the targeted reassessment control, so it republishes this
+    # study's rubric assessment whatever its state. A study still working through its checks has
+    # documentary obligations that were settled, and they are not held back until it concludes.
     if study.state == "classified":
         await record_scorecard(session, study, reason=reason, force=True)
+    else:
+        await record_evidence_assessment(session, study, reason=reason)
     await log_action(
         session,
         user_id,
