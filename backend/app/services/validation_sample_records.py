@@ -49,11 +49,7 @@ async def collect_sample_records(*, deposits: list[dict] | None, fetcher=None, l
     One entry per deposit bioAF could open, carrying its samples, the URL they were read from, when,
     and the checksum of the bytes. One limitation per deposit it could not, carrying why.
     """
-    from app.services.literature.accession_manifest_service import (
-        _http_fetch_text,
-        geo_series_matrix_url,
-        parse_sample_records,
-    )
+    from app.services.literature.accession_manifest_service import _http_fetch_text, geo_series_matrix_url
 
     fetch = fetcher or _http_fetch_text
     held: list[dict] = []
@@ -89,31 +85,71 @@ async def collect_sample_records(*, deposits: list[dict] | None, fetcher=None, l
                 }
             )
             continue
-        try:
-            text = await fetch(url)
-        except Exception as exc:  # noqa: BLE001 - an unreachable deposit is a limitation, never a verdict
-            logger.info("sample records for %s could not be read: %s", accession, exc)
-            limitations.append(
-                {
-                    "accession": accession,
-                    "archive": archive,
-                    "source": url,
-                    "reason": f"{accession}'s sample records could not be read from {url}",
-                }
-            )
+        samples, sources, digest, reason = await _matrices(accession, url, fetch)
+        if reason is not None:
+            limitations.append({"accession": accession, "archive": archive, "source": url, "reason": reason})
             continue
-        samples = parse_sample_records(text)
         held.append(
             {
                 "accession": accession,
                 "archive": archive,
                 "provenance": deposit.get("provenance"),
                 "scoped": bool(deposit.get("scoped")),
-                "source": url,
+                "source": sources[0],
+                "sources": sources,
                 "at": _now_iso(),
-                "sha256": hashlib.sha256((text or "").encode("utf-8", errors="replace")).hexdigest(),
+                "sha256": digest,
                 "sample_count": len(samples),
                 "samples": samples,
             }
         )
     return {"deposits": held, "limitations": limitations}
+
+
+async def _matrices(accession: str, url: str, fetch) -> tuple[list[dict], list[str], str, str | None]:
+    """Every sample record of one GEO series: ``(samples, sources, sha256, reason)``.
+
+    plan_8_5 section 3.4, from the live run on study 64. GEO publishes the combined
+    ``GSE<n>_series_matrix.txt.gz`` only for a series that used ONE instrument. GSE144396 spans two
+    (SAMD1's ChIP-seq and its RNA-seq), so the single URL bioAF built is a 404 and the whole deposit
+    read as unreachable. The folder is what says which matrices exist, which is the same fallback
+    `AccessionManifestService` has always used for the sample manifest.
+    """
+    from app.services.literature.accession_manifest_service import (
+        geo_matrix_dir_url,
+        parse_matrix_directory,
+        parse_sample_records,
+    )
+
+    texts: list[tuple[str, str]] = []
+    try:
+        texts.append((url, await fetch(url)))
+    except Exception as exc:  # noqa: BLE001 - one missing combined matrix is not an unreachable deposit
+        logger.info("no combined series matrix for %s (%s); listing the folder", accession, exc)
+        folder = geo_matrix_dir_url(accession)
+        try:
+            listing = await fetch(folder) if folder else ""
+        except Exception as listing_exc:  # noqa: BLE001 - now the deposit really is unreachable
+            logger.info("sample records for %s could not be read: %s", accession, listing_exc)
+            return [], [], "", f"{accession}'s sample records could not be read from {url}"
+        names = parse_matrix_directory(listing)
+        if not names:
+            return [], [], "", f"GEO has published no series matrix for {accession}"
+        for name in names:
+            try:
+                texts.append((f"{folder}{name}", await fetch(f"{folder}{name}")))
+            except Exception as one:  # noqa: BLE001 - a platform bioAF could not read is said so
+                logger.info("one matrix of %s could not be read: %s", accession, one)
+    if not texts:
+        return [], [], "", f"{accession}'s sample records could not be read from {url}"
+    samples: list[dict] = []
+    seen: set[str] = set()
+    for _source, text in texts:
+        for sample in parse_sample_records(text):
+            key = str(sample.get("accession") or "") or f"{len(samples)}"
+            if key in seen:
+                continue
+            seen.add(key)
+            samples.append(sample)
+    digest = hashlib.sha256("".join(text for _s, text in texts).encode("utf-8", errors="replace")).hexdigest()
+    return samples, [source for source, _t in texts], digest, None
