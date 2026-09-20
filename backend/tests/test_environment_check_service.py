@@ -262,3 +262,96 @@ class TestTheControlAPersonUses:
         )
         assert response.status_code == 409
         assert "isolated identity" in response.json()["detail"]
+
+
+class TestAskingAgainSettlesRatherThanDuplicates:
+    """Found by using it on the demo: requesting a check while one was already running launched a
+    second pod. The control a person has is the same one that completes the loop."""
+
+    @pytest.fixture(autouse=True)
+    def _outputs(self, monkeypatch):
+        async def _read(session, cs):
+            return [{"path": "/outputs/transcript.txt", "text": getattr(self, "_transcript", "")}]
+
+        monkeypatch.setattr(
+            "app.services.validation_driver_service.ValidationDriverService._read_code_outputs",
+            staticmethod(_read),
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_check_already_running_is_polled_rather_than_launched_again(
+        self, session, admin_user, monkeypatch
+    ):
+        launches = []
+
+        async def _execute(session_, **kw):
+            launches.append(kw)
+            return SimpleNamespace(id=90 + len(launches))
+
+        _patch(monkeypatch)
+        monkeypatch.setattr(
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code", _execute
+        )
+        study = await _study(session, admin_user)
+        first = await request_environment_check(session, study, user_id=admin_user.id)
+
+        held = SimpleNamespace(id=first["session_id"], status="running", failure_message=None)
+
+        async def _get(session_, session_id):
+            return held
+
+        async def _poll(session_, cs):
+            return cs
+
+        monkeypatch.setattr("app.services.validation_environment_check._compute_session", _get)
+        monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
+        again = await request_environment_check(session, study, user_id=admin_user.id)
+        assert len(launches) == 1, "the pod already running is the one that answers"
+        assert again["session_id"] == first["session_id"]
+        assert again["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_asking_again_after_it_finished_lands_what_it_established(
+        self, session, admin_user, monkeypatch
+    ):
+        _patch(monkeypatch)
+        study = await _study(session, admin_user)
+        await request_environment_check(session, study, user_id=admin_user.id)
+        self._transcript = "BIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"
+        held = SimpleNamespace(id=77, status="completed", failure_message=None)
+
+        async def _get(session_, session_id):
+            return held
+
+        async def _poll(session_, cs):
+            return cs
+
+        monkeypatch.setattr("app.services.validation_environment_check._compute_session", _get)
+        monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
+        record = await request_environment_check(session, study, user_id=admin_user.id)
+        assert record["status"] == "settled"
+        assert study.evidence_json["code_inspection"]["execution"]["load"]["status"] == "succeeded"
+
+    @pytest.mark.asyncio
+    async def test_a_settled_check_can_be_asked_for_again_as_a_fresh_run(self, session, admin_user, monkeypatch):
+        """A person who fixed the environment is entitled to re-run it."""
+        launches = []
+
+        async def _execute(session_, **kw):
+            launches.append(kw)
+            return SimpleNamespace(id=95 + len(launches))
+
+        _patch(monkeypatch)
+        monkeypatch.setattr(
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code", _execute
+        )
+        study = await _study(session, admin_user)
+        await request_environment_check(session, study, user_id=admin_user.id)
+        evidence = dict(study.evidence_json)
+        inspection = dict(evidence["code_inspection"])
+        inspection["environment_check"] = {**inspection["environment_check"], "status": "settled"}
+        evidence["code_inspection"] = inspection
+        study.evidence_json = evidence
+        await session.flush()
+        await request_environment_check(session, study, user_id=admin_user.id)
+        assert len(launches) == 2
