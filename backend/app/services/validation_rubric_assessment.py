@@ -30,7 +30,18 @@ CHECKER_VERSION = 1
 
 # What the checks actually read. Evidence outside this cannot change an outcome, so it cannot
 # invalidate one either: a re-fetched artifact must not cost every study a fresh set of judgments.
-EVIDENCE_KEYS = ("precompute_checks", "sample_records", "input_choice", "code_inspection", "methods_cutoffs")
+EVIDENCE_KEYS = (
+    "precompute_checks",
+    "sample_records",
+    "input_choice",
+    "code_inspection",
+    "methods_cutoffs",
+    # plan_8_5 section 3.6, caught live on study 62: seventeen judgments were made and accepted and
+    # the score did not move, because the answers an assessor produced were not in the key that
+    # decides whether the assessment is rebuilt. An obligation's evidence is an input to it.
+    "rubric_judgments",
+    "paper_statements",
+)
 PLAN_KEYS = ("reported_experiments", "differential_design", "sample_sheet", "finding_inventory")
 CLAIM_KEYS = ("index", "consistency", "predicate_detail")
 
