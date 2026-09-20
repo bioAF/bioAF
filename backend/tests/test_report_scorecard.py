@@ -23,9 +23,13 @@ _P = [{"kind": "pvalue", "operator": "<", "value": 0.01}]
 
 
 def _summary(*, plan, targets, evidence=None, state="classified", classification="inconclusive"):
+    # plan_8_5 section 3.2: a report shows the assessment its study published, so these examples
+    # publish one first, through the same production function a live study uses.
+    from tests.replay import with_assessment
+
     return summarize(
         study={"state": state, "classification": classification},
-        evidence=evidence or {},
+        evidence=with_assessment(evidence or {}, plan=plan, targets=targets),
         plan=plan,
         targets=targets,
         issues=[],

@@ -27,16 +27,16 @@ _FROZEN = "2026-09-10T13:09:18+00:00"
 
 async def _contract() -> dict:
     from app.services.validation_report_summary import enum_labels, summarize
+
+    # plan_8_5 section 3.2: the frontend renders the assessment a study published, so the contract's
+    # own examples carry one, published by the same production function a live study uses.
+    from tests.replay import with_assessment
     from tests.test_report_summary import _STUDY_34, _groff_failed_evidence
 
     evidence = await _groff_failed_evidence()
     # Times are the one thing that differs between runs; the contract is about shape and wording.
     for entry in evidence["retrieval_ledger"]:
         entry["at"] = _FROZEN
-    # plan_8_5 section 3.2: the frontend renders the assessment a study published, so the contract's
-    # own example carries one, published by the same production function a live study uses.
-    from tests.replay import with_assessment
-
     published = with_assessment(
         evidence,
         plan=_STUDY_34["reproduction_plan"],
@@ -101,17 +101,21 @@ async def _contract() -> dict:
     )
 
     groff_plan, groff_targets = _groff_plan_and_targets(evidence)
+    groff_published = with_assessment(evidence, plan=groff_plan, targets=groff_targets)
+    groff_published["rubric_assessment"]["at"] = _FROZEN
     groff_scored = summarize(
         study={"state": "classified", "classification": "access_restricted"},
-        evidence=evidence,
+        evidence=groff_published,
         plan=groff_plan,
         targets=groff_targets,
         issues=[],
     )
     samd1_plan, samd1_targets, samd1_evidence = _samd1_like()
+    samd1_published = with_assessment(samd1_evidence, plan=samd1_plan, targets=samd1_targets)
+    samd1_published["rubric_assessment"]["at"] = _FROZEN
     samd1 = summarize(
         study={"state": "classified", "classification": "inconclusive"},
-        evidence=samd1_evidence,
+        evidence=samd1_published,
         plan=samd1_plan,
         targets=samd1_targets,
         issues=[],
@@ -297,8 +301,9 @@ async def _contract() -> dict:
         targets=[],
         issues=[],
     )
-    return json.loads(
-        json.dumps(
+    return _without_times(
+        json.loads(
+            json.dumps(
             {
                 "enums": enum_labels(),
                 "outside_methods": outside_methods,
@@ -324,8 +329,22 @@ async def _contract() -> dict:
                 "failed_read_legacy": failed_read_legacy,
                 "failed_read": failed_read,
             }
+            )
         )
     )
+
+
+# plan_8_5 section 3.2: an assessment records when it was made, and the contract is about shape and
+# wording. A timestamp would make it differ on every run and say nothing about what the frontend renders.
+_TIMES = ("assessed_at",)
+
+
+def _without_times(value):
+    if isinstance(value, dict):
+        return {k: (_FROZEN if k in _TIMES and v else _without_times(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_without_times(v) for v in value]
+    return value
 
 
 def _stage2_resources() -> list[dict]:

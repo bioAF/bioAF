@@ -5,8 +5,6 @@ parse only Python. What changes here is the parser and the reading behind it, no
 same obligations, the same rules about what may fail, applied to the language the paper used.
 """
 
-import pytest
-
 from app.services.validation_code_checks import assess_code
 
 _GOOD = {
