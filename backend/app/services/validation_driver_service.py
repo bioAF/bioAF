@@ -696,12 +696,22 @@ class ValidationDriverService:
         evidence["supplements"] = text.supplements
         if text.pmcid:
             evidence["pmcid"] = text.pmcid
-        if text.sections is not None:
-            # plan_8_2 section 3.1: the methods sentences that define a differential test's cutoff, verbatim.
-            # A claim that states no cutoff inherits one only from a sentence covering its experiment.
-            from app.services.validation_methods_cutoffs import record as record_methods
+        # plan_8_6 section 3: the paper's text by section, kept once per source revision while the
+        # text is in hand. It is what every obligation's evidence packet is selected from, and it is
+        # what gives a paper that did not come from Europe PMC any methods at all.
+        from app.services.validation_evidence_index import build_index, methods_paragraphs
 
-            evidence["methods_cutoffs"] = record_methods((text.sections or {}).get("methods"), source=text.source)
+        index = build_index(full_text, sections=text.sections, source=text.source)
+        evidence["paper_index"] = index
+        # plan_8_2 section 3.1: the methods sentences that define a differential test's cutoff, verbatim.
+        # A claim that states no cutoff inherits one only from a sentence covering its experiment.
+        # plan_8_6 section 3 item 4: read from the index, so a study whose text came from the Library
+        # or from a paste is no longer silently exempt from M2 and M4.
+        from app.services.validation_methods_cutoffs import record as record_methods
+
+        paragraphs = methods_paragraphs(index) or (text.sections or {}).get("methods")
+        if paragraphs:
+            evidence["methods_cutoffs"] = record_methods(paragraphs, source=text.source)
         evidence["scanned_identifiers"] = scan_identifiers(full_text)
         if isinstance(evidence.get("scorecard_record"), dict):
             # plan_8_1 section 1.4: a re-read supersedes the plan, and the score recorded from it is history.
