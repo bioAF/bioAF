@@ -21,6 +21,11 @@ obligations untested.
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
+
+logger = logging.getLogger("bioaf.validation_environment_check")
+
 # The runtimes bioAF can offer for a bounded environment check, and what each one is asked to do.
 RUNTIMES = {
     "python": {"runtime": "python:3.12-slim", "action": "import every module the source imports, and nothing else"},
@@ -81,6 +86,158 @@ def environment_check_request(*, sources: list[dict] | None, manifests: list[dic
     }
 
 
+# What the check prints, so a transcript can be read back into an outcome. A marker rather than a
+# parse of free text: the pod's own stderr and a package's warnings share that stream.
+LOAD_MARKER = "BIOAF_LOAD"
+RESOLVE_MARKER = "BIOAF_RESOLVE"
+
+
+def _python_check(modules: list[str]) -> str:
+    """Import each module on its own, so a failure names ONE of them."""
+    return (
+        "import importlib, sys\n"
+        f"modules = {sorted(modules)!r}\n"
+        "failed = []\n"
+        "for name in modules:\n"
+        "    try:\n"
+        "        importlib.import_module(name)\n"
+        f"        print('{LOAD_MARKER} ' + name + ' ok', flush=True)\n"
+        "    except BaseException as exc:\n"
+        "        failed.append(name)\n"
+        f"        print('{LOAD_MARKER} ' + name + ' failed: ' + str(exc), flush=True)\n"
+        f"print('{RESOLVE_MARKER} ' + ('failed: ' + ', '.join(failed) if failed else 'ok'), flush=True)\n"
+        "sys.exit(1 if failed else 0)\n"
+    )
+
+
+def _r_check(packages: list[str]) -> str:
+    """Attach each package on its own. ``requireNamespace`` loads without attaching, which is the
+    narrower thing to ask and still answers whether the environment holds it."""
+    return (
+        f"packages <- c({', '.join(repr(p) for p in sorted(packages))})\n"
+        "failed <- character(0)\n"
+        "for (name in packages) {\n"
+        "  ok <- requireNamespace(name, quietly = TRUE)\n"
+        "  if (ok) {\n"
+        f"    cat('{LOAD_MARKER} ', name, ' ok\\n', sep = '')\n"
+        "  } else {\n"
+        "    failed <- c(failed, name)\n"
+        f"    cat('{LOAD_MARKER} ', name, ' failed: not installed\\n', sep = '')\n"
+        "  }\n"
+        "}\n"
+        f"cat('{RESOLVE_MARKER} ', if (length(failed)) paste0('failed: ', paste(failed, collapse = ', ')) "
+        "else 'ok', '\\n', sep = '')\n"
+        "quit(status = if (length(failed)) 1 else 0)\n"
+    )
+
+
+def _required(sources: list[dict], language: str) -> list[str]:
+    """What this analysis requires, read from its own source and nothing else."""
+    if language == "python":
+        import ast
+
+        modules: set[str] = set()
+        for source in sources:
+            try:
+                tree = ast.parse(str(source.get("text") or ""))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules |= {alias.name.split(".")[0] for alias in node.names}
+                elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    modules.add(node.module.split(".")[0])
+        return sorted(modules)
+    from app.services.r_parser import read_r
+
+    packages: set[str] = set()
+    for source in sources:
+        found = read_r(str(source.get("text") or ""))
+        packages |= set(found["packages"]) | set(found["namespaced"])
+    return sorted(packages)
+
+
+def check_script(*, sources: list[dict] | None, manifests: list[dict] | None) -> str:
+    """The script the isolated run executes: load what the source requires, and nothing else.
+
+    It never runs the paper's own script. Loading a module executes that module's top level, which is
+    what makes this an isolated run at all, but running the analysis is a different question with a
+    different cost and a different approval.
+    """
+    request = environment_check_request(sources=sources, manifests=manifests)
+    supplied = [s for s in sources or [] if str(s.get("language") or "").lower() == request["language"]]
+    required = _required(supplied, request["language"])
+    return _python_check(required) if request["language"] == "python" else _r_check(required)
+
+
+_ENTRY_POINT = {"python": "bioaf_environment_check.py", "r": "bioaf_environment_check.R"}
+
+
+async def stage_environment_check(*, sources, manifests, storage, bucket: str, prefix: str) -> dict:
+    """Put the sources, their manifests and the check where the isolated run can read them.
+
+    Only what it was given: the paper's own files under their own names, and one check script beside
+    them. Returns ``{"code_uri", "entry_point", "language", "files"}``.
+    """
+    request = environment_check_request(sources=sources, manifests=manifests)
+    entry_point = _ENTRY_POINT[request["language"]]
+    written: list[str] = []
+    for row in [*(sources or []), *(manifests or [])]:
+        name = str(row.get("path") or "").rsplit("/", 1)[-1]
+        if not name:
+            continue
+        await storage.write_text(
+            storage.build_uri(bucket, f"{prefix}/{name}"), str(row.get("text") or ""), content_type="text/plain"
+        )
+        written.append(name)
+    uri = storage.build_uri(bucket, f"{prefix}/{entry_point}")
+    await storage.write_text(uri, check_script(sources=sources, manifests=manifests), content_type="text/plain")
+    return {
+        "code_uri": storage.build_uri(bucket, f"{prefix}/"),
+        "entry_point": entry_point,
+        "language": request["language"],
+        "files": [*written, entry_point],
+        "request": request,
+    }
+
+
+def outcome_from_run(*, exit_code: int | None, transcript: str, environment: str, ref: str) -> dict:
+    """What an isolated run established, read from its own markers.
+
+    plan_8_4 section 3.4: a run that said nothing establishes NOTHING. A pod killed for memory, a
+    timeout, an image that could not start are all bioAF's limitations, and reading them as a paper
+    whose code will not load is exactly the confusion this rubric exists to prevent.
+    """
+    lines = [line.strip() for line in (transcript or "").splitlines() if line.strip()]
+    loads = [line for line in lines if line.startswith(LOAD_MARKER)]
+    resolves = [line for line in lines if line.startswith(RESOLVE_MARKER)]
+    if not loads and not resolves:
+        return {}
+    found: dict = {}
+    broken = [line[len(LOAD_MARKER) :].strip() for line in loads if " failed:" in line]
+    if broken:
+        found["load"] = {
+            "status": "failed",
+            "reason": "; ".join(broken),
+            "environment": environment,
+            "ref": ref,
+        }
+    elif loads and exit_code == 0:
+        found["load"] = {"status": "succeeded", "environment": environment, "ref": ref}
+    for line in resolves:
+        answer = line[len(RESOLVE_MARKER) :].strip()
+        if answer.startswith("failed"):
+            found["dependency_resolution"] = {
+                "status": "failed",
+                "reason": answer.partition(":")[2].strip() or answer,
+                "environment": environment,
+                "ref": ref,
+            }
+        elif answer == "ok" and exit_code == 0:
+            found["dependency_resolution"] = {"status": "succeeded", "environment": environment, "ref": ref}
+    return found
+
+
 def record_environment_check(evidence: dict, *, result: dict) -> dict:
     """Land an isolated check's result where C1.B and C2.B read it, keeping everything else held.
 
@@ -96,3 +253,134 @@ def record_environment_check(evidence: dict, *, result: dict) -> dict:
     inspection["execution"] = execution
     evidence["code_inspection"] = inspection
     return execution
+
+
+# ---- the run a person approves ---------------------------------------------------------------------
+#
+# plan_8_5 section 3.5. The isolation was never the missing part: `execute_fetched_code` already runs
+# code fetched from a paper's authors under plan_7 step 16a's identity, in its own namespace, holding
+# no project-level role. What had no caller was the check that settles C1.B and C2.B.
+
+
+def get_storage_adapter():
+    """Indirected so a test can stage without a bucket, and so this module names its own dependency."""
+    from app.adapters.registry import get_storage_adapter as adapter
+
+    return adapter()
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _sources_of(study) -> tuple[list[dict], list[dict]]:
+    inspection = (study.evidence_json or {}).get("code_inspection") or {}
+    sources = [s for s in inspection.get("sources") or [] if isinstance(s, dict)]
+    manifests = [m for m in inspection.get("manifests") or [] if isinstance(m, dict)]
+    return sources, manifests
+
+
+async def request_environment_check(session, study, *, user_id: int) -> dict:
+    """Stage this study's source and submit the environment check under the isolated identity.
+
+    Raises ``EnvironmentCheckRefused`` where there is nothing to check, no runtime for it, or no
+    isolated identity on this install. The last one is deliberate: borrowing another identity is the
+    exposure that identity exists to end.
+    """
+    from app.services.notebook_execution_service import NotebookExecutionService
+    from app.services.untrusted_execution import UNCONFIGURED_MESSAGE, untrusted_identity
+
+    sources, manifests = _sources_of(study)
+    request = environment_check_request(sources=sources, manifests=manifests)
+    identity = await untrusted_identity(session)
+    if identity is None:
+        raise EnvironmentCheckRefused(UNCONFIGURED_MESSAGE)
+    staged = await stage_environment_check(
+        sources=sources,
+        manifests=manifests,
+        storage=get_storage_adapter(),
+        bucket=identity.bucket,
+        prefix=f"{identity.prefix_for(study.id)}/environment-check",
+    )
+    compute = await NotebookExecutionService.execute_fetched_code(
+        session,
+        org_id=study.organization_id,
+        user_id=user_id,
+        code_uri=staged["code_uri"],
+        entry_point=staged["entry_point"],
+        arguments="",
+        input_file_ids=[],
+        experiment_id=getattr(study, "experiment_id", None),
+    )
+    record = {
+        "status": "running",
+        "session_id": compute.id,
+        "language": staged["language"],
+        "runtime": request["runtime"],
+        "files": staged["files"],
+        "establishes": request["establishes"],
+        "limits": request["limits"],
+        "requested_by": user_id,
+        "at": _now_iso(),
+    }
+    evidence = dict(study.evidence_json or {})
+    inspection = dict(evidence.get("code_inspection") or {})
+    inspection["environment_check"] = record
+    evidence["code_inspection"] = inspection
+    study.evidence_json = evidence
+    await session.flush()
+    return record
+
+
+async def _compute_session(session, session_id: int):
+    from app.models.compute_session import ComputeSession
+
+    return await session.get(ComputeSession, session_id)
+
+
+async def settle_environment_check(session, study) -> dict:
+    """Read a submitted check's result and land what it established, or nothing.
+
+    plan_8_4 section 3.4: a run that said nothing establishes NOTHING. A pod killed for memory, a
+    timeout and an image that could not start are bioAF's limitations, and reading any of them as a
+    paper whose code will not load is the confusion this rubric exists to prevent.
+    """
+    from app.services.notebook_execution_service import NotebookExecutionService
+
+    evidence = dict(study.evidence_json or {})
+    inspection = dict(evidence.get("code_inspection") or {})
+    record = dict(inspection.get("environment_check") or {})
+    if not record or record.get("status") not in ("running", None):
+        return record
+    compute = await _compute_session(session, record.get("session_id"))
+    if compute is None:
+        return record
+    try:
+        compute = await NotebookExecutionService.poll_execution(session, compute)
+    except Exception as exc:  # noqa: BLE001 - polling a run cannot fail the study it belongs to
+        logger.warning("study %s: the environment check could not be polled: %s", study.id, exc)
+        return record
+    if getattr(compute, "status", None) in ("running", "pending", "starting"):
+        return record
+    transcript = str(getattr(compute, "output_log", "") or "")
+    found = outcome_from_run(
+        exit_code=getattr(compute, "exit_code", None),
+        transcript=transcript,
+        environment=record.get("runtime") or "the declared environment",
+        ref=f"compute-session-{record.get('session_id')}",
+    )
+    record["status"] = "settled" if found else "inconclusive"
+    record["settled_at"] = _now_iso()
+    if not found:
+        record["reason"] = (
+            "the isolated run ended without reporting on a single module, so it established nothing "
+            "about this paper's code"
+        )
+    inspection["environment_check"] = record
+    evidence["code_inspection"] = inspection
+    study.evidence_json = evidence
+    if found:
+        record_environment_check(evidence, result=found)
+        study.evidence_json = dict(evidence)
+    await session.flush()
+    return record
