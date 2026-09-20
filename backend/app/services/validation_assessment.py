@@ -412,7 +412,9 @@ async def refresh_code_inspection(session: AsyncSession, study, *, sources=None,
         logger.warning("study %s: the authors' code could not be resolved: %s", study.id, exc)
         return held or {}
 
-    record = {**resolution.record(), "inputs": identity, "at": _now_iso()}
+    # `staged: False` says this record holds no bytes: the execution arm re-resolves for them when
+    # it needs to stage a run, and only then.
+    record = {**resolution.record(), "inputs": identity, "at": _now_iso(), "staged": False}
     evidence["code_resolution"] = record
     from app.services.validation_code_inspection import inspect_archive
 

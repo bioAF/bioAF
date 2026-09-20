@@ -2906,10 +2906,11 @@ class ValidationDriverService:
         # fail an approval, and this retries for free on the next tick. A service nothing calls is
         # not a feature, which is the lesson step 11 exists to record.
         # plan_8_6 section 4: the assessment stage now fetches and READS the code, so a record may
-        # already exist. This arm needs the BYTES as well, to stage them for an approved run, and a
-        # record with no staged archive has none: it re-resolves for that, and nothing else.
+        # already exist. That record holds no bytes, and this arm needs them to stage a run, so a
+        # record marked `staged: False` is resolved again HERE and nothing else is. A record this
+        # arm made is never re-fetched, whether or not staging was possible on this install.
         resolved = evidence.get("code_resolution") or {}
-        if not resolved or (resolved.get("outcome") == "resolved" and not resolved.get("archive_uri")):
+        if not resolved or resolved.get("staged") is False:
             await ValidationDriverService._resolve_authors_code(session, study, evidence)
             level3 = evidence.get("level3")
 
@@ -3251,7 +3252,7 @@ class ValidationDriverService:
             fetcher=fetcher or _deposit_bytes_fetcher,
             revisions=cited_revisions(_availability_text(evidence)),
         )
-        record = resolution.record()
+        record = {**resolution.record(), "staged": True}
 
         # Step 13 recorded `accessible: not_attempted`. This is the attempt.
         capabilities = dict(evidence.get("capabilities") or {})
