@@ -54,7 +54,13 @@ class TestExclusionStatements:
         assert all(len(s) <= MAX_STATEMENT_CHARS for s in statements)
 
     def test_nothing_is_kept_from_an_empty_text(self):
-        assert paper_passages("", ["x"]) == {"claims": [{"claim_text": "x", "passage": None}], "statements": []}
+        # plan_8_5 section 3.6: the record also carries the paper's methods sentences now, and an
+        # empty text keeps none of those either.
+        assert paper_passages("", ["x"]) == {
+            "claims": [{"claim_text": "x", "passage": None}],
+            "statements": [],
+            "methods": [],
+        }
 
 
 class TestAStatementIsAboutTheAnalysedPopulation:
