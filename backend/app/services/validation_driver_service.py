@@ -157,16 +157,6 @@ def _route_unavailable_reason(route: str, capabilities: dict) -> str | None:
     return None if decision.authorizes_execution else decision.reason
 
 
-def _has_organism_source(evidence: dict) -> bool:
-    """Whether any described deposit could have declared an organism.
-
-    Only GEO is read for one, via its series matrix. Saying "the deposit declares no organism" for
-    an EGA study reported a lookup that never happened.
-    """
-    deposits = (evidence.get("capabilities") or {}).get("deposits") or []
-    return any(d.get("archive") == "geo" for d in deposits if isinstance(d, dict))
-
-
 def _named_accessions(
     study: "ValidationStudy", plan, evidence: dict | None = None, *, for_discovery: bool = False
 ) -> list[dict]:
@@ -1253,6 +1243,7 @@ class ValidationDriverService:
         evidence = dict(study.evidence_json or {})
         sample_sheet = (plan.sample_sheet_json if plan else None) or {}
         issues: list[dict] = []
+        deposit_organisms, opened_a_deposit = await ValidationDriverService._deposit_organisms(study, fetcher=fetcher)
         try:
             checks = await run_precompute_checks(
                 # The methods section is not separated out of the extraction, so the judgment reads
@@ -1262,7 +1253,7 @@ class ValidationDriverService:
                 methods_text=full_text or "",
                 samples_text=full_text or "",
                 plan_organism=sample_sheet.get("organism"),
-                deposit_organisms=await ValidationDriverService._deposit_organisms(study, fetcher=fetcher),
+                deposit_organisms=deposit_organisms,
                 paper_sample_count=sample_sheet.get("sample_count"),
                 entries=await ValidationDriverService._deposit_entries(study, fetcher=fetcher),
                 # Whatever the inventory holds so far. At read time these are named references with
@@ -1272,10 +1263,10 @@ class ValidationDriverService:
                 # handed `list_deposit` an empty accession and the check said "no deposited files were
                 # listed" beside an EGA inventory of 108 files.
                 deposits=((study.evidence_json or {}).get("capabilities") or {}).get("deposits") or [],
-                # A series matrix is the only organism declaration bioAF reads. An EGA deposit has
-                # none, and reporting that as "the deposit declares no organism" claimed we had
-                # looked at something we never queried.
-                organism_source=_has_organism_source(study.evidence_json or {}),
+                # plan_8_5 section 3.4: whether bioAF actually opened a deposit's sample records.
+                # An EGA deposit has none to open, and reporting that as "the deposit declares no
+                # organism" claimed we had looked at something we never queried.
+                organism_source=opened_a_deposit,
                 client=get_client(cfg.provider) if cfg else None,
                 model=cfg.model if cfg else "",
                 api_key=cfg.api_key if cfg else None,
@@ -1295,26 +1286,28 @@ class ValidationDriverService:
         return checks
 
     @staticmethod
-    async def _deposit_organisms(study: ValidationStudy, *, fetcher=None) -> list[str]:
-        """What the DEPOSIT says its samples are, from the series matrix. Empty when unreachable.
+    async def _deposit_organisms(study: ValidationStudy, *, fetcher=None) -> tuple[list[str], bool]:
+        """What the DEPOSIT says its samples are, and whether bioAF actually opened one.
 
         The depositor's own controlled statement, which is the same authority ``library_strategy``
         takes over a paper's prose when the two disagree.
-        """
-        from app.services.literature.accession_manifest_service import (
-            _http_fetch_text,
-            geo_series_matrix_url,
-            parse_series_organisms,
-        )
 
-        url = geo_series_matrix_url((study.source_accession or "").strip())
-        if not url:
-            return []
-        try:
-            return parse_series_organisms(await (fetcher or _http_fetch_text)(url))
-        except Exception as exc:  # noqa: BLE001 - an unreachable matrix leaves the check UNKNOWN
-            logger.info("study %s: could not read the deposit's declared organism: %s", study.id, exc)
-            return []
+        plan_8_5 section 3.4: this was one URL built from ``study.source_accession``, the accession
+        someone optionally typed into the request. A paper submitted by DOI has none, so nothing was
+        fetched and the check still reported what the deposit declares. It now reads the per-sample
+        records of every deposit the study RESOLVED, and says whether it opened any, so a lookup that
+        never happened cannot be reported as a deposit that declares nothing.
+        """
+        from app.services.validation_assessment import refresh_sample_records
+
+        held = await refresh_sample_records(None, study, fetcher=fetcher)
+        organisms: list[str] = []
+        for deposit in held.get("deposits") or []:
+            for sample in deposit.get("samples") or []:
+                organism = str(sample.get("organism") or "").strip()
+                if organism and organism not in organisms:
+                    organisms.append(organism)
+        return organisms, bool(held.get("deposits"))
 
     @staticmethod
     async def _deposit_entries(study: ValidationStudy, *, fetcher=None) -> list:

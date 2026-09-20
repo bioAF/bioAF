@@ -559,6 +559,11 @@ async def refresh_sample_records(session: AsyncSession, study, *, fetcher=None) 
 
     evidence = dict(study.evidence_json or {})
     deposits = [d for d in ((evidence.get("capabilities") or {}).get("deposits") or []) if isinstance(d, dict)]
+    requested = str(getattr(study, "source_accession", "") or "").strip()
+    if requested and not any(str(d.get("accession") or "").strip().upper() == requested.upper() for d in deposits):
+        # The requested accession is authoritative for what a run fetches, whether or not discovery
+        # has described it yet, so it is opened here too.
+        deposits = [{"accession": requested, "provenance": "requested", "scoped": True}, *deposits]
     wanted = _deposit_identity(deposits)
     held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else None
     if held is not None and held.get("deposits_seen") == wanted:
@@ -573,7 +578,9 @@ async def refresh_sample_records(session: AsyncSession, study, *, fetcher=None) 
     record = {**collected, "deposits_seen": wanted, "at": _now_iso()}
     evidence["sample_records"] = record
     study.evidence_json = evidence
-    await session.flush()
+    # The read-time caller holds no session of its own; it persists with the rest of its evidence.
+    if session is not None:
+        await session.flush()
     return record
 
 
