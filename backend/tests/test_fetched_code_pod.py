@@ -144,3 +144,46 @@ class TestTheManifestUsesIt:
         adapter = KubernetesNotebookProvider.__new__(KubernetesNotebookProvider)
         with pytest.raises(ValidationError):
             adapter._headless_command({"session_type": "headless", "session_id": 1})
+
+
+class TestThePodIsBuiltForTheNamespaceItIsSentTo:
+    """plan_7 step 16a, caught by running a real isolated check on the demo.
+
+    ``_k8s_launch_session`` sends the create request to the namespace the spec names, and the
+    manifest builder hardcoded the default into ``metadata.namespace``. Kubernetes refuses the pair:
+    "the namespace of the provided object does not match the namespace sent on the request". So
+    every untrusted run 400'd at creation, and the whole arm that runs a paper's own code could
+    never have started.
+    """
+
+    _FETCHED = {
+        "code_uri": "gs://bioaf-untrusted-x/study-3/",
+        "entry_point": "bioaf_environment_check.R",
+        "arguments": "",
+    }
+
+    def _manifest(self, spec):
+        from app.adapters.notebooks.kubernetes import KubernetesNotebookProvider
+
+        adapter = KubernetesNotebookProvider.__new__(KubernetesNotebookProvider)
+        return adapter._build_pod_manifest(
+            {"session_type": "headless", "session_id": 3, "fetched_code": self._FETCHED, **spec}
+        )
+
+    def test_an_untrusted_spec_builds_an_untrusted_pod(self):
+        manifest = self._manifest({"namespace": "bioaf-untrusted"})
+        assert manifest["metadata"]["namespace"] == "bioaf-untrusted"
+
+    def test_a_spec_naming_nothing_still_builds_a_notebook_pod(self):
+        assert self._manifest({})["metadata"]["namespace"] == "bioaf-notebooks"
+
+    def test_a_namespace_outside_the_allowlist_is_refused_the_way_the_launcher_refuses_it(self):
+        """The allowlist is the boundary; the manifest must not be a way around it."""
+        assert self._manifest({"namespace": "kube-system"})["metadata"]["namespace"] == "bioaf-notebooks"
+
+    def test_the_manifest_and_the_launcher_agree_on_which_namespace_that_is(self):
+        from app.adapters.notebooks.kubernetes import namespace_for
+
+        for requested in ("bioaf-untrusted", "bioaf-notebooks", "kube-system", None):
+            spec = {"namespace": requested} if requested else {}
+            assert self._manifest(spec)["metadata"]["namespace"] == namespace_for(spec)
