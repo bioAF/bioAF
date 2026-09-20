@@ -110,9 +110,7 @@ def _string_token(source: str, i: int, line: int, column: int) -> tuple[_Token, 
     """A quoted string, including R's raw strings (``r"(...)"``). Raises where it never closes."""
     start_line = line
     quote = source[i]
-    raw = False
     if quote in "rR" and i + 1 < len(source) and source[i + 1] in "\"'":
-        raw = True
         quote = source[i + 1]
         j = i + 2
         dashes = 0
@@ -497,9 +495,7 @@ class _Parser:
             if self.token.kind == "end":
                 raise _Refused("')' is missing from the parameter list", self.token.line, self.token.column)
             if self.token.kind != "name":
-                raise _Refused(
-                    f"{self.token.text!r} is not a parameter name", self.token.line, self.token.column
-                )
+                raise _Refused(f"{self.token.text!r} is not a parameter name", self.token.line, self.token.column)
             self.advance()
             self.skip_newlines()
             if self.token.kind == "operator" and self.token.text == "=":
@@ -604,7 +600,11 @@ def _literal(token: _Token) -> str | None:
     text = token.text
     if text[:1] in "rR":
         opening = text.index("(") if "(" in text[:4] else text.index("[") if "[" in text[:4] else -1
-        return text[opening + 1 : text.rindex(")" if opening != -1 and text[opening] == "(" else "]")] if opening != -1 else text
+        return (
+            text[opening + 1 : text.rindex(")" if opening != -1 and text[opening] == "(" else "]")]
+            if opening != -1
+            else text
+        )
     return text[1:-1].replace("\\'", "'").replace('\\"', '"')
 
 
@@ -629,7 +629,6 @@ def read_r(source: str) -> dict:
     except (_Refused, _Unreadable):
         return found
     depth = 0
-    statement_start = True
     for index, token in enumerate(tokens):
         nxt = tokens[index + 1] if index + 1 < len(tokens) else None
         if token.kind == "open":
@@ -637,8 +636,6 @@ def read_r(source: str) -> dict:
         elif token.kind == "close":
             depth = max(0, depth - 1)
         elif token.kind in ("newline", ";"):
-            if depth == 0:
-                statement_start = True
             continue
         if token.kind == "string":
             text = _literal(token)
@@ -672,7 +669,5 @@ def read_r(source: str) -> dict:
         if token.kind == "name" and nxt is not None and nxt.kind == "operator" and nxt.text in ("::", ":::"):
             if token.text not in found["namespaced"]:
                 found["namespaced"].append(token.text)
-        if token.kind not in ("newline", ";"):
-            statement_start = False
     found["namespaced"] = [p for p in found["namespaced"] if p not in found["packages"]]
     return found
