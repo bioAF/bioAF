@@ -13,6 +13,7 @@ import pytest
 
 from app.services.validation_report_summary import summarize
 from app.services.validation_rubric_v3 import FAILED, VERIFIED
+from tests.replay import with_assessment
 
 _PLAN = {
     "reported_experiments": [
@@ -73,12 +74,20 @@ _CLAIMS = [
 
 
 def _card():
-    """The card the report builds, with the claims a real study's targets would project."""
-    from app.services.validation_report_summary import evidence_scorecard
+    """The card the report builds, from the assessment this study's evidence publishes.
 
+    plan_8_5 section 3.2: the obligations are settled once and stored, and the card is that record
+    projected. The claims are the ones a real study's targets project.
+    """
+    from app.services.validation_report_summary import evidence_scorecard
+    from app.services.validation_rubric_assessment import build_assessment
+
+    assessment = build_assessment(
+        plan=_PLAN, evidence=_EVIDENCE, claims=_CLAIMS, inventory=_PLAN["finding_inventory"]
+    )
     return evidence_scorecard(
         study={"state": "classified", "classification": "discrepancy"},
-        evidence=_EVIDENCE,
+        evidence={**_EVIDENCE, "rubric_assessment": assessment},
         plan=_PLAN,
         claims=_CLAIMS,
         attempt={"status": "not_attempted"},
@@ -119,7 +128,7 @@ class TestTheNegativePointsAreRealAndNamed:
         """Section 10: a paper can have 0 verified points. Nothing rounds that into something."""
         card = summarize(
             study={"state": "classified", "classification": "discrepancy"},
-            evidence={},
+            evidence=with_assessment({}, plan={}),
             plan={},
             targets=[],
             issues=[],

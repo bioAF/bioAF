@@ -255,6 +255,9 @@ async def test_the_concluded_record_keeps_its_inventorys_version(monkeypatch):
         async def execute(self, *_a, **_k):
             return _Result()
 
+        async def flush(self):
+            """plan_8_5 section 3.2: recording the score settles the rubric's obligations first."""
+
     monkeypatch.setattr("app.services.validation_assessment.active_plan", _active_plan)
     monkeypatch.setattr(summary, "plan_projection", lambda plan: {"finding_inventory": plan.finding_inventory_json})
     study = _Study()

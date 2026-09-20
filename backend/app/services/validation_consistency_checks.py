@@ -386,6 +386,13 @@ async def run_pending(
             concluded += await _record_safe_failure(session, record_id)
         if checkpoint is not None:
             await checkpoint()
+    if concluded:
+        # plan_8_5 section 3.1: the score follows the checks as they settle. A settled comparison
+        # changes what the results and the decision-criteria obligations establish, and a reader must
+        # not have to wait for the study to conclude to see it. Publishing costs no model call.
+        from app.services.validation_assessment import publish_assessment
+
+        await publish_assessment(session, study, reason="a contributing check settled")
     return concluded
 
 

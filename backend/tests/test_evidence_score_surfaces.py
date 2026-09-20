@@ -7,6 +7,7 @@ the same score. A number that differs between two surfaces is a number nobody ca
 import pytest
 
 from app.services.validation_report_summary import summarize
+from tests.replay import with_assessment
 
 _PLAN = {
     "reported_experiments": [
@@ -34,9 +35,11 @@ _PLAN = {
 
 
 def _summary():
+    # plan_8_5 section 3.2: a surface shows the assessment the study PUBLISHED, so the production
+    # publisher runs before anything is projected.
     return summarize(
         study={"state": "classified", "classification": "access_restricted"},
-        evidence={},
+        evidence=with_assessment({}, plan=_PLAN),
         plan=_PLAN,
         targets=[],
         issues=[],
@@ -96,9 +99,10 @@ class TestTheListQueryProducesTheSameNumbers:
     @pytest.mark.asyncio
     async def test_a_listed_study_shows_the_score_its_report_shows(self, session, admin_user):
         from app.services.validation_report_summary import compact_scorecards_for, report_summary_for
-        from tests.replay import restore
+        from tests.replay import replay_publish, restore
 
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
+        await replay_publish(session, restored)
         listed = await compact_scorecards_for(session, [restored.study])
         report = await report_summary_for(session, restored.study, restored.study.organization_id)
         assert listed[restored.study.id]["evidence_score"]["headline"] == report["evidence_score"]["headline"]
@@ -112,9 +116,10 @@ class TestTheScoreIsPersistedWithItsProvenance:
     @pytest.mark.asyncio
     async def test_the_record_carries_the_exact_and_displayed_numbers(self, session, admin_user):
         from app.services.validation_report_summary import compute_scorecard_record
-        from tests.replay import restore
+        from tests.replay import replay_publish, restore
 
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
+        await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
         evidence_score = record["evidence_score"]
         assert evidence_score["rubric_version"] == 3
@@ -128,9 +133,10 @@ class TestTheScoreIsPersistedWithItsProvenance:
     @pytest.mark.asyncio
     async def test_the_stored_record_and_a_fresh_projection_agree(self, session, admin_user):
         from app.services.validation_report_summary import compute_scorecard_record, report_summary_for
-        from tests.replay import restore
+        from tests.replay import replay_publish, restore
 
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
+        await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
         report = await report_summary_for(session, restored.study, restored.study.organization_id)
         assert record["evidence_score"]["headline"] == report["evidence_score"]["headline"]
@@ -140,9 +146,10 @@ class TestTheScoreIsPersistedWithItsProvenance:
         """Section 6.4: a v2 score of 100 is not relabelled as a v3 score of 100. The two versions
         live in the same record under their own names."""
         from app.services.validation_report_summary import compute_scorecard_record
-        from tests.replay import restore
+        from tests.replay import replay_publish, restore
 
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
+        await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
         assert record["rubric_version"] != 3
         assert record["evidence_score"]["rubric_version"] == 3
