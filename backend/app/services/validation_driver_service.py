@@ -2905,7 +2905,11 @@ class ValidationDriverService:
         # network work belongs to the driver, for the reason step 11 gives: a GitHub blip must not
         # fail an approval, and this retries for free on the next tick. A service nothing calls is
         # not a feature, which is the lesson step 11 exists to record.
-        if "code_resolution" not in evidence:
+        # plan_8_6 section 4: the assessment stage now fetches and READS the code, so a record may
+        # already exist. This arm needs the BYTES as well, to stage them for an approved run, and a
+        # record with no staged archive has none: it re-resolves for that, and nothing else.
+        resolved = evidence.get("code_resolution") or {}
+        if not resolved or (resolved.get("outcome") == "resolved" and not resolved.get("archive_uri")):
             await ValidationDriverService._resolve_authors_code(session, study, evidence)
             level3 = evidence.get("level3")
 
@@ -3221,7 +3225,7 @@ class ValidationDriverService:
         answer is written back onto each capability source so the checklist can say "GitHub, exists,
         not accessible: repository is private" rather than flattening the two facts into one cell.
         """
-        from app.services.code_fetch_service import RESOLVED, resolve_code
+        from app.services.code_fetch_service import RESOLVED, cited_revisions, resolve_code
 
         plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
         sources = (plan.code_availability_json if plan else None) or []
@@ -3236,18 +3240,18 @@ class ValidationDriverService:
             for e in inventory
         ]
 
+        # plan_8_6 section 4: the revision the PAPER archived, not the repository's HEAD. Study 65
+        # cites a Software Heritage revision whose repository has moved on since, and fetching HEAD
+        # would attribute to the paper whatever the authors pushed afterwards.
+        from app.services.validation_assessment import _availability_text
+
         resolution = await resolve_code(
-            sources=sources, deposit_entries=entries, fetcher=fetcher or _deposit_bytes_fetcher
+            sources=sources,
+            deposit_entries=entries,
+            fetcher=fetcher or _deposit_bytes_fetcher,
+            revisions=cited_revisions(_availability_text(evidence)),
         )
-        record = {
-            "outcome": resolution.outcome,
-            "kind": resolution.kind,
-            "url": resolution.url,
-            "commit_sha": resolution.commit_sha,
-            "files": resolution.files,
-            "reason": resolution.reason,
-            "attempts": resolution.attempts,
-        }
+        record = resolution.record()
 
         # Step 13 recorded `accessible: not_attempted`. This is the attempt.
         capabilities = dict(evidence.get("capabilities") or {})

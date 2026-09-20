@@ -63,6 +63,70 @@ _DEFINITE_ABSENCE = ("404", "403", "not found", "gone", "410", "unauthorized", "
 _GITHUB_REPO_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s#?]+)", re.IGNORECASE)
 _GITLAB_REPO_RE = re.compile(r"gitlab\.com/([^\s#?]+?)/([^/\s#?]+)", re.IGNORECASE)
 
+# plan_8_6 section 4: the revision a paper ARCHIVED, which is not the repository's HEAD.
+#
+# Study 65 cites `swh:1:rev:3c650290779db376c4d1f3a14960b08b17ae5561` beside its repository, and
+# that repository's HEAD is a later commit. Fetching HEAD and calling it the published code would
+# attribute to the paper whatever the authors pushed afterwards.
+#
+# A Software Heritage revision id IS the git commit id, so it resolves against the repository host
+# directly. Anything that merely looks like forty hex characters is not a revision: a commit has to
+# be named as one.
+_SWHID_RE = re.compile(r"\bswh:1:rev:([0-9a-f]{40})\b", re.IGNORECASE)
+_COMMIT_RE = re.compile(r"\b(?:commit|revision|rev\.?|sha)\s*:?\s*([0-9a-f]{7,40})\b", re.IGNORECASE)
+_CONTEXT_CHARS = 160
+
+SWH_REVISION = "swh_revision"
+COMMIT = "commit"
+
+
+def cited_revisions(text: str | None) -> list[dict]:
+    """Every code revision the paper names, with the words around it. Never raises.
+
+    ``{"kind", "value", "raw", "context"}``. The context is what decides WHICH repository a revision
+    belongs to: a paper citing an archived revision of a tool it used has not pinned its own code.
+    """
+    body = " ".join((text or "").split())
+    found: list[dict] = []
+    seen: set[str] = set()
+    for pattern, kind in ((_SWHID_RE, SWH_REVISION), (_COMMIT_RE, COMMIT)):
+        for match in pattern.finditer(body):
+            value = match.group(1).lower()
+            if value in seen:
+                continue
+            seen.add(value)
+            start = max(0, match.start() - _CONTEXT_CHARS)
+            found.append(
+                {
+                    "kind": kind,
+                    "value": value,
+                    "raw": match.group(0),
+                    "context": body[start : match.end() + _CONTEXT_CHARS],
+                }
+            )
+    return found
+
+
+def _revision_for(source: dict, revisions: list[dict] | None) -> dict | None:
+    """The revision this source is pinned at, if the paper pinned it.
+
+    A revision whose surrounding words name this repository belongs to it. Where the paper names
+    exactly one revision and one repository, that is the pairing. Anything more ambiguous is left
+    unpinned rather than guessed: a wrong revision is a false statement about what ran.
+    """
+    rows = [r for r in revisions or [] if isinstance(r, dict) and r.get("value")]
+    if not rows:
+        return None
+    slug = _repo_slug(source.get("kind") or "", source.get("url") or "")
+    if slug:
+        named = f"{slug[0]}/{slug[1]}".lower()
+        for revision in rows:
+            if named in str(revision.get("context") or "").lower():
+                return revision
+    if len(rows) == 1 and not slug:
+        return rows[0]
+    return None
+
 
 @dataclass
 class CodeResolution:
@@ -83,6 +147,27 @@ class CodeResolution:
     attempts: list[dict] = field(default_factory=list)
     # Per source: what an attempted fetch established about reachability, for step 13's record.
     accessibility: dict[str, dict] = field(default_factory=dict)
+    # plan_8_6 section 4: the revision the PAPER named, beside the one that was retrieved. A
+    # snapshot of current code is labelled as such rather than presented as what produced the
+    # published results.
+    requested_revision: str | None = None
+    revision_kind: str | None = None
+    is_publication_revision: bool = False
+
+    def record(self) -> dict:
+        """What the study keeps about this resolution: never the bytes."""
+        return {
+            "outcome": self.outcome,
+            "kind": self.kind,
+            "url": self.url,
+            "commit_sha": self.commit_sha,
+            "requested_revision": self.requested_revision,
+            "revision_kind": self.revision_kind,
+            "is_publication_revision": self.is_publication_revision,
+            "files": self.files,
+            "reason": self.reason,
+            "attempts": self.attempts,
+        }
 
 
 def safe_member_path(name: str) -> str | None:
@@ -164,12 +249,18 @@ def _unpack(blob: bytes, *, max_bytes: int, max_files: int) -> tuple[list[dict],
     return files, None
 
 
-async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max_files: int) -> CodeResolution:
+async def _fetch_repository(
+    source: dict, fetch: Fetcher, *, max_bytes: int, max_files: int, revision: dict | None = None
+) -> CodeResolution:
     """Resolve a repository to a pinned commit and fetch that commit's tree.
 
     A repo that moved is not the one the paper used, so an unpinnable repository is refused BY NAME
     rather than fetched at whatever HEAD happens to be. The provenance report has to name what
     actually ran.
+
+    plan_8_6 section 4: where the paper ARCHIVED a revision, that revision is what is resolved. An
+    archived revision bioAF cannot reach is reported as unavailable rather than quietly replaced
+    with HEAD, and where the paper pinned nothing the result says it is a snapshot of current code.
     """
     kind, url = source["kind"], source.get("url") or ""
     slug = _repo_slug(kind, url)
@@ -178,24 +269,39 @@ async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max
             CODE_UNREACHABLE, kind=kind, url=url, reason=f"{url} is not a repository URL this can resolve"
         )
     owner, repo = slug
+    wanted = str((revision or {}).get("value") or "") or None
+    ref = wanted or "HEAD"
 
     if kind == "github":
-        ref_url = f"https://api.github.com/repos/{owner}/{repo}/commits/HEAD"
+        ref_url = f"https://api.github.com/repos/{owner}/{repo}/commits/{ref}"
         tar_url = f"https://api.github.com/repos/{owner}/{repo}/tarball/"
     else:
-        ref_url = f"https://gitlab.com/api/v4/projects/{owner}%2F{repo}/repository/commits/HEAD"
-        tar_url = f"https://gitlab.com/{owner}/{repo}/-/archive/HEAD/{repo}-HEAD.tar.gz"
+        ref_url = f"https://gitlab.com/api/v4/projects/{owner}%2F{repo}/repository/commits/{ref}"
+        tar_url = f"https://gitlab.com/{owner}/{repo}/-/archive/{ref}/{repo}-{ref}.tar.gz"
+
+    pinned = {
+        "requested_revision": wanted,
+        "revision_kind": (revision or {}).get("kind"),
+        "is_publication_revision": bool(wanted),
+    }
 
     try:
         body = await fetch(ref_url)
     except Exception as exc:  # noqa: BLE001 - an unreachable repo is a finding about the paper
         accessible, detail = _accessibility_for(exc)
+        reason = (
+            f"{url} names the archived revision {wanted}, and that revision could not be retrieved ({detail}). "
+            "bioAF did not substitute the repository's current code for it."
+            if wanted
+            else f"{url} could not be reached ({detail})"
+        )
         return CodeResolution(
             CODE_UNREACHABLE,
             kind=kind,
             url=url,
-            reason=f"{url} could not be reached ({detail})",
+            reason=reason,
             accessibility={url: {"accessible": accessible, "reason": detail}},
+            **pinned,
         )
 
     try:
@@ -209,6 +315,7 @@ async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max
             url=url,
             reason=f"{url} could not be pinned to a commit, so there is no way to say which code ran",
             accessibility={url: {"accessible": "no", "reason": "no commit sha was returned"}},
+            **pinned,
         )
 
     try:
@@ -222,6 +329,7 @@ async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max
             commit_sha=sha,
             reason=f"{url} resolved to {sha} but its contents could not be downloaded ({detail})",
             accessibility={url: {"accessible": accessible, "reason": detail}},
+            **pinned,
         )
 
     files, problem = _unpack(blob, max_bytes=max_bytes, max_files=max_files)
@@ -233,6 +341,7 @@ async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max
             commit_sha=sha,
             reason=problem,
             accessibility={url: {"accessible": "no", "reason": problem}},
+            **pinned,
         )
     return CodeResolution(
         RESOLVED,
@@ -241,8 +350,14 @@ async def _fetch_repository(source: dict, fetch: Fetcher, *, max_bytes: int, max
         commit_sha=sha,
         files=files,
         archive=blob,
-        reason=f"{url} pinned at {sha}",
+        reason=(
+            f"{url} at the revision the paper archived, {sha}"
+            if wanted
+            else f"{url} pinned at {sha}, which is a snapshot of its current code: this paper archived no revision, "
+            "so this is not established to be the code that produced its results"
+        ),
         accessibility={url: {"accessible": "yes", "reason": None}},
+        **pinned,
     )
 
 
@@ -338,6 +453,7 @@ async def resolve_code(
     sources: list[dict],
     deposit_entries: list | None = None,
     fetcher: Fetcher,
+    revisions: list[dict] | None = None,
     max_bytes: int = _MAX_BYTES,
     max_files: int = _MAX_FILES,
 ) -> CodeResolution:
@@ -361,7 +477,13 @@ async def resolve_code(
     for source in ordered:
         kind = source.get("kind") or "other"
         if kind in _REPO_KINDS:
-            result = await _fetch_repository(source, fetcher, max_bytes=max_bytes, max_files=max_files)
+            result = await _fetch_repository(
+                source,
+                fetcher,
+                max_bytes=max_bytes,
+                max_files=max_files,
+                revision=_revision_for(source, revisions),
+            )
         else:
             result = await _fetch_artifact(source, fetcher, max_bytes=max_bytes, max_files=max_files)
 
