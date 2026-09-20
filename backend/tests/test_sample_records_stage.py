@@ -151,6 +151,22 @@ class TestAFailedRetrievalIsNotAnAnswerToKeep:
         assert study.evidence_json["sample_records"]["deposits"][0]["sample_count"] == 2
 
     @pytest.mark.asyncio
+    async def test_a_limitation_recorded_before_this_build_is_tried_again(self, session, admin_user):
+        """An older record cannot say which failure it was, so it is not a record to keep."""
+        study = await _study(session, admin_user, deposits=[{"accession": "GSE1", "archive": "geo"}])
+        study.evidence_json = {
+            **study.evidence_json,
+            "sample_records": {
+                "deposits": [],
+                "limitations": [{"accession": "GSE1", "reason": "could not be read"}],
+                "deposits_seen": ["GSE1"],
+            },
+        }
+        await session.flush()
+        await run_assessment(session, study, fetcher=_serving(_MATRIX))
+        assert study.evidence_json["sample_records"]["deposits"][0]["sample_count"] == 2
+
+    @pytest.mark.asyncio
     async def test_an_archive_with_no_adapter_is_not_asked_about_again(self, session, admin_user):
         calls = []
 
