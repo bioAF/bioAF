@@ -173,30 +173,65 @@ def check_script(*, sources: list[dict] | None, manifests: list[dict] | None) ->
 _ENTRY_POINT = {"python": "bioaf_environment_check.py", "r": "bioaf_environment_check.R"}
 
 
+def _archive(members: dict[str, str]) -> bytes:
+    """One gzipped tar of what the check needs, which is what the runner knows how to fetch.
+
+    Caught by running it live: the fetched-code runner copies ``code_uri`` to a single local file
+    and unpacks it. Staging a directory prefix made it fetch nothing, run nothing, and exit clean.
+    """
+    import io
+    import tarfile
+    import time
+
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for name, text in members.items():
+            payload = (text or "").encode("utf-8")
+            info = tarfile.TarInfo(name=name)
+            info.size = len(payload)
+            info.mtime = int(time.time())
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def _member_name(path: str, taken: set[str]) -> str:
+    """A flat, safe name inside the archive. A source extracted from a document carries its
+    document's title, which is not a filename anyone can run."""
+    import re
+
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", str(path or "").rsplit("/", 1)[-1]).strip("_") or "source"
+    name, suffix = base, 1
+    while name in taken:
+        suffix += 1
+        stem, _, extension = base.rpartition(".")
+        name = f"{stem}_{suffix}.{extension}" if stem else f"{base}_{suffix}"
+    taken.add(name)
+    return name
+
+
 async def stage_environment_check(*, sources, manifests, storage, bucket: str, prefix: str) -> dict:
     """Put the sources, their manifests and the check where the isolated run can read them.
 
-    Only what it was given: the paper's own files under their own names, and one check script beside
-    them. Returns ``{"code_uri", "entry_point", "language", "files"}``.
+    ONE object: the runner copies ``code_uri`` to a single local file and unpacks it, so a tarball is
+    what it can read. Only what it was given goes in, and one check script beside it.
     """
     request = environment_check_request(sources=sources, manifests=manifests)
     entry_point = _ENTRY_POINT[request["language"]]
-    written: list[str] = []
+    taken: set[str] = {entry_point}
+    members: dict[str, str] = {}
     for row in [*(sources or []), *(manifests or [])]:
-        name = str(row.get("path") or "").rsplit("/", 1)[-1]
-        if not name:
+        if not str(row.get("path") or "").strip():
             continue
-        await storage.write_text(
-            storage.build_uri(bucket, f"{prefix}/{name}"), str(row.get("text") or ""), content_type="text/plain"
-        )
-        written.append(name)
-    uri = storage.build_uri(bucket, f"{prefix}/{entry_point}")
-    await storage.write_text(uri, check_script(sources=sources, manifests=manifests), content_type="text/plain")
+        members[_member_name(str(row.get("path")), taken)] = str(row.get("text") or "")
+    members[entry_point] = check_script(sources=sources, manifests=manifests)
+    uri = storage.build_uri(bucket, f"{prefix}/environment-check.tar.gz")
+    await storage.write_bytes(uri, _archive(members), content_type="application/gzip")
     return {
-        "code_uri": storage.build_uri(bucket, f"{prefix}/"),
+        "code_uri": uri,
         "entry_point": entry_point,
         "language": request["language"],
-        "files": [*written, entry_point],
+        "files": sorted(members),
         "request": request,
     }
 
