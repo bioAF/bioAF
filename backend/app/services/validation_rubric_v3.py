@@ -258,6 +258,171 @@ CRITERIA: tuple[Criterion, ...] = (
 )
 
 CRITERIA_BY_ID = {c.id: c for c in CRITERIA}
+
+# plan_8_6 section 6: the context a row's words lose when they are read on their own.
+#
+# M1.B reads "Material settings and the relevant quality and filtering decisions are specified". M1
+# is a COMPUTATIONAL row about preprocessing, and on study 65 an assessor read "material" as
+# *materials* and verified it from Matrigel, mTeSR Plus and EDTA passaging. The obligation's words
+# are rubric v3's and are not changed; what was missing is the section the row sits in, what its
+# scope is, and which kinds of evidence can answer it.
+#
+# Every row is read for the same ambiguity, once. ``scope`` says what the obligation is ABOUT;
+# ``accepts`` lists evidence that can settle it; ``excludes`` names the evidence that looks relevant
+# and is not. This is context, never a new criterion: changing a row's points, obligations or section
+# is still a new rubric version.
+CRITERION_EVIDENCE: dict[str, dict] = {
+    "C1": {
+        "scope": "the supplied source files themselves, parsed as the language they declare",
+        "accepts": ["the text of the supplied scripts, notebooks and configuration"],
+        "excludes": ["the paper's prose description of what the code does"],
+    },
+    "C2": {
+        "scope": "the dependency and environment specifications supplied beside the code",
+        "accepts": ["requirements, environment and lockfiles", "the import statements in the supplied source"],
+        "excludes": ["a list of tool names in the methods, which is not a declared dependency"],
+    },
+    "C3": {
+        "scope": "how the environment that ran the analysis could be rebuilt",
+        "accepts": ["pinned tool and library versions", "a stated runtime, container or reconstruction procedure"],
+        "excludes": ["a tool named without a version"],
+    },
+    "C4": {
+        "scope": "whether the supplied entry points and scripts cover the analysis the paper claims",
+        "accepts": ["the supplied scripts and notebooks, their inputs and outputs, and their order"],
+        "excludes": ["the paper's description of steps for which no code was supplied"],
+    },
+    "C5": {
+        "scope": "whether the tool operations in the supplied code suit the input and the calculation",
+        "accepts": ["the actual version and configuration in the supplied code", "documented defects of that version"],
+        "excludes": ["a general opinion about the tool that is not tied to this version or configuration"],
+    },
+    "S1": {
+        "scope": "the organisms of the samples this paper analysed",
+        "accepts": ["the paper's own statement of the organism", "the deposited sample records"],
+        "excludes": ["an organism named only in the introduction's background"],
+    },
+    "S2": {
+        "scope": "the tissue, cell type or material of the samples analysed",
+        "accepts": ["the paper's statement of the material", "independent deposit or repository records"],
+        "excludes": [
+            "for the B obligation, the paper's own text: the independent record is the deposit, not the paper"
+        ],
+    },
+    "S3": {
+        "scope": "the treatment, control and comparison arms of the experiments",
+        "accepts": ["the paper's definition of its arms", "per-sample deposit records assigning samples to arms"],
+        "excludes": ["a figure label that names a condition without defining it"],
+    },
+    "S4": {
+        "scope": "how many samples each experiment used, and what was included or excluded",
+        "accepts": ["per-experiment counts and inclusion rules", "the deposit's own sample records"],
+        "excludes": ["a whole-series count, which is not one experiment's count"],
+    },
+    "S5": {
+        "scope": "biological versus technical replication, and pairing or blocking, for the stated inferences",
+        "accepts": [
+            "the paper's description of its replicates and units",
+            "figure legends stating n per group",
+            "deposit records that establish unit identity",
+        ],
+        "excludes": ["a sample-name pattern, which is not a statement of replication"],
+    },
+    "E1": {
+        "scope": "the WET-LAB sample preparation and measurement procedure, at the bench",
+        "accepts": [
+            "culture, treatment, dissection, staining, library preparation and instrument settings",
+            "reagents, kits and catalogue numbers where they determine the measurement",
+        ],
+        "excludes": ["computational preprocessing parameters, which are M1's"],
+    },
+    "E2": {
+        "scope": "the DESIGN of the comparisons claimed: the units compared, replication and selection",
+        "accepts": [
+            "the experimental unit and what was compared to what",
+            "replicate kind and count, pairing or blocking",
+            "how clones, lines or subjects were selected",
+            "figure legends and limitations stating n and the comparator",
+        ],
+        "excludes": [
+            "the mere presence of a comparator or control condition, which does not establish that "
+            "the design supports the claim"
+        ],
+    },
+    "E3": {
+        "scope": "the quality criteria and exclusions of the BENCH measurements, and their internal consistency",
+        "accepts": [
+            "stated quality thresholds for the measurement",
+            "what was excluded or failed, and how it was handled",
+            "counts reported in text, legends and tables",
+        ],
+        "excludes": ["read-level or alignment quality filtering, which is M1's"],
+    },
+    "M1": {
+        "scope": (
+            "COMPUTATIONAL preprocessing of the measured data: the steps that turn raw output into "
+            "the matrix the analysis used, and their order"
+        ),
+        "accepts": [
+            "trimming, alignment, demultiplexing, deduplication, quantification and normalisation steps",
+            "the parameter values those steps were run with",
+            "read, cell, barcode or feature quality and filtering thresholds",
+        ],
+        "excludes": [
+            "culture media, Matrigel, reagents, passaging and other wet-lab materials: those are E1's, "
+            "and 'material settings' here means the parameter values that materially change the result"
+        ],
+    },
+    "M2": {
+        "scope": "the reference genomes, annotations, databases and feature definitions the analysis used",
+        "accepts": ["named references and annotations with their versions or identifiers"],
+        "excludes": ["a species name on its own, which does not identify a reference build"],
+    },
+    "M3": {
+        "scope": "the statistical model, its experimental units, its comparisons and its covariates",
+        "accepts": [
+            "the named test or model and what it was fitted to",
+            "the unit of replication the test treats as independent",
+            "covariates, blocking and batch terms",
+        ],
+        "excludes": ["a significance threshold on its own, which is M4's"],
+    },
+    "M4": {
+        "scope": "the decision criteria applied to the analysis output, and whether they are unambiguous",
+        "accepts": [
+            "significance definitions and multiplicity correction",
+            "effect-size thresholds and their direction, scale and contrast orientation",
+        ],
+        "excludes": ["the choice of statistical test, which is M3's"],
+    },
+    "M5": {
+        "scope": "whether the paper's reported results can be traced to the analysis that produced them",
+        "accepts": [
+            "the paper's links from a figure or table to the step that produced it",
+            "the supplied scripts, notebooks and configuration, at their cited locations",
+        ],
+        "excludes": [
+            "for the B obligation, the paper's prose alone: the comparison is between what the paper "
+            "states and what the supplied code does"
+        ],
+    },
+    "R1": {
+        "scope": "a measured comparison between an identified author table and a specific paper claim",
+        "accepts": ["the author table's own values", "the claim's own words"],
+        "excludes": ["a value bioAF computed for something else"],
+    },
+    "R2": {
+        "scope": "an independently executed analysis of the underlying data",
+        "accepts": ["the result of an executed analysis, with its declared comparisons and tolerances"],
+        "excludes": ["a value read back from the authors' own output"],
+    },
+    "R3": {
+        "scope": "a workflow executed from its declared inputs to complete, usable outputs",
+        "accepts": ["the run's own completion, outputs and QC records"],
+        "excludes": ["a workflow definition that was never executed"],
+    },
+}
+
 DOCUMENTARY_SECTIONS = ("C", "S", "E", "M")
 RESULT_CRITERIA = ("R1", "R2", "R3")
 
