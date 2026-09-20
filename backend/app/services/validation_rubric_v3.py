@@ -810,6 +810,10 @@ def evidence_card(
     card = score(leaves, assessed)
     shown = display(card)
     limits = _limit_rows(leaves, assessed, capability_limits or {})
+    # plan_8_6 section 9: the untested obligations whose EVIDENCE was never supplied or retrieved,
+    # told apart from the ones bioAF inspected and could not settle. A card showing zero negative
+    # points means one of two things, and a reader has to be able to tell which.
+    evidence_limits = _evidence_limit_rows(leaves, assessed)
     sections = [_section_row(key, bucket, leaves, assessed, limits) for key, bucket in sorted(card["sections"].items())]
     attempted = bool((reproduction or {}).get("attempted"))
     return {
@@ -843,6 +847,12 @@ def evidence_card(
             "It is not a probability that the paper is correct, and not a fraction of the paper reproduced. "
             "Untested includes checks that were attempted and could not conclude; negative identifies a "
             "demonstrated problem with a named check, never a judgment about the paper."
+            + (
+                f" {len(evidence_limits)} of the untested obligations were not given the evidence that would "
+                "settle them, so what they might have found is not established either way."
+                if evidence_limits
+                else ""
+            )
         ),
         "scope": {
             **card["assessed_scope"],
@@ -856,6 +866,7 @@ def evidence_card(
             "with_author_results_ceiling": float(profile["ceilings"]["with_author_results"]),
         },
         "capability_limits": limits,
+        "evidence_limits": evidence_limits,
         "reproduction": {
             "attempted": attempted,
             "label": (reproduction or {}).get("label") or "Independent reproduction: not attempted",
@@ -991,6 +1002,38 @@ def _limit_rows(leaves: list[dict], assessed: dict, declared: dict) -> list[dict
                 "section": leaf["section"],
                 "points": float(leaf["weight"]),
                 "reason": found.get("rationale") or limit["reason"],
+            }
+        )
+    return rows
+
+
+def _evidence_limit_rows(leaves: list[dict], assessed: dict) -> list[dict]:
+    """The untested obligations whose evidence bioAF never got, each naming what was missing.
+
+    plan_8_6 section 9. An obligation bioAF inspected and could not settle is a different statement
+    from one whose sources never arrived, and only the second means a zero negative count says
+    nothing about the paper. The coverage each judgment was made under is what tells them apart.
+    """
+    rows = []
+    for leaf in leaves:
+        found = assessed.get(leaf["id"]) or {}
+        if found.get("outcome", UNDETERMINED) != UNDETERMINED:
+            continue
+        coverage = found.get("coverage")
+        if not isinstance(coverage, dict):
+            continue
+        unavailable = [str(u) for u in coverage.get("unavailable") or []]
+        if not unavailable and not coverage.get("truncated"):
+            continue
+        rows.append(
+            {
+                "leaf": leaf["id"],
+                "criterion": leaf["criterion"],
+                "section": leaf["section"],
+                "points": float(leaf["weight"]),
+                "reason": "; ".join(unavailable)
+                or str(coverage.get("reason") or "")
+                or "the evidence packet did not carry every relevant passage",
             }
         )
     return rows

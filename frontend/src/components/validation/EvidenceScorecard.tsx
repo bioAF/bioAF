@@ -57,6 +57,10 @@ export function EvidenceScoreBar({ card }: { card: EvidenceScore }) {
 function Section({ section, card }: { section: EvidenceScoreSection; card: EvidenceScore }) {
   const [open, setOpen] = useState(false);
   const limits = card.capability_limits.filter((limit) => limit.section === section.section);
+  // plan_8_6 section 9: an obligation left untested because its evidence never arrived, beside the
+  // one with no implemented check. They are different facts, and only one of them says the zero
+  // negative count is not a statement about the paper.
+  const missing = (card.evidence_limits ?? []).filter((limit) => limit.section === section.section);
   // plan_8_4 section 4: a section reads the way the headline does. Without this the row printed
   // "0.2857142857142857 / 30", which is not a number anyone can act on. A report written before the
   // backend sent the display falls back to its own numbers.
@@ -108,6 +112,13 @@ function Section({ section, card }: { section: EvidenceScoreSection; card: Evide
             </div>
           ))}
           {section.outstanding && <p className="text-gray-700">Outstanding: {section.outstanding}</p>}
+          {missing.length > 0 && (
+            <p data-testid={`evidence-evidence-limits-${section.section}`}>
+              {missing.length} {missing.length === 1 ? "obligation was" : "obligations were"} not given the evidence
+              that would settle {missing.length === 1 ? "it" : "them"}:{" "}
+              {missing.map((limit) => `${limit.leaf} (${limit.reason})`).join("; ")}.
+            </p>
+          )}
           {section.unsupported_count > 0 && (
             <p data-testid={`evidence-limits-${section.section}`}>
               {section.unsupported_count} {section.unsupported_count === 1 ? "obligation has" : "obligations have"} no
