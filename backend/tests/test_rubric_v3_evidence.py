@@ -345,3 +345,157 @@ class TestApplicabilityIsAboutThePaperNotAboutBioaf:
         profile = self._profile([None, ""])
         assert "M2" in profile["weights"]
         assert profile["exclusions"] == []
+
+
+class TestThresholdCreditRestsOnTheStatedCriteria:
+    """plan_8_5 section 3.3: a nonempty dictionary is not a threshold.
+
+    M4.A asks whether the definitions the paper's analysis actually uses are stated: raw versus
+    adjusted significance, the correction where one is used, and the effect threshold on its own
+    scale. The extraction's ``thresholds`` pair exists on every contrast and holds ``None`` where
+    nothing was stated, so its presence establishes nothing at all.
+    """
+
+    def _plan(self, contrast: dict) -> dict:
+        return {**_PLAN, "differential_design": {"contrasts": [contrast]}}
+
+    def test_a_threshold_pair_of_nulls_establishes_nothing(self):
+        contrast = {k: v for k, v in _CONTRASTS[0].items() if k != "cutoffs"}
+        assessed = _assess(plan=self._plan({**contrast, "thresholds": {"padj": None, "log2fc": None}}))
+        assert assessed["M4.A"]["outcome"] == UNDETERMINED
+        assert assessed["M4.A"]["next_action"]
+
+    def test_a_stated_significance_cutoff_verifies_it_and_names_the_definition(self):
+        assessed = _assess()
+        assert assessed["M4.A"]["outcome"] == VERIFIED
+        assert "0.05" in assessed["M4.A"]["rationale"]
+
+    def test_an_effect_threshold_of_zero_is_a_stated_threshold(self):
+        """A legitimate zero is not an absent one: "any positive fold change" is a threshold."""
+        contrast = {
+            **_CONTRASTS[0],
+            "cutoffs": [
+                {"kind": "padj", "operator": "<", "value": 0.05},
+                {"kind": "abs_log2fc", "operator": ">", "value": 0},
+            ],
+        }
+        assessed = _assess(plan=self._plan(contrast))
+        assert assessed["M4.A"]["outcome"] == VERIFIED
+
+    def test_an_analysis_that_applies_no_fold_change_requirement_is_not_missing_one(self):
+        """Section 3.3: do not require every possible threshold for an analysis that does not use it."""
+        contrast = {k: v for k, v in _CONTRASTS[0].items() if k != "cutoffs"}
+        assessed = _assess(plan=self._plan({**contrast, "thresholds": {"padj": 0.05, "log2fc": None}}))
+        assert assessed["M4.A"]["outcome"] == VERIFIED
+
+    def test_a_threshold_the_paper_never_stated_for_this_contrast_stays_untested(self):
+        """The paper-level pair says nothing either way about this contrast's fold change."""
+        contrast = {k: v for k, v in _CONTRASTS[0].items() if k != "cutoffs"}
+        plan = {**self._plan(contrast), "differential_design": {"contrasts": [contrast], "thresholds": {"padj": 0.05}}}
+        assessed = _assess(plan=plan)
+        assert assessed["M4.A"]["outcome"] == UNDETERMINED
+
+    def test_one_contrast_without_a_stated_threshold_holds_the_obligation_open(self):
+        bare = {k: v for k, v in _CONTRASTS[0].items() if k != "cutoffs"}
+        plan = {**_PLAN, "differential_design": {"contrasts": [_CONTRASTS[0], {**bare, "name": "second"}]}}
+        assessed = _assess(plan=plan)
+        assert assessed["M4.A"]["outcome"] == UNDETERMINED
+        assert "second" in assessed["M4.A"]["rationale"]
+
+
+class TestTheReadingOfAThresholdMustBeEstablishedNotAssumed:
+    """plan_8_5 section 3.3: the absence of a field in a projection is not proof of no ambiguity.
+
+    M4.B is about direction, scale, contrast orientation and interpretation. It is established from
+    the normalized predicate bioAF built for each claim, and claims carrying no predicate at all
+    establish nothing: that is exactly the state the old check read as unambiguous.
+    """
+
+    _RESOLVED = {
+        "status": "resolved",
+        "direction": "down",
+        "orientation": "test_over_reference",
+        "significance": {"kind": "padj", "operator": "<", "value": 0.05, "adjustment": "BH"},
+        "effect": {"kind": "none"},
+    }
+
+    def test_claims_carrying_no_predicate_leave_the_reading_untested(self):
+        assessed = _assess(claims=[{"index": 0}, {"index": 1}])
+        assert assessed["M4.B"]["outcome"] == UNDETERMINED
+        assert assessed["M4.B"]["next_action"]
+
+    def test_a_resolved_predicate_verifies_the_reading_and_says_what_it_reads(self):
+        assessed = _assess(claims=[{"index": 0, "predicate_detail": self._RESOLVED}])
+        assert assessed["M4.B"]["outcome"] == VERIFIED
+        assert "down" in assessed["M4.B"]["rationale"]
+
+    def test_a_predicate_that_could_not_be_read_leaves_it_untested_with_the_reason(self):
+        detail = {**self._RESOLVED, "status": "not_checkable", "reason": "the claim states no significance cutoff"}
+        assessed = _assess(claims=[{"index": 0, "predicate_detail": detail}])
+        assert assessed["M4.B"]["outcome"] == UNDETERMINED
+        assert "significance cutoff" in assessed["M4.B"]["rationale"]
+
+    def test_an_unresolved_signed_or_absolute_filter_still_holds_it_open(self):
+        claims = [
+            {
+                "index": 0,
+                "predicate_detail": self._RESOLVED,
+                "consistency": {"filter_semantics": {"unresolved": True}},
+            }
+        ]
+        assessed = _assess(claims=claims)
+        assert assessed["M4.B"]["outcome"] == UNDETERMINED
+
+    def test_a_stated_threshold_alone_never_proves_the_reading(self):
+        """Section 3.3: a numerical threshold alone does not prove B."""
+        assessed = _assess(claims=[{"index": 0, "consistency": {"outcome": "agree"}}])
+        assert assessed["M4.A"]["outcome"] == VERIFIED
+        assert assessed["M4.B"]["outcome"] == UNDETERMINED
+
+
+class TestReferenceRecoverabilityIsAboutThePaperNotAboutBioaf:
+    """plan_8_5 section 3.3: M2.B is the recoverability of the paper's reference versions.
+
+    A release bioAF cannot supply is still a release the paper specified, and bioAF choosing a
+    default in its place is a fact about bioAF's run, not about the paper's reporting.
+    """
+
+    def _plan(self, reference: dict) -> dict:
+        return {**_PLAN, "reported_experiments": [{**_EXPERIMENTS[0], "reference": reference}]}
+
+    def test_a_release_bioaf_cannot_supply_is_still_specified_by_the_paper(self):
+        reference = {
+            "assembly": {"stated": "hg19", "resolved": "GRCh37", "status": "usable"},
+            "annotation": {
+                "stated": "GENCODE v19",
+                "status": "unavailable",
+                "reason": "bioAF supplies GENCODE v44 for GRCh37, and never swaps one release for another",
+            },
+        }
+        assessed = _assess(plan=self._plan(reference))
+        assert assessed["M2.B"]["outcome"] == VERIFIED
+        assert "GENCODE v19" in assessed["M2.B"]["rationale"]
+
+    def test_an_annotation_the_read_never_reached_is_untested_and_does_not_blame_the_paper(self):
+        reference = {
+            "assembly": {"stated": "hg19", "resolved": "GRCh37", "status": "usable"},
+            "annotation": {"stated": None, "status": "not_read", "reason": "the paper's annotation was not read"},
+        }
+        assessed = _assess(plan=self._plan(reference))
+        assert assessed["M2.B"]["outcome"] == UNDETERMINED
+        assert "not read" in assessed["M2.B"]["rationale"]
+        assert "does not state" not in assessed["M2.B"]["rationale"]
+
+    def test_two_statements_naming_different_assemblies_fail_with_their_cause(self):
+        reference = {
+            "assembly": {
+                "stated": "hg19",
+                "status": "unresolved",
+                "conflict": True,
+                "reason": "the paper states GRCh37 and an annotation release that belongs to GRCh38",
+            },
+            "annotation": {"stated": "GENCODE v44", "status": "unresolved", "conflict": True},
+        }
+        assessed = _assess(plan=self._plan(reference))
+        assert assessed["M2.B"]["outcome"] == FAILED
+        assert assessed["M2.B"]["impact"]

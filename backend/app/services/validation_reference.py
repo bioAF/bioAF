@@ -328,8 +328,13 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
     if named:
         first = named[0]
         if from_release and first["assembly"] != from_release:
+            # plan_8_5 section 3.3: the paper's OWN two statements disagree, and bioAF recognised
+            # both. That is a different fact from bioAF recognising neither, and an assessment of
+            # whether the paper's reference can be recovered must be able to tell them apart
+            # without reading this sentence.
             assembly.update(
                 status=UNRESOLVED,
+                conflict=True,
                 reason=(
                     f'the paper states {first["assembly"]} ("{assembly["quote"] or stated_assembly}") and an '
                     f'annotation release that belongs to {from_release} ("{annotation["quote"] or stated_annotation}")'
@@ -367,7 +372,9 @@ def experiment_reference(experiment: dict, *, pipeline_key: str | None, supplied
     if stated_annotation:
         label = release["label"] if release else stated_annotation
         if assembly["status"] == UNRESOLVED and release and from_release != (named[0]["assembly"] if named else None):
-            annotation.update(status=UNRESOLVED, reason=assembly["reason"])
+            annotation.update(
+                status=UNRESOLVED, reason=assembly["reason"], **({"conflict": True} if assembly.get("conflict") else {})
+            )
         elif resolved_assembly and label in offered:
             annotation.update(status=USABLE, resolved=label)
         else:
