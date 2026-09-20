@@ -49,6 +49,9 @@ DEPOSIT = "deposit"
 CODE = "code"
 TOOLS = "tools"
 SUPPLEMENT = "supplement"
+# plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words by
+# `validation_design_summary`. A comparator is not a design, and E2.B is answered from these.
+DESIGN = "design"
 
 
 @dataclass(frozen=True)
@@ -171,7 +174,7 @@ _SELECTORS: dict[str, Selector] = {
     ),
     "S4": Selector(
         _DESIGN,
-        (DEPOSIT,),
+        (DESIGN, DEPOSIT),
         _ALWAYS_NEEDS,
         _re(
             r"\bn\s*=\s*\d|\bsamples?\b|\bnumber of\b|\btotal of\b|\bexclud\w*|\bincluded\b",
@@ -180,7 +183,7 @@ _SELECTORS: dict[str, Selector] = {
     ),
     "S5": Selector(
         _DESIGN,
-        (DEPOSIT,),
+        (DESIGN, DEPOSIT),
         _ALWAYS_NEEDS,
         _re(
             r"\breplicat\w*|\bbiological\b|\btechnical\b|\bindependent experiments?\b|\bpaired\b|\bblock\w*",
@@ -191,7 +194,7 @@ _SELECTORS: dict[str, Selector] = {
     "E1": Selector(_PROCEDURE, (SUPPLEMENT,), _ALWAYS_NEEDS, _BENCH_PROCEDURE, _ANALYSIS_ONLY),
     "E2": Selector(
         _DESIGN,
-        (SUPPLEMENT,),
+        (DESIGN, SUPPLEMENT),
         _ALWAYS_NEEDS,
         _re(
             r"\bcontrol\b|\bcomparator\b|\buntreated\b|\bvehicle\b|\bwild-?type\b|\bknockout\b|\bparental\b",
@@ -204,7 +207,7 @@ _SELECTORS: dict[str, Selector] = {
     ),
     "E3": Selector(
         _DESIGN,
-        (SUPPLEMENT,),
+        (DESIGN, SUPPLEMENT),
         _ALWAYS_NEEDS,
         _re(
             r"\bexclud\w*|\bdiscard\w*|\bomitt?\w*|\bfailed\b|\bquality control\b|\bQC\b|\boutlier\w*",
@@ -422,6 +425,9 @@ def _supplied(passage: dict) -> dict:
         "section": passage.get("section"),
         "location": passage.get("location"),
         "certain": passage.get("certain"),
+        # plan_8_6 section 7: what kind of fact this passage carries, where it is more than the
+        # paper's running text. E2.B's acceptance rests on being cited a design fact.
+        "carries": passage.get("carries"),
     }
 
 
