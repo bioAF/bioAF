@@ -177,6 +177,65 @@ def parse_series_organisms(text: str) -> list[str]:
     return seen
 
 
+# plan_8_5 section 3.4: the per-sample lines of a series matrix that say what a sample IS. The
+# organism line was the only one bioAF read, so "the deposit declares no organism" was the whole of
+# what it could say about any sample, and no other sample obligation had anything to compare.
+_SAMPLE_FIELDS = {
+    "!Sample_title": "title",
+    "!Sample_geo_accession": "accession",
+    "!Sample_organism_ch1": "organism",
+    "!Sample_source_name_ch1": "source_name",
+    "!Sample_molecule_ch1": "molecule",
+    "!Sample_library_strategy": "library_strategy",
+}
+
+
+def parse_sample_records(text: str) -> list[dict]:
+    """One record per sample column: what the DEPOSITOR stated about that sample.
+
+    ``{accession, title, organism, source_name, molecule, library_strategy, characteristics,
+    unkeyed}``. Characteristics are kept under the keys the depositor wrote ("genotype: WT" becomes
+    ``{"genotype": "WT"}``); one with no key at all is kept verbatim under ``unkeyed`` rather than
+    guessed at. A field the matrix omits for a column is empty, never absent: a sample bioAF holds
+    no organism for and a sample with no organism line are the same record here, and the difference
+    that matters (whether the matrix was read at all) belongs to the retrieval, not the parse.
+
+    Pure. It parses one already-fetched series matrix and never fetches anything.
+    """
+    columns: dict[str, list[str]] = {}
+    characteristics: list[list[str]] = []
+    for raw in (text or "").splitlines():
+        line = raw.rstrip("\r\n")
+        key = line.split("\t", 1)[0]
+        if key == "!Sample_characteristics_ch1":
+            characteristics.append(_series_matrix_values(line))
+        elif key in _SAMPLE_FIELDS:
+            columns[_SAMPLE_FIELDS[key]] = _series_matrix_values(line)
+    width = max((len(values) for values in [*columns.values(), *characteristics]), default=0)
+    records = []
+    for i in range(width):
+        keyed: dict[str, str] = {}
+        unkeyed: list[str] = []
+        for line in characteristics:
+            value = line[i].strip() if i < len(line) else ""
+            if not value:
+                continue
+            name, sep, detail = value.partition(":")
+            if sep and name.strip():
+                keyed[name.strip().lower()] = detail.strip()
+            else:
+                unkeyed.append(value)
+        records.append(
+            {
+                **{field: (values[i].strip() if i < len(values) else "") for field, values in columns.items()},
+                **{field: "" for field in _SAMPLE_FIELDS.values() if field not in columns},
+                "characteristics": keyed,
+                "unkeyed": unkeyed,
+            }
+        )
+    return records
+
+
 def parse_series_matrix(text: str) -> tuple[list[dict], str | None]:
     """Parse a GEO series-matrix into (samples, series_sra_accession).
 

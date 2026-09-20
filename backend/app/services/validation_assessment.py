@@ -435,7 +435,7 @@ def refresh_checks(study, plan) -> None:
         study.evidence_json = evidence
 
 
-async def run_assessment(session: AsyncSession, study) -> dict:
+async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     """The public assessment stage. Never raises; always produces a record.
 
     Runs on every authorized study on both routes, after authorization and before the final
@@ -457,6 +457,11 @@ async def run_assessment(session: AsyncSession, study) -> dict:
         evidence["capabilities"] = propagate_retrieval(evidence.get("capabilities") or {}, evidence["supplements"])
         study.evidence_json = evidence
         await session.flush()
+
+    # plan_8_5 sections 3.1 and 3.4: the deposit's own sample records, for every deposit this study
+    # resolved. They answer documentary obligations about species, material, arms, counts and units,
+    # so they are held here, before any input is acquired and before anyone approves compute.
+    await refresh_sample_records(session, study, fetcher=fetcher)
 
     plan = await active_plan(session, study)
     refresh_checks(study, plan)
@@ -514,6 +519,40 @@ async def run_assessment(session: AsyncSession, study) -> dict:
         "revisions": len(reconciliation.get("revisions") or []),
     }
     evidence["assessment"] = record
+    study.evidence_json = evidence
+    await session.flush()
+    return record
+
+
+def _deposit_identity(deposits: list[dict]) -> list[str]:
+    """What a held set of sample records was built from, so an unchanged set is not fetched again."""
+    return sorted({str(d.get("accession") or "").strip().upper() for d in deposits or [] if isinstance(d, dict)} - {""})
+
+
+async def refresh_sample_records(session: AsyncSession, study, *, fetcher=None) -> dict:
+    """plan_8_5 section 3.4: hold the sample records of every deposit this study resolved.
+
+    Keyed on the accessions themselves, so re-running the stage over the same deposits costs no
+    request, and a deposit the reading discovered later is fetched when it appears. Never raises:
+    a retrieval failure is recorded as bioAF's limitation beside the records it did read.
+    """
+    from app.services.validation_sample_records import collect_sample_records
+
+    evidence = dict(study.evidence_json or {})
+    deposits = [d for d in ((evidence.get("capabilities") or {}).get("deposits") or []) if isinstance(d, dict)]
+    wanted = _deposit_identity(deposits)
+    held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else None
+    if held is not None and held.get("deposits_seen") == wanted:
+        return held
+    if not wanted:
+        return held or {"deposits": [], "limitations": []}
+    try:
+        collected = await collect_sample_records(deposits=deposits, fetcher=fetcher)
+    except Exception as exc:  # noqa: BLE001 - the records inform the score; they cannot fail the stage
+        logger.warning("sample records could not be collected for study %s: %s", study.id, exc)
+        return held or {"deposits": [], "limitations": []}
+    record = {**collected, "deposits_seen": wanted, "at": _now_iso()}
+    evidence["sample_records"] = record
     study.evidence_json = evidence
     await session.flush()
     return record

@@ -499,3 +499,69 @@ class TestReferenceRecoverabilityIsAboutThePaperNotAboutBioaf:
         assessed = _assess(plan=self._plan(reference))
         assert assessed["M2.B"]["outcome"] == FAILED
         assert assessed["M2.B"]["impact"]
+
+
+def _records(*organisms, accession="GSE1", limitations=None):
+    return {
+        "sample_records": {
+            "deposits": (
+                [
+                    {
+                        "accession": accession,
+                        "source": f"https://example/{accession}",
+                        "sample_count": len(organisms),
+                        "samples": [
+                            {"accession": f"GSM{i}", "organism": organism, "characteristics": {}}
+                            for i, organism in enumerate(organisms, start=1)
+                        ],
+                    }
+                ]
+                if organisms
+                else []
+            ),
+            "limitations": limitations or [],
+        }
+    }
+
+
+class TestSpeciesAgreementIsMeasuredAgainstTheRecordsThemselves:
+    """plan_8_5 section 3.4: S1.B compares the paper with the deposit's own sample records.
+
+    Not with a flag left by an earlier check, and never with an organism field missing from bioAF's
+    manifest: what bioAF failed to retrieve is bioAF's limitation, and saying "the deposit declares
+    no organism" about a deposit nobody opened is a statement bioAF has no evidence for.
+    """
+
+    def test_records_declaring_the_organism_the_paper_states_verify_it(self):
+        assessed = _assess(evidence=_records("Homo sapiens", "Homo sapiens"))
+        assert assessed["S1.B"]["outcome"] == VERIFIED
+        assert "GSE1" in assessed["S1.B"]["scope"]
+
+    def test_records_declaring_a_different_organism_fail_it_and_name_the_samples(self):
+        assessed = _assess(evidence=_records("Mus musculus", "Mus musculus"))
+        assert assessed["S1.B"]["outcome"] == FAILED
+        assert "Mus musculus" in assessed["S1.B"]["rationale"]
+        assert assessed["S1.B"]["impact"]
+
+    def test_a_deposit_holding_two_species_still_agrees_where_it_holds_the_papers(self):
+        """A xenograft or a spike-in deposits two organisms, and the paper names the one it analysed."""
+        assessed = _assess(evidence=_records("Homo sapiens", "Mus musculus"))
+        assert assessed["S1.B"]["outcome"] == VERIFIED
+
+    def test_a_deposit_bioaf_never_opened_leaves_it_untested_and_names_the_limitation(self):
+        limitation = {"accession": "EGAS1", "reason": "bioAF reads per-sample records from GEO only"}
+        assessed = _assess(evidence=_records(limitations=[limitation]))
+        assert assessed["S1.B"]["outcome"] == UNDETERMINED
+        assert "GEO only" in assessed["S1.B"]["rationale"]
+
+    def test_records_that_were_read_and_state_no_organism_say_that_about_the_deposit(self):
+        assessed = _assess(evidence=_records("", ""))
+        assert assessed["S1.B"]["outcome"] == UNDETERMINED
+        assert "states no organism" in assessed["S1.B"]["rationale"]
+
+    def test_the_records_are_preferred_over_an_older_checks_verdict(self):
+        evidence = {
+            **_records("Mus musculus"),
+            "precompute_checks": {"species_matches": {"verdict": "ok", "detail": "an older run agreed"}},
+        }
+        assert _assess(evidence=evidence)["S1.B"]["outcome"] == FAILED
