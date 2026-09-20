@@ -320,6 +320,8 @@ async def review_documents(
     """
     accepted: dict[str, dict] = {}
     failures: list[dict] = []
+    # plan_8_6 section 11: what this review actually cost, recorded rather than estimated.
+    asked = {"requests": 0, "expansions": 0, "skipped_without_evidence": 0}
     packets = packets or {}
     shared = [p for p in passages or [] if isinstance(p, dict) and p.get("id") and str(p.get("text") or "").strip()]
     if not shared and not any((p or {}).get("passages") for p in packets.values()):
@@ -334,7 +336,9 @@ async def review_documents(
             reason = (coverage or {}).get("reason") or "bioAF holds no evidence relevant to this obligation"
             failures.append({"leaf": leaf, "reason": reason})
             accepted[leaf] = _untested(reason, coverage)
+            asked["skipped_without_evidence"] += 1
             continue
+        asked["requests"] += 1
         judged, failure = await _ask(
             leaf,
             rows,
@@ -354,6 +358,8 @@ async def review_documents(
             # One targeted expansion, within the existing per-paper allowance: the passages the
             # first packet's budget or ranking left out, added once. Section 3 item 3.
             widened = rows + expansion
+            asked["requests"] += 1
+            asked["expansions"] += 1
             again, failure = await _ask(
                 leaf,
                 widened,
@@ -378,6 +384,11 @@ async def review_documents(
         "model": model,
         "contract_version": CONTRACT_VERSION,
         "review_version": REVIEW_VERSION,
+        "asked": asked,
+        "evidence_chars": sum(
+            len(str(p.get("text") or "")) for packet in packets.values() for p in packet.get("passages") or []
+        )
+        or sum(len(str(p.get("text") or "")) for p in shared),
         "reason": None,
     }
 

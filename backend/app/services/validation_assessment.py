@@ -602,8 +602,11 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     and whether they ran at all.** ``reconciled: false`` stood for five different causes, and an
     empty contradiction list read as consistency established when the pass had not run.
     """
+    import time
+
     from app.services.validation_provenance import record_stage
 
+    started = time.monotonic()
     record_stage(study, "assessment")
     evidence = dict(study.evidence_json or {})
     if independent_checks_outstanding(evidence) or _bundle_never_requested(evidence):
@@ -683,25 +686,55 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     evidence["assessment"] = record
     study.evidence_json = evidence
     await session.flush()
+
     # plan_8_5 section 3.6: the documentary obligations a bounded model review can settle, judged on
     # the passages this study holds. It is cached on those passages, so the stage running again costs
     # nothing, and a provider failure leaves only the obligations it was asked about grey.
     cfg = await llm_provider_config_service.get_for_feature(
         session, study.organization_id, FEATURE_LITERATURE_VALIDATION
     )
-    await refresh_documentary_review(
+    reviewed = await refresh_documentary_review(
         session,
         study,
         client=get_client(cfg.provider) if cfg else None,
         model=cfg.model if cfg else None,
         api_key=cfg.api_key if cfg else None,
     )
+    # plan_8_6 section 11: what this assessment actually cost, recorded rather than estimated. A
+    # cheaper configuration is only acceptable once the accuracy gates pass, and neither can be
+    # argued from numbers nobody kept.
+    evidence = dict(study.evidence_json or {})
+    record["measured"] = _measured(evidence, reviewed, seconds=time.monotonic() - started)
+    evidence["assessment"] = record
+    study.evidence_json = evidence
+    await session.flush()
 
     # plan_8_5 sections 3.1 and 3.2: settle the rubric's obligations from what this study now holds,
     # and publish them. The score follows the evidence as it settles; it does not wait for approval,
     # for an acquired input or for a finding inventory, and nothing is judged at render time.
     await publish_assessment(session, study, reason="the assessment stage ran")
     return record
+
+
+def _measured(evidence: dict, reviewed: dict | None, *, seconds: float) -> dict:
+    """plan_8_6 section 11: bytes moved, model calls made, and obligations settled, for this attempt."""
+    ledger = [e for e in evidence.get("retrieval_ledger") or [] if isinstance(e, dict)]
+    judgments = ((reviewed or {}).get("judgments") or {}) if isinstance(reviewed, dict) else {}
+    settled = [j for j in judgments.values() if isinstance(j, dict) and j.get("outcome") in ("verified", "failed")]
+    code = evidence.get("code_resolution") if isinstance(evidence.get("code_resolution"), dict) else {}
+    return {
+        "seconds": round(seconds, 2),
+        "supplement_bytes": sum(int(e.get("bytes_transferred") or 0) for e in ledger),
+        "supplement_attempts": len(ledger),
+        "code_bytes": sum(int(f.get("size_bytes") or 0) for f in (code or {}).get("files") or []),
+        "code_sources_read": len((evidence.get("code_inspection") or {}).get("sources") or []),
+        "model_requests": ((reviewed or {}).get("asked") or {}).get("requests", 0),
+        "model_expansions": ((reviewed or {}).get("asked") or {}).get("expansions", 0),
+        "skipped_without_evidence": ((reviewed or {}).get("asked") or {}).get("skipped_without_evidence", 0),
+        "evidence_chars": (reviewed or {}).get("evidence_chars", 0),
+        "obligations_judged": len(judgments),
+        "obligations_settled": len(settled),
+    }
 
 
 async def publish_assessment(session: AsyncSession, study, *, reason: str) -> None:

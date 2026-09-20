@@ -158,3 +158,45 @@ class TestInspectCodeStillReadsWhatItAlwaysDid:
         )
         assert found["sources"][0]["language"] == "python"
         assert "fc_thresh = 1" in found["sources"][0]["text"]
+
+
+class TestALegitimateOverrideIsDistinguishableFromADiscrepancy:
+    """Section 4: a fixture with a legitimate override or an unrelated threshold must not fail.
+
+    `deg_interpretation.py` sets TWO fold-change thresholds. One labels points on a volcano plot;
+    the other selects the genes fed to GO enrichment, and only the second is the one the paper's
+    methods state a value for. Supplying the file as one blob would make the two indistinguishable,
+    so the excerpts keep their line ranges and the comments that say which is which.
+    """
+
+    def _script(self):
+        found = inspect_archive(_ARCHIVE, origin="https://github.com/programmablebio/granulosa")
+        return next(s for s in found["sources"] if s["path"].endswith("deg_interpretation.py"))
+
+    def test_both_thresholds_are_present_with_the_comments_that_scope_them(self):
+        text = self._script()["text"]
+        assert "#Thresholds for enrichment" in text
+        assert "volcano" in text.lower()
+
+    def test_the_excerpts_an_obligation_is_given_carry_their_line_numbers(self):
+        from app.services.validation_documentary_review import extras_for
+
+        rows = extras_for(
+            evidence={"code_inspection": {"sources": [self._script()], "manifests": []}},
+            plan={},
+        )
+        code = [r for r in rows if r["kind"] == "code"]
+        assert code
+        assert all(r["text"].startswith("lines ") for r in code)
+        assert any("fc_thresh = 1" in r["text"] for r in code)
+
+    def test_the_whole_file_reaches_the_assessor_not_its_first_900_characters(self):
+        from app.services.validation_documentary_review import extras_for
+
+        rows = extras_for(
+            evidence={"code_inspection": {"sources": [self._script()], "manifests": []}},
+            plan={},
+        )
+        carried = "\n".join(r["text"] for r in rows if r["kind"] == "code")
+        assert "Make volcano plots" in carried
+        assert "#Thresholds for enrichment" in carried

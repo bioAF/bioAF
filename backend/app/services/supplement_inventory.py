@@ -997,10 +997,20 @@ async def resolve_supplements(
     if ledger is None:
         ledger = []
     covered = [r["identity"] for r in rows if r["kind"] not in (KIND_FIGURE, KIND_INDEX)]
-    contents, entry = await _retrieve_bundle(_SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid), fetcher, covered, ledger)
-
+    url = _SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid)
     ledger_for: dict[str, str] = {}
     from_members = False
+    # plan_8_6 section 5: a bundle already refused for its size is refused again. Remembering it
+    # against the source means an unchanged retry goes straight to the member path instead of
+    # transferring 243 MiB a second time to learn the same thing.
+    refused = next(
+        (e for e in ledger if isinstance(e, dict) and e.get("url") == url and e.get("outcome") == TOO_LARGE), None
+    )
+    if refused is not None:
+        contents, entry = None, refused
+    else:
+        contents, entry = await _retrieve_bundle(url, fetcher, covered, ledger)
+
     if contents is None and entry.get("outcome") == TOO_LARGE:
         # plan_8_6 section 5: the bundle being over the cap is a reason to fetch its members, not a
         # reason to hold nothing. The limit stays; each member is retrieved under it on its own.

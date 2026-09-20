@@ -240,9 +240,7 @@ class TestTheBudget:
     async def test_at_most_three_member_requests_are_in_flight(self):
         fetcher = _Fetcher(files={f"elife-83291-supp{i}.zip": b"a" for i in range(1, 8)})
         fetcher.peak = 0
-        await resolve_supplements(
-            "PMC9943069", _MANY, fetcher=fetcher, ledger=[], article_urls=_ARTICLE_URLS
-        )
+        await resolve_supplements("PMC9943069", _MANY, fetcher=fetcher, ledger=[], article_urls=_ARTICLE_URLS)
         assert fetcher.peak <= 3
 
 
@@ -256,9 +254,7 @@ class TestWhatIsFetchedFirst:
                 "elife-83291-fig2-data1.zip": _table(),
             }
         )
-        await resolve_supplements(
-            "PMC9943069", _MANIFEST, fetcher=fetcher, ledger=[], article_urls=_ARTICLE_URLS
-        )
+        await resolve_supplements("PMC9943069", _MANIFEST, fetcher=fetcher, ledger=[], article_urls=_ARTICLE_URLS)
         members = [u for u in fetcher.asked if "cdn.elifesciences.org" in u]
         assert members.index(next(u for u in members if "supp4" in u)) < members.index(
             next(u for u in members if "fig2-data1" in u)
@@ -293,3 +289,28 @@ class TestNothingChangesWhenTheBundleArrives:
         )
         assert next(r for r in rows if r["identity"] == "elife-83291-supp4.zip")["resolved"] is True
         assert not any("cdn.elifesciences.org" in u for u in bundle.asked), "no member fetch when the bundle arrives"
+
+
+class TestReuse:
+    @pytest.mark.asyncio
+    async def test_a_bundle_already_refused_for_its_size_is_not_downloaded_again(self):
+        """Section 5: remember `too_large` against the source, so an unchanged retry goes straight
+        to the member path instead of transferring 243 MiB a second time."""
+        fetcher = _Fetcher(files={"elife-83291-supp4.zip": _table()})
+        ledger: list[dict] = []
+        await resolve_supplements("PMC9943069", _MANIFEST, fetcher=fetcher, ledger=ledger, article_urls=_ARTICLE_URLS)
+        first = len([u for u in fetcher.asked if "supplementaryFiles" in u])
+        await resolve_supplements("PMC9943069", _MANIFEST, fetcher=fetcher, ledger=ledger, article_urls=_ARTICLE_URLS)
+        assert len([u for u in fetcher.asked if "supplementaryFiles" in u]) == first
+
+    @pytest.mark.asyncio
+    async def test_a_member_already_held_is_not_fetched_again(self):
+        fetcher = _Fetcher(files={"elife-83291-supp4.zip": _table(), "elife-83291-supp2.xlsx": _table()})
+        ledger: list[dict] = []
+        rows = await resolve_supplements(
+            "PMC9943069", _MANIFEST, fetcher=fetcher, ledger=ledger, article_urls=_ARTICLE_URLS
+        )
+        before = len([u for u in fetcher.asked if "supp4" in u])
+        await resolve_supplements("PMC9943069", rows, fetcher=fetcher, ledger=ledger, article_urls=_ARTICLE_URLS)
+        assert next(r for r in rows if r["identity"] == "elife-83291-supp4.zip")["resolved"] is True
+        assert before >= 1
