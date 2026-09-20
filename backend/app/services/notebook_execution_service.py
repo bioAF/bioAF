@@ -382,8 +382,15 @@ class NotebookExecutionService:
     async def _finalize_success(session: AsyncSession, cs: ComputeSession) -> None:
         from app.services.session_output_service import SessionOutputService
 
+        # plan_7 step 16a, found in a live backend log: "Outputs sync complete" and nothing landed.
+        # The untrusted identity holds ONE bucket-level binding, on its own bucket, which is the
+        # whole point of it. Syncing an untrusted run to the platform working bucket asks its service
+        # account to write a bucket it cannot touch; the copy fails inside the sidecar, the exec
+        # returns, and the outputs are lost behind a log line saying complete.
+        untrusted = bool((cs.provider_metadata or {}).get("untrusted"))
+        bucket_key = "untrusted_bucket_name" if untrusted else "working_bucket_name"
         working_bucket = ""
-        working_bucket_value = await PlatformConfigService.get(session, "working_bucket_name")
+        working_bucket_value = await PlatformConfigService.get(session, bucket_key)
         if working_bucket_value is not None:
             val = (working_bucket_value or "").strip()
             if val and val != "null":

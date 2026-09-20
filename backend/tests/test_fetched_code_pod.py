@@ -14,6 +14,8 @@ question this is not: a notebook session is already an isolated per-session pod 
 and step 16a gave this one an identity that can reach exactly one bucket.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.adapters.notebooks.kubernetes import build_fetched_code_script
@@ -231,3 +233,78 @@ class TestThePodCanWriteWhereItUnpacksTheCode:
     def test_a_template_run_is_unchanged(self):
         manifest = self._manifest({"notebook_json": {"cells": []}})
         assert "/work" not in self._mounts(manifest)
+
+
+class TestAnUntrustedRunSyncsToTheBucketItCanWrite:
+    """plan_7 step 16a, found in the live backend log: "Outputs sync complete" and nothing landed.
+
+    The untrusted identity holds ONE bucket-level binding, on its own bucket, which is the whole
+    point of it. Finalising a run reads the PLATFORM working bucket from config and syncs there, so
+    an untrusted pod was asked to write a bucket its service account cannot touch. The copy fails
+    inside the sidecar, the exec returns, and the outputs are lost with a log line saying complete.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_untrusted_bucket_is_what_an_untrusted_session_syncs_to(self, session, admin_user, monkeypatch):
+        from app.models.notebook_session import ComputeSession
+        from app.services.notebook_execution_service import NotebookExecutionService
+
+        cs = ComputeSession(
+            user_id=admin_user.id,
+            organization_id=admin_user.organization_id,
+            session_type="headless",
+            resource_profile="medium",
+            cpu_cores=2,
+            memory_gb=4,
+            status="running",
+            compute_job_ref="bioaf-notebook-1",
+            k8s_namespace="bioaf-untrusted",
+            provider_metadata={"untrusted": True, "namespace": "bioaf-untrusted"},
+        )
+        session.add(cs)
+        await session.flush()
+
+        asked = {}
+
+        class _Adapter:
+            async def terminate_session(self, *a, **kw):
+                asked.update(kw)
+                return SimpleNamespace(output_files=[], output_prefix="")
+
+        from app.platform.platform_config_service import PlatformConfigService
+
+        await PlatformConfigService.set(session, "working_bucket_name", "bioaf-working")
+        await PlatformConfigService.set(session, "untrusted_bucket_name", "bioaf-untrusted-bucket")
+        monkeypatch.setattr("app.services.notebook_execution_service.get_notebook_adapter", lambda: _Adapter())
+        await NotebookExecutionService._finalize_success(session, cs)
+        assert asked["working_bucket"] == "bioaf-untrusted-bucket"
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_session_still_syncs_to_the_working_bucket(self, session, admin_user, monkeypatch):
+        from app.models.notebook_session import ComputeSession
+        from app.platform.platform_config_service import PlatformConfigService
+        from app.services.notebook_execution_service import NotebookExecutionService
+
+        cs = ComputeSession(
+            user_id=admin_user.id,
+            organization_id=admin_user.organization_id,
+            session_type="headless",
+            resource_profile="medium",
+            cpu_cores=2,
+            memory_gb=4,
+            status="running",
+            compute_job_ref="bioaf-notebook-2",
+        )
+        session.add(cs)
+        await session.flush()
+        asked = {}
+
+        class _Adapter:
+            async def terminate_session(self, *a, **kw):
+                asked.update(kw)
+                return SimpleNamespace(output_files=[], output_prefix="")
+
+        await PlatformConfigService.set(session, "working_bucket_name", "bioaf-working")
+        monkeypatch.setattr("app.services.notebook_execution_service.get_notebook_adapter", lambda: _Adapter())
+        await NotebookExecutionService._finalize_success(session, cs)
+        assert asked["working_bucket"] == "bioaf-working"
