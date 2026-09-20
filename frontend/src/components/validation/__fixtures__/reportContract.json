@@ -1450,34 +1450,6 @@
           "points": 10.0,
           "reason": "end-to-end execution requires an approved workflow run. Nothing is assessed until one has run.",
           "section": "R"
-        },
-        {
-          "criterion": "S2",
-          "leaf": "S2.A",
-          "points": 1.5,
-          "reason": "bioAF holds no implemented check that the paper identifies the tissue, cell type or material of the relevant samples apart from the conditions its contrasts name.",
-          "section": "S"
-        },
-        {
-          "criterion": "S2",
-          "leaf": "S2.B",
-          "points": 1.5,
-          "reason": "bioAF holds no implemented check that independent records agree with the paper's stated sample identities, with legitimate differences between experiments accounted for.",
-          "section": "S"
-        },
-        {
-          "criterion": "S4",
-          "leaf": "S4.B",
-          "points": 1.5,
-          "reason": "bioAF holds no implemented check reconciling held sample records to the counts and inclusion rules each experiment states.",
-          "section": "S"
-        },
-        {
-          "criterion": "S5",
-          "leaf": "S5.A",
-          "points": 1.5,
-          "reason": "bioAF holds no implemented check that the paper describes biological versus technical replication and its pairing or blocking requirements.",
-          "section": "S"
         }
       ],
       "checker_version": 1,
@@ -1595,7 +1567,23 @@
           "section": "S"
         },
         {
-          "action": "acquire an analysis input and map its columns",
+          "action": "read the paper's samples section for the material it used",
+          "criterion": "S2",
+          "leaf": "S2.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata, and record the material the paper states",
+          "criterion": "S2",
+          "leaf": "S2.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata, or an analysis input and map its columns",
           "criterion": "S3",
           "leaf": "S3.B",
           "needs_approval": false,
@@ -1606,6 +1594,22 @@
           "action": "read the paper's samples section again",
           "criterion": "S4",
           "leaf": "S4.A",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "acquire the deposit's sample metadata",
+          "criterion": "S4",
+          "leaf": "S4.B",
+          "needs_approval": false,
+          "points": 1.5,
+          "section": "S"
+        },
+        {
+          "action": "read the paper's design for its replication, and record the passage it rests on",
+          "criterion": "S5",
+          "leaf": "S5.A",
           "needs_approval": false,
           "points": 1.5,
           "section": "S"
@@ -2384,34 +2388,34 @@
               "failed": 0.0,
               "obligations": [
                 {
-                  "capability_limit": true,
+                  "capability_limit": false,
                   "impact": null,
                   "label": "untested",
                   "leaf": "S2.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "read the paper's samples section for the material it used",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 1.5,
-                  "rationale": "bioAF holds no implemented check that the paper identifies the tissue, cell type or material of the relevant samples apart from the conditions its contrasts name.",
-                  "scope": "not assessed",
+                  "rationale": "bioAF holds no statement of the tissue, cell type or material the relevant samples came from",
+                  "scope": "the paper's samples section",
                   "statement": "The relevant tissue, cell type or material is identified in the paper",
                   "unit": null
                 },
                 {
-                  "capability_limit": true,
+                  "capability_limit": false,
                   "impact": null,
                   "label": "untested",
                   "leaf": "S2.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "acquire the deposit's sample metadata, and record the material the paper states",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 1.5,
-                  "rationale": "bioAF holds no implemented check that independent records agree with the paper's stated sample identities, with legitimate differences between experiments accounted for.",
-                  "scope": "not assessed",
+                  "rationale": "bioAF holds no sample records to compare the paper's stated material with",
+                  "scope": "no sample record bioAF could read",
                   "statement": "Independent records agree with those identities, legitimate differences between experiments accounted for",
                   "unit": null
                 }
@@ -2448,12 +2452,12 @@
                   "leaf": "S3.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": "acquire an analysis input and map its columns",
+                  "next_action": "acquire the deposit's sample metadata, or an analysis input and map its columns",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 1.5,
-                  "rationale": "no analysis input was chosen, so no sample records were placed against the paper's arms",
-                  "scope": "no chosen input",
+                  "rationale": "bioAF holds no sample records placing this paper's samples in its arms",
+                  "scope": "no sample record bioAF could read",
                   "statement": "Independent sample records support assignment to those arms",
                   "unit": null
                 }
@@ -2484,18 +2488,18 @@
                   "unit": null
                 },
                 {
-                  "capability_limit": true,
+                  "capability_limit": false,
                   "impact": null,
                   "label": "untested",
                   "leaf": "S4.B",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "acquire the deposit's sample metadata",
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 1.5,
-                  "rationale": "bioAF holds no implemented check reconciling held sample records to the counts and inclusion rules each experiment states.",
-                  "scope": "not assessed",
+                  "rationale": "bioAF holds no sample records to reconcile the paper's counts against",
+                  "scope": "no sample record bioAF could read",
                   "statement": "Held sample records reconcile to those counts and rules; a whole-series count is not an experiment's count",
                   "unit": null
                 }
@@ -2510,18 +2514,18 @@
               "failed": 0.0,
               "obligations": [
                 {
-                  "capability_limit": true,
+                  "capability_limit": false,
                   "impact": null,
                   "label": "untested",
                   "leaf": "S5.A",
                   "method": "measurement",
                   "method_label": "Measured",
-                  "next_action": null,
+                  "next_action": "read the paper's design for its replication, and record the passage it rests on",
                   "obligation": "A",
                   "outcome": "undetermined",
                   "points": 1.5,
-                  "rationale": "bioAF holds no implemented check that the paper describes biological versus technical replication and its pairing or blocking requirements.",
-                  "scope": "not assessed",
+                  "rationale": "nothing bioAF holds describes biological versus technical replication, or the pairing this design requires",
+                  "scope": "the paper's design",
                   "statement": "Biological versus technical replication and pairing or blocking requirements are described",
                   "unit": null
                 },
@@ -2553,11 +2557,11 @@
           ],
           "failed": 0.0,
           "maximum": 15.0,
-          "outstanding": "bioAF holds no implemented check that the paper identifies the tissue, cell type or material of the relevant samples apart from the conditions its contrasts name.",
+          "outstanding": "read the paper's samples section again, or record the organism at the gate",
           "section": "S",
           "title": "Sample metadata and study design",
           "undetermined": 13.5,
-          "unsupported_count": 4,
+          "unsupported_count": 0,
           "verified": 1.5
         }
       ],

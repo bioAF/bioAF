@@ -81,9 +81,11 @@ class TestIsolation:
         assert failed_judge["outcome"] == UNDETERMINED
 
     def test_a_parser_bioaf_does_not_have_cannot_fail_the_syntax_obligation(self):
+        """plan_8_5 section 3.5 gave bioAF an R parser; Julia is a language it still cannot read, and
+        a language with no parser leaves the obligation grey rather than failing the paper."""
         assessed = assess_evidence(
             plan=_PLAN,
-            evidence={"code_inspection": {"sources": [{"path": "a.R", "language": "r", "text": "f <- 1"}]}},
+            evidence={"code_inspection": {"sources": [{"path": "a.jl", "language": "julia", "text": "f(x) = 1"}]}},
             claims=[],
             inventory=None,
         )
