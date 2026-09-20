@@ -290,10 +290,17 @@ class TestTheCodeSectionIsAssessedWhereTheSourceIsInHand:
         assert all(assessed[f"C{n}.{o}"]["outcome"] == UNDETERMINED for n in range(1, 6) for o in "AB")
 
     def test_an_unparseable_language_declares_itself_a_capability_limit(self):
-        r_source = {"path": "AllRCode.R", "language": "r", "text": "f <- function(x) x + 1\n"}
-        assessed = _assess(evidence={"code_inspection": {"sources": [r_source]}})
+        """plan_8_5 section 3.5 gave bioAF an R parser. Julia is a language it still cannot read, and
+        a language with no parser leaves its obligation grey and declares why."""
+        source = {"path": "analysis.jl", "language": "julia", "text": "f(x) = x + 1\n"}
+        assessed = _assess(evidence={"code_inspection": {"sources": [source]}})
         assert assessed["C1.A"]["outcome"] == UNDETERMINED
         assert assessed["C1.A"]["capability_limit"] is True
+
+    def test_the_r_a_paper_supplied_is_parsed_rather_than_declared_unreadable(self):
+        source = {"path": "AllRCode.R", "language": "r", "text": "library(DESeq2)\nprint(1)\n"}
+        assessed = _assess(evidence={"code_inspection": {"sources": [source]}})
+        assert assessed["C1.A"]["outcome"] == VERIFIED
 
 
 class TestApplicabilityIsAboutThePaperNotAboutBioaf:

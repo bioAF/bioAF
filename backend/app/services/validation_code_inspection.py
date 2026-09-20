@@ -53,8 +53,12 @@ MANIFESTS = {
     "makefile",
 }
 
-# Documents and archives: real containers of code that bioAF does not split back into files.
+# Documents and archives: real containers of code. plan_8_5 section 3.5: a .docx whose text is R
+# Markdown is read back into its chunks, which are units the authors wrote; anything else stays a
+# container bioAF cannot split, because inventing file boundaries would put files in the record that
+# were never supplied.
 _OPAQUE = (".docx", ".doc", ".pdf", ".rtf", ".odt")
+_DOCUMENTS = (".docx",)
 
 
 def _sha256(blob: bytes) -> str:
@@ -101,6 +105,11 @@ def inspect_code(supplements: list[dict] | None, *, bytes_for: dict[str, bytes] 
         if blob is None:
             unreadable.append({"path": name, "reason": "bioAF holds no bytes for this file"})
             continue
+        if name.lower().endswith(_DOCUMENTS):
+            extracted = _documented_sources(name, blob)
+            if extracted:
+                sources.extend(extracted)
+                continue
         if name.lower().endswith(_OPAQUE):
             unreadable.append(
                 {
@@ -129,6 +138,69 @@ def inspect_code(supplements: list[dict] | None, *, bytes_for: dict[str, bytes] 
         suffix = pathlib.PurePosixPath(name).suffix.lower()
         sources.append({**entry, "language": LANGUAGES.get(suffix, "unknown")})
     return {"sources": sources, "manifests": manifests, "unreadable": unreadable}
+
+
+# The chunk engines bioAF reads back into source, and the language each one is.
+_ENGINES = {"r": "r", "python": "python", "bash": "shell", "sh": "shell"}
+
+
+def _documented_sources(name: str, blob: bytes) -> list[dict]:
+    """The R Markdown documents inside a word-processed file, as sources with their chunks.
+
+    plan_8_5 section 3.5: Groff's supplement is five R Markdown documents and a hundred chunks inside
+    one .docx. Recording it as unreadable left every code obligation grey for a paper that supplied
+    all of its code. One source per DOCUMENT the authors wrote, its chunks kept in order with their
+    labels and their places, and the prose between them left out, because prose is not source.
+    """
+    from app.services.code_documents import has_rmarkdown_chunks, rmarkdown_documents
+    from app.services.supplement_inventory import extract_docx_text
+
+    text = extract_docx_text(blob)
+    if not text or not has_rmarkdown_chunks(text):
+        return []
+    found: list[dict] = []
+    documents = rmarkdown_documents(text)
+    titles = [d["title"] or f"document {i}" for i, d in enumerate(documents, start=1)]
+    for index, document in enumerate(documents, start=1):
+        by_language: dict[str, list[dict]] = {}
+        for chunk in document["chunks"]:
+            language = _ENGINES.get(chunk["engine"])
+            if language is None or not (chunk["code"] or "").strip():
+                continue
+            by_language.setdefault(language, []).append(
+                {
+                    "id": f"chunk {chunk['order']}" + (f" ({chunk['label']})" if chunk["label"] else ""),
+                    "label": chunk["label"] or f"chunk {chunk['order']}",
+                    "line": chunk["line"],
+                    "order": chunk["order"],
+                    "code": chunk["code"],
+                    "unterminated": chunk["unterminated"],
+                }
+            )
+        title = document["title"] or f"document {index}"
+        if titles.count(title) > 1:
+            # Two of Groff's five documents are both titled "R Notebook". They are still two
+            # documents, and a diagnostic has to say which one it is about.
+            title = f"{title} {1 + titles[:index - 1].count(title)}"
+        for language, segments in by_language.items():
+            found.append(
+                {
+                    "path": f"{name} > {title}",
+                    "language": language,
+                    "text": "\n".join(s["code"] for s in segments),
+                    "segments": segments,
+                    "document": title,
+                    "provenance": {
+                        "from": "supplement",
+                        "sha256": _sha256(blob),
+                        "bytes": len(blob),
+                        "extracted": "r markdown in a word-processed document",
+                        "chunks": len(segments),
+                        "container": name,
+                    },
+                }
+            )
+    return found
 
 
 def is_code_file(filename: str, *, role: str | None = None) -> bool:

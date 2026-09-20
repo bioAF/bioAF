@@ -71,12 +71,16 @@ class TestAParserDecidesWhetherTheSourceParses:
         assert found["outcome"] == VERIFIED
 
     def test_a_language_with_no_declared_parser_is_undetermined_not_failed(self):
-        """Section 6.2: an explicit language capability declaration. R is what Groff supplied, and
-        bioAF holds no R parser, so its syntax is unknown rather than wrong."""
-        assert "r" not in SUPPORTED_LANGUAGES
-        found = _assess(sources=_sources("f <- function(x) { x + 1 }\n", path="code.R", language="r"))["C1.A"]
+        """Section 6.2: an explicit language capability declaration. plan_8_5 section 3.5 added R,
+        which is what study 55 supplied; Julia is a language bioAF still cannot parse, and its syntax
+        is unknown rather than wrong."""
+        assert "julia" not in SUPPORTED_LANGUAGES
+        found = _assess(sources=_sources("f(x) = x + 1\n", path="code.jl", language="julia"))["C1.A"]
         assert found["outcome"] == UNDETERMINED
-        assert "R" in found["rationale"] or "r" in found["rationale"]
+        assert "julia" in found["rationale"].lower()
+
+    def test_the_language_it_can_parse_is_declared_rather_than_assumed(self):
+        assert "python" in SUPPORTED_LANGUAGES and "r" in SUPPORTED_LANGUAGES
 
     def test_loading_and_building_stay_undetermined_behind_the_approval(self):
         found = _assess()["C1.B"]
