@@ -625,6 +625,33 @@ _RETRYABLE = (NOT_FOUND, TRANSIENT)
 BUNDLE_SOURCE = "europepmc_supplementary_bundle"
 BUNDLE_SOURCE_LABEL = "the article's supplementary bundle from Europe PMC"
 
+# plan_8_6 section 5: what happens when the bundle is over the cap. Study 65's is 243 MiB and the
+# ledger recorded `too_large` twice and stopped, so every attachment the paper published was lost to
+# one refusal, including a 2.6 MB differential-expression table that is 1% of the bundle.
+#
+# The limit stays. What changes is what bioAF does when it is hit: each member is resolved to the
+# publisher's own copy and fetched on its own, under the same per-file cap and the same ledger.
+MEMBER_SOURCE = "publisher_member_file"
+MEMBER_SOURCE_LABEL = "the publisher's own copy of one attachment"
+# The bundle was too large AND bioAF could not work out where its members live. Distinct from
+# `too_large` alone, which now means the bundle was refused and the members were fetched instead.
+MEMBERS_UNRESOLVED = "members_unresolved"
+# The per-assessment transfer allowance ran out before this file. Never an absence, and never a
+# reason to start another automatic attempt: plan_8_6 section 11.
+BUDGET_EXHAUSTED = "budget_exhausted"
+
+# plan_8_6 section 11: at most three concurrent member requests, and a recorded aggregate transfer
+# budget for the new bytes one assessment attempt may spend, failed transfers included.
+MAX_CONCURRENT_MEMBERS = 3
+AGGREGATE_TRANSFER_BYTES = 400 * 1024 * 1024
+
+_HREF_RE = re.compile(r"""(?:href|src)\s*=\s*["']([^"']+)["']""", re.I)
+_ABSOLUTE_RE = re.compile(r"""https?://[^\s"'<>\\]+""")
+# The version segment a publisher appends to its own copy of a file the manifest names without one
+# (`elife-83291-supp4.zip` is served as `elife-83291-supp4-v2.zip`). Learned from a link the
+# publisher actually gave, never assumed.
+_MAX_ARTICLE_PAGE_BYTES = 8 * 1024 * 1024
+
 # Bounded, with backoff, never a fixed-interval loop: the attempt cap is change_7.2 section 3's.
 # The waits are seconds rather than that policy's minutes because retrieval runs inside one driver
 # tick or one approval request, and a quarter-hour sleep there would stall every other study.
@@ -659,7 +686,9 @@ async def _retrieve_bundle(url: str, fetcher, covered: list[str], ledger: list[d
         at = _now_iso()
         outcome, status, error_class, contents = RETRIEVED, None, None, None
         try:
-            blob = await fetcher(url)
+            # plan_8_6 section 5: streamed and stopped at the cap where the transport can, so an
+            # oversized bundle is refused without transferring all of it first.
+            blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES)
         except Exception as exc:  # noqa: BLE001 - a fetch failure is a limitation of the run
             status = _status_of(exc)
             outcome, error_class = _failure_outcome(status), type(exc).__name__
@@ -695,11 +724,249 @@ async def _retrieve_bundle(url: str, fetcher, covered: list[str], ledger: list[d
     return None, entry
 
 
+def article_links(html: str, page_url: str) -> list[str]:
+    """Every file location an article page gives, absolute. Never raises.
+
+    plan_8_6 section 5: member URLs are resolved from the publisher's own links, not from a URL
+    pattern hard-coded per journal. A page that links nothing yields nothing, and that is recorded
+    as "the members could not be listed" rather than as the paper publishing nothing.
+    """
+    from urllib.parse import urljoin
+
+    text = html or ""
+    found: list[str] = []
+    for candidate in [*_ABSOLUTE_RE.findall(text), *(urljoin(page_url, h) for h in _HREF_RE.findall(text))]:
+        url = candidate.rstrip(".,;)\"'")
+        if url.lower().startswith(("http://", "https://")) and url not in found:
+            found.append(url)
+    return found
+
+
+def _basename(path: str) -> str:
+    return (path or "").rsplit("?", 1)[0].rsplit("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+
+
+def member_locations(rows: list[dict] | None, links: list[str] | None) -> dict[str, str]:
+    """Where each named attachment can be fetched on its own: ``{identity: url}``.
+
+    A manifest href that is already absolute is its own location. One that matches a link the
+    publisher gave takes that link. The rest are resolved against the directory and the version
+    suffix a matched link REVEALED, which is learned from the publisher's own page rather than
+    assumed: eLife links its figure source data and not its supplementary files, and the two sit
+    side by side under the same base with the same `-v2` suffix.
+
+    A prose alias with no filename is not a member: it is another name for one of these.
+    """
+    wanted = [r for r in rows or [] if isinstance(r, dict) and r.get("filename")]
+    by_name: dict[str, str] = {}
+    for url in links or []:
+        by_name.setdefault(_basename(url).lower(), url)
+
+    found: dict[str, str] = {}
+    matched: list[tuple[str, str, str]] = []
+    for row in wanted:
+        name = str(row["filename"])
+        identity = str(row.get("identity") or name)
+        if name.lower().startswith(("http://", "https://")):
+            found[identity] = name
+            continue
+        url, suffix = _served_as(name, by_name)
+        if url is not None:
+            found[identity] = url
+            matched.append((_basename(name), url, suffix))
+
+    for name, url, suffix in matched:
+        served = _basename(url)
+        extension = name.rpartition(".")[2]
+        base = url[: -len(served)]
+        for row in wanted:
+            identity = str(row.get("identity") or row["filename"])
+            if identity in found:
+                continue
+            other_stem, _, other_extension = _basename(str(row["filename"])).rpartition(".")
+            if other_stem and other_extension:
+                found[identity] = f"{base}{other_stem}{suffix}.{other_extension}"
+        if extension:
+            break
+    return found
+
+
+# What a publisher appends to its own copy of a file the manifest names without it: a version
+# segment (`-v2`), or nothing. Learned from a link the publisher actually gave, never assumed, and
+# narrow enough that `fig2-data1.zip` cannot be matched by `fig2-data11-v2.zip`.
+_SERVED_SUFFIX = re.compile(r"^(?:[-_.]v?\d{1,3})?$", re.I)
+
+
+def _served_as(name: str, by_name: dict[str, str]) -> tuple[str | None, str]:
+    """``(url, suffix)`` for the link that serves this manifest filename, or ``(None, "")``."""
+    base = _basename(name)
+    exact = by_name.get(base.lower())
+    if exact is not None:
+        return exact, ""
+    stem, _, extension = base.rpartition(".")
+    if not (stem and extension):
+        return None, ""
+    for served_lower, url in by_name.items():
+        if not served_lower.endswith(f".{extension.lower()}") or not served_lower.startswith(stem.lower()):
+            continue
+        served = _basename(url)
+        suffix = served[len(stem) : len(served) - len(extension) - 1]
+        if _SERVED_SUFFIX.fullmatch(suffix):
+            return url, suffix
+    return None, ""
+
+
+# What an attachment is likely to answer an obligation with, highest first. plan_8_6 section 5:
+# prioritize code, methods, sample metadata and result tables; do not spend the budget downloading
+# every image archive to meet an attachment count. The role is only known after the bytes arrive,
+# so this orders by what the publisher NAMED the file, and nothing is excluded by it.
+_PRIORITY_NAMES = re.compile(r"supp|table|data\s*set|dataset|metadata|code|script|method|material", re.I)
+_DEPRIORITY_NAMES = re.compile(r"\bfig(?:ure)?\d|checklist|reporting|transparent|mdar", re.I)
+
+
+def _member_priority(row: dict) -> tuple[int, str]:
+    name = str(row.get("filename") or row.get("label") or "")
+    if _DEPRIORITY_NAMES.search(name):
+        return 2, name
+    return (0 if _PRIORITY_NAMES.search(name) else 1), name
+
+
+async def _fetch_within(fetcher, url: str, max_bytes: int) -> bytes:
+    """Fetch, asking the transport to stop at ``max_bytes`` where it can. Never downloads blindly
+    past the cap when the fetcher supports a limit; a fetcher that does not is used as it is."""
+    try:
+        return await fetcher(url, max_bytes=max_bytes)
+    except TypeError:
+        return await fetcher(url)
+
+
+async def _retrieve_members(
+    rows: list[dict],
+    *,
+    fetcher,
+    article_urls: list[str] | None,
+    ledger: list[dict],
+    transfer_budget: int,
+) -> tuple[dict[str, bytes], dict[str, str]]:
+    """Fetch each named attachment on its own. Returns (bytes by filename, ledger id by filename).
+
+    plan_8_6 section 5. Every attempt is its own ledger entry naming its own file, so a member that
+    is too large is recorded as that one file's limitation and costs the others nothing.
+    """
+    pages: list[str] = []
+    for url in (article_urls or [])[:2]:
+        try:
+            blob = await _fetch_within(fetcher, url, _MAX_ARTICLE_PAGE_BYTES)
+        except Exception as exc:  # noqa: BLE001 - a page bioAF cannot read lists no members
+            logger.info("could not read the article page at %s: %s", url, exc)
+            continue
+        pages.append(bytes(blob).decode("utf-8", errors="replace"))
+        pages_links = article_links(pages[-1], url)
+        if pages_links:
+            locations = member_locations(rows, pages_links)
+            if locations:
+                break
+    else:
+        locations = {}
+    if pages:
+        locations = locations or member_locations(rows, article_links(pages[-1], (article_urls or [""])[-1]))
+    if not locations:
+        ledger.append(
+            _entry(
+                ledger,
+                source=MEMBER_SOURCE,
+                label=MEMBER_SOURCE_LABEL,
+                url=(article_urls or [None])[0],
+                outcome=MEMBERS_UNRESOLVED,
+                artifacts=[r["identity"] for r in rows if r.get("filename")],
+            )
+        )
+        return {}, {}
+
+    ordered = sorted(
+        (r for r in rows if r.get("identity") in locations and r["kind"] not in (KIND_INDEX,)),
+        key=_member_priority,
+    )
+    contents: dict[str, bytes] = {}
+    ledger_for: dict[str, str] = {}
+    spent = 0
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_MEMBERS)
+    exhausted = False
+
+    async def _one(row: dict) -> tuple[dict, bytes | None, str, int | None, str | None]:
+        url = locations[row["identity"]]
+        async with semaphore:
+            try:
+                blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES)
+            except Exception as exc:  # noqa: BLE001 - one member's failure is one member's
+                return row, None, _failure_outcome(_status_of(exc)), _status_of(exc), type(exc).__name__
+        if len(blob) > _MAX_BUNDLE_BYTES:
+            return row, None, TOO_LARGE, None, None
+        return row, bytes(blob), RETRIEVED, None, None
+
+    # In priority batches, at most three requests in flight, counting transferred bytes as they land
+    # and stopping at the aggregate budget rather than starting another attempt behind it.
+    for start in range(0, len(ordered), MAX_CONCURRENT_MEMBERS):
+        if exhausted:
+            break
+        batch = ordered[start : start + MAX_CONCURRENT_MEMBERS]
+        if spent >= transfer_budget:
+            exhausted = True
+            batch_rows = ordered[start:]
+            ledger.append(
+                _entry(
+                    ledger,
+                    source=MEMBER_SOURCE,
+                    label=MEMBER_SOURCE_LABEL,
+                    url=None,
+                    outcome=BUDGET_EXHAUSTED,
+                    artifacts=[r["identity"] for r in batch_rows],
+                )
+            )
+            break
+        for row, blob, outcome, status, error_class in await asyncio.gather(*(_one(r) for r in batch)):
+            spent += len(blob) if blob is not None else 0
+            entry = _entry(
+                ledger,
+                source=MEMBER_SOURCE,
+                label=MEMBER_SOURCE_LABEL,
+                url=locations[row["identity"]],
+                outcome=outcome,
+                artifacts=[row["identity"]],
+                http_status=status,
+                error_class=error_class,
+                bytes_transferred=len(blob) if blob is not None else 0,
+            )
+            ledger.append(entry)
+            if blob is not None:
+                contents[str(row["filename"])] = blob
+                ledger_for[str(row["filename"])] = entry["id"]
+    return contents, ledger_for
+
+
+def _entry(ledger: list[dict], *, source: str, label: str, url, outcome: str, artifacts: list[str], **extra) -> dict:
+    return {
+        "id": f"R{len(ledger) + 1}",
+        "source": source,
+        "source_label": label,
+        "url": url,
+        "at": _now_iso(),
+        "attempt": 1,
+        "outcome": outcome,
+        "http_status": extra.pop("http_status", None),
+        "error_class": extra.pop("error_class", None),
+        "artifacts": artifacts,
+        **extra,
+    }
+
+
 async def resolve_supplements(
     pmcid: str,
     references: list[dict],
     *,
     fetcher,
+    article_urls: list[str] | None = None,
+    transfer_budget: int = AGGREGATE_TRANSFER_BYTES,
     thresholds: list[float] | None = None,
     ledger: list[dict] | None = None,
     predicates: list[dict] | None = None,
@@ -732,7 +999,22 @@ async def resolve_supplements(
     covered = [r["identity"] for r in rows if r["kind"] not in (KIND_FIGURE, KIND_INDEX)]
     contents, entry = await _retrieve_bundle(_SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid), fetcher, covered, ledger)
 
-    if contents is None:
+    ledger_for: dict[str, str] = {}
+    from_members = False
+    if contents is None and entry.get("outcome") == TOO_LARGE:
+        # plan_8_6 section 5: the bundle being over the cap is a reason to fetch its members, not a
+        # reason to hold nothing. The limit stays; each member is retrieved under it on its own.
+        from_members = True
+        contents, ledger_for = await _retrieve_members(
+            rows,
+            fetcher=fetcher,
+            article_urls=article_urls,
+            ledger=ledger,
+            transfer_budget=transfer_budget,
+        )
+        entry = ledger[-1] if ledger else entry
+
+    if not contents:
         for row in rows:
             if row.get("resolved"):
                 continue  # retrieved by an earlier attempt; this failure does not undo that
@@ -748,7 +1030,14 @@ async def resolve_supplements(
             if not row.get("resolved"):
                 # The bundle arrived and this artifact is not in it. That alone is marked; the rest
                 # resolve. Still not an absence: the manifest named it.
-                row["retrieval"] = {"status": RETRIEVAL_NOT_IN_BUNDLE, "ledger": entry["id"]}
+                #
+                # plan_8_6 section 5: when the members were fetched individually, a file bioAF did
+                # not get is a FAILED retrieval of that one file, never "the bundle does not contain
+                # it": no bundle was ever opened, so nothing established what it holds.
+                row["retrieval"] = {
+                    "status": RETRIEVAL_FAILED if from_members else RETRIEVAL_NOT_IN_BUNDLE,
+                    "ledger": _ledger_id_for(row, ledger, entry, from_members=from_members),
+                }
                 row.pop("failure_reason", None)
             continue
         claimed.add(filename)
@@ -757,7 +1046,7 @@ async def resolve_supplements(
             filename=filename,
             size_bytes=len(contents[filename]),
             resolved=True,
-            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": entry["id"]},
+            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": ledger_for.get(filename, entry["id"])},
         )
         if row["kind"] == KIND_REFERENCE:
             # A citation the manifest could not place, which the bundle's listing did.
@@ -791,7 +1080,7 @@ async def resolve_supplements(
         row.update(
             size_bytes=len(blob_bytes),
             resolved=True,
-            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": entry["id"]},
+            retrieval={"status": RETRIEVAL_RETRIEVED, "ledger": ledger_for.get(filename, entry["id"])},
         )
         if kind == KIND_ATTACHMENT:
             row.update(
@@ -806,6 +1095,15 @@ async def resolve_supplements(
     # are, nothing about what the authors published follows.
     rows.extend(expanded)
     return rows
+
+
+def _ledger_id_for(row: dict, ledger: list[dict], entry: dict, *, from_members: bool) -> str | None:
+    """The ledger entry that decided this row: its own member attempt where it had one."""
+    if from_members:
+        own = next((e for e in reversed(ledger) if row.get("identity") in (e.get("artifacts") or [])), None)
+        if own is not None:
+            return own.get("id")
+    return entry.get("id")
 
 
 def _inspect(row: dict, blob: bytes, expanded: list[dict], *, thresholds, predicates) -> None:
