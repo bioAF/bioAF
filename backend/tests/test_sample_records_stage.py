@@ -118,3 +118,47 @@ class TestTheSpeciesCheckReadsWhatWasActuallyOpened:
         check = check_species("Homo sapiens", organisms, organism_source=looked)
         assert check["verdict"] == UNKNOWN
         assert "declares no organism" not in check["detail"]
+
+
+class TestAFailedRetrievalIsNotAnAnswerToKeep:
+    """plan_8_5 section 3.4, from the live run: a deposit that could not be reached stayed unread.
+
+    The held records are reused when the study's deposits have not changed, which is what keeps a
+    refresh free. But a retrieval FAILURE establishes nothing about the deposit, and caching it
+    meant the next assessment never tried again: study 64's GSE144396 read as unreachable forever.
+    An archive bioAF has no adapter for is different, and asking again would cost a request to learn
+    what it already knows.
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_deposit_that_could_not_be_reached_is_tried_again(self, session, admin_user):
+        runs = {"n": 0}
+
+        async def flaky(url: str) -> str:
+            # The first assessment cannot reach GEO at all: neither the combined matrix nor the
+            # folder that would say which per-platform matrices exist.
+            if runs["n"] == 0:
+                raise RuntimeError("the matrix is unreachable")
+            if url.endswith("/matrix/"):
+                raise RuntimeError("no folder was asked for")
+            return _MATRIX
+
+        study = await _study(session, admin_user, deposits=[{"accession": "GSE1", "archive": "geo"}])
+        await run_assessment(session, study, fetcher=flaky)
+        assert study.evidence_json["sample_records"]["deposits"] == []
+        runs["n"] = 1
+        await run_assessment(session, study, fetcher=flaky)
+        assert study.evidence_json["sample_records"]["deposits"][0]["sample_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_an_archive_with_no_adapter_is_not_asked_about_again(self, session, admin_user):
+        calls = []
+
+        async def counting(url: str) -> str:
+            calls.append(url)
+            return _MATRIX
+
+        study = await _study(session, admin_user, deposits=[{"accession": "EGAS1", "archive": "ega"}])
+        await run_assessment(session, study, fetcher=counting)
+        await run_assessment(session, study, fetcher=counting)
+        assert calls == [], "bioAF has no adapter for it, and asking again cannot change that"

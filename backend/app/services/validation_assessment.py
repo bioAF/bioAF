@@ -579,7 +579,11 @@ async def refresh_sample_records(session: AsyncSession, study, *, fetcher=None) 
         deposits = [{"accession": requested, "provenance": "requested", "scoped": True}, *deposits]
     wanted = _deposit_identity(deposits)
     held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else None
-    if held is not None and held.get("deposits_seen") == wanted:
+    from app.services.validation_sample_records import retrievable_again
+
+    # plan_8_5 section 3.4: unchanged deposits cost no request, but a failure to RETRIEVE is not an
+    # answer about the deposit, so it is tried again rather than kept.
+    if held is not None and held.get("deposits_seen") == wanted and not retrievable_again(held):
         return held
     if not wanted:
         return held or {"deposits": [], "limitations": []}

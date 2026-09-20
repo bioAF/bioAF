@@ -31,6 +31,24 @@ logger = logging.getLogger("bioaf.validation_sample_records")
 SUPPORTED_ARCHIVES = ("geo",)
 _MAX_DEPOSITS = 4
 
+# Why bioAF holds no records for a deposit. Only the first of these can change by asking again, and
+# plan_8_5 section 3.4: a retrieval failure establishes nothing about the deposit, so it is never
+# kept as the answer.
+UNREACHABLE = "unreachable"
+PUBLISHED_NONE = "published_none"
+UNSUPPORTED = "unsupported_archive"
+BOUNDED = "bounded"
+TRANSIENT = (UNREACHABLE,)
+
+
+def retrievable_again(record: dict | None) -> bool:
+    """Whether a held set of sample records has a failure that asking again could still settle."""
+    if not isinstance(record, dict):
+        return True
+    return any(
+        isinstance(limit, dict) and limit.get("kind") in TRANSIENT for limit in record.get("limitations") or []
+    )
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -69,6 +87,7 @@ async def collect_sample_records(*, deposits: list[dict] | None, fetcher=None, l
                 {
                     "accession": accession,
                     "archive": archive or None,
+                    "kind": UNSUPPORTED,
                     "reason": (
                         f"bioAF reads per-sample records from {', '.join(a.upper() for a in SUPPORTED_ARCHIVES)} "
                         f"only, and {accession} is in {archive.upper() if archive else 'an archive bioAF did not recognise'}"
@@ -81,13 +100,22 @@ async def collect_sample_records(*, deposits: list[dict] | None, fetcher=None, l
                 {
                     "accession": accession,
                     "archive": archive,
+                    "kind": BOUNDED,
                     "reason": f"bioAF opened {limit} deposits for this study and stopped there",
                 }
             )
             continue
         samples, sources, digest, reason = await _matrices(accession, url, fetch)
         if reason is not None:
-            limitations.append({"accession": accession, "archive": archive, "source": url, "reason": reason})
+            limitations.append(
+                {
+                    "accession": accession,
+                    "archive": archive,
+                    "source": url,
+                    "kind": UNREACHABLE if "could not be read" in reason else PUBLISHED_NONE,
+                    "reason": reason,
+                }
+            )
             continue
         held.append(
             {
