@@ -255,3 +255,30 @@ test("a section expands into its criteria, each obligation as itself", () => {
   expect(criterion).toHaveTextContent("the deposit records Mus musculus");
   expect(criterion).toHaveTextContent("Measured");
 });
+
+// plan_8_4 section 4, caught in the browser on study 62: the row printed "0.2857142857142857 / 30".
+test("a section is shown the way the headline is, one decimal", () => {
+  const card = {
+    ...CARD,
+    sections: [
+      {
+        section: "R",
+        title: "Results checks and reproduction",
+        verified: 0.2857142857142857,
+        failed: 0,
+        undetermined: 29.714285714285715,
+        maximum: 30,
+        display: { verified: "0.3", failed: "0", undetermined: "29.7", maximum: "30" },
+        established: [],
+        outstanding: null,
+        unsupported_count: 0,
+        criteria: [],
+      },
+    ],
+  };
+  render(<EvidenceScorecard card={card} />);
+  const row = screen.getByTestId("evidence-section-R");
+  expect(row).toHaveTextContent("0.3 / 30");
+  expect(row).toHaveTextContent("0.3 positive · 29.7 untested · 0 negative");
+  expect(row).not.toHaveTextContent("0.2857142857142857");
+});

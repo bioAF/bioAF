@@ -1886,6 +1886,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -2025,6 +2042,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -2248,6 +2282,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "18",
+              "verified": "2"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 18.0,
+              "verified": 2.0
+            },
+            "total": "20",
+            "undetermined": "18",
+            "verified": "2"
+          },
           "established": [
             "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid WE (RNA karyotype): adjusted P <= 0.05, no fold-change requirement; XX vs XY WE (sex chromosome): adjusted P <= 0.05, |log2FC| >= 2; good vs poor morphology (Gardner AA vs CC) WE: adjusted P <= 0.05, no fold-change requirement; high vs low morphokinetic quality WE: adjusted P <= 0.05, no fold-change requirement)"
           ],
@@ -2341,6 +2392,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -2564,6 +2632,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "27/2",
+              "verified": "3/2"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 13.5,
+              "verified": 1.5
+            },
+            "total": "15",
+            "undetermined": "13.5",
+            "verified": "1.5"
+          },
           "established": [
             "every comparison the paper's claims rest on names its test and its reference arm"
           ],
@@ -5778,6 +5863,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -5917,6 +6019,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -6140,6 +6259,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "14",
+              "verified": "6"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 14.0,
+              "verified": 6.0
+            },
+            "total": "20",
+            "undetermined": "14",
+            "verified": "6"
+          },
           "established": [
             "the paper names the reference its results depend on (GRCh38)",
             "every comparison the paper's claims rest on states the criteria it applies (aneuploid vs euploid: adjusted P < 0.05, no fold-change requirement)",
@@ -6347,6 +6483,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -6570,6 +6723,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -8132,6 +8302,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -8271,6 +8458,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -8494,6 +8698,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -8617,6 +8838,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -8840,6 +9078,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -11204,6 +11459,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -11343,6 +11615,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -11566,6 +11855,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -12073,6 +12379,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -12296,6 +12619,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -14155,6 +14495,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -14294,6 +14651,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -14517,6 +14891,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -14608,6 +14999,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -14831,6 +15239,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -16638,6 +17063,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -16777,6 +17219,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -17000,6 +17459,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -17123,6 +17599,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -17346,6 +17839,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -18578,6 +19088,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -18717,6 +19244,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -18940,6 +19484,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "16",
+              "verified": "4"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 16.0,
+              "verified": 4.0
+            },
+            "total": "20",
+            "undetermined": "16",
+            "verified": "4"
+          },
           "established": [
             "every comparison the paper's claims rest on states the criteria it applies (KO vs WT: P < 0.01, no fold-change requirement)",
             "every claim's reading is established: P < 0.01, no fold-change requirement, down, the test arm over the reference arm; P < 0.01, no fold-change requirement, up, the test arm over the reference arm"
@@ -19066,6 +19627,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "22",
+              "verified": "8"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 22.0,
+              "verified": 8.0
+            },
+            "total": "30",
+            "undetermined": "22",
+            "verified": "8"
+          },
           "established": [
             "the authors' own published table agrees with this claim under its stated predicate",
             "the authors' own published table agrees with this claim under its stated predicate"
@@ -19292,6 +19870,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -21079,6 +21674,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -21218,6 +21830,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -21441,6 +22070,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -21564,6 +22210,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -21787,6 +22450,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -23198,6 +23878,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -23337,6 +24034,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,
@@ -23560,6 +24274,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "20",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "20",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 20.0,
+              "verified": 0.0
+            },
+            "total": "20",
+            "undetermined": "20",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 20.0,
@@ -23779,6 +24510,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "30",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "30",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 30.0,
+              "verified": 0.0
+            },
+            "total": "30",
+            "undetermined": "30",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 30.0,
@@ -24002,6 +24750,23 @@
               "verified": 0.0
             }
           ],
+          "display": {
+            "exact": {
+              "failed": "0",
+              "undetermined": "15",
+              "verified": "0"
+            },
+            "failed": "0",
+            "maximum": "15",
+            "parts": {
+              "failed": 0.0,
+              "undetermined": 15.0,
+              "verified": 0.0
+            },
+            "total": "15",
+            "undetermined": "15",
+            "verified": "0"
+          },
           "established": [],
           "failed": 0.0,
           "maximum": 15.0,

@@ -57,6 +57,15 @@ export function EvidenceScoreBar({ card }: { card: EvidenceScore }) {
 function Section({ section, card }: { section: EvidenceScoreSection; card: EvidenceScore }) {
   const [open, setOpen] = useState(false);
   const limits = card.capability_limits.filter((limit) => limit.section === section.section);
+  // plan_8_4 section 4: a section reads the way the headline does. Without this the row printed
+  // "0.2857142857142857 / 30", which is not a number anyone can act on. A report written before the
+  // backend sent the display falls back to its own numbers.
+  const shown = section.display ?? {
+    verified: String(section.verified),
+    undetermined: String(section.undetermined),
+    failed: String(section.failed),
+    maximum: String(section.maximum),
+  };
   return (
     <li data-testid={`evidence-section-${section.section}`} className="border-t border-gray-200 py-2">
       <button
@@ -66,11 +75,11 @@ function Section({ section, card }: { section: EvidenceScoreSection; card: Evide
       >
         <span className="text-sm font-medium text-gray-800">{section.title}</span>
         <span className="text-sm tabular-nums text-gray-700">
-          {section.verified} / {section.maximum}
+          {shown.verified} / {shown.maximum}
         </span>
       </button>
       <p className="text-xs text-gray-600">
-        {section.verified} positive · {section.undetermined} untested · {section.failed} negative
+        {shown.verified} positive · {shown.undetermined} untested · {shown.failed} negative
       </p>
       {open && (
         <div className="mt-1 space-y-1 text-xs text-gray-600">

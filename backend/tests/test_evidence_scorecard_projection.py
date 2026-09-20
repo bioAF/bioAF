@@ -346,3 +346,45 @@ class TestTheReadingOfAClaimReachesTheScore:
     def test_a_claim_reporting_on_no_comparison_carries_no_reading(self):
         claim = _summary(targets=[{"id": 2, "claim_text": "the QC passed", "contrast_index": None}])["claims"][0]
         assert claim["predicate_detail"] is None
+
+
+class TestASectionsNumbersAreShownTheWayTheHeadlineIs:
+    """plan_8_4 section 4, caught in the browser on study 62: a section row printed
+    ``0.2857142857142857 / 30``. One decimal, with the same sum-preserving rule the headline uses,
+    and the exact values travelling beside them."""
+
+    _INVENTORY = {
+        "findings": [
+            {"id": f"F{n}", "required": [n], "importance": {"category": "primary" if n < 3 else "supporting"}}
+            for n in range(1, 8)
+        ]
+    }
+
+    def _sections(self):
+        targets = [
+            {"id": n, "claim_text": f"claim {n}", "contrast_index": 0, "claimed_value": n}
+            for n in range(1, 8)
+        ]
+        plan = {**_PLAN, "finding_inventory": self._INVENTORY}
+        card = _summary(plan=plan, targets=targets)["evidence_score"]
+        return {s["section"]: s for s in card["sections"]}
+
+    def test_every_section_shows_one_decimal(self):
+        for section in self._sections().values():
+            for key in ("verified", "undetermined", "failed", "maximum"):
+                shown = section["display"][key]
+                decimals = shown.split(".")[1] if "." in shown else ""
+                assert shown == "<0.1" or len(decimals) <= 1, f"{section['section']}.{key}={shown}"
+
+    def test_the_shown_parts_add_up_to_the_shown_maximum(self):
+        for section in self._sections().values():
+            shown = section["display"]
+            if "<0.1" in shown.values():
+                continue
+            parts = sum(float(shown[key]) for key in ("verified", "undetermined", "failed"))
+            assert round(parts, 1) == float(shown["maximum"]), section["section"]
+
+    def test_the_exact_values_are_still_there(self):
+        results = self._sections()["R"]
+        assert results["verified"] == results["verified"], "the float stays for anything that computes"
+        assert "exact" in results["display"]
