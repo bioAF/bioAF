@@ -392,6 +392,38 @@ async def retry_inventory(
     return await _study_response(session, study, org_id)
 
 
+@router.post("/{study_id}/environment-check")
+async def request_environment_check_endpoint(
+    study_id: int,
+    current_user: dict = require_permission("lit_validation", "request"),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """plan_8_5 section 3.5: run an isolated environment check for this study's supplied code.
+
+    This is the approval C1.B and C2.B require: loading the source and resolving its dependencies
+    runs code bioAF did not write, so it runs under the untrusted identity, on request only. 409
+    where there is nothing to check, no runtime for its language, or no isolated identity on this
+    install: bioAF never borrows another identity to run a stranger's code.
+    """
+    from app.services.validation_environment_check import EnvironmentCheckRefused, request_environment_check
+    from app.services.validation_ownership import owned
+
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    study = await _load(session, study_id, org_id)
+    async with owned(session, study.id, holder="api") as own:
+        if own is None:
+            raise HTTPException(409, "Another worker is working on this study. Try again when it finishes.")
+        await session.refresh(study)
+        try:
+            record = await request_environment_check(session, study, user_id=user_id)
+        except EnvironmentCheckRefused as exc:
+            raise HTTPException(409, str(exc)) from exc
+        await session.commit()
+    response = await _study_response(session, study, org_id)
+    return {"environment_check": record, **response.model_dump(mode="json")}
+
+
 @router.get("/{study_id}/recovery")
 async def preview_recovery(
     study_id: int,
