@@ -76,6 +76,8 @@ GENERATED_ANALYSIS = "generated_analysis"
 CODE_EXECUTION = "code_execution"
 SIGNAL_VERDICT = "signal_verdict"
 SIGNAL_CANDIDATE = "signal_candidate"
+# plan_8_5 section 3.6: one obligation of the rubric, judged on the paper's own passages.
+DOCUMENTARY_JUDGMENT = "documentary_judgment"
 
 
 @dataclass(frozen=True)
@@ -256,6 +258,16 @@ DECISIONS: dict[str, DecisionPolicy] = {
             recovery=ONE_RETRY,
             measurement=CONTRACT,
             basis="one object: one listed candidate, one or two sentences and a confidence",
+        ),
+        _policy(
+            DOCUMENTARY_JUDGMENT,
+            decision="Documentary obligation judgment",
+            module="app/services/validation_documentary_review.py",
+            max_tokens=_FIXED_ANSWER,
+            recovery=ONE_RETRY,
+            measurement=CONTRACT,
+            basis="one object about ONE obligation: an outcome, one or two sentences, the ids it cites "
+            "and a confidence. It never rates a paper and never produces a number the score uses",
         ),
     )
 }

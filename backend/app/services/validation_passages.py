@@ -124,10 +124,53 @@ def population_statements(full_text: str) -> list[str]:
     return found
 
 
+# plan_8_5 section 3.6: the sentences a judgment about a procedure, a preprocessing step or a
+# statistical design has to rest on. Without them an assessor would be judging bioAF's summary of a
+# paper rather than the paper. Bounded like everything else here: a long paper costs what a short
+# one does.
+MAX_METHOD_STATEMENTS = 40
+
+_METHOD = re.compile(
+    r"\b(?:"
+    r"align\w*|map(?:ped|ping)|quantif\w*|normali[sz]\w*|sequenc\w*|librar\w+\s+(?:were|was|prep\w*)"
+    r"|prepar\w*\s+(?:using|with)|extract\w*\s+(?:using|with)|cultur\w*|incubat\w*|stain\w*|fix\w*\s+(?:in|with)"
+    r"|transfect\w*|infect\w*|treat\w*\s+with|dissect\w*|biops\w*|harvest\w*|isolat\w*"
+    r"|differential\s+expression|statistic\w*|test(?:ed)?\s+(?:with|using|by)|model(?:led|ed)\s+(?:with|using)"
+    r"|adjust\w*\s+(?:by|using|with)|correct\w*\s+(?:for|by|using)|threshold\w*|cut-?off"
+    r"|trimm\w*|filter\w*|deduplicat\w*|batch\s+effect|assembl\w*|annotat\w*\s+(?:with|using)"
+    r"|perform\w*\s+(?:using|with|in)|analy[sz]\w*\s+(?:using|with|in)|according\s+to\s+the\s+manufacturer"
+    r"|version\s+\d|v\d+\.\d+"
+    r")\b",
+    re.I,
+)
+# A sentence that reports a result is not a method, however many tool names it carries.
+_RESULT = re.compile(
+    r"\b(?:we (?:found|observed|show|report)|the results? (?:show|indicate|suggest)|consistent with"
+    r"|significantly (?:higher|lower|enriched|depleted)|we thank|acknowledg\w*|funded by|no conflict)\b",
+    re.I,
+)
+
+
+def method_statements(full_text: str) -> list[str]:
+    """The paper's own sentences describing how the work was done, bounded in number and length."""
+    found: list[str] = []
+    for sentence in _sentences(full_text):
+        if _RESULT.search(sentence) or not _METHOD.search(sentence):
+            continue
+        statement = sentence[:MAX_STATEMENT_CHARS].strip()
+        if statement not in found:
+            found.append(statement)
+        if len(found) >= MAX_METHOD_STATEMENTS:
+            break
+    return found
+
+
 def paper_passages(full_text: str | None, claim_texts: list[str | None]) -> dict:
-    """``{"claims": [{"claim_text", "passage"}], "statements": [...]}`` for ``evidence``."""
+    """``{"claims": [...], "statements": [...], "methods": [...]}`` for ``evidence``."""
     text = full_text or ""
     return {
         "claims": [{"claim_text": claim, "passage": claim_passage(text, claim)} for claim in claim_texts],
         "statements": population_statements(text),
+        # plan_8_5 section 3.6: what a documentary judgment is entitled to read.
+        "methods": method_statements(text),
     }

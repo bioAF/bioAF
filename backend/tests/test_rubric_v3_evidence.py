@@ -743,3 +743,60 @@ class TestGroupAssignmentIsNotHeldByTheComputeInput:
             }
         }
         assert _assess(evidence=evidence)["S3.B"]["outcome"] == VERIFIED
+
+
+class TestAJudgmentSettlesWhatNoMeasurementCould:
+    """plan_8_5 section 3.6: the accepted documentary judgments reach the obligations they answer.
+
+    A measurement outranks a judgment: where bioAF compared something and got an answer, a model's
+    opinion about the same obligation does not overwrite it.
+    """
+
+    def _judged(self, leaf, outcome, **extra):
+        return {
+            "rubric_judgments": {
+                "judgments": {
+                    leaf: {
+                        "outcome": outcome,
+                        "rationale": "the assessor judged it",
+                        "scope": "2 supplied passages",
+                        "method": "model_assisted",
+                        "evidence": {"citations": ["m1"]},
+                        "assessor": {"model": "m", "contract_version": 1},
+                        **extra,
+                    }
+                }
+            }
+        }
+
+    def test_an_accepted_judgment_verifies_its_obligation(self):
+        assessed = _assess(evidence=self._judged("E1.A", VERIFIED))
+        assert assessed["E1.A"]["outcome"] == VERIFIED
+        assert assessed["E1.A"]["method"] == "model_assisted"
+        assert assessed["E1.A"]["evidence"]["citations"] == ["m1"]
+
+    def test_an_obligation_with_no_judgment_says_what_would_settle_it(self):
+        assessed = _assess()
+        assert assessed["M3.A"]["outcome"] == UNDETERMINED
+        assert assessed["M3.A"]["next_action"]
+        assert not assessed["M3.A"].get("capability_limit"), "bioAF implements this check now"
+
+    def test_a_judgment_never_overwrites_a_measurement_that_settled(self):
+        evidence = {
+            **_records("Mus musculus"),
+            "rubric_judgments": {
+                "judgments": {
+                    "S1.B": {"outcome": VERIFIED, "rationale": "the assessor thought it agreed", "method": "model_assisted"}
+                }
+            },
+        }
+        assert _assess(evidence=evidence)["S1.B"]["outcome"] == FAILED
+
+    def test_a_judged_failure_carries_its_impact(self):
+        assessed = _assess(evidence=self._judged("E2.B", FAILED, impact="the comparison has no control"))
+        assert assessed["E2.B"]["outcome"] == FAILED
+        assert assessed["E2.B"]["impact"]
+
+    def test_the_experimental_obligations_are_no_longer_capability_limits(self):
+        for leaf in ("E1.A", "E1.B", "E2.A", "E2.B", "E3.A", "E3.B", "M1.A", "M1.B", "M3.A", "M3.B", "M5.A", "M5.B"):
+            assert leaf not in CAPABILITY_LIMITS, leaf

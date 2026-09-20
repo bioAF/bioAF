@@ -23,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services import llm_provider_config_service
+from app.services.llm_feature_models import FEATURE_LITERATURE_VALIDATION
 from app.services.llm_provider_clients import get_client
 from app.services.validation_completion import completion_for
 from app.services.validation_issue_service import ValidationIssueService
@@ -521,6 +522,18 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     evidence["assessment"] = record
     study.evidence_json = evidence
     await session.flush()
+    # plan_8_5 section 3.6: the documentary obligations a bounded model review can settle, judged on
+    # the passages this study holds. It is cached on those passages, so the stage running again costs
+    # nothing, and a provider failure leaves only the obligations it was asked about grey.
+    cfg = await llm_provider_config_service.get_for_feature(session, study.organization_id, FEATURE_LITERATURE_VALIDATION)
+    await refresh_documentary_review(
+        session,
+        study,
+        client=get_client(cfg.provider) if cfg else None,
+        model=cfg.model if cfg else None,
+        api_key=cfg.api_key if cfg else None,
+    )
+
     # plan_8_5 sections 3.1 and 3.2: settle the rubric's obligations from what this study now holds,
     # and publish them. The score follows the evidence as it settles; it does not wait for approval,
     # for an acquired input or for a finding inventory, and nothing is judged at render time.
@@ -582,6 +595,58 @@ async def refresh_sample_records(session: AsyncSession, study, *, fetcher=None) 
     if session is not None:
         await session.flush()
     return record
+
+
+async def refresh_documentary_review(session: AsyncSession, study, *, client=None, model=None, api_key=None) -> dict:
+    """plan_8_5 section 3.6: judge the documentary obligations from the passages this study holds.
+
+    Cached on the evidence itself: the passages supplied, the contract they were judged under and the
+    model that judged them. Unchanged inputs cost no call, so a refresh, a recovery and a second
+    assessment do not reroll a paper's score. Never raises: a provider failure leaves the obligations
+    it was asked about grey, with what would settle them, and everything already established stands.
+    """
+    from app.services.validation_documentary_review import passages_for, review_documents
+
+    evidence = dict(study.evidence_json or {})
+    plan = await active_plan(session, study)
+    plan_dict = {}
+    if plan is not None:
+        from app.services.validation_report_summary import plan_projection
+
+        plan_dict = plan_projection(plan)
+    passages = passages_for(evidence=evidence, plan=plan_dict)
+    identity = {
+        "passages": [p["id"] for p in passages],
+        "fingerprint": _passage_fingerprint(passages),
+        "model": model,
+    }
+    held = evidence.get("rubric_judgments") if isinstance(evidence.get("rubric_judgments"), dict) else None
+    if held is not None and held.get("inputs") == identity:
+        return held
+    try:
+        reviewed = await review_documents(passages=passages, client=client, model=model or "", api_key=api_key)
+    except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
+        logger.warning("study %s: the documentary review could not run: %s", study.id, exc)
+        return held or {"judgments": {}, "failures": [], "reason": str(exc)}
+    record = {**reviewed, "inputs": identity}
+    evidence["rubric_judgments"] = record
+    study.evidence_json = evidence
+    await session.flush()
+    return record
+
+
+def _passage_fingerprint(passages: list[dict]) -> str:
+    """What the assessor was shown, as one hash, so a changed passage is judged again."""
+    import hashlib
+    import json as _json
+
+    from app.services.validation_documentary_review import REVIEW_VERSION
+    from app.services.validation_judgment import CONTRACT_VERSION
+
+    payload = _json.dumps(
+        {"passages": passages, "contract": CONTRACT_VERSION, "review": REVIEW_VERSION}, sort_keys=True, default=str
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 async def guard_population_counts(session: AsyncSession, study, plan) -> list[int]:
