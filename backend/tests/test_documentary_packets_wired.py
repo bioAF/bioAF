@@ -27,17 +27,30 @@ def _index():
 class _Client:
     """A model client at its own boundary: it records what each obligation was shown."""
 
-    def __init__(self, outcome="met", rationale="the methods state it", answers=None):
+    def __init__(self, outcome="met", rationale="the methods state it", answers=None, unmet=None):
         self.asked: list[dict] = []
         self.outcome = outcome
         self.rationale = rationale
         self.answers = answers or {}
+        # One obligation answered unmet, citing its own packet. The others answer the default, so a
+        # finding is not reconciled away as the same failure reported by seventeen obligations.
+        self.unmet = unmet or {}
 
     async def submit(self, *, prompt, payload, model=None, api_key=None, max_tokens=None, **kw):
         leaf = next((line for line in payload.splitlines() if line.startswith("Obligation (")), "")
         self.asked.append({"leaf": leaf, "payload": payload})
         key = leaf.partition("(")[2].partition(")")[0].replace(" ", ".")
-        answer = self.answers.get(key) or {
+        answer = self.answers.get(key)
+        if answer is None and key in self.unmet:
+            answer = {
+                "outcome": "unmet",
+                "rationale": self.unmet[key],
+                "citations": [self._first_id(payload)],
+                "scope": "the single-cell preprocessing described in this paper",
+                "impact": "a reader cannot repeat the filtering this analysis applied",
+                "confidence": 0.7,
+            }
+        answer = answer or {
             "outcome": self.outcome,
             "rationale": self.rationale,
             "citations": [self._first_id(payload)],
@@ -185,3 +198,54 @@ class TestReuse:
         await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
         assert study.evidence_json["rubric_judgments"]["judgments"]
         assert "RSEM" in client.payload_for("M1.A")
+
+
+class TestStudy65sOwnCodeReachesTheObligationsThroughThisCaller:
+    """Section 10: a defect is accepted on the evidence it was found in, through the production caller.
+
+    The fixtures are study 65's own: its Europe PMC document and its repository at the revision the
+    paper archived. What the carrying step used to cut is exactly what the owner's review turned on.
+    """
+
+    def _evidence(self):
+        from app.services.validation_code_inspection import inspect_archive
+
+        archive = (
+            pathlib.Path(__file__).parent / "fixtures" / "granulosa" / "repo_at_cited_revision.tar.gz"
+        ).read_bytes()
+        found = inspect_archive(archive, origin="https://github.com/programmablebio/granulosa")
+        return {
+            "paper_index": _index(),
+            "code_inspection": {"sources": found["sources"], "manifests": found["manifests"]},
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_statistical_obligation_is_shown_that_the_dazl_test_is_commented_out(self, session, admin_user):
+        """M3.B was deducted for a cell-level test as though the supplied notebook ran it.
+
+        The executed `rank_genes_groups` call is on the Leiden clusters; the DAZL one is commented
+        out, 188 lines into a 199-line notebook, and the eight-excerpt rule stopped before it.
+        """
+        study = await _study(session, admin_user, self._evidence())
+        client = _Client()
+        await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
+        payload = client.payload_for("M3.B")
+        assert "sc.tl.rank_genes_groups(adata, 'leiden'" in payload
+        assert "#sc.tl.rank_genes_groups(adata, 'DAZL_plus'" in payload
+
+    @pytest.mark.asyncio
+    async def test_the_environment_obligation_is_shown_the_versions_past_the_letter_b(self, session, admin_user):
+        study = await _study(session, admin_user, self._evidence())
+        client = _Client()
+        await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
+        payload = client.payload_for("C5.B")
+        assert "pandas=0.23.4" in payload
+        assert "numpy=1.15.4" in payload
+
+    @pytest.mark.asyncio
+    async def test_the_code_a_whole_repository_adds_does_not_stop_an_absence_finding(self, session, admin_user):
+        """Carrying whole files must not make every obligation permanently untestable (section 8)."""
+        study = await _study(session, admin_user, self._evidence())
+        client = _Client(unmet={"M1.B": "the doublet-filtering threshold is not stated in the methods"})
+        await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
+        assert study.evidence_json["rubric_judgments"]["judgments"]["M1.B"]["outcome"] == "failed"
