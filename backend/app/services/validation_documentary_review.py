@@ -87,7 +87,6 @@ MAX_SOURCE_CHARS = 120_000
 MAX_CODE_CHARS = 600_000
 MIN_SOURCE_SHARE = 4_000
 MAX_SAMPLE_RECORDS = 400
-MAX_SUPPLEMENTS = 200
 
 
 def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
@@ -195,7 +194,12 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
                     ),
                 }
             )
-    for supplement in (evidence.get("supplements") or [])[:MAX_SUPPLEMENTS]:
+    # Every record, however many there are. A supplement record carries the paper's own sentences
+    # about one attachment, and there is no bound on how many of those a paper has: study 65 holds
+    # 368 records and 15 of them cite anything at all. Because every obligation depends on
+    # supplements (`_ALWAYS_NEEDS`), a cap here reports a paper whose attachments all arrived as one
+    # with uninspected sources, and then nothing on it can report an absence.
+    for supplement in evidence.get("supplements") or []:
         if not isinstance(supplement, dict):
             continue
         for passage in supplement.get("citing_passages") or []:
@@ -209,16 +213,6 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
                         "text": piece,
                     }
                 )
-    if len(evidence.get("supplements") or []) > MAX_SUPPLEMENTS:
-        omissions.append(
-            {
-                "needs": "supplements",
-                "reason": (
-                    f"{len(evidence['supplements']) - MAX_SUPPLEMENTS} of this paper's "
-                    f"{len(evidence['supplements'])} supplement records were not put in front of this obligation"
-                ),
-            }
-        )
     tools = [str(t).strip() for t in (plan.get("method") or {}).get("tools") or [] if str(t).strip()]
     declared = sorted(set(tools) | set(packages))
     if declared:
