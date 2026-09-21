@@ -357,6 +357,47 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     return merged
 
 
+async def refresh_paper_index(session: AsyncSession, study, *, fetch_text=None) -> dict | None:
+    """plan_8_6 section 3: give a study recorded before the index one, without re-extracting it.
+
+    The index is built at read time. A study read before it existed holds only the capped passages
+    of the old selector, which is how study 65 came to be judged on forty sentences of cell-culture
+    protocol. Its methods, legends and availability statement are still free to fetch from the
+    SOURCE ITS READ RECORDED, and none of that is an extraction: no model is asked, no claim is
+    re-read, and what the study already holds is untouched when the source cannot be reached.
+
+    Never raises: a text bioAF cannot re-fetch leaves the study exactly as it was.
+    """
+    from app.services import validation_paper_text as paper_text
+    from app.services.validation_evidence_index import build_index, methods_paragraphs
+
+    evidence = dict(study.evidence_json or {})
+    held = evidence.get("paper_index")
+    if isinstance(held, dict) and held.get("passages"):
+        return held
+    source = (evidence.get("paper_text_acquisition") or {}).get("source")
+    fetch = fetch_text or paper_text.again
+    try:
+        text = await fetch(session, study, source)
+    except Exception as exc:  # noqa: BLE001 - a text bioAF cannot re-fetch is a limitation of the run
+        logger.info("study %s: the paper's text could not be re-read for the index: %s", study.id, exc)
+        return None
+    if text is None or not (text.text or "").strip():
+        return None
+    index = build_index(text.text, sections=text.sections, source=text.source)
+    evidence["paper_index"] = index
+    # Section 3 item 4: the deterministic cutoff reader gets the methods this recovered too.
+    paragraphs = methods_paragraphs(index)
+    if paragraphs:
+        from app.services.validation_methods_cutoffs import record as record_methods
+
+        evidence["methods_cutoffs"] = record_methods(paragraphs, source=text.source)
+    study.evidence_json = evidence
+    if session is not None:
+        await session.flush()
+    return index
+
+
 async def refresh_code_inspection(session: AsyncSession, study, *, sources=None, fetcher=None) -> dict:
     """plan_8_6 section 4: fetch the code this paper published, and READ it. Never raises.
 
@@ -623,6 +664,10 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # resolved. They answer documentary obligations about species, material, arms, counts and units,
     # so they are held here, before any input is acquired and before anyone approves compute.
     await refresh_sample_records(session, study, fetcher=fetcher)
+
+    # plan_8_6 section 3: a study read before the evidence index existed gets one now, from the
+    # source its read recorded. No model is asked and no claim is re-read.
+    await refresh_paper_index(session, study)
 
     # plan_8_6 section 4: the code this paper published, fetched at the revision the paper archived
     # and READ. Study 65 resolved a repository and a cited revision and recorded `not_attempted`,
