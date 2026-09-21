@@ -17,6 +17,8 @@ Pure: no database, no model, no I/O. Everything here is read from evidence the s
 
 from __future__ import annotations
 
+import re
+
 from app.services.validation_documentary_review import JUDGED_LEAVES
 from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
 
@@ -678,7 +680,19 @@ def _references(experiments: list[dict], read: list[dict] | None = None) -> dict
     place is a fact about this run, not a defect in the reporting. What fails B is the paper's own
     statements naming two different references; what leaves it open is bioAF never reading one.
     """
-    references = [(e.get("id"), (e.get("reference") or {})) for e in experiments]
+    references = [
+        (
+            e.get("id"),
+            {
+                **(e.get("reference") or {}),
+                # How the arm is named to a reader: the assay it is, else the id. "the single-cell
+                # RNA-seq experiment" is what distinguishes it from the bulk one that DOES state its
+                # build; "e2" is what the plan calls its row.
+                "experiment_name": str(e.get("name") or e.get("assay") or e.get("id") or "").strip(),
+            },
+        )
+        for e in experiments
+    ]
     relevant = [(eid, r) for eid, r in references if r]
     if not relevant:
         return {
@@ -727,6 +741,9 @@ _USABLE, _UNAVAILABLE, _UNRESOLVED, _NOT_READ, _UNSTATED = (
     "unstated",
 )
 _REFERENCE_PARTS = ("assembly", "annotation")
+# What the plan calls a row when the reading gave it no assay to be named by. "e2" is an identifier
+# a reader can look up; it is not a phrase that reads as "the <something> experiment".
+_PLAN_ROW = re.compile(r"e\d+", re.I)
 
 
 def _reference_recoverability(relevant: list[tuple], scope: str, read: list[dict]) -> dict:
@@ -742,6 +759,14 @@ def _reference_recoverability(relevant: list[tuple], scope: str, read: list[dict
     open_parts: list[str] = []
     recovered: list[str] = []
     for _eid, reference in relevant:
+        # Which arm this half is open FOR. M2.A speaks for the paper and M2.B for each reported
+        # experiment, so "the paper names GRCh38" beside "bioAF's read recorded no assembly release
+        # for this experiment" read as a contradiction on study 65's card when it was neither: its
+        # bulk RNA-seq arm states `Ensembl GRCh38 v96` and its single-cell and amplicon arms state
+        # no build at all. Nothing is carried between them - they run different pipelines.
+        arm = str(reference.get("experiment_name") or _eid or "").strip()
+        about = f" for the {arm} experiment" if arm and not _PLAN_ROW.fullmatch(arm) else (f" for {arm}" if arm else "")
+        about = about or " for this experiment"
         for name in _REFERENCE_PARTS:
             part = reference.get(name) or {}
             status = str(part.get("status") or "").strip().lower()
@@ -772,11 +797,11 @@ def _reference_recoverability(relevant: list[tuple], scope: str, read: list[dict
                 # UNAVAILABLE means bioAF cannot SUPPLY what the paper named. The paper named it.
                 recovered.append(statement)
             elif status == _NOT_READ:
-                open_parts.append(f"the paper's {name} was not read")
+                open_parts.append(f"the paper's {name}{about} was not read")
             elif statement and status == _UNRESOLVED:
-                open_parts.append(f"the paper's {name} ('{statement}') names nothing bioAF recognises")
+                open_parts.append(f"the paper's {name}{about} ('{statement}') names nothing bioAF recognises")
             else:
-                open_parts.append(f"bioAF's read recorded no {name} release for this experiment")
+                open_parts.append(f"bioAF's read recorded no {name} release{about}")
     if conflicts:
         return _finding(
             FAILED,

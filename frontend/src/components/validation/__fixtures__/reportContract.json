@@ -6123,7 +6123,7 @@
                   "obligation": "B",
                   "outcome": "undetermined",
                   "points": 2.0,
-                  "rationale": "bioAF's read recorded no annotation release for this experiment",
+                  "rationale": "bioAF's read recorded no annotation release for the bulk RNA-seq experiment",
                   "scope": "1 reported experiment",
                   "statement": "Relevant versions and identifiers are specified sufficiently to recover the intended reference inputs",
                   "unit": null

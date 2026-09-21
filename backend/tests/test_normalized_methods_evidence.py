@@ -301,3 +301,63 @@ class TestTheAssemblyHalfOfM2B:
     def test_a_build_the_methods_never_name_leaves_it_open(self):
         found = self._assess(stated="GRCm39", index=self._index("Reads were aligned to the mouse genome."))
         assert found["M2.B"]["outcome"] == "undetermined"
+
+
+class TestM2BSaysWhichExperimentIsOpen:
+    """Study 65's card shows M2.A "the paper names the reference its results depend on (GRCh38)"
+    beside M2.B "bioAF's read recorded no assembly release for this experiment". Both are true and
+    they read as a contradiction: M2.A speaks for the paper, M2.B for EACH reported experiment, and
+    it is the single-cell and amplicon arms that state no build, not the bulk RNA-seq one that
+    states `Ensembl GRCh38 v96`.
+
+    The reference of one experiment is not the reference of another - the arms run different
+    pipelines - so nothing is carried across. What changes is that the open half names the arm.
+    """
+
+    def _assess(self, experiments):
+        from app.services.validation_rubric_evidence import assess_evidence
+
+        return assess_evidence(
+            plan={"reported_experiments": experiments, "differential_design": {"contrasts": []}},
+            evidence={"paper_index": _granulosa_index()},
+            claims=[],
+        )
+
+    def test_the_open_half_names_the_experiment_it_is_open_for(self):
+        found = self._assess(
+            [
+                {
+                    "id": "e1",
+                    "name": "bulk RNA-seq of TF-overexpression samples",
+                    "reference": {
+                        "assembly": {"stated": "GRCh38", "status": "usable"},
+                        "annotation": {"stated": "Ensembl 96", "status": "usable"},
+                    },
+                },
+                {
+                    "id": "e2",
+                    "name": "single-cell RNA-seq of ovaroids",
+                    "reference": {
+                        "assembly": {"stated": None, "status": "unstated"},
+                        "annotation": {"stated": None, "status": "unstated"},
+                    },
+                },
+            ]
+        )
+        assert found["M2.B"]["outcome"] == "undetermined"
+        assert "e2" in found["M2.B"]["rationale"] or "single-cell" in found["M2.B"]["rationale"]
+        assert "e1" not in found["M2.B"]["rationale"]
+
+    def test_a_paper_whose_every_arm_states_its_reference_is_settled(self):
+        found = self._assess(
+            [
+                {
+                    "id": "e1",
+                    "reference": {
+                        "assembly": {"stated": "GRCh38", "status": "usable"},
+                        "annotation": {"stated": "Ensembl 96", "status": "usable"},
+                    },
+                }
+            ]
+        )
+        assert found["M2.B"]["outcome"] == "verified"
