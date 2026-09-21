@@ -418,13 +418,25 @@ def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
         if _is_manifest(safe) or pathlib.PurePosixPath(safe).suffix.lower() in LANGUAGES:
             unreadable.append({"path": safe, "reason": reason, "size_bytes": size})
 
-    for name, member_bytes in members[:MAX_SOURCES]:
+    for name, member_bytes in members:
         safe = str(name).removeprefix(strip)
         if not safe or safe.endswith("/"):
             continue
         manifest = _is_manifest(safe)
         suffix = pathlib.PurePosixPath(safe).suffix.lower()
         if not manifest and suffix not in LANGUAGES:
+            continue
+        # The budget bounds the SOURCE bioAF keeps, not the members it walks past: a repository that
+        # ships its data beside its scripts spent the whole of it on files that are not code, and
+        # the script behind them was never read. What the budget stops at is named, because an
+        # unrecorded skip is what let an assessor read incomplete inspection as missing work.
+        if len(sources) + len(manifests) >= MAX_SOURCES:
+            reason = (
+                f"bioAF reads at most {MAX_SOURCES} files of one archive and this one is past that "
+                "count, so bioAF did not read it and what it contains is not established"
+            )
+            skipped.append({"path": safe, "reason": reason, "size_bytes": len(member_bytes)})
+            unreadable.append({"path": safe, "reason": reason, "size_bytes": len(member_bytes)})
             continue
         provenance = {
             "from": "repository",
