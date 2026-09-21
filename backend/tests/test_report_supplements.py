@@ -86,3 +86,96 @@ class TestTheSupplementInventoryReachesTheExport:
         parts: list[str] = []
         _append_supplement_inventory(parts, [])
         assert parts == []
+
+
+class TestTheReportDoesNotContradictItself:
+    """The owner, 2026-09-21: "Its code-source listing says 'Not retrieved' despite the scored code
+    inspection", and "the report says attachments were retrieved while still recommending retrying
+    their download". A reader cannot act on a report that states a thing and its opposite."""
+
+    _EVIDENCE = {
+        "capabilities": {
+            "code_sources": [
+                {"kind": "github", "url": "https://github.com/lab/paper", "exists": "yes", "identified_in": ["methods"]}
+            ]
+        },
+        "code_resolution": {
+            "outcome": "resolved",
+            "kind": "github",
+            "url": "https://github.com/lab/paper",
+            "commit_sha": "abc123",
+            "is_publication_revision": True,
+        },
+        "code_inspection": {
+            "sources": [
+                {"path": "a.py", "text": "x = 1", "provenance": {"from": "repository", "origin": "https://github.com/lab/paper"}}
+            ],
+            "manifests": [],
+        },
+    }
+
+    def test_a_fetched_repository_is_not_listed_as_not_retrieved(self):
+        from app.services.validation_report_summary import _code_sources
+
+        row = _code_sources(self._EVIDENCE)[0]
+        assert row["retrieval"]["status"] == "retrieved"
+        assert "Not retrieved" not in row["retrieval"]["label"]
+
+    def test_the_listing_says_it_was_inspected_when_its_source_was_read(self):
+        from app.services.validation_report_summary import _code_sources
+
+        row = _code_sources(self._EVIDENCE)[0]
+        assert row["inspection"]["status"] != "not_inspected"
+
+    def test_the_revision_that_was_fetched_is_on_the_row(self):
+        from app.services.validation_report_summary import _code_sources
+
+        row = _code_sources(self._EVIDENCE)[0]
+        assert "abc123" in str(row["retrieval"].get("reason") or "")
+
+    def test_a_repository_that_was_not_fetched_still_says_so(self):
+        from app.services.validation_report_summary import _code_sources
+
+        evidence = {
+            "capabilities": self._EVIDENCE["capabilities"],
+            "code_resolution": {"outcome": "code_unreachable", "url": "https://github.com/lab/paper", "reason": "404"},
+            "code_inspection": {"sources": [], "manifests": []},
+        }
+        row = _code_sources(evidence)[0]
+        assert row["retrieval"]["status"] != "retrieved"
+
+    def test_a_retrieved_attachment_set_must_not_also_be_recommended_for_retry(self):
+        from app.services.validation_report_summary import report_contradictions
+
+        breaches = report_contradictions(
+            {
+                "summary": ["bioAF could not download the paper's supplementary files in this attempt."],
+                "facts": {"attachments": {"identified": 19, "retrieved": 19, "failed": 0}},
+            }
+        )
+        assert breaches
+
+    def test_a_code_listing_that_disagrees_with_the_inspection_is_a_breach(self):
+        from app.services.validation_report_summary import report_contradictions
+
+        breaches = report_contradictions(
+            {
+                "summary": [],
+                "code_sources": [{"retrieval": {"status": "not_attempted"}, "inspection": {"status": "inspected"}}],
+            }
+        )
+        assert breaches
+
+    def test_a_consistent_report_breaches_nothing(self):
+        from app.services.validation_report_summary import report_contradictions
+
+        assert (
+            report_contradictions(
+                {
+                    "summary": ["19 supplementary attachments were retrieved and inspected."],
+                    "facts": {"attachments": {"identified": 19, "retrieved": 19, "failed": 0}},
+                    "code_sources": [{"retrieval": {"status": "retrieved"}, "inspection": {"status": "inspected"}}],
+                }
+            )
+            == []
+        )

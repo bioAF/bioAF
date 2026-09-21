@@ -330,9 +330,7 @@ def summarize(
         ),
         # plan_8_4: rubric v3's evidence score, beside it. The two are separate cards with separate
         # semantics and are never read as one another: a v2 score of 100 is not a v3 score of 100.
-        "evidence_score": evidence_scorecard(
-            study=study, evidence=evidence, plan=plan, claims=claims, attempt=attempt
-        ),
+        "evidence_score": evidence_scorecard(study=study, evidence=evidence, plan=plan, claims=claims, attempt=attempt),
     }
     # plan_8_4 section 7: two cards cannot both be called the Validation Scorecard. Where the v3
     # evidence score is present it IS that card, and the v2 card is named for what it measures: the
@@ -426,7 +424,9 @@ async def record_evidence_assessment(session, study, *, reason: str) -> dict:
     held = evidence.get("rubric_assessment") if isinstance(evidence.get("rubric_assessment"), dict) else None
     if reusable(held, inputs):
         return held
-    record = assessment_for(study=study_projection(study), evidence=evidence, plan=plan_dict, targets=targets, checks=checks)
+    record = assessment_for(
+        study=study_projection(study), evidence=evidence, plan=plan_dict, targets=targets, checks=checks
+    )
     record["revision"] = int((held or {}).get("revision") or 0) + 1
     if held is not None:
         evidence["rubric_assessment_history"] = list(evidence.get("rubric_assessment_history") or []) + [
@@ -648,7 +648,12 @@ def check_activity(checks: list[dict] | None) -> dict:
     return {
         "counts": counts,
         "completed": counts["done"] + counts["unresolved"] + counts["blocked"],
-        "total": counts["pending"] + counts["retrying"] + counts["running"] + counts["done"] + counts["unresolved"] + counts["blocked"],
+        "total": counts["pending"]
+        + counts["retrying"]
+        + counts["running"]
+        + counts["done"]
+        + counts["unresolved"]
+        + counts["blocked"],
         "under_way": counts["pending"] + counts["retrying"] + counts["running"],
         "label": "; ".join(parts) or None,
     }
@@ -1683,14 +1688,32 @@ def _same_sequence(entry: dict, last: dict, ledger: list[dict]) -> bool:
 def _code_sources(evidence: dict) -> list[dict]:
     code = evidence.get("code_execution") or {}
     outcome = code.get("outcome") if isinstance(code, dict) else None
+    # The owner, 2026-09-21: this listing said "Not retrieved" beside a scored code inspection,
+    # because it read only the capability row the SUPPLEMENT path annotates. What the repository
+    # fetch established lives in `code_resolution`, and what was read from it in `code_inspection`;
+    # a row that ignores both tells the reader the opposite of what bioAF did.
+    resolution = evidence.get("code_resolution") if isinstance(evidence.get("code_resolution"), dict) else {}
+    fetched_url = str((resolution or {}).get("url") or "")
+    fetched = (resolution or {}).get("outcome") == "resolved"
+    read_from = {
+        str((s.get("provenance") or {}).get("origin") or "")
+        for s in ((evidence.get("code_inspection") or {}).get("sources") or [])
+        if isinstance(s, dict) and (s.get("provenance") or {}).get("from") == "repository"
+    }
     rows = []
     for source in (evidence.get("capabilities") or {}).get("code_sources") or []:
         if not isinstance(source, dict):
             continue
         retrieval = source.get("retrieval") or {}
         inspection = source.get("inspection") or {}
+        # This source IS the one the resolution fetched when their URLs agree, or when the paper
+        # named only one and that is what was fetched.
+        url = str(source.get("url") or "")
+        this_one = bool(fetched_url) and (url == fetched_url or not url)
         status = retrieval.get("status") or (
-            "retrieved" if source.get("accessible") == "yes" else (source.get("accessible") or "not_attempted")
+            "retrieved"
+            if (source.get("accessible") == "yes" or (this_one and fetched))
+            else (source.get("accessible") or "not_attempted")
         )
         executed = bool(outcome) and outcome not in ("code_absent", "code_unreachable", "generation_failed")
         rows.append(
@@ -1704,10 +1727,27 @@ def _code_sources(evidence: dict) -> list[dict]:
                 "retrieval": {
                     "status": status,
                     "label": RETRIEVAL_LABELS.get(status, status),
-                    "reason": source.get("accessible_reason"),
+                    # Which revision was fetched is what makes "retrieved" checkable.
+                    "reason": (
+                        (resolution or {}).get("reason")
+                        or (
+                            f"fetched at {(resolution or {}).get('commit_sha')}"
+                            if (resolution or {}).get("commit_sha")
+                            else None
+                        )
+                        if this_one
+                        else None
+                    )
+                    or source.get("accessible_reason"),
                 },
                 "inspection": {
-                    "status": inspection.get("status") or "not_inspected",
+                    "status": (
+                        inspection.get("status")
+                        or (
+                            "inspected" if this_one and (read_from & {fetched_url} or (fetched and read_from)) else None
+                        )
+                        or "not_inspected"
+                    ),
                     "role_label": ROLE_LABELS.get(inspection.get("role")) if inspection.get("role") else None,
                 },
                 "execution": {
@@ -2300,6 +2340,21 @@ def report_contradictions(projection: dict) -> list[str]:
         breaches.append(
             f"{len(projection['artifacts'])} supplement row(s) exist and the summary says none were identified"
         )
+    # The owner, 2026-09-21. Two more invariants, each a pair of sentences the deployed report
+    # actually printed side by side.
+    attachments = (projection.get("facts") or {}).get("attachments") or {}
+    retrieved = attachments.get("retrieved")
+    if retrieved and not attachments.get("failed") and "could not download" in summary:
+        breaches.append(
+            f"{retrieved} attachment(s) were retrieved and the summary still says bioAF could not download them"
+        )
+    for row in projection.get("code_sources") or []:
+        if not isinstance(row, dict):
+            continue
+        if (row.get("inspection") or {}).get("status") not in (None, "not_inspected") and (
+            row.get("retrieval") or {}
+        ).get("status") in ("not_attempted", "failed"):
+            breaches.append("a code source is listed as inspected and as not retrieved, which cannot both be true")
     if breaches:
         logging.getLogger("bioaf.validation_report_summary").warning(
             "the report contradicts itself: %s", "; ".join(breaches)
