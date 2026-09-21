@@ -578,6 +578,12 @@ def _environment(sources, readings, manifests) -> dict:
     # Only a dependency this analysis ACTUALLY uses is result-sensitive. A general "not everything is
     # pinned" rule is explicitly insufficient (section 3.4).
     unpinned = sorted(name for name, version in declared.items() if name in used and not version)
+    # The owner, 2026-09-21: C3.A said every dependency this analysis uses is declared at a fixed
+    # version while C2.A was reporting undeclared ones. A package the analysis uses and the manifest
+    # never names has no version to recover either, so it is a hole in the SAME question, not
+    # something outside it. It is reported as undeclared rather than as unpinned, because those are
+    # different facts and C2.A is where the first one is scored.
+    undeclared = sorted(name for name in used if name not in declared)
     # A package keeps the spelling the source uses: "DESeq2" is what a reader looks for, not "deseq2".
     spelling = {
         package.lower(): package
@@ -593,7 +599,16 @@ def _environment(sources, readings, manifests) -> dict:
             "this analysis uses it, so the versions its results depend on cannot be recovered",
             scope=", ".join(str(m.get("path")) for m in manifests),
             impact="a rerun would resolve a different version and could produce different numbers",
-            evidence={"unpinned": unpinned},
+            evidence={"unpinned": unpinned, "undeclared": undeclared},
+        )
+    elif undeclared:
+        pinned = _open(
+            f"the supplied specification pins what it declares, and this analysis also uses "
+            f"{', '.join(spelling.get(n, n) for n in undeclared)}, which it does not declare, so the "
+            "versions of those cannot be recovered from it either",
+            scope=", ".join(str(m.get("path")) for m in manifests),
+            next_action="add the packages the analysis imports to the environment specification",
+            evidence={"pinned": sorted(name for name in declared if name in used), "undeclared": undeclared},
         )
     elif used and any(name in used for name in declared):
         pinned = _finding(
@@ -626,21 +641,46 @@ def _environment(sources, readings, manifests) -> dict:
     return {"C3.A": pinned, "C3.B": runtime}
 
 
-def _entry_points(trees) -> list[str]:
-    found = []
+def _entry_points(trees) -> tuple[list[str], list[str]]:
+    """``(runs anything, declares an entry point)``.
+
+    Two different facts, and conflating them is what let C4.A award complete-analysis coverage from
+    a top-level assignment. A `__main__` guard says THIS is how the analysis is started; a bare
+    statement says only that something in the file runs.
+    """
+    found: list[str] = []
+    declared: list[str] = []
     for source, tree in trees:
+        path = str(source.get("path"))
         for node in tree.body:
             if isinstance(node, ast.If):
                 test = ast.dump(node.test)
                 if "__main__" in test or "__name__" in test:
-                    found.append(str(source.get("path")))
+                    declared.append(path)
+                    found.append(path)
                     break
             elif isinstance(node, (ast.Expr, ast.Assign, ast.AugAssign)) and not isinstance(
                 getattr(node, "value", None), (ast.Constant,)
             ):
-                found.append(str(source.get("path")))
+                found.append(path)
                 break
-    return found
+    return found, declared
+
+
+def _wildcard_modules(tree: ast.Module) -> list[str]:
+    """The modules a source imports everything from.
+
+    The owner, 2026-09-21: study 65's flow notebook begins `from cytoflow import *`, and that module
+    exports `Tube`, `ImportOp`, `PolygonOp` and the rest. Reading the `*` as a bound name called
+    every one of them undefined and asserted that the analysis stops at that line, which is a claim
+    about EXECUTION bioAF never performed. A wildcard means bioAF cannot say what is bound, which is
+    not the same fact as a name being unbound.
+    """
+    return [
+        node.module or ""
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names)
+    ]
 
 
 def _bound_names(tree: ast.Module) -> set[str]:
@@ -651,6 +691,8 @@ def _bound_names(tree: ast.Module) -> set[str]:
             bound.add(node.name)
         elif isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
+                if alias.name == "*":
+                    continue
                 bound.add((alias.asname or alias.name).split(".")[0])
         elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             bound.add(node.id)
@@ -675,17 +717,29 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
                 held, scope=_scope(unsupported + unreadable), next_action="add a declared parser", capability_limit=True
             ),
         }
-    entry = _entry_points(trees)
+    entry, declared_entry = _entry_points(trees)
     # plan_8_5 section 3.5: an R source that does work when it runs states how the analysis starts.
     # A file of function definitions and nothing else does not, in either language.
-    entry += [
-        str(r["source"].get("path")) for r in readings if r["language"] == "r" and r["r"]["runs"]
-    ]
-    if entry:
+    running = [str(r["source"].get("path")) for r in readings if r["language"] == "r" and r["r"]["runs"]]
+    entry += running
+    declared_entry += running
+    if declared_entry:
         covers = _finding(
             VERIFIED,
-            f"the supplied source has an entry point that runs the analysis ({', '.join(entry)})",
+            f"the supplied source has an entry point that runs the analysis ({', '.join(declared_entry)})",
             scope=_scope(sources),
+        )
+    elif entry:
+        # The owner, 2026-09-21: this awarded complete-analysis coverage merely because the scripts
+        # contain executable statements. On study 65 every "entry point" was a bare top-level
+        # assignment, which establishes that something in the file runs, not that the file starts
+        # the analysis or covers the steps this paper claims.
+        covers = _open(
+            f"the supplied source runs top-level statements ({', '.join(entry)}) but declares no entry "
+            "point, so which of them starts the analysis, and whether they cover the steps this paper "
+            "claims, is not established by reading them",
+            scope=_scope(sources),
+            next_action="bind each claimed analysis step to the supplied script that performs it",
         )
     else:
         covers = _open(
@@ -696,10 +750,17 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
         )
     unbound: list[str] = []
     personal: list[str] = []
+    wildcards: list[str] = []
     for source, tree in trees:
         bound = _bound_names(tree)
+        from_star = _wildcard_modules(tree)
+        wildcards += from_star
         for node in ast.walk(tree):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound:
+                # A wildcard import may be where this name comes from, and bioAF does not resolve
+                # the module to find out. Not established, rather than established absent.
+                if from_star:
+                    continue
                 unbound.append(node.id)
             elif isinstance(node, ast.Constant) and isinstance(node.value, str) and _PERSONAL_PATH.match(node.value):
                 personal.append(node.value)
@@ -712,8 +773,20 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
             f"the supplied source uses {', '.join(sorted(set(unbound)))}, which nothing in it defines, "
             "imports, or receives as an argument",
             scope=_scope(sources),
-            impact="the analysis stops at that line, so what follows it was never run from this source",
+            # What a READER can establish from the source. bioAF did not run it, and saying where
+            # execution would stop would be a claim about a run that never happened.
+            impact="a reader cannot tell where those names are meant to come from, so this source does "
+            "not stand on its own",
             evidence={"unbound": sorted(set(unbound))},
+        )
+    elif wildcards:
+        named = ", ".join(sorted({module for module in wildcards if module}) or ["a module"])
+        coherent = _open(
+            f"the supplied source imports everything from {named} (`from {sorted(set(wildcards))[0] or 'module'} "
+            "import *`), and bioAF does not resolve a wildcard import, so whether every name it uses is "
+            "defined is not established by reading it",
+            scope=_scope(sources),
+            next_action="approve an isolated load, which is what resolves the names a wildcard import brings in",
         )
     elif personal:
         coherent = _finding(
