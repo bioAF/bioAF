@@ -401,11 +401,19 @@ async def refresh_paper_index(session: AsyncSession, study, *, fetch_text=None) 
     Never raises: a text bioAF cannot re-fetch leaves the study exactly as it was.
     """
     from app.services import validation_paper_text as paper_text
-    from app.services.validation_evidence_index import build_index, methods_paragraphs
+    from app.services.validation_evidence_index import build_index
 
     evidence = dict(study.evidence_json or {})
     held = evidence.get("paper_index")
     if isinstance(held, dict) and held.get("passages"):
+        # The index is what it was, and the READING of it may not be: `methods_cutoffs` was recorded
+        # before the analysis-scoped statements existed, so a study whose index is already in hand
+        # held a record with none. The record is refreshed from the held index, which asks nobody
+        # and fetches nothing.
+        _record_methods_reading(evidence, held, source=(evidence.get("methods_cutoffs") or {}).get("source"))
+        study.evidence_json = evidence
+        if session is not None:
+            await session.flush()
         return held
     source = (evidence.get("paper_text_acquisition") or {}).get("source")
     fetch = fetch_text or paper_text.again
@@ -419,15 +427,29 @@ async def refresh_paper_index(session: AsyncSession, study, *, fetch_text=None) 
     index = build_index(text.text, sections=text.sections, source=text.source)
     evidence["paper_index"] = index
     # Section 3 item 4: the deterministic cutoff reader gets the methods this recovered too.
-    paragraphs = methods_paragraphs(index)
-    if paragraphs:
-        from app.services.validation_methods_cutoffs import record as record_methods
-
-        evidence["methods_cutoffs"] = record_methods(paragraphs, source=text.source)
+    _record_methods_reading(evidence, index, source=text.source)
     study.evidence_json = evidence
     if session is not None:
         await session.flush()
     return index
+
+
+def _record_methods_reading(evidence: dict, index: dict, *, source) -> None:
+    """Keep bioAF's normalized reading of the methods beside the index it was read from.
+
+    plan_8_6 section 3 item 4. The record is what a reader inspects to see what bioAF resolved out
+    of the paper: the sentences that define a differential test's cutoff, and the ones that state a
+    criterion for a named analysis operation. Both are recomputed from the held index, so the stored
+    record never says the paper stated nothing when the reader would find two thresholds in it.
+    """
+    from app.services.validation_evidence_index import methods_paragraphs
+    from app.services.validation_methods_cutoffs import record as record_methods
+
+    paragraphs = methods_paragraphs(index)
+    if not paragraphs:
+        return
+    held = evidence.get("methods_cutoffs") if isinstance(evidence.get("methods_cutoffs"), dict) else {}
+    evidence["methods_cutoffs"] = record_methods(paragraphs, source=source or held.get("source"))
 
 
 async def refresh_code_inspection(session: AsyncSession, study, *, sources=None, fetcher=None, allowance=None) -> dict:
