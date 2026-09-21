@@ -352,3 +352,48 @@ class TestADisagreementIsRecordedNotResolvedBySilence:
         issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
         assert any("disagrees" in (i.get("message") or "") for i in issues)
         assert plan.differential_design_json["contrasts"][0]["thresholds_unresolved"]
+
+
+class TestADirectionalFoldChangeIsNotAnAbsoluteOne:
+    """The owner, 2026-09-21: bioAF converts the paper's directional `log2FC < -2` into
+    `|log2FC| < -2`, an impossible condition, and then treats the resulting contradiction as
+    unresolved evidence about the paper. The ambiguity was bioAF's own."""
+
+    def test_a_downward_cutoff_keeps_its_direction(self):
+        from app.services.validation_claim_cutoffs import effect_cutoff
+
+        found = effect_cutoff("log2fc", "<", -2)
+        assert found is not None
+        assert found["kind"] != "abs_log2fc", "an absolute value is never below a negative number"
+        assert found["operator"] == "<"
+        assert found["value"] == -2
+
+    def test_it_is_never_described_as_an_impossible_condition(self):
+        from app.services.validation_claim_cutoffs import describe_cutoff, effect_cutoff
+
+        described = describe_cutoff(effect_cutoff("log2fc", "<", -2))
+        assert "|log2FC| < -2" not in described
+        assert "log2FC" in described
+
+    def test_an_absolute_threshold_the_paper_wrote_as_one_still_reads_that_way(self):
+        from app.services.validation_claim_cutoffs import effect_cutoff
+
+        found = effect_cutoff("abs_log2fc", ">", 2)
+        assert found["kind"] == "abs_log2fc"
+
+    def test_an_upward_directional_cutoff_is_still_directional(self):
+        from app.services.validation_claim_cutoffs import effect_cutoff
+
+        found = effect_cutoff("log2fc", ">", 2)
+        assert found["kind"] == "log2fc"
+        assert found["value"] == 2
+
+    def test_a_directional_pair_is_not_a_disagreement_with_itself(self):
+        """The paper's own "log2fc >3 (and <-3)" is two directional statements, not a contradiction."""
+        from app.services.validation_claim_cutoffs import threshold_disagreement
+
+        cutoffs = [
+            {"kind": "log2fc", "operator": ">", "value": 3},
+            {"kind": "log2fc", "operator": "<", "value": -3},
+        ]
+        assert not threshold_disagreement(3, "log2fc", cutoffs)

@@ -23,13 +23,19 @@ _KINDS = {
     "pvalue": "pvalue",
     "p": "pvalue",
     "abs_log2fc": "abs_log2fc",
-    "log2fc": "abs_log2fc",
+    # The owner, 2026-09-21: reading a bare `log2fc` as an ABSOLUTE one turned the paper's
+    # directional `log2FC < -2` into `|log2FC| < -2`, a condition nothing can satisfy, and bioAF
+    # then reported the contradiction it had introduced as the paper's own unresolved ambiguity.
+    # A directional cutoff keeps its direction; only a threshold the paper wrote as an absolute
+    # value is one.
+    "log2fc": "log2fc",
+    "logfc": "log2fc",
     "abs_logfc": "abs_log2fc",
     "fold_change": "fold_change",
 }
 _OPERATORS = ("<", "<=", ">", ">=")
 # The direction a bare scalar threshold means for each kind.
-_DEFAULT_OPERATOR = {"padj": "<", "pvalue": "<", "abs_log2fc": ">", "fold_change": ">"}
+_DEFAULT_OPERATOR = {"padj": "<", "pvalue": "<", "abs_log2fc": ">", "log2fc": ">", "fold_change": ">"}
 _SET_OUTPUTS = ("gene_set_size", "region_set_size", "peak_set_size")
 
 
@@ -88,10 +94,27 @@ def _is_set_claim(claim: dict) -> bool:
     return str(claim.get("output_type") or "").lower() in _SET_OUTPUTS
 
 
-_WORDS = {"padj": "adjusted P", "pvalue": "P", "abs_log2fc": "|log2FC|", "fold_change": "fold change"}
+_WORDS = {
+    "padj": "adjusted P",
+    "pvalue": "P",
+    "abs_log2fc": "|log2FC|",
+    "log2fc": "log2FC",
+    "fold_change": "fold change",
+}
 SIGNIFICANCE_KINDS = ("padj", "pvalue")
 _SIGNIFICANCE_KINDS = SIGNIFICANCE_KINDS
-_EFFECT_KINDS = ("abs_log2fc", "fold_change")
+_EFFECT_KINDS = ("abs_log2fc", "log2fc", "fold_change")
+
+
+def effect_cutoff(kind, operator, value) -> dict | None:
+    """An effect-size cutoff in canonical form, or None when it is not one.
+
+    A bare `log2fc` keeps its DIRECTION. `log2FC < -2` is the downregulated half of a pair and is a
+    perfectly ordinary thing for a paper to write; rendering it as `|log2FC| < -2` invents a
+    contradiction and then attributes it to the paper.
+    """
+    cutoff = _cutoff(kind, operator, value)
+    return cutoff if cutoff is not None and cutoff["kind"] in _EFFECT_KINDS else None
 
 
 def significance_cutoff(kind, operator, value) -> dict | None:
@@ -143,7 +166,12 @@ def threshold_disagreement(threshold, threshold_kind, cutoffs: list[dict] | None
 
 
 def _on_log2_scale(cutoff: dict) -> tuple[str, float] | None:
-    """A cutoff's kind and value with a linear fold change read on the log2 scale, or None."""
+    """A cutoff's kind and value with a linear fold change read on the log2 scale, or None.
+
+    A directional `log2fc` is compared by MAGNITUDE against an absolute one: `log2FC < -3` and
+    `|log2FC| > 3` are the same threshold written two ways, and reporting them as a disagreement
+    would be bioAF disagreeing with itself.
+    """
     import math
 
     kind, value = cutoff.get("kind"), cutoff.get("value")
@@ -151,6 +179,8 @@ def _on_log2_scale(cutoff: dict) -> tuple[str, float] | None:
         return None
     if kind == "fold_change":
         return ("abs_log2fc", math.log2(float(value))) if value > 1 else None
+    if kind == "log2fc":
+        return "abs_log2fc", abs(float(value))
     return kind, float(value)
 
 
