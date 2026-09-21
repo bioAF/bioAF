@@ -186,3 +186,13 @@ async def test_a_paper_with_no_supplements_carries_an_empty_manifest():
 
     assert result is not None
     assert result.supplements == []
+
+
+def test_the_read_timeout_is_long_enough_for_a_full_text_document():
+    """plan_8_6, found by running the index rebuild on the demo: Europe PMC returns study 65's
+    280 KB full text in about 41 seconds from that VM, and a 30-second read timeout meant the
+    paper's text could not be re-read there at all. Connecting still fails fast."""
+    from app.services.literature.fulltext_service import _TIMEOUT
+
+    assert _TIMEOUT.read >= 60.0
+    assert _TIMEOUT.connect is not None and _TIMEOUT.connect <= 30.0

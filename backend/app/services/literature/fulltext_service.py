@@ -28,7 +28,11 @@ logger = logging.getLogger("bioaf.literature.fulltext")
 _WHITESPACE_RE = re.compile(r"\s+")
 
 _BASE = "https://www.ebi.ac.uk/europepmc/webservices/rest"
-_TIMEOUT = 30.0
+# plan_8_6, found by running the index rebuild on the demo: Europe PMC returns study 65's 280 KB
+# full text in about 41 seconds from that VM, and a 30-second read timeout meant the paper's text
+# could not be re-read there at all. Connecting is still held short, because an unreachable endpoint
+# should fail fast; it is READING a large document over a slow path that needs the room.
+_TIMEOUT = httpx.Timeout(120.0, connect=15.0)
 
 
 @dataclass
