@@ -296,3 +296,35 @@ class TestEveryJudgedObligationHasASelector:
 
         for leaf in JUDGED_LEAVES:
             assert selector_for(leaf) is not None, leaf
+
+
+class TestThePacketIsSizedAgainstADeclaredBudget:
+    """plan_8_6 section 11: the input budget is declared where every other budget is, and the
+    packet is sized against it rather than against a row count.
+
+    Measured on study 65 at the 8,192 tokens section 11 said to start from: all seventeen judged
+    obligations deferred relevant evidence, so no absence finding could be reported on a real paper
+    at all. The cap moved to 16,384 with that measurement recorded beside it.
+    """
+
+    def test_the_budget_is_declared_in_the_decision_audit(self):
+        from app.services.validation_decision_budgets import DOCUMENTARY_JUDGMENT, policy_for
+
+        declared = policy_for(DOCUMENTARY_JUDGMENT)
+        assert declared.max_input_tokens >= 8192
+        assert declared.provenance()["max_input_tokens"] == declared.max_input_tokens
+
+    def test_the_packet_fits_inside_it(self):
+        from app.services.validation_decision_budgets import DOCUMENTARY_JUDGMENT, policy_for
+        from app.services.validation_evidence_packets import MAX_PACKET_CHARS
+
+        declared = policy_for(DOCUMENTARY_JUDGMENT).max_input_tokens
+        # Four characters to a token for prose, with room left for the instructions and the question.
+        assert MAX_PACKET_CHARS / 4 < declared * 0.85
+
+    def test_the_character_budget_binds_before_the_row_count(self):
+        """A row count deciding a token question is what cut packets sitting at 21,000 characters."""
+        from app.services.validation_evidence_packets import MAX_PACKET_CHARS, MAX_PACKET_PASSAGES
+
+        # A packet of typical paragraphs reaches the character budget before the passage count.
+        assert MAX_PACKET_CHARS / MAX_PACKET_PASSAGES <= 700

@@ -92,12 +92,16 @@ class DecisionPolicy:
     measurement: str
     basis: str
     record: str | None = None
+    # plan_8_6 section 11: what one request may be GIVEN, beside what it may produce. Declared here
+    # so the number is on the record with every other budget rather than living in a selector.
+    max_input_tokens: int | None = None
 
     def provenance(self) -> dict:
         return {
             "purpose": self.purpose,
             "decision": self.decision,
             "max_tokens": self.max_tokens,
+            "max_input_tokens": self.max_input_tokens,
             "recovery": self.recovery,
             "measurement": self.measurement,
             "record": self.record,
@@ -268,6 +272,20 @@ DECISIONS: dict[str, DecisionPolicy] = {
             measurement=CONTRACT,
             basis="one object about ONE obligation: an outcome, one or two sentences, the ids it cites "
             "and a confidence. It never rates a paper and never produces a number the score uses",
+            # plan_8_6 section 11 says to start at 8,192 input tokens and, where the acceptance
+            # evidence cannot fit, to report the tradeoff and propose a measured adjustment rather
+            # than silently truncating. Measured on study 65 (eLife 83291, 98,246 characters of
+            # text) at the deployed 8,192: every one of the seventeen judged obligations deferred
+            # relevant evidence, so NO absence finding could be reported on it at all, which is the
+            # whole of the repair section 8 exists for. The relevant evidence one obligation left
+            # behind ran from 3,118 to 21,213 characters on top of a packet already at 21,000 to
+            # 24,000, so carrying the largest of them whole needs about 11,700 input tokens.
+            #
+            # 16,384 is that, with room. The measured cost is a packet budget of 48,000 characters
+            # against 24,000, so a full documentary review of a paper this size roughly doubles from
+            # 373,187 characters of evidence across eighteen requests to about 750,000. A lower
+            # organization limit still wins.
+            max_input_tokens=16384,
         ),
     )
 }

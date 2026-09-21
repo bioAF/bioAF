@@ -36,13 +36,19 @@ from app.services.validation_evidence_index import (
 
 PACKET_VERSION = 1
 
-# What one request may carry. The judgment contract's budget is 8,192 input tokens including the
-# instructions and the question, and the rest is evidence; at roughly four characters to a token
-# this leaves the packet well inside it. What does not fit is offered once as an expansion rather
-# than silently dropped.
-MAX_PACKET_CHARS = 24000
-MAX_PACKET_PASSAGES = 30
-MAX_EXPANSION_PASSAGES = 20
+# What one request may carry, against the input budget `validation_decision_budgets` declares for a
+# documentary judgment. plan_8_6 section 11 asked to start at 8,192 input tokens and to report the
+# tradeoff where the acceptance evidence could not fit. It could not: on study 65's own 98,246
+# characters every one of the seventeen judged obligations deferred relevant evidence, so no absence
+# finding could be reported on a real paper at all. The budget is 16,384 input tokens now, and the
+# measurement that justifies it is recorded beside it.
+#
+# The CHARACTER budget is the binding one, because it is what maps to tokens. The passage count is a
+# guard against a pathological packet of one-line rows, not a second budget: at 30 it was cutting
+# packets that sat at 21,000 characters, which is a row count deciding a token question.
+MAX_PACKET_CHARS = 48000
+MAX_PACKET_PASSAGES = 80
+MAX_EXPANSION_PASSAGES = 40
 
 # The kinds of evidence that are not the article's running text.
 DEPOSIT = "deposit"
