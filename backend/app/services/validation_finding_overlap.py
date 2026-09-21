@@ -137,26 +137,35 @@ def reconcile_findings(judgments: dict[str, dict] | None) -> dict[str, dict]:
             same_finding_as=owner,
         )
 
-    # A positive cannot rest on evidence a standing negative has contradicted.
+    # A positive cannot rest on evidence a standing negative has contradicted. The test is
+    # CONTAINMENT, not overlap: found by running this on study 65, where a negative citing seven
+    # background passages demoted every positive that happened to cite two of them and the score
+    # fell for the wrong reason. Sharing a passage is not resting on the same fact.
     standing = [(leaf, rows[leaf]) for leaf, _ in kept]
     for leaf, judgment in rows.items():
         if judgment.get("outcome") != VERIFIED or not _citations(judgment):
             continue
         citations = _citations(judgment)
-        against = next(
-            (
-                other
-                for other, negative in standing
-                if citations & _citations(negative) and len(citations & _citations(negative)) >= min(2, len(citations))
-            ),
-            None,
-        )
-        if against is None:
+        against = next((other for other, negative in standing if citations <= _citations(negative)), None)
+        if against is not None:
+            # It rests on nothing the negative did not already account for, so it cannot stand on it.
+            found[leaf] = _demote(
+                judgment,
+                f"this rests on the same evidence as {against}, which found a problem in it that this does "
+                f"not resolve, so bioAF has not established it either way; see {against}",
+                contradicted_by=against,
+            )
             continue
-        found[leaf] = _demote(
-            judgment,
-            f"this rests on the same evidence as {against}, which found a problem in it that this does not "
-            f"resolve, so bioAF has not established it either way; see {against}",
-            contradicted_by=against,
-        )
+        # It rests on evidence of its own as well. The two are in tension and a person reconciles
+        # them; bioAF does not silently withdraw a point it established.
+        overlapping = next((other for other, negative in standing if citations & _citations(negative)), None)
+        if overlapping is not None:
+            found[leaf] = {
+                **judgment,
+                "tension_with": overlapping,
+                "tension": (
+                    f"{overlapping} found a problem in evidence this also rests on, and this answer does not "
+                    f"address it; both are reported and neither is withdrawn"
+                ),
+            }
     return found

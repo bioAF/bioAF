@@ -149,3 +149,41 @@ class TestItChangesNothingItNeedNot:
     def test_a_judgment_with_no_citations_is_left_alone(self):
         judgments = {"M1.A": {"outcome": UNDETERMINED, "rationale": "nothing to judge"}}
         assert reconcile_findings(judgments) == judgments
+
+
+class TestSharingAPassageIsNotRestingOnTheSameFact:
+    """Found by running the reconciliation on study 65: a negative citing seven background passages
+    demoted every positive that happened to cite two of them, and the score fell for the wrong
+    reason. A positive is only withdrawn where it rests on NOTHING the negative did not already
+    account for; where the two merely overlap, the tension is recorded and the score is left alone
+    for a person to reconcile."""
+
+    def test_a_positive_resting_on_more_than_the_negative_keeps_its_outcome(self):
+        judgments = {
+            "E2.B": _failed(
+                ["p59", "p61", "p71", "p68", "p133", "p44", "p40"],
+                scope="the combinatorial screen underwriting the sufficiency claim",
+            ),
+            "E1.B": _verified(["p48", "p49", "p50", "p59", "p61"]),
+        }
+        found = reconcile_findings(judgments)
+        assert found["E1.B"]["outcome"] == VERIFIED
+        assert found["E1.B"]["tension_with"] == "E2.B", "the conflict is recorded for a person"
+        assert "E2.B" in found["E1.B"]["tension"]
+
+    def test_a_positive_resting_on_nothing_more_is_still_withdrawn(self):
+        judgments = {
+            "S5.A": _failed(["p61", "design:3", "GSE213156/GSM6573673"], scope="the replicate structure"),
+            "M3.B": _verified(["p61", "design:3"]),
+        }
+        found = reconcile_findings(judgments)
+        assert found["M3.B"]["outcome"] == UNDETERMINED
+        assert found["M3.B"]["contradicted_by"] == "S5.A"
+
+    def test_one_negative_does_not_take_down_a_whole_report(self):
+        judgments = {
+            "E2.B": _failed(["p1", "p2", "p3", "p4", "p5"], scope="the screen"),
+            **{f"X{i}.A": _verified([f"p{i}", "p1", "p2"]) for i in range(6, 12)},
+        }
+        found = reconcile_findings(judgments)
+        assert all(found[f"X{i}.A"]["outcome"] == VERIFIED for i in range(6, 12))
