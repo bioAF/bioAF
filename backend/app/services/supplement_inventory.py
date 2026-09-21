@@ -422,7 +422,10 @@ def _citations(text: str) -> list[dict]:
 
 
 _NOUN_TOKENS = {
-    "file": r"files?",
+    # plan_8_6 section 5, measured on study 65: eLife deposits "Supplementary file 4" as
+    # `elife-83291-supp4.zip`, so the prose citation and the attachment never merged and four
+    # aliases were reported as four attachments bioAF had failed to retrieve.
+    "file": r"(?:files?|supp(?:l|lement(?:al|ary)?)?)",
     "table": r"(?:tables?|tab)",
     "dataset": r"(?:data_?sets?|data)",
     "datafile": r"(?:data_?files?|data)",

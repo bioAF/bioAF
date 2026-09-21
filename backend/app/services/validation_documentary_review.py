@@ -214,10 +214,13 @@ def limitations_for(evidence: dict | None) -> list[dict]:
     found: list[dict] = []
     if not (evidence.get("paper_index") or (evidence.get("paper_passages") or {}).get("methods")):
         found.append({"needs": "text", "reason": "bioAF holds no methods text for this paper"})
+    # plan_8_6 section 5: only an ATTACHMENT bioAF did not retrieve. A prose reference is another
+    # name for one of them, and counting unresolved aliases as missing files left every obligation's
+    # coverage insufficient on a paper whose attachments had all arrived.
     unresolved = [
         s
         for s in evidence.get("supplements") or []
-        if isinstance(s, dict) and s.get("kind") not in ("figure", "index") and not s.get("resolved")
+        if isinstance(s, dict) and s.get("kind") == "attachment" and not s.get("resolved")
     ]
     if unresolved:
         ledger = [e for e in evidence.get("retrieval_ledger") or [] if isinstance(e, dict)]

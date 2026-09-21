@@ -176,3 +176,34 @@ class TestWhatTheCodeThenAnswers:
         study = await _study(session, admin_user)
         await refresh_code_inspection(session, study, sources=_SOURCES, fetcher=_Fetcher())
         assert not any(limit["needs"] == "code" for limit in limitations_for(study.evidence_json))
+
+
+class TestTheRepositorySourceSurvivesASupplementReRead:
+    """plan_8_6 section 4, found on the demo: re-reading the attachments replaced
+    `code_inspection` wholesale, so a study whose repository bioAF had fetched and parsed came out
+    of the assessment stage holding no source at all and `limitations_for` reported the code as
+    missing beside the reason it had been found."""
+
+    @pytest.mark.asyncio
+    async def test_a_supplement_inspection_does_not_wipe_what_the_repository_gave(self, session, admin_user):
+        from app.services.validation_documentary_review import limitations_for
+
+        study = await _study(session, admin_user)
+        await refresh_code_inspection(session, study, sources=_SOURCES, fetcher=_Fetcher())
+        assert study.evidence_json["code_inspection"]["sources"]
+
+        # What `resolve_study_supplements` does at the end of its own pass.
+        from app.services.validation_code_inspection import inspect_code
+
+        evidence = dict(study.evidence_json)
+        inspected = inspect_code([{"filename": "x.R", "role": "code"}], bytes_for={"x.R": b"library(DESeq2)\n"})
+        held = dict(evidence["code_inspection"])
+        repository = [s for s in held["sources"] if (s.get("provenance") or {}).get("from") == "repository"]
+        evidence["code_inspection"] = {**inspected, "sources": [*repository, *inspected["sources"]]}
+        study.evidence_json = evidence
+        await session.flush()
+
+        paths = {s["path"] for s in study.evidence_json["code_inspection"]["sources"]}
+        assert "DEG/deg_interpretation.py" in paths
+        assert "x.R" in paths
+        assert not any(limit["needs"] == "code" for limit in limitations_for(study.evidence_json))
