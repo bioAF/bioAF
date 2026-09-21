@@ -314,10 +314,30 @@ def _notebook_source(name: str, blob: bytes, *, provenance: dict) -> dict | None
     }
 
 
-# plan_8_6 section 4: the same limits the fetched archive was unpacked under. A repository is source
-# code; a member in the hundreds of megabytes is a data drop and is named without being read.
+# plan_8_6 section 4: a repository is source code, and a member in the hundreds of megabytes is a
+# data drop. What the cap bounds is the SOURCE bioAF keeps, not the file it came out of.
+#
+# The owner, 2026-09-21: study 65's `scRNA/scanpy_analysis.ipynb` is 3.6 MB and was skipped by a
+# 2 MB file-size cap WITHOUT A WORD. Its actual code is about 9 KB; the bulk is saved outputs, which
+# are not source and never reach an assessor. M1.B then deducted two points for the very parameters
+# that notebook states, and nothing on the record could tell incomplete inspection from missing
+# author documentation. A notebook is read up to a container cap and kept only for its code; a
+# member bioAF does not read is RECORDED as unread, never silently dropped.
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
+# What a notebook's container may weigh before bioAF stops opening it. Outputs dominate the file and
+# are discarded, so this bounds the read rather than the source.
+MAX_NOTEBOOK_BYTES = 64 * 1024 * 1024
 MAX_SOURCES = 400
+
+
+def _cap_for(name: str) -> int:
+    """How large a member may be before bioAF stops opening it.
+
+    A notebook is a container: its saved outputs are the bulk of the file and are discarded, so the
+    cap bounds the READ rather than the source. Everything else is capped at the source it would
+    become.
+    """
+    return MAX_NOTEBOOK_BYTES if str(name or "").lower().endswith(".ipynb") else MAX_SOURCE_BYTES
 
 
 def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
@@ -336,18 +356,36 @@ def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
     sources: list[dict] = []
     manifests: list[dict] = []
     unreadable: list[dict] = []
+    skipped: list[dict] = []
+    oversized: list[tuple[str, int]] = []
     if not blob:
-        return {"sources": [], "manifests": [], "unreadable": [{"path": origin or "", "reason": "no bytes were held"}]}
+        return {
+            "sources": [],
+            "manifests": [],
+            "unreadable": [{"path": origin or "", "reason": "no bytes were held"}],
+            "skipped": [],
+        }
 
     members: list[tuple[str, bytes]] = []
     try:
         if bytes(blob[:2]) == b"PK":
             with zipfile.ZipFile(io.BytesIO(blob)) as archive:
-                members = [(i.filename, archive.read(i.filename)) for i in archive.infolist() if not i.is_dir()]
+                for info in archive.infolist():
+                    if info.is_dir():
+                        continue
+                    if info.file_size > _cap_for(info.filename):
+                        oversized.append((info.filename, info.file_size))
+                        continue
+                    members.append((info.filename, archive.read(info.filename)))
         else:
             with tarfile.open(fileobj=io.BytesIO(blob), mode="r:*") as archive:
                 for member in archive.getmembers():
-                    if not member.isfile() or member.size > MAX_SOURCE_BYTES:
+                    if not member.isfile():
+                        continue
+                    if member.size > _cap_for(member.name):
+                        # Named and honestly not read. Silently skipping it is what let an assessor
+                        # read bioAF's incomplete inspection as the authors' missing documentation.
+                        oversized.append((member.name, member.size))
                         continue
                     handle = archive.extractfile(member)
                     if handle is not None:
@@ -357,12 +395,28 @@ def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
             "sources": [],
             "manifests": [],
             "unreadable": [{"path": origin or "", "reason": f"the archive could not be read ({exc})"}],
+            "skipped": [],
         }
 
     # A repository tarball wraps everything in `<repo>-<sha>/`. Stripping it keeps a cited path the
     # one a reader would type.
-    prefixes = {name.split("/", 1)[0] for name, _ in members if "/" in name}
-    strip = prefixes.pop() + "/" if len(prefixes) == 1 and all("/" in name for name, _ in members) else ""
+    named = [name for name, _ in members] + [name for name, _ in oversized]
+    prefixes = {name.split("/", 1)[0] for name in named if "/" in name}
+    strip = prefixes.pop() + "/" if len(prefixes) == 1 and all("/" in name for name in named) else ""
+
+    for name, size in oversized:
+        safe = str(name).removeprefix(strip)
+        reason = (
+            f"this file is {size} bytes, larger than the {_cap_for(name)}-byte cap for a member bioAF "
+            "opens, so bioAF did not read it and what it contains is not established"
+        )
+        # Every member bioAF declined is on the record. A code file or a manifest is also
+        # `unreadable`, because that is the list the code checks read, and an unrecorded skip is
+        # what let an assessor read bioAF's incomplete inspection as the authors' missing
+        # documentation.
+        skipped.append({"path": safe, "reason": reason, "size_bytes": size})
+        if _is_manifest(safe) or pathlib.PurePosixPath(safe).suffix.lower() in LANGUAGES:
+            unreadable.append({"path": safe, "reason": reason, "size_bytes": size})
 
     for name, member_bytes in members[:MAX_SOURCES]:
         safe = str(name).removeprefix(strip)
@@ -398,7 +452,7 @@ def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
             manifests.append(entry)
         else:
             sources.append({**entry, "language": LANGUAGES.get(suffix, "unknown")})
-    return {"sources": sources, "manifests": manifests, "unreadable": unreadable}
+    return {"sources": sources, "manifests": manifests, "unreadable": unreadable, "skipped": skipped}
 
 
 def is_code_file(filename: str, *, role: str | None = None) -> bool:

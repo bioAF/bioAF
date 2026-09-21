@@ -200,3 +200,58 @@ class TestALegitimateOverrideIsDistinguishableFromADiscrepancy:
         carried = "\n".join(r["text"] for r in rows if r["kind"] == "code")
         assert "Make volcano plots" in carried
         assert "#Thresholds for enrichment" in carried
+
+
+class TestALargeNotebookIsNotSilentlySkipped:
+    """The owner, 2026-09-21: "No single-cell processing code was supplied" is FALSE.
+
+    `scRNA/scanpy_analysis.ipynb` is 3.6 MB, over the archive reader's 2 MB member cap, so it was
+    skipped without a word. Its actual CODE is about 9 KB; the bulk is saved outputs. M1.B then
+    deducted two points for parameters the notebook states, and the assessor could not tell
+    incomplete inspection from missing author documentation because nothing recorded the skip.
+    """
+
+    def _archive(self, *, name="scRNA/scanpy_analysis.ipynb", blob=None):
+        import io
+        import tarfile
+
+        payload = blob if blob is not None else pathlib.Path("/tmp/big_notebook.ipynb").read_bytes()
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+            info = tarfile.TarInfo(f"repo-abc123/{name}")
+            info.size = len(payload)
+            archive.addfile(info, io.BytesIO(payload))
+            other = b"print(1)\n"
+            info2 = tarfile.TarInfo("repo-abc123/small.py")
+            info2.size = len(other)
+            archive.addfile(info2, io.BytesIO(other))
+        return buffer.getvalue()
+
+    def test_the_notebooks_code_is_read_even_though_the_file_is_large(self):
+        found = inspect_archive(self._archive(), origin="https://github.com/programmablebio/granulosa")
+        notebook = next((s for s in found["sources"] if s["path"].endswith("scanpy_analysis.ipynb")), None)
+        assert notebook is not None, "a 3.6 MB notebook of 9 KB of code is source, not a data drop"
+        for parameter in ("min_genes", "min_cells", "pct_counts_mt", "normalize_total", "leiden", "resolution"):
+            assert parameter in notebook["text"], parameter
+
+    def test_the_saved_outputs_are_not_what_reaches_the_assessor(self):
+        found = inspect_archive(self._archive(), origin="x")
+        notebook = next(s for s in found["sources"] if s["path"].endswith(".ipynb"))
+        assert len(notebook["text"]) < 100_000, "the outputs are the bulk of the file and are not source"
+
+    def test_a_member_bioaf_does_not_read_is_recorded_rather_than_skipped(self):
+        """Incomplete inspection must never look like missing author documentation."""
+        huge = b"x" * (3 * 1024 * 1024)
+        found = inspect_archive(self._archive(name="data/matrix.csv", blob=huge), origin="x")
+        assert any("matrix.csv" in row["path"] for row in found["skipped"])
+        assert any("larger than" in row["reason"] for row in found["skipped"])
+
+    def test_a_large_plain_script_is_also_recorded_rather_than_skipped(self):
+        huge = b"# a comment\n" * 300_000
+        found = inspect_archive(self._archive(name="analysis.py", blob=huge), origin="x")
+        assert any("analysis.py" in row["path"] for row in found["unreadable"])
+        assert not any(s["path"].endswith("analysis.py") for s in found["sources"])
+
+    def test_the_small_members_beside_it_are_still_read(self):
+        found = inspect_archive(self._archive(name="data/matrix.csv", blob=b"x" * (3 * 1024 * 1024)), origin="x")
+        assert any(s["path"] == "small.py" for s in found["sources"])
