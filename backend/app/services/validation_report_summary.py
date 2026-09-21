@@ -1745,11 +1745,11 @@ def _code_sources(evidence: dict) -> list[dict]:
                     or source.get("accessible_reason"),
                 },
                 "inspection": {
+                    # What the fetch and the inspection established outranks the annotation the
+                    # supplement path wrote, which is `not_inspected` for a source it never saw.
                     "status": (
-                        inspection.get("status")
-                        or (
-                            "inspected" if this_one and (read_from & {fetched_url} or (fetched and read_from)) else None
-                        )
+                        ("inspected" if this_one and fetched and read_from else None)
+                        or inspection.get("status")
                         or "not_inspected"
                     ),
                     "role_label": ROLE_LABELS.get(inspection.get("role")) if inspection.get("role") else None,

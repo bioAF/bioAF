@@ -108,7 +108,11 @@ class TestTheReportDoesNotContradictItself:
         },
         "code_inspection": {
             "sources": [
-                {"path": "a.py", "text": "x = 1", "provenance": {"from": "repository", "origin": "https://github.com/lab/paper"}}
+                {
+                    "path": "a.py",
+                    "text": "x = 1",
+                    "provenance": {"from": "repository", "origin": "https://github.com/lab/paper"},
+                }
             ],
             "manifests": [],
         },
@@ -143,6 +147,28 @@ class TestTheReportDoesNotContradictItself:
         }
         row = _code_sources(evidence)[0]
         assert row["retrieval"]["status"] != "retrieved"
+
+    def test_a_stale_not_inspected_annotation_does_not_beat_the_inspection(self):
+        """Found on the demo: the supplement path writes `inspection: not_inspected` for a source it
+        never saw, and reading that first left a fetched, parsed repository listed as uninspected."""
+        from app.services.validation_report_summary import _code_sources
+
+        evidence = {
+            **self._EVIDENCE,
+            "capabilities": {
+                "code_sources": [
+                    {
+                        "kind": "github",
+                        "url": "https://github.com/lab/paper",
+                        "retrieval": {"status": "not_attempted"},
+                        "inspection": {"status": "not_inspected"},
+                    }
+                ]
+            },
+        }
+        row = _code_sources(evidence)[0]
+        assert row["retrieval"]["status"] == "retrieved"
+        assert row["inspection"]["status"] == "inspected"
 
     def test_a_retrieved_attachment_set_must_not_also_be_recommended_for_retry(self):
         from app.services.validation_report_summary import report_contradictions
