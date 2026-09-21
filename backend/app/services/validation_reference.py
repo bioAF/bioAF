@@ -223,7 +223,15 @@ _PINNED_ANNOTATION = {
 # releases are per species: human 55 to 75 are GRCh37 and 76 onwards GRCh38; mouse 68 to 102 are
 # GRCm38 and 104 onwards GRCm39. Release 103 for mouse is left unmapped rather than guessed.
 _GENCODE = re.compile(r"\bgencode\b\D{0,12}?(?:release\s*|v(?:ersion)?\s*)?(?P<mouse>m)?(?P<n>\d{1,3})\b", re.I)
-_ENSEMBL = re.compile(r"\bensembl\b(?!\s*plants)\D{0,12}?(?:release\s*|r|v)?(?P<n>\d{2,3})\b", re.I)
+# "Ensembl GRCh38 v96" names a release of 96 and an assembly of GRCh38. A lazy `\D{0,12}` reached
+# the first digits it could and read the ASSEMBLY number as the release, so study 65's Ensembl 96
+# was recorded as Ensembl 38. A release is either introduced by a release word or written directly
+# after the provider; digits inside an assembly token are neither.
+_ENSEMBL = re.compile(
+    r"\bensembl\b(?!\s*plants)(?:[^.]{0,20}?\b(?:release|version|v|r)\s*\.?\s*(?P<n>\d{2,3})\b"
+    r"|\s*(?P<direct>\d{2,3})\b)",
+    re.I,
+)
 _MOUSE = ("mus musculus", "mouse", "murine")
 _HUMAN = ("homo sapiens", "human")
 
@@ -261,7 +269,7 @@ def parse_annotation(stated: str | None, *, organism: str | None = None) -> dict
         return {"provider": "gencode", "release": release, "label": f"GENCODE {release}", "assembly": assembly}
     match = _ENSEMBL.search(text)
     if match:
-        number = int(match.group("n"))
+        number = int(match.group("n") or match.group("direct"))
         species = _species(organism) or _species(text)
         assembly = None
         if species == "human":
@@ -270,6 +278,57 @@ def parse_annotation(stated: str | None, *, organism: str | None = None) -> dict
             assembly = "GRCm38" if 68 <= number <= 102 else ("GRCm39" if number >= 104 else None)
         return {"provider": "ensembl", "release": str(number), "label": f"Ensembl {number}", "assembly": assembly}
     return None
+
+
+# A database or annotation resource whose VERSION decides a result, beside the assemblies above.
+# M2 asks whether the result-sensitive references are identifiable and their versions specified, and
+# "PantherDB" without a release is exactly the answer it needs to be able to give.
+_RESOURCE = re.compile(
+    r"\b(?:GENCODE|Ensembl|RefSeq|UCSC|PantherDB|Panther|Reactome|KEGG|MSigDB|GO|Gene Ontology"
+    r"|miRBase|Rfam|Pfam|InterPro|UniProt|dbSNP|gnomAD|ClinVar|CellRanger reference|10x reference)\b",
+    re.I,
+)
+# A version a reader could use to recover the same input. A bare year is not one: "(Bray et al.,
+# 2016)" is a citation, and reading it as a database release would put a number in front of M2 that
+# the paper never stated about its reference.
+_RESOURCE_VERSION = re.compile(r"\b(?:v(?:ersion)?\.?\s*|release\s*)(?P<v>\d{1,4}(?:\.\d+)*)\b", re.I)
+
+
+def reference_statements(paragraphs: list[str] | None) -> list[dict]:
+    """Every methods sentence that names a result-sensitive reference, with what bioAF read from it.
+
+    plan_8_6 section 3 item 4: M2 asks whether the references, annotations and feature definitions
+    the analysis used are identifiable and versioned. It was judged on the paper's running prose,
+    with nothing saying which build or release bioAF had actually resolved out of it. Each statement
+    is ``{"quote", "build", "historical", "annotation", "resources", "version"}``, and a field bioAF
+    could not resolve is None rather than guessed.
+
+    A species name alone is not a reference: "the human transcriptome" identifies no build, which is
+    the distinction M2's own scope draws.
+    """
+    from app.services.validation_table_binding import sentences
+
+    found: list[dict] = []
+    for index, paragraph in enumerate(paragraphs or []):
+        for sentence in sentences(paragraph or ""):
+            assemblies = assemblies_named(sentence)
+            resources = sorted({m.group(0) for m in _RESOURCE.finditer(sentence)}, key=str.lower)
+            annotation = parse_annotation(sentence)
+            if not assemblies and not (resources and annotation):
+                continue
+            version = _RESOURCE_VERSION.search(sentence)
+            found.append(
+                {
+                    "quote": sentence,
+                    "build": assemblies[0]["assembly"] if assemblies else None,
+                    "historical": bool(assemblies and assemblies[0]["historical"]),
+                    "annotation": annotation,
+                    "resources": resources,
+                    "version": version.group("v") if version else None,
+                    "paragraph": index,
+                }
+            )
+    return found
 
 
 def supplied_references(pipeline_key: str | None = None, *, reference_datasets: list | None = None) -> list[dict]:

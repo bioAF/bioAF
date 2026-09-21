@@ -289,7 +289,7 @@ def _article_urls(study, pmcid: str) -> list[str]:
     return found
 
 
-async def resolve_study_supplements(session: AsyncSession, study, evidence: dict) -> list[dict]:
+async def resolve_study_supplements(session: AsyncSession, study, evidence: dict, *, allowance=None) -> list[dict]:
     """Download the paper's attachments and establish what each one is. Never raises.
 
     This is the point where the read-time manifest of NAMES becomes an inventory of FILES with
@@ -328,6 +328,9 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
             ledger=ledger,
             predicates=await claimed_predicates(session, study),
             code_bytes=code_bytes,
+            # plan_8_6 section 11: ONE transfer allowance for this attempt, shared with the
+            # repository fetch below. A budget spent separately in each place is three budgets.
+            allowance=allowance,
         )
     except Exception as exc:  # noqa: BLE001 - an inventory failure degrades the report, never fails the study
         logger.warning("supplement resolution failed for study %s: %s", study.id, exc)
@@ -372,6 +375,20 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
     return merged
 
 
+def _metered(fetcher, allowance):
+    """``fetcher``, spending ``allowance`` as it transfers. The fetcher itself when there is none."""
+    if allowance is None:
+        return fetcher
+    from app.services.supplement_inventory import _fetch_within
+
+    async def metered(url, max_bytes=None):
+        from app.services.code_fetch_service import _MAX_BYTES
+
+        return await _fetch_within(fetcher, url, max_bytes or _MAX_BYTES, allowance)
+
+    return metered
+
+
 async def refresh_paper_index(session: AsyncSession, study, *, fetch_text=None) -> dict | None:
     """plan_8_6 section 3: give a study recorded before the index one, without re-extracting it.
 
@@ -413,7 +430,7 @@ async def refresh_paper_index(session: AsyncSession, study, *, fetch_text=None) 
     return index
 
 
-async def refresh_code_inspection(session: AsyncSession, study, *, sources=None, fetcher=None) -> dict:
+async def refresh_code_inspection(session: AsyncSession, study, *, sources=None, fetcher=None, allowance=None) -> dict:
     """plan_8_6 section 4: fetch the code this paper published, and READ it. Never raises.
 
     Study 65 identified a repository and a cited Software Heritage revision and recorded
@@ -461,7 +478,10 @@ async def refresh_code_inspection(session: AsyncSession, study, *, sources=None,
         resolution = await resolve_code(
             sources=rows,
             deposit_entries=entries,
-            fetcher=fetcher or deposit_bytes_fetcher,
+            # plan_8_6 section 11: the repository's archive is transferred out of the SAME allowance
+            # the supplements spend. It was counted nowhere, so an assessment could move far more
+            # than its budget by spending it in two places.
+            fetcher=_metered(fetcher or deposit_bytes_fetcher, allowance),
             revisions=revisions,
         )
     except Exception as exc:  # noqa: BLE001 - reading the code cannot fail the stage that earned the rest
@@ -667,8 +687,13 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     started = time.monotonic()
     record_stage(study, "assessment")
     evidence = dict(study.evidence_json or {})
+    # plan_8_6 section 11: one transfer allowance for this attempt, shared by the supplement bundle,
+    # the publisher's member files and the repository archive, and recorded with what it spent.
+    from app.services.supplement_inventory import TransferAllowance
+
+    allowance = TransferAllowance()
     if independent_checks_outstanding(evidence) or _bundle_never_requested(evidence):
-        evidence["supplements"] = await resolve_study_supplements(session, study, evidence)
+        evidence["supplements"] = await resolve_study_supplements(session, study, evidence, allowance=allowance)
         # What retrieval established has to reach the rows that answer for it. Study 32 recorded
         # Supplemental File S2 as "not attempted" in the same bundle that had downloaded and read it.
         evidence["capabilities"] = propagate_retrieval(evidence.get("capabilities") or {}, evidence["supplements"])
@@ -688,7 +713,11 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # and READ. Study 65 resolved a repository and a cited revision and recorded `not_attempted`,
     # because the only caller was post-approval. Static inspection only: nothing is installed and
     # nothing is executed, and the run-only obligations keep every approval prerequisite they had.
-    await refresh_code_inspection(session, study)
+    await refresh_code_inspection(session, study, allowance=allowance)
+    evidence = dict(study.evidence_json or {})
+    evidence["transfer_allowance"] = allowance.record()
+    study.evidence_json = evidence
+    await session.flush()
 
     plan = await active_plan(session, study)
     refresh_checks(study, plan)
@@ -880,16 +909,23 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     # so a computational question is not answered from the culture protocol and an absence finding
     # rests on what the packet actually covered.
     packets = packets_for(evidence=evidence, plan=plan_dict, leaves=JUDGED_LEAVES)
+    fingerprints = {leaf: _packet_fingerprint(packet) for leaf, packet in packets.items()}
     identity = {
         "packets": {leaf: [p["id"] for p in packet["passages"]] for leaf, packet in packets.items()},
-        "fingerprint": _passage_fingerprint(packets),
+        "fingerprints": fingerprints,
         "model": model,
     }
     held = evidence.get("rubric_judgments") if isinstance(evidence.get("rubric_judgments"), dict) else None
     if held is not None and held.get("inputs") == identity:
         return held
+    # plan_8_6 section 11, and the owner's review 2026-09-21: "One fingerprint covers every packet.
+    # Any change invokes the full documentary review again." An obligation whose packet, model and
+    # versions are unchanged keeps the judgment it already has; only the ones that moved are asked.
+    settled = _unchanged_judgments(held, fingerprints, model)
     try:
-        reviewed = await review_documents(packets=packets, client=client, model=model or "", api_key=api_key)
+        reviewed = await review_documents(
+            packets=packets, client=client, model=model or "", api_key=api_key, settled=settled
+        )
     except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
         logger.warning("study %s: the documentary review could not run: %s", study.id, exc)
         return held or {"judgments": {}, "failures": [], "reason": str(exc)}
@@ -900,34 +936,62 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     return record
 
 
-def _passage_fingerprint(packets: dict[str, dict]) -> str:
-    """What each obligation was shown, as one hash, so a changed packet is judged again.
+def _packet_fingerprint(packet: dict) -> str:
+    """What ONE obligation was shown, as one hash, so a changed packet is judged again and no other.
 
-    plan_8_6 section 11: keyed per obligation, so one changed source reruns the checks that depend
-    on it rather than every judgment this study has ever made. The contract, the review and the
-    packet versions are in it, because a corrected question is a different question.
+    plan_8_6 section 11, keyed per obligation: one changed source reruns the checks that depend on
+    it rather than every judgment this study has ever made. The contract, the review, the overlap
+    and the packet versions are in it, because a corrected question is a different question and a
+    changed reconciliation is a different answer.
     """
     import hashlib
     import json as _json
 
     from app.services.validation_documentary_review import REVIEW_VERSION
     from app.services.validation_evidence_packets import PACKET_VERSION
+    from app.services.validation_finding_overlap import OVERLAP_VERSION
     from app.services.validation_judgment import CONTRACT_VERSION
 
     payload = _json.dumps(
         {
-            "packets": {
-                leaf: {"passages": packet.get("passages"), "coverage": packet.get("coverage")}
-                for leaf, packet in sorted((packets or {}).items())
-            },
+            "passages": (packet or {}).get("passages"),
+            "coverage": (packet or {}).get("coverage"),
+            "expansion": [p.get("id") for p in (packet or {}).get("expansion") or []],
             "contract": CONTRACT_VERSION,
             "review": REVIEW_VERSION,
             "packet": PACKET_VERSION,
+            "overlap": OVERLAP_VERSION,
         },
         sort_keys=True,
         default=str,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _unchanged_judgments(held: dict | None, fingerprints: dict[str, str], model: str | None) -> dict[str, dict]:
+    """The judgments whose packet is exactly what it was when they were made.
+
+    A judgment the reconciliation pass demoted is NOT reused: what it is depends on the other
+    obligations, and those are about to be judged again. Its own answer is held under ``withheld``
+    and the pass reruns over the whole set, so nothing is lost by asking for it again.
+    """
+    if not isinstance(held, dict):
+        return {}
+    inputs = held.get("inputs") if isinstance(held.get("inputs"), dict) else {}
+    if inputs.get("model") != model:
+        return {}
+    before = inputs.get("fingerprints") if isinstance(inputs.get("fingerprints"), dict) else {}
+    judgments = held.get("judgments") if isinstance(held.get("judgments"), dict) else {}
+    return {
+        leaf: judgment
+        for leaf, judgment in judgments.items()
+        if isinstance(judgment, dict)
+        and before.get(leaf)
+        and before.get(leaf) == fingerprints.get(leaf)
+        and not judgment.get("same_finding_as")
+        and not judgment.get("contradicted_by")
+        and not judgment.get("tension_with")
+    }
 
 
 async def guard_population_counts(session: AsyncSession, study, plan) -> list[int]:

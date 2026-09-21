@@ -33,7 +33,11 @@ from app.services.validation_rubric_v3 import (
 
 # plan_8_6 sections 6 and 8: the request carries its section, title and acceptable evidence, and the
 # contradiction test is per outcome. Both change what a cached judgment means, so the version moves.
-CONTRACT_VERSION = 2
+#
+# 3: an `unmet` answer declares its `basis` and points at the `observations` that show it, and every
+# answer names the scope it is about. A judgment made under 2 named no scope and showed nothing, so
+# it cannot be replayed against either rule; the version moves and those are asked again.
+CONTRACT_VERSION = 3
 MODEL_ASSISTED = "model_assisted"
 
 MET = "met"
@@ -72,16 +76,26 @@ _ABSENCE_CLAIM = re.compile(
     re.I,
 )
 
-# A negative that rests on something the evidence POSITIVELY shows: two values that disagree, a
-# method used where it does not apply, a step the supplied code does not perform. Section 8: such a
-# finding is narrowly scoped and does not need the whole paper to have been inspected.
-_POSITIVE_FINDING = re.compile(
-    r"\bcontradict\w*|\bdisagree\w*|\bconflict\w*|\binconsisten\w*|\bmismatch\w*"
-    r"|\bdiffers? from\b|\binstead of\b|\bwhile the\b|\bwhereas\b"
-    r"|\bhas no replicate\b|\bno replicate to\b|\bsingle (?:sample|replicate)\b"
-    r"|\binappropriate\w*|\bunsuitable\b|\bnot valid for\b|\bcannot support\b",
-    re.I,
-)
+# plan_8_6 section 8, and the owner's review of the deployed code, 2026-09-21: what exempts a
+# negative from the coverage requirement is what it SHOWED, never how it read. A keyword list over
+# the rationale ("whereas", "inconsistent", "while the") gated or exempted the same finding
+# depending on which words the assessor happened to choose, in both directions.
+#
+# A defect is DEMONSTRATED when the answer can point at what two SUPPLIED passages each state and
+# name the scope the disagreement is about. That is a structure bioAF checks against the evidence it
+# handed over; prose is not consulted for it at all.
+ABSENT = "absent"
+CONTRADICTION = "contradiction"
+INAPPROPRIATE = "inappropriate"
+NOT_REPRODUCED = "not_reproduced"
+# The four kinds of defect the system prompt already enumerates as grounds for `unmet`. Only the
+# last three can be shown by pointing at supplied passages; an absence is a claim about what was
+# looked at, and no number of observations turns it into one.
+DEFECT_KINDS = (ABSENT, CONTRADICTION, INAPPROPRIATE, NOT_REPRODUCED)
+SHOWABLE_KINDS = (CONTRADICTION, INAPPROPRIATE, NOT_REPRODUCED)
+# Two: a disagreement is between two things, and a method is unsuited TO something. One observation
+# is one fact, and a finding resting on one fact is resting on what is absent from the others.
+MIN_OBSERVATIONS = 2
 
 
 # plan_8_6 section 7: an obligation whose POSITIVE answer has to rest on a particular kind of
@@ -112,8 +126,10 @@ _SYSTEM = (
     "produce any number other than the confidence field.\n\n"
     "Respond with a SINGLE fenced JSON block (```json ... ```) and nothing else:\n"
     '{"outcome": "met | unmet | cannot_establish", "rationale": "one or two sentences", '
-    '"citations": ["the id of every passage your rationale rests on"], "scope": "for unmet: the '
-    'experiment, analysis or file the finding is about", "impact": "for unmet: the material '
+    '"citations": ["the id of every passage your rationale rests on"], "scope": "the experiment, '
+    'analysis or file this answer is about", "basis": "for unmet: absent | contradiction | '
+    'inappropriate | not_reproduced", "observations": [{"citation": "a passage id", "states": "what '
+    'that passage states that this finding rests on"}], "impact": "for unmet: the material '
     'consequence for a reader trying to repeat this", "confidence": 0.0 to 1.0}\n\n'
     "Rules:\n"
     "- cite the passages below by their id; a rationale that rests on something not listed here has no ground\n"
@@ -127,6 +143,13 @@ _SYSTEM = (
     "reports. An absence is not the only kind\n"
     "- an `unmet` answer states its scope and its material consequence, and rests on cited passages. "
     "Do not answer `unmet` about sources you were not shown; say `cannot_establish` instead\n"
+    "- `basis` says WHICH of those four kinds this finding is, and `observations` points at what the "
+    "evidence SHOWS it with: one entry per passage, saying what that passage states. A contradiction, an "
+    "inappropriate method and a procedure that does not reproduce the paper are each shown by at least TWO "
+    "passages listed below - the two values that disagree, or the method and what it was applied to. An "
+    "`absent` finding has nothing to point at, and rests instead on what bioAF inspected\n"
+    "- every answer names its `scope`: the experiment, analysis or file it is about. A `met` answer about one "
+    "comparison is not an answer about every comparison in the paper\n"
     "- ONE failure per answer, inside THIS obligation's scope. Do not add a second finding that belongs "
     "to another obligation, and do not repeat a mismatch as though it were a further problem\n"
     "- `impact` is what a READER cannot do or cannot check. Nothing here has been installed, imported or "
@@ -199,7 +222,12 @@ def build_request(leaf: str, *, passages: list[dict] | None) -> dict:
         "system": _SYSTEM,
         "payload": "\n".join(p for p in question if p is not None) + f"\n\nEvidence:\n{payload}",
         "evidence": [{"id": p["id"], "source": p.get("source")} for p in rows],
-        "schema": {"outcome": list(JUDGMENT_OUTCOMES), "citations": "ids from the evidence above"},
+        "schema": {
+            "outcome": list(JUDGMENT_OUTCOMES),
+            "citations": "ids from the evidence above",
+            "basis": list(DEFECT_KINDS),
+            "observations": "for unmet: {citation, states} per passage the finding rests on",
+        },
         "contract_version": CONTRACT_VERSION,
     }
 
@@ -218,17 +246,46 @@ def contradicts_itself(outcome: str, rationale: str) -> bool:
     return outcome == MET and bool(_ABSENCE_CLAIM.search(text))
 
 
-def needs_coverage(rationale: str) -> bool:
-    """Whether this negative is an ABSENCE finding, which rests on what was inspected.
+def observations_of(answer: dict | None, supplied: set[str], citations: list[str]) -> list[dict]:
+    """The supporting observations this answer names, keeping only the ones bioAF can resolve.
 
-    Section 8: a negative resting on positive evidence (two values that disagree, a method applied
-    where it does not hold, a step the supplied code does not perform) is narrowly scoped and is not
-    a claim about sources nobody opened. An absence finding is a claim about them.
+    An observation is ``{"citation", "states"}``: one passage the assessor was handed, and what it
+    says that the finding rests on. An observation naming a passage nobody supplied is recollection,
+    and it is dropped here for the same reason an unresolvable citation is rejected above.
     """
-    text = rationale or ""
-    if _POSITIVE_FINDING.search(text):
-        return False
-    return bool(_ABSENCE_CLAIM.search(text))
+    cited = set(citations)
+    found: list[dict] = []
+    seen: set[str] = set()
+    for row in (answer or {}).get("observations") or []:
+        if not isinstance(row, dict):
+            continue
+        citation = str(row.get("citation") or "").strip()
+        states = str(row.get("states") or "").strip()
+        if not citation or not states or citation not in supplied or citation not in cited:
+            continue
+        if citation in seen:
+            # Two readings of one passage are one observation: a passage cannot disagree with itself.
+            continue
+        seen.add(citation)
+        found.append({"citation": citation, "states": states})
+    return found
+
+
+def demonstrates_defect(basis: str, observations: list[dict], scope: str) -> bool:
+    """Whether this negative SHOWED its defect, rather than reporting that something is missing.
+
+    Section 8: positive evidence of a contradiction supports a narrowly scoped negative without
+    inspecting unrelated sources. What makes it that, and not a claim about sources nobody opened:
+
+    - the basis is one of the three that can be shown at all (an absence never is);
+    - it points at ``MIN_OBSERVATIONS`` distinct passages bioAF actually supplied, saying what each
+      one states;
+    - it names the scope it is about, so the finding's reach is on the record.
+
+    None of that reads the rationale, which is the point: the same finding must not be gated or
+    exempted by which words an assessor chose.
+    """
+    return basis in SHOWABLE_KINDS and len(observations) >= MIN_OBSERVATIONS and bool(scope.strip())
 
 
 def coverage_supports_absence(coverage: dict | None) -> tuple[bool, str]:
@@ -336,9 +393,14 @@ def judgment_from(
                 withheld={"outcome": outcome, "rationale": rationale},
                 coverage=coverage,
             )
-    if outcome == UNMET and needs_coverage(rationale):
-        # plan_8_6 section 8: an absence is a claim about what was looked at. A source bioAF never
-        # retrieved cannot establish that the authors omitted anything.
+    basis = str(answer.get("basis") or "").strip().lower()
+    basis = basis if basis in DEFECT_KINDS else ABSENT
+    finding_scope = str(answer.get("scope") or "").strip()
+    observations = observations_of(answer, supplied, citations)
+    if outcome == UNMET and not demonstrates_defect(basis, observations, finding_scope):
+        # plan_8_6 section 8: a negative that did not SHOW its defect is a claim about what was
+        # looked at, whatever its wording. A source bioAF never retrieved cannot establish that the
+        # authors omitted anything.
         supported, why = coverage_supports_absence(coverage)
         if not supported:
             return _open(
@@ -346,13 +408,19 @@ def judgment_from(
                 next_action="retrieve and inspect the sources this obligation is about, then ask again",
                 assessor=assessor,
                 confidence=answer.get("confidence"),
-                withheld={"outcome": outcome, "rationale": rationale},
+                withheld={"outcome": outcome, "rationale": rationale, "basis": basis},
+                observations=observations,
                 coverage=coverage,
             )
     found = {
         "outcome": _TO_RUBRIC[outcome],
         "rationale": rationale or f"the assessor judged this obligation {outcome}",
-        "scope": f"{len(supplied)} supplied passages",
+        # What this answer says it is ABOUT. plan_8_6 section 7 and the owner's review, 2026-09-21:
+        # the reconciliation pass compares a positive with a negative on the scope each named, and
+        # "12 supplied passages" named nothing, so a positive about sample preparation could be
+        # withdrawn by a negative about a GO threshold that happened to cite the same paragraph.
+        "scope": finding_scope or f"{len(supplied)} supplied passages",
+        "scope_stated": bool(finding_scope),
         "method": MODEL_ASSISTED,
         "evidence": {"citations": citations},
         "assessor": assessor,
@@ -366,7 +434,11 @@ def judgment_from(
         found["impact"] = str(answer.get("impact") or "").strip() or (
             "what the obligation requires is absent from the evidence inspected"
         )
-        found["finding_scope"] = str(answer.get("scope") or "").strip() or found["scope"]
+        found["finding_scope"] = finding_scope or found["scope"]
+        found["basis"] = basis
+        # What the finding pointed at, so a reader sees the two passages a demonstrated defect rests
+        # on rather than being told that one exists.
+        found["observations"] = observations
     return found
 
 

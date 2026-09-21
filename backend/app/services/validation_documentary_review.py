@@ -63,7 +63,16 @@ JUDGED_LEAVES = (
 # plan_8_6 sections 3, 6 and 8: one packet per obligation, the request carrying its section and
 # scope, and a negative kept where its coverage supports it. All three change what an accepted
 # judgment means, so a held review made under the old version is asked again.
-REVIEW_VERSION = 2
+#
+# 3: what exempts a negative from coverage is what it SHOWED, not how it read, and the reconciliation
+# pass compares scopes rather than citation sets alone.
+REVIEW_VERSION = 3
+
+
+# plan_8_6 section 11: one initial call plus one recovery, per obligation per evidence revision. The
+# recovery is spent on a malformed answer OR on a targeted evidence expansion, and each of those
+# used to carry its own, which permitted four semantic attempts where the plan allows two.
+ATTEMPTS_PER_LEAF = 2
 
 
 def _now_iso() -> str:
@@ -101,11 +110,12 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
     could not carry whole reaches the packet's coverage the same way a source it never fetched does,
     so section 8 refuses an absence finding over the part nobody read.
     """
-    from app.services.validation_evidence_packets import CODE, DEPOSIT, SUPPLEMENT, TOOLS
+    from app.services.validation_evidence_packets import CODE, CUTOFF, DEPOSIT, REFERENCE, SUPPLEMENT, TOOLS
 
     evidence, plan = evidence or {}, plan or {}
     rows: list[dict] = []
     omissions: list[dict] = []
+    rows += _normalized_rows(evidence, cutoff_kind=CUTOFF, reference_kind=REFERENCE)
     # plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words.
     # E2.B was verified from a list of comparators because nothing else about the design was ever
     # put in front of it.
@@ -225,6 +235,61 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
             }
         )
     return {"rows": rows, "omissions": omissions}
+
+
+def _normalized_rows(evidence: dict, *, cutoff_kind: str, reference_kind: str) -> list[dict]:
+    """What bioAF READ out of this paper's methods, as evidence the obligations about it can cite.
+
+    plan_8_6 section 3 item 4. M4 asks whether the decision criteria applied to the analysis output
+    are specified and unambiguous, and M2 the same for the references. Both were judged on the
+    paper's running prose with nothing saying which thresholds or releases bioAF had actually
+    resolved from it, so a threshold the paper states and bioAF could not parse looked the same as
+    one the paper never stated.
+
+    Each row is scoped to the ANALYSIS it governs. Two thresholds governing two operations are two
+    criteria, not an ambiguity, and nothing here inherits either into a claim: that stays
+    `validation_methods_cutoffs.inherited_cutoffs`, under plan_8_2's rule.
+    """
+    from app.services.validation_evidence_index import methods_paragraphs
+    from app.services.validation_methods_cutoffs import analysis_statements
+    from app.services.validation_reference import reference_statements
+
+    paragraphs = methods_paragraphs(_index_of(evidence))
+    rows: list[dict] = []
+    for position, statement in enumerate(analysis_statements(paragraphs), start=1):
+        read = ", ".join(f"{c['kind']} {c['operator']} {c['value']}" for c in statement["cutoffs"])
+        rows.append(
+            {
+                "id": f"{cutoff_kind}:{position}",
+                "kind": cutoff_kind,
+                "source": "the decision criteria bioAF read from this paper's methods",
+                "text": (
+                    f"Decision criteria for {statement['analysis']}. bioAF read: {read}. Quote: {statement['quote']}"
+                ),
+            }
+        )
+    for position, statement in enumerate(reference_statements(paragraphs), start=1):
+        read = "; ".join(
+            part
+            for part in [
+                f"build {statement['build']}" + (" (a historical assembly)" if statement["historical"] else "")
+                if statement["build"]
+                else "",
+                f"annotation {(statement['annotation'] or {}).get('label')}" if statement["annotation"] else "",
+                f"version {statement['version']}" if statement["version"] else "",
+                f"resources {', '.join(statement['resources'])}" if statement["resources"] else "",
+            ]
+            if part
+        )
+        rows.append(
+            {
+                "id": f"{reference_kind}:{position}",
+                "kind": reference_kind,
+                "source": "the reference inputs bioAF read from this paper's methods",
+                "text": f"Reference input. bioAF read: {read or 'nothing identifying'}. Quote: {statement['quote']}",
+            }
+        )
+    return rows
 
 
 def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
@@ -377,12 +442,29 @@ def _index_of(evidence: dict) -> dict:
 
 def _validate(data: dict) -> list[str]:
     """The caller's own schema, which is what earns one semantic re-ask instead of a wasted call."""
+    from app.services.validation_judgment import DEFECT_KINDS, MIN_OBSERVATIONS, SHOWABLE_KINDS
+
     problems = []
-    outcome = str((data or {}).get("outcome") or "").strip().lower()
+    data = data or {}
+    outcome = str(data.get("outcome") or "").strip().lower()
     if outcome not in ("met", "unmet", "cannot_establish"):
         problems.append("`outcome` must be exactly one of met, unmet, cannot_establish")
-    if outcome in ("met", "unmet") and not (data or {}).get("citations"):
+    if outcome in ("met", "unmet") and not data.get("citations"):
         problems.append("an answer of met or unmet must cite the ids of the passages it rests on")
+    if outcome == "unmet":
+        # plan_8_6 section 8: an omitted `basis` is not a defect bioAF can classify, and a
+        # contradiction with nothing to point at is a claim about sources nobody inspected. Both are
+        # correctable in one re-ask, which is what the recovery allowance is for.
+        basis = str(data.get("basis") or "").strip().lower()
+        if basis not in DEFECT_KINDS:
+            problems.append("`basis` must be exactly one of " + ", ".join(DEFECT_KINDS))
+        elif basis in SHOWABLE_KINDS:
+            rows = [r for r in data.get("observations") or [] if isinstance(r, dict) and r.get("citation")]
+            if len({str(r["citation"]) for r in rows}) < MIN_OBSERVATIONS:
+                problems.append(
+                    f"a `{basis}` finding is shown by at least {MIN_OBSERVATIONS} of the passages supplied: "
+                    "give one `observations` entry per passage, each with its `citation` and what it `states`"
+                )
     return problems
 
 
@@ -395,6 +477,7 @@ async def review_documents(
     api_key: str | None,
     leaves: tuple[str, ...] = JUDGED_LEAVES,
     on_failure=None,
+    settled: dict[str, dict] | None = None,
 ) -> dict:
     """``{"judgments", "failures", "at", "model", "reason"}``: one judgment per obligation asked.
 
@@ -406,18 +489,32 @@ async def review_documents(
     reason, and costs no model call. An obligation the first packet could not settle is asked once
     more with its expansion, which shares the existing recovery allowance rather than nesting a
     second retry loop inside it.
+
+    ``settled`` is the judgments whose packets have not changed since they were made (section 11).
+    They cost no call and are reconciled with the new ones, because one changed source reruns the
+    obligations that depend on it and not a paper's whole review.
     """
     accepted: dict[str, dict] = {}
+    settled = {leaf: j for leaf, j in (settled or {}).items() if isinstance(j, dict)}
     failures: list[dict] = []
     # plan_8_6 section 11: what this review actually cost, recorded rather than estimated.
-    asked = {"requests": 0, "expansions": 0, "skipped_without_evidence": 0}
+    asked = {"requests": 0, "expansions": 0, "skipped_without_evidence": 0, "reused": 0}
     packets = packets or {}
     shared = [p for p in passages or [] if isinstance(p, dict) and p.get("id") and str(p.get("text") or "").strip()]
-    if not shared and not any((p or {}).get("passages") for p in packets.values()):
+    if not shared and not any((p or {}).get("passages") for p in packets.values()) and not settled:
         return _nothing("bioAF holds no passages of this paper to judge these obligations on")
-    if client is None or not model:
+    if (client is None or not model) and not settled:
+        return _nothing("no language model is configured for this organisation, so nothing was judged")
+    unsettled = [leaf for leaf in leaves if leaf not in settled]
+    if unsettled and (client is None or not model):
         return _nothing("no language model is configured for this organisation, so nothing was judged")
     for leaf in leaves:
+        held = settled.get(leaf)
+        if held is not None:
+            # Its packet is what it was judged on, so re-asking would buy the same answer.
+            accepted[leaf] = held
+            asked["reused"] += 1
+            continue
         packet = packets.get(leaf) or {}
         rows = packet.get("passages") or shared
         coverage = packet.get("coverage")
@@ -428,7 +525,7 @@ async def review_documents(
             asked["skipped_without_evidence"] += 1
             continue
         asked["requests"] += 1
-        judged, failure = await _ask(
+        judged, failure, spent = await _ask(
             leaf,
             rows,
             coverage=coverage,
@@ -443,20 +540,25 @@ async def review_documents(
             accepted[leaf] = _untested("this obligation could not be asked with the evidence supplied", coverage)
             continue
         expansion = packet.get("expansion") or []
-        if judged["outcome"] == UNDETERMINED and expansion and not judged.get("conflict"):
-            # One targeted expansion, within the existing per-paper allowance: the passages the
-            # first packet's budget or ranking left out, added once. Section 3 item 3.
+        if judged["outcome"] == UNDETERMINED and expansion and not judged.get("conflict") and spent < ATTEMPTS_PER_LEAF:
+            # ONE targeted expansion, on the allowance the first call did not spend: the passages the
+            # first packet's budget or ranking left out, added once (section 3 item 3). An obligation
+            # whose recovery already went on correcting a malformed answer is not asked a third time.
             widened = rows + expansion
             asked["requests"] += 1
             asked["expansions"] += 1
-            again, failure = await _ask(
+            again, failure, _ = await _ask(
                 leaf,
                 widened,
-                coverage=coverage,
+                # Section 11: the widened request is judged on what IT was shown. An absence finding
+                # rests on this record, and handing it the first packet's would let a negative rest
+                # on coverage of evidence the assessor never saw.
+                coverage=packet.get("expanded_coverage") or coverage,
                 client=client,
                 model=model,
                 api_key=api_key,
                 on_failure=on_failure,
+                recovery=False,
             )
             if failure is not None:
                 failures.append(failure)
@@ -488,12 +590,17 @@ async def review_documents(
     }
 
 
-async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure):
-    """One obligation, asked once. Returns (judgment or None, failure or None). Never raises."""
+async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure, recovery=True):
+    """One obligation, asked once. Returns (judgment or None, failure or None, attempts spent).
+
+    ``recovery`` is the shared allowance of plan_8_6 section 11: one initial call plus one recovery
+    per obligation per evidence revision, spent on a malformed answer OR on a targeted evidence
+    expansion, never on both. Never raises.
+    """
     try:
         request = build_request(leaf, passages=rows)
     except JudgmentRefused as refusal:
-        return None, {"leaf": leaf, "reason": str(refusal)}
+        return None, {"leaf": leaf, "reason": str(refusal)}, 0
     decision = await decide_with_recovery(
         intent=f"judging {request['criterion']} {leaf.rpartition('.')[2]}: {request['title']}",
         system=request["system"],
@@ -503,6 +610,7 @@ async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure):
         api_key=api_key,
         purpose=budgets.DOCUMENTARY_JUDGMENT,
         validate=_validate,
+        recovery=recovery,
     )
     failure = None
     if decision.outcome != OUTCOME_OK:
@@ -516,7 +624,7 @@ async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure):
         model=model,
         coverage=coverage,
     )
-    return judged, failure
+    return judged, failure, max(1, len(decision.attempts or []))
 
 
 def _untested(reason: str, coverage: dict | None) -> dict:

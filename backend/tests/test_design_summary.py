@@ -40,8 +40,15 @@ class TestWhatTheSummaryReads:
         assert "clone" in found["selection"]["quote"].lower() or "line" in found["selection"]["quote"].lower()
 
     def test_the_group_sizes_the_paper_states_are_read(self):
-        found = design_summary(_granulosa_index())
-        quotes = " ".join(str(g.get("quote") or "") for g in found["group_sizes"])
+        """Under the COMPARISON that states them. The paper-wide reading takes the first few group
+        sizes in the document and the single-cell ones are not among them, which is the defect
+        `design_comparisons` exists for: see `test_design_per_comparison`."""
+        from app.services.validation_design_summary import design_comparisons
+
+        single_cell = next(
+            c for c in design_comparisons(_granulosa_index()) if c["anchor"] == "Single-cell RNA sequencing"
+        )
+        quotes = " ".join(str(g.get("quote") or "") for g in single_cell["group_sizes"])
         assert "2 samples per time point" in quotes or "6 ovaroids per sample" in quotes
 
     def test_the_comparators_the_paper_names_are_read(self):

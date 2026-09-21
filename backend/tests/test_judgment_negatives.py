@@ -161,7 +161,12 @@ class TestAnAbsenceNeedsTheSourcesItIsAboutToHaveBeenInspected:
         assert found["outcome"] == UNDETERMINED
 
     def test_a_demonstrated_contradiction_does_not_need_paper_wide_coverage(self):
-        """Section 8: positive evidence of a contradiction supports a narrowly scoped negative."""
+        """Section 8: positive evidence of a contradiction supports a narrowly scoped negative.
+
+        What makes it demonstrated is that the answer points at the two supplied passages that
+        disagree, not that its rationale contains a word like "while" or "disagree": see
+        `test_judgment_demonstrated_negative`.
+        """
         incomplete = {
             "sufficient": False,
             "supplied": ["methods: statistical analysis"],
@@ -177,7 +182,14 @@ class TestAnAbsenceNeedsTheSourcesItIsAboutToHaveBeenInspected:
                     "The methods state an absolute log2 fold change greater than 3 for the GO-enrichment "
                     "input while the supplied deg_interpretation.py sets that threshold to 1, so the two "
                     "disagree on the same analysis step."
-                )
+                ),
+                citations=["m1", "m2"],
+                scope="the GO-enrichment input selection",
+                basis="contradiction",
+                observations=[
+                    {"citation": "m1", "states": "the paper sets the threshold above 3"},
+                    {"citation": "m2", "states": "the supplied script sets that same threshold to 1"},
+                ],
             ),
             passages=_PASSAGES,
             coverage=incomplete,
@@ -192,7 +204,14 @@ class TestAnAbsenceNeedsTheSourcesItIsAboutToHaveBeenInspected:
                 rationale=(
                     "A Wald test is applied to a single sample per condition, so the reported dispersion "
                     "has no replicate to estimate it from."
-                )
+                ),
+                citations=["m1", "m2"],
+                scope="the differential expression comparison of Figure 3",
+                basis="inappropriate",
+                observations=[
+                    {"citation": "m2", "states": "a Wald test is fitted to the counts"},
+                    {"citation": "m1", "states": "each condition contributes one sample"},
+                ],
             ),
             passages=_PASSAGES,
             coverage=incomplete,

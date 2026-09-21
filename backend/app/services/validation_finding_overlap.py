@@ -29,7 +29,8 @@ import re
 
 from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
 
-OVERLAP_VERSION = 1
+# 2: the positive side compares the scope each answer named, not its citation set alone.
+OVERLAP_VERSION = 2
 
 # A measurement outranks a model's review, which is plan_8_5's rule for the same obligation and is
 # the same rule here for WHICH of two findings keeps the deduction.
@@ -69,8 +70,18 @@ def _citations(judgment: dict) -> set[str]:
     return {str(c) for c in (evidence or {}).get("citations") or []}
 
 
+# What `judgment_from` fills `scope` with when the answer named none. It is the same sentence on
+# every judgment of every paper, so comparing it finds a match between any two answers: an artefact,
+# never a scope bioAF read out of an answer.
+_UNNAMED_SCOPE = re.compile(r"^\s*\d+\s+supplied passages\s*$", re.I)
+
+
 def _scope_words(judgment: dict) -> set[str]:
-    text = " ".join(str(judgment.get(key) or "") for key in ("finding_scope", "scope")).lower()
+    text = " ".join(
+        str(judgment.get(key) or "")
+        for key in ("finding_scope", "scope")
+        if not _UNNAMED_SCOPE.fullmatch(str(judgment.get(key) or ""))
+    ).lower()
     return {word for word in _WORD.findall(text) if word not in _COMMON and len(word) > 2}
 
 
@@ -87,6 +98,11 @@ def _same_scope(one: dict, other: dict) -> bool:
         return not a and not b
     overlap = len(a & b) / min(len(a), len(b))
     return overlap >= 0.6
+
+
+def _names_scope(judgment: dict) -> bool:
+    """Whether this answer said what it is about, rather than leaving bioAF to fill the field in."""
+    return bool(_scope_words(judgment))
 
 
 def _rank(judgment: dict) -> int:
@@ -137,16 +153,32 @@ def reconcile_findings(judgments: dict[str, dict] | None) -> dict[str, dict]:
             same_finding_as=owner,
         )
 
-    # A positive cannot rest on evidence a standing negative has contradicted. The test is
-    # CONTAINMENT, not overlap: found by running this on study 65, where a negative citing seven
-    # background passages demoted every positive that happened to cite two of them and the score
-    # fell for the wrong reason. Sharing a passage is not resting on the same fact.
+    # A positive cannot rest on evidence a standing negative has contradicted. Containment finds the
+    # CANDIDATES; the scope decides. The owner, 2026-09-21: "Citation overlap is not proof of
+    # contradiction... Shared citations can identify candidates for review; they cannot decide the
+    # outcome." A paper's methods paragraph carries the sample preparation and the enrichment
+    # threshold both, so a negative about the second contained a positive about the first and took
+    # it down. Each answer names what it is about, and two answers collide only when they are about
+    # the same thing.
     standing = [(leaf, rows[leaf]) for leaf, _ in kept]
     for leaf, judgment in rows.items():
         if judgment.get("outcome") != VERIFIED or not _citations(judgment):
             continue
         citations = _citations(judgment)
-        against = next((other for other, negative in standing if citations <= _citations(negative)), None)
+        # Both sides have to have SAID what they are about. Where either did not, bioAF cannot
+        # establish that they are about the same thing, and it does not withdraw an established
+        # point on a guess: the tension below records it for a person instead.
+        against = next(
+            (
+                other
+                for other, negative in standing
+                if citations <= _citations(negative)
+                and _names_scope(judgment)
+                and _names_scope(negative)
+                and _same_scope(judgment, negative)
+            ),
+            None,
+        )
         if against is not None:
             # It rests on nothing the negative did not already account for, so it cannot stand on it.
             found[leaf] = _demote(
