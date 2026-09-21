@@ -328,3 +328,70 @@ class TestThePacketIsSizedAgainstADeclaredBudget:
 
         # A packet of typical paragraphs reaches the character budget before the passage count.
         assert MAX_PACKET_CHARS / MAX_PACKET_PASSAGES <= 700
+
+
+class TestAPaperWhoseCodeIsCarriedWholeStillFitsItsPacket:
+    """Section 11: where the acceptance evidence cannot fit, adjust the cap on a measurement.
+
+    Measured on the demo against study 65's own held evidence, 2026-09-21, once the supplied code
+    reached selection whole: M1.B's relevant evidence is 51,946 characters (37,954 of code across
+    nine sources, 9,077 of the paper's methods, the rest deposit and design facts) and C5's is
+    47,632. At 48,000 both deferred a relevant excerpt, which under section 8 leaves the obligation
+    unable to report an absence the owner's review says it should still be able to report.
+
+    The declared input budget does not move: 54,000 characters is about 13,500 tokens against the
+    16,384 the decision audit already declares.
+    """
+
+    def _relevant(self, chars: int) -> list[dict]:
+        row = (
+            "lines 1-12:\n"
+            "sc.pp.filter_cells(adata, min_genes=1000)\n"
+            "sc.pp.filter_genes(adata, min_cells=5)\n"
+            "adata = adata[adata.obs.pct_counts_mt < 10]\n"
+            "sc.pp.normalize_total(adata, target_sum=1e6)\n"
+        )
+        row += "x = 1\n" * ((900 - len(row)) // 6)
+        return [
+            {"id": f"code:pipeline.py#{i}", "kind": "code", "source": "the supplied pipeline.py", "text": row}
+            for i in range(chars // len(row))
+        ]
+
+    def test_fifty_two_thousand_characters_of_relevant_evidence_are_carried_whole(self):
+        packet = packet_for("M1.B", index=_INDEX, extras=self._relevant(52_000))
+        assert packet["coverage"]["deferred_relevant"] == []
+        assert packet["coverage"]["truncated"] is False
+
+    def test_an_absence_can_still_be_reported_over_that_packet(self):
+        from app.services.validation_judgment import coverage_supports_absence
+
+        packet = packet_for("M1.B", index=_INDEX, extras=self._relevant(52_000))
+        supported, why = coverage_supports_absence(packet["coverage"])
+        assert supported is True, why
+
+
+class TestTheRowCountIsAGuardAndNotASecondBudget:
+    """Measured on the demo, 2026-09-21: S2.B carried 80 deposit records at 25,624 characters and
+    deferred eighteen more, so an obligation about the deposited records could not report an
+    absence on evidence that was half of its character budget. A record is a short row; a packet of
+    them reaches the characters that map to tokens long after it reaches eighty rows."""
+
+    def _records(self, count: int) -> list[dict]:
+        return [
+            {
+                "id": f"GSE9/GSM{i}",
+                "kind": "deposit",
+                "source": "the deposited record of GSE9",
+                "text": (
+                    f"granulosa-like ovaroid replicate {i}; Homo sapiens; ovaroid; cell type: "
+                    f"granulosa-like; treatment: doxycycline; time point: day 4; library: 10x 3' v3"
+                ),
+            }
+            for i in range(count)
+        ]
+
+    def test_a_hundred_and_fifty_deposited_records_are_all_carried(self):
+        packet = packet_for("S2.B", index=_INDEX, extras=self._records(150))
+        carried = [p for p in packet["passages"] if p["id"].startswith("GSE9/")]
+        assert len(carried) == 150
+        assert packet["coverage"]["truncated"] is False

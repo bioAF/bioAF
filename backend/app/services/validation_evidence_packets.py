@@ -46,8 +46,19 @@ PACKET_VERSION = 1
 # The CHARACTER budget is the binding one, because it is what maps to tokens. The passage count is a
 # guard against a pathological packet of one-line rows, not a second budget: at 30 it was cutting
 # packets that sat at 21,000 characters, which is a row count deciding a token question.
-MAX_PACKET_CHARS = 48000
-MAX_PACKET_PASSAGES = 80
+#
+# 48,000 was measured before the supplied code reached selection whole. Measured again on the demo
+# against study 65's own held evidence, 2026-09-21: M1.B's relevant evidence is 51,946 characters
+# (37,954 of code across nine sources, 9,077 of the paper's methods) and C5's is 47,632, so both
+# deferred a relevant excerpt at 48,000 and could no longer report an absence. The declared input
+# budget does not move for this: 54,000 characters is about 13,500 tokens against the 16,384 the
+# decision audit already declares.
+MAX_PACKET_CHARS = 54000
+# The same measurement caught the row count deciding a token question again, one layer down: S2.B
+# carried 80 deposited sample records at 25,624 characters and deferred eighteen more, so an
+# obligation about those records could not report an absence over half a packet. A record is a
+# short row; 200 of them reach the character budget at 270 characters each.
+MAX_PACKET_PASSAGES = 200
 MAX_EXPANSION_PASSAGES = 40
 
 # The kinds of evidence that are not the article's running text.

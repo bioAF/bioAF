@@ -168,6 +168,30 @@ class TestEveryRecordBioafHoldsReachesSelection:
         assert "Supplementary File 29" in carried
         assert "the d genes" in carried
 
+    def test_a_paper_with_hundreds_of_supplement_records_loses_none_of_them(self):
+        """Study 65 holds 368, measured on the demo 2026-09-21, and 15 of them cite anything.
+
+        A cap on the RECORDS reaches every obligation through `_ALWAYS_NEEDS`: a paper whose
+        attachments all arrived would report every one of its obligations as having uninspected
+        supplements, and no absence finding could be made on it at all.
+        """
+        evidence = {
+            "supplements": [
+                {
+                    "identity": f"supp-{i}",
+                    "label": f"Supplementary File {i}",
+                    "kind": "attachment",
+                    "resolved": True,
+                    "citing_passages": [{"text": f"Supplementary File {i} lists the differential genes."}],
+                }
+                for i in range(400)
+            ]
+        }
+        found = carried_evidence(evidence=evidence, plan={})
+        carried = " ".join(row["text"] for row in found["rows"] if row["kind"] == "supplement")
+        assert "Supplementary File 399" in carried
+        assert [o for o in found["omissions"] if o["needs"] == "supplements"] == []
+
     def test_the_thirtieth_source_file_is_offered(self):
         evidence = {
             "code_inspection": {
