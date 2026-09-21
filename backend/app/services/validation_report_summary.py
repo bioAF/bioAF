@@ -1710,11 +1710,15 @@ def _code_sources(evidence: dict) -> list[dict]:
         # named only one and that is what was fetched.
         url = str(source.get("url") or "")
         this_one = bool(fetched_url) and (url == fetched_url or not url)
-        status = retrieval.get("status") or (
-            "retrieved"
-            if (source.get("accessible") == "yes" or (this_one and fetched))
-            else (source.get("accessible") or "not_attempted")
-        )
+        # What the fetch established outranks what the supplement path annotated: a row still
+        # reading `not_attempted` beside a resolved fetch is the listing telling the reader the
+        # opposite of what bioAF did.
+        if this_one and fetched:
+            status = "retrieved"
+        else:
+            status = retrieval.get("status") or (
+                "retrieved" if source.get("accessible") == "yes" else (source.get("accessible") or "not_attempted")
+            )
         executed = bool(outcome) and outcome not in ("code_absent", "code_unreachable", "generation_failed")
         rows.append(
             {
