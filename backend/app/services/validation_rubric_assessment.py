@@ -26,7 +26,12 @@ from fractions import Fraction
 
 # Bump when a check's meaning changes, so accepted outcomes from the previous one are not reused.
 # plan_8_5 section 3.2: a changed checker must not reuse the old checker's accepted outcome.
-CHECKER_VERSION = 1
+#
+# 2: plan_8_6 section 3 item 4. M2 and M4 read the paper's OWN methods for the reference releases
+# and the decision criteria bioAF normalized out of them, and M2.B names the arm each open half is
+# open for. Study 65's held outcomes were made by a checker that did neither, and they survived a
+# forced republish because the evidence and plan digests had not moved: the CHECKER had.
+CHECKER_VERSION = 2
 
 # What the checks actually read. Evidence outside this cannot change an outcome, so it cannot
 # invalidate one either: a re-fetched artifact must not cost every study a fresh set of judgments.
