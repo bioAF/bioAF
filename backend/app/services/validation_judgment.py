@@ -127,6 +127,14 @@ _SYSTEM = (
     "reports. An absence is not the only kind\n"
     "- an `unmet` answer states its scope and its material consequence, and rests on cited passages. "
     "Do not answer `unmet` about sources you were not shown; say `cannot_establish` instead\n"
+    "- ONE failure per answer, inside THIS obligation's scope. Do not add a second finding that belongs "
+    "to another obligation, and do not repeat a mismatch as though it were a further problem\n"
+    "- `impact` is what a READER cannot do or cannot check. Nothing here has been installed, imported or "
+    "run, so do not say what an execution would do, where it would stop, or that nothing can be "
+    "reproduced: say what the evidence leaves a reader unable to establish\n"
+    "- state what is NOT ESTABLISHED, not what the authors did wrong beyond the evidence. "
+    '"the fitted design and the handling of line effects are not documented" is a finding; '
+    '"the design is invalid" is a conclusion the evidence has to reach on its own\n'
     "- answer `cannot_establish` for anything else, including evidence that is too thin to tell\n"
     "- do not hedge the answer you gave. If the evidence settles it, say so plainly; if it does not, "
     "answer `cannot_establish`. An answer whose reasoning withdraws it is recorded as settling nothing\n"

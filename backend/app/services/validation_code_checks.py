@@ -371,7 +371,7 @@ def _r_requirements(sources, readings) -> dict | None:
             FAILED,
             f"the source reads in {', '.join(missing)} as code, and nothing supplied provides it",
             scope=_scope([r["source"] for r in r_readings]),
-            impact="the analysis stops where it sources that file, so nothing after it was run from what was supplied",
+            impact="a reader has no copy of the file it sources, so what that step contributed cannot be established from what was supplied",
             evidence={"missing": missing, "supplied": sorted(supplied)},
         )
     if dynamic:
@@ -434,7 +434,7 @@ def _imports(sources, readings, manifests, unsupported, unreadable) -> dict:
             f"the source imports {', '.join(missing)}, which nothing supplied declares and which is "
             "neither standard library nor another supplied file",
             scope=_scope(sources),
-            impact="the analysis would stop at the import, so nothing it computes can be reproduced",
+            impact="a reader has no record of which package or version those names come from, so the environment this analysis needs cannot be reconstructed from what was supplied",
             evidence={"missing": missing, "declared": sorted(declared)},
         )
     else:

@@ -380,6 +380,12 @@ async def review_documents(
                 rows = widened
         accepted[leaf] = judged
         accepted[leaf]["evidence_ids"] = [p["id"] for p in rows]
+    # The owner, 2026-09-21: one demonstrated failure must not be several deductions, and a positive
+    # cannot stand on evidence a negative contradicts. Obligations are judged one per request, so
+    # neither can be seen from inside a judgment; this is where they are reconciled.
+    from app.services.validation_finding_overlap import reconcile_findings
+
+    accepted = reconcile_findings(accepted)
     return {
         "judgments": accepted,
         "failures": failures,
