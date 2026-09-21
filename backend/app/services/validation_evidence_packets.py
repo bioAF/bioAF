@@ -351,17 +351,20 @@ def packet_for(
         )
 
     eligible = [p for p in passages if p.get("kind") in selector.sections]
-    # (rank, relevant, document order, passage). ``relevant`` is whether the passage matched this
-    # obligation's own terms, kept apart from the section bonus so that a neutral paragraph deferred
-    # by budget is not reported as relevant evidence bioAF failed to carry.
-    ranked: list[tuple[int, bool, int, dict]] = []
+    # (rank, relevant, candidate, document order, passage). ``relevant`` is whether the passage
+    # matched this obligation's own terms, kept apart from the section bonus so that a neutral
+    # paragraph deferred by budget is not reported as relevant evidence bioAF failed to carry.
+    # ``candidate`` is whether it is supplied before the ranking has to fall back on the section.
+    ranked: list[tuple[int, bool, bool, int, dict]] = []
     excluded = 0
     for order, passage in enumerate(eligible):
         rank, dropped = _score(str(passage.get("text") or ""), selector, str(passage.get("section") or ""))
         if dropped:
             excluded += 1
             continue
-        ranked.append((rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, order, passage))
+        ranked.append(
+            (rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, rank > 0, order, passage)
+        )
     for order, extra in enumerate(extras or [], start=len(eligible)):
         if not isinstance(extra, dict) or extra.get("kind") not in selector.extras:
             continue
@@ -371,25 +374,35 @@ def packet_for(
             continue
         # Evidence that is not the article's text is eligible BECAUSE of what it is: a deposit record
         # answers "do independent records agree" whether or not it repeats the paper's vocabulary.
+        # What it is NOT is automatically relevant: a source file is carried whole now, and most of
+        # its excerpts say nothing about any one obligation. Counting every deferred excerpt as
+        # relevant evidence bioAF failed to carry would leave every obligation on a paper with code
+        # permanently unable to report an absence (section 8).
         ranked.append(
-            (max(rank, 1) + _section_bonus(selector, str(extra.get("kind") or ""), extras=True), True, order, extra)
+            (
+                max(rank, 1) + _section_bonus(selector, str(extra.get("kind") or ""), extras=True),
+                rank > 0,
+                True,
+                order,
+                extra,
+            )
         )
 
-    ranked.sort(key=lambda row: (-row[0], row[2]))
+    ranked.sort(key=lambda row: (-row[0], row[3]))
     # Relevance first; where nothing is relevant, the SECTION is the relevance. A passage that
     # matched none of this obligation's terms is supplied only when nothing matched any: that is
     # what keeps the culture protocol out of a preprocessing packet while leaving a method written
     # in words no selector knows still assessable.
-    relevant_rows = [row for row in ranked if row[1]]
-    chosen = relevant_rows or ranked
-    by_section_only = not relevant_rows and bool(ranked)
-    spare = [row for row in ranked if row not in chosen]
+    candidates = [row for row in ranked if row[2]]
+    chosen = candidates or ranked
+    by_section_only = not candidates and bool(ranked)
+    spare = [row for row in ranked if not row[2]] if candidates else []
 
     kept: list[dict] = []
     deferred: list[dict] = []
     missed: list[dict] = []
     spent = 0
-    for _, relevant, _, passage in chosen:
+    for _, relevant, _, _, passage in chosen:
         text = str(passage.get("text") or "")
         if len(kept) < MAX_PACKET_PASSAGES and spent + len(text) <= budget_chars:
             kept.append(passage)
@@ -407,7 +420,7 @@ def packet_for(
     kept.sort(key=lambda p: order_of.get(id(p), 0))
     # What the one targeted expansion may add: the relevant passages the budget left out first, then
     # the eligible sections the ranking passed over. One second ask, not a nested retry loop.
-    expansion = deferred + [row[3] for row in spare]
+    expansion = deferred + [row[4] for row in spare]
     coverage = _coverage(leaf, eligible, kept, excluded, deferred, missed, limitations or [], selector)
     coverage["selected_by"] = "section" if by_section_only else "relevance"
     return _packet(leaf, kept, expansion[:MAX_EXPANSION_PASSAGES], coverage)

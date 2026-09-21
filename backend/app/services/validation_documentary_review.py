@@ -71,22 +71,42 @@ def _now_iso() -> str:
 
 
 # How much of one piece of evidence reaches the assessor. A passage is a sentence or a record, not
-# a document: the contract is that every citation resolves to one thing a reader can check.
+# a document: the contract is that every citation resolves to one thing a reader can check. A piece
+# longer than this becomes SEVERAL passages; it is never cut short.
 MAX_PASSAGE_CHARS = 900
-MAX_RECORDS = 24
+
+# What bioAF carries into selection, and the last stop against a pathological input. These are NOT
+# selection: `validation_evidence_packets` ranks the rows against the obligation being asked and
+# reports what its own budget deferred. A cap applied here, before any obligation has ranked
+# anything, is evidence bioAF holds and never offers, and every one of these that binds is recorded
+# as an omission the obligations that depend on that source can see (section 3, item 3).
+#
+# Measured on study 65, 2026-09-21: its two supplied sources are 14,357 characters and its manifest
+# 2,433, so nothing here binds on it. What bound was the eight-excerpt rule these replace.
+MAX_SOURCE_CHARS = 120_000
+MAX_CODE_CHARS = 600_000
+MIN_SOURCE_SHARE = 4_000
+MAX_SAMPLE_RECORDS = 400
+MAX_SUPPLEMENTS = 200
 
 
-def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
-    """The evidence that is not the article's running text, each piece saying what kind it is.
+def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
+    """``{"rows", "omissions"}``: the evidence that is not the article's running text, and what of it did not fit.
 
     plan_8_6 section 3: `passages_for` handed every obligation one flat list, so a deposit record
     was in front of a preprocessing question and the supplied code was in front of nothing. These
     carry a ``kind``, and `validation_evidence_packets` decides which obligations each kind answers.
+
+    The bounds here are the study's, not the obligation's, and an omission is a
+    ``{"needs", "reason"}`` row in the shape `limitations_for` returns: a source bioAF held and
+    could not carry whole reaches the packet's coverage the same way a source it never fetched does,
+    so section 8 refuses an absence finding over the part nobody read.
     """
     from app.services.validation_evidence_packets import CODE, DEPOSIT, SUPPLEMENT, TOOLS
 
     evidence, plan = evidence or {}, plan or {}
     rows: list[dict] = []
+    omissions: list[dict] = []
     # plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words.
     # E2.B was verified from a list of comparators because nothing else about the design was ever
     # put in front of it.
@@ -95,7 +115,8 @@ def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
     rows += design_facts(_index_of(evidence))
     held = evidence.get("sample_records") if isinstance(evidence.get("sample_records"), dict) else {}
     for deposit in (held or {}).get("deposits") or []:
-        for sample in (deposit.get("samples") or [])[:MAX_RECORDS]:
+        samples = deposit.get("samples") or []
+        for sample in samples[:MAX_SAMPLE_RECORDS]:
             described = "; ".join(
                 part
                 for part in [
@@ -107,64 +128,97 @@ def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
                 ]
                 if part
             )
-            if described:
+            # A record longer than one passage becomes several: a characteristic bioAF cut off is a
+            # field of the deposit the assessor was never shown.
+            for part, piece in enumerate(_pieces(described), start=1):
                 rows.append(
                     {
-                        "id": f"{deposit.get('accession')}/{sample.get('accession')}",
+                        "id": f"{deposit.get('accession')}/{sample.get('accession')}"
+                        + (f"#{part}" if part > 1 else ""),
                         "kind": DEPOSIT,
                         "source": f"the deposited record of {deposit.get('accession')}",
-                        "text": described[:MAX_PASSAGE_CHARS],
+                        "text": piece,
                     }
                 )
+        if len(samples) > MAX_SAMPLE_RECORDS:
+            omissions.append(
+                {
+                    "needs": "deposit",
+                    "reason": (
+                        f"{len(samples) - MAX_SAMPLE_RECORDS} of {deposit.get('accession')}'s "
+                        f"{len(samples)} sample records were not put in front of this obligation"
+                    ),
+                }
+            )
     # plan_8_6 section 4: the code bioAF holds, shown to the obligations that reason about it. M5.B
     # asks whether the inspected methods, configuration and supplied code agree on the consequential
     # parameters, and it cannot be answered by anyone who was not shown the code.
+    inspection = evidence.get("code_inspection") if isinstance(evidence.get("code_inspection"), dict) else {}
+    files = [
+        (str(f.get("path") or f"source {i}"), str(f.get("text") or ""), f)
+        for i, f in enumerate(
+            ((inspection or {}).get("sources") or []) + ((inspection or {}).get("manifests") or []), 1
+        )
+        if isinstance(f, dict)
+    ]
+    # One file does not take the whole study's budget: each is carried up to its share, so the last
+    # script is offered as well as the first. Nothing is dropped without a word either way.
+    share = max(MIN_SOURCE_SHARE, MAX_CODE_CHARS // len(files)) if files else 0
     packages: list[str] = []
-    for index, source in enumerate(((evidence.get("code_inspection") or {}).get("sources") or [])[:MAX_RECORDS], 1):
-        if not isinstance(source, dict):
-            continue
-        text = str(source.get("text") or "")
+    spent = 0
+    for path, text, source in files:
         if str(source.get("language") or "").lower() == "r":
             from app.services.r_parser import read_r
 
             found = read_r(text)
             packages += found["packages"] + found["namespaced"]
-        path = str(source.get("path") or f"source {index}")
-        for part, excerpt in enumerate(_code_excerpts(text), start=1):
+        limit = min(MAX_SOURCE_CHARS, share, max(0, MAX_CODE_CHARS - spent))
+        excerpts, left = _excerpts(text, limit=limit)
+        spent += sum(len(body) for _, _, body in excerpts)
+        for part, (first, last, body) in enumerate(excerpts, start=1):
             rows.append(
                 {
                     "id": f"code:{path}#{part}",
                     "kind": CODE,
                     "source": f"the supplied {path}",
-                    "text": excerpt,
+                    "location": f"{path} lines {first}-{last}",
+                    "text": f"lines {first}-{last}:\n{body}",
                 }
             )
-    for index, manifest in enumerate(((evidence.get("code_inspection") or {}).get("manifests") or [])[:MAX_RECORDS], 1):
-        if not isinstance(manifest, dict):
-            continue
-        path = str(manifest.get("path") or f"manifest {index}")
-        rows.append(
-            {
-                "id": f"code:{path}",
-                "kind": CODE,
-                "source": f"the supplied {path}",
-                "text": str(manifest.get("text") or "")[:MAX_PASSAGE_CHARS],
-            }
-        )
-    for supplement in (evidence.get("supplements") or [])[:MAX_RECORDS]:
+        if left:
+            omissions.append(
+                {
+                    "needs": "code",
+                    "reason": (
+                        f"{left} of {path}'s {len(text)} characters were not put in front of this obligation, "
+                        "so what the rest of that file does is not established"
+                    ),
+                }
+            )
+    for supplement in (evidence.get("supplements") or [])[:MAX_SUPPLEMENTS]:
         if not isinstance(supplement, dict):
             continue
-        for passage in (supplement.get("citing_passages") or [])[:2]:
+        for passage in supplement.get("citing_passages") or []:
             text = str((passage or {}).get("text") or "").strip()
-            if text:
+            for piece in _pieces(text):
                 rows.append(
                     {
                         "id": f"supp:{supplement.get('identity')}#{len(rows)}",
                         "kind": SUPPLEMENT,
                         "source": f"the paper on {supplement.get('label') or supplement.get('identity')}",
-                        "text": text[:MAX_PASSAGE_CHARS],
+                        "text": piece,
                     }
                 )
+    if len(evidence.get("supplements") or []) > MAX_SUPPLEMENTS:
+        omissions.append(
+            {
+                "needs": "supplements",
+                "reason": (
+                    f"{len(evidence['supplements']) - MAX_SUPPLEMENTS} of this paper's "
+                    f"{len(evidence['supplements'])} supplement records were not put in front of this obligation"
+                ),
+            }
+        )
     tools = [str(t).strip() for t in (plan.get("method") or {}).get("tools") or [] if str(t).strip()]
     declared = sorted(set(tools) | set(packages))
     if declared:
@@ -176,31 +230,67 @@ def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
                 "text": "The analysis declares: " + ", ".join(declared),
             }
         )
-    return rows
+    return {"rows": rows, "omissions": omissions}
 
 
-# A source file is not one passage. It is cut at line boundaries so a citation resolves to a place
-# a reader can find, and the whole file is carried rather than its first 900 characters.
-MAX_CODE_EXCERPTS = 8
+def extras_for(*, evidence: dict | None, plan: dict | None) -> list[dict]:
+    """The rows `carried_evidence` carries, for a caller that does not need its omissions."""
+    return carried_evidence(evidence=evidence, plan=plan)["rows"]
 
 
-def _code_excerpts(text: str) -> list[str]:
+def _excerpts(text: str, *, limit: int) -> tuple[list[tuple[int, int, str]], int]:
+    """``([(first line, last line, body)], characters left out)``: one file, cut at line boundaries.
+
+    A source file is not one passage: it is carried as excerpts a citation can resolve to a place a
+    reader can find. The whole file is carried unless ``limit`` stops it, and what ``limit`` stopped
+    is returned rather than dropped quietly.
+    """
     lines = (text or "").splitlines()
-    found: list[str] = []
+    if limit <= 0:
+        return [], len(text or "")
+    found: list[tuple[int, int, str]] = []
     current: list[str] = []
     spent = 0
+    carried = 0
     start = 1
     for number, line in enumerate(lines, start=1):
         if spent + len(line) > MAX_PASSAGE_CHARS and current:
-            found.append(f"lines {start}-{number - 1}:\n" + "\n".join(current))
+            body = "\n".join(current)
+            found.append((start, number - 1, body))
+            carried += len(body) + 1
             current, spent, start = [], 0, number
-            if len(found) >= MAX_CODE_EXCERPTS:
-                return found
+            if carried >= limit:
+                return found, sum(len(rest) + 1 for rest in lines[number - 1 :])
         current.append(line)
         spent += len(line) + 1
     if current:
-        found.append(f"lines {start}-{len(lines)}:\n" + "\n".join(current))
-    return found[:MAX_CODE_EXCERPTS]
+        found.append((start, len(lines), "\n".join(current)))
+    return found, 0
+
+
+def _pieces(text: str) -> list[str]:
+    """One record as passages of at most `MAX_PASSAGE_CHARS`, split between its fields, not inside one."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= MAX_PASSAGE_CHARS:
+        return [text]
+    found: list[str] = []
+    current = ""
+    for field in text.split("; "):
+        while len(field) > MAX_PASSAGE_CHARS:
+            if current:
+                found.append(current)
+                current = ""
+            found.append(field[:MAX_PASSAGE_CHARS])
+            field = field[MAX_PASSAGE_CHARS:]
+        if current and len(current) + len(field) + 2 > MAX_PASSAGE_CHARS:
+            found.append(current)
+            current = ""
+        current = f"{current}; {field}" if current else field
+    if current:
+        found.append(current)
+    return found
 
 
 def limitations_for(evidence: dict | None) -> list[dict]:
@@ -263,9 +353,11 @@ def packets_for(*, evidence: dict | None, plan: dict | None, leaves: tuple[str, 
     from app.services.validation_evidence_packets import packet_for
 
     index = _index_of(evidence or {})
-    extras = extras_for(evidence=evidence, plan=plan)
-    limitations = limitations_for(evidence)
-    return {leaf: packet_for(leaf, index=index, extras=extras, limitations=limitations) for leaf in leaves}
+    carried = carried_evidence(evidence=evidence, plan=plan)
+    # A source bioAF held and could not carry whole is a limitation of this study's evidence in the
+    # same way a source it never fetched is: section 8 will not report an absence over either.
+    limitations = limitations_for(evidence) + carried["omissions"]
+    return {leaf: packet_for(leaf, index=index, extras=carried["rows"], limitations=limitations) for leaf in leaves}
 
 
 def _index_of(evidence: dict) -> dict:
