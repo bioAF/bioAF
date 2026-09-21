@@ -314,3 +314,80 @@ class TestReuse:
         await resolve_supplements("PMC9943069", rows, fetcher=fetcher, ledger=ledger, article_urls=_ARTICLE_URLS)
         assert next(r for r in rows if r["identity"] == "elife-83291-supp4.zip")["resolved"] is True
         assert before >= 1
+
+
+class TestWhatTheLiveRunOnStudy65Found:
+    """plan_8_6 section 5, three defects the deployed run surfaced that no fixture had."""
+
+    def test_an_elife_supplementary_file_merges_with_the_prose_that_cites_it(self):
+        """eLife deposits "Supplementary file 4" as `elife-83291-supp4.zip`. The citation and the
+        attachment never merged, so four aliases were reported as four files bioAF failed to get."""
+        from app.services.supplement_inventory import establish_identity
+
+        rows = establish_identity(
+            [
+                {
+                    "label": "Supplementary file 4",
+                    "filename": "elife-83291-supp4.zip",
+                    "source": "attached",
+                    "kind": "attachment",
+                },
+                {
+                    "label": "Supplemental File 4",
+                    "filename": None,
+                    "source": "named_in_text",
+                    "kind": "reference",
+                    "identity": "reference:file:4",
+                },
+            ]
+        )
+        assert len(rows) == 1
+        assert rows[0]["identity"] == "elife-83291-supp4.zip"
+        assert "Supplemental File 4" in rows[0]["references"]
+
+    def test_a_table_citation_still_never_takes_a_file(self):
+        from app.services.supplement_inventory import establish_identity
+
+        rows = establish_identity(
+            [
+                {
+                    "label": "Supplementary file 1",
+                    "filename": "elife-1-supp1.xlsx",
+                    "source": "attached",
+                    "kind": "attachment",
+                },
+                {
+                    "label": "Supplementary Table S1",
+                    "filename": None,
+                    "source": "named_in_text",
+                    "kind": "reference",
+                    "identity": "reference:table:1",
+                },
+            ]
+        )
+        assert len(rows) == 2, "a table is not a file, whatever the numbers"
+
+    def test_an_unresolved_prose_alias_is_not_a_missing_attachment(self):
+        from app.services.validation_documentary_review import limitations_for
+
+        evidence = {
+            "paper_index": {"passages": [{"text": "x", "kind": "methods"}]},
+            "supplements": [
+                {"identity": "a.zip", "kind": "attachment", "resolved": True},
+                {"identity": "reference:file:9", "kind": "reference", "resolved": False},
+            ],
+            "code_inspection": {"sources": [{"path": "a.py"}]},
+            "sample_records": {"deposits": [{"accession": "GSE1"}]},
+        }
+        assert not any(limit["needs"] == "supplements" for limit in limitations_for(evidence))
+
+    def test_an_attachment_bioaf_did_not_retrieve_still_is_one(self):
+        from app.services.validation_documentary_review import limitations_for
+
+        evidence = {
+            "paper_index": {"passages": [{"text": "x", "kind": "methods"}]},
+            "supplements": [{"identity": "a.zip", "kind": "attachment", "resolved": False}],
+            "code_inspection": {"sources": [{"path": "a.py"}]},
+            "sample_records": {"deposits": [{"accession": "GSE1"}]},
+        }
+        assert any(limit["needs"] == "supplements" for limit in limitations_for(evidence))

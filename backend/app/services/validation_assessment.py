@@ -345,8 +345,23 @@ async def resolve_study_supplements(session: AsyncSession, study, evidence: dict
 
         inspected = inspect_code(merged, bytes_for=code_bytes)
         held = dict(evidence.get("code_inspection") or {})
+        # plan_8_6 section 4: the source read from the paper's REPOSITORY is not the supplements'
+        # to replace. Re-reading the attachments used to wipe it, so a study whose code bioAF had
+        # fetched and parsed came out of this stage holding none.
+        repository = [
+            source
+            for source in held.get("sources") or []
+            if isinstance(source, dict) and (source.get("provenance") or {}).get("from") == "repository"
+        ]
+        repository_manifests = [
+            entry
+            for entry in held.get("manifests") or []
+            if isinstance(entry, dict) and (entry.get("provenance") or {}).get("from") == "repository"
+        ]
         evidence["code_inspection"] = {
             **inspected,
+            "sources": [*repository, *inspected["sources"]],
+            "manifests": [*repository_manifests, *inspected["manifests"]],
             # An earlier inspection's reviews and approved runs are evidence in their own right and
             # are not discarded because the source was read again.
             "reviews": held.get("reviews") or [],
