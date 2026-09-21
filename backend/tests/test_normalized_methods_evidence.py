@@ -240,3 +240,64 @@ class TestTheFinalM2AndM4Outcomes:
         found = self._assess(experiments=[{"id": "E1"}], contrasts=[{"name": "treated vs control"}], index=bare)
         assert found["M4.A"]["outcome"] == "undetermined"
         assert "not stated" in found["M4.A"]["rationale"]
+
+
+class TestTheAssemblyHalfOfM2B:
+    """M2.A said "the paper names the reference its results depend on (GRCh38)" while M2.B said
+    "bioAF's read recorded no assembly release for this experiment", on the same paper, in the same
+    assessment. The paper states `Ensembl GRCh38 v96`.
+
+    The methods are read for the assembly the same way they are for the annotation, with one guard
+    the annotation does not need: a paper names builds it did NOT use. Groff's methods name hg19 in
+    the sentence that aligns its reads and GRCh38 in the sentence saying realignment to it "is not
+    anticipated to alter the main findings". What settles the half is a build the methods name AND
+    the reference bioAF already resolved agrees with; a build named only in passing settles nothing.
+    """
+
+    def _assess(self, *, stated, index):
+        from app.services.validation_rubric_evidence import assess_evidence
+
+        return assess_evidence(
+            plan={
+                "reported_experiments": [{"id": "E1", "reference": {"assembly": {"stated": stated, "status": None}}}],
+                "differential_design": {"contrasts": []},
+            },
+            evidence={"paper_index": index},
+            claims=[],
+        )
+
+    def _index(self, *paragraphs):
+        return build_index(
+            "",
+            sections={"index": [{"title": "Methods", "kind": "methods", "paragraphs": list(paragraphs)}]},
+            source="pasted",
+        )
+
+    def test_the_build_the_methods_state_settles_the_assembly_half(self):
+        found = self._assess(
+            stated="GRCh38",
+            index=self._index("Reads were pseudoaligned to the human transcriptome (Ensembl GRCh38 v96)."),
+        )
+        assert found["M2.B"]["outcome"] == "verified", found["M2.B"]["rationale"]
+        assert "GRCh38" in found["M2.B"]["rationale"]
+
+    def test_a_build_named_only_in_passing_does_not_settle_it(self):
+        """Groff's own two sentences: the one that aligned the reads, and the one that says
+        realigning to another build would not change the findings."""
+        found = self._assess(
+            stated="hg19",
+            index=self._index(
+                "Sequencing reads were trimmed to 50 bp and then aligned with RSEM version 1.2.29 to hg19.",
+                "Because updates to the genome in GRCh38 focused mostly on noncoding regions, realignment "
+                "to GRCh38 is not anticipated to alter the main findings reported here.",
+            ),
+        )
+        # The annotation half is genuinely open on this paper: it names no release. What must not
+        # happen is the ASSEMBLY half reporting a conflict over a build the paper says it did not use.
+        assert found["M2.B"]["outcome"] == "undetermined"
+        assert "assembly" not in found["M2.B"]["rationale"], found["M2.B"]["rationale"]
+        assert "annotation" in found["M2.B"]["rationale"]
+
+    def test_a_build_the_methods_never_name_leaves_it_open(self):
+        found = self._assess(stated="GRCm39", index=self._index("Reads were aligned to the mouse genome."))
+        assert found["M2.B"]["outcome"] == "undetermined"

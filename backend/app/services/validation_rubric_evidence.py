@@ -650,6 +650,25 @@ def _annotation_from_methods(read: list[dict]) -> dict:
     return {"label": None, "quote": None, "conflict": None}
 
 
+def _assembly_from_methods(read: list[dict], stated: str) -> dict:
+    """``{"label", "quote"}`` where the methods name the build this experiment's reference resolved to.
+
+    A paper names builds it did NOT use: Groff's methods align its reads to hg19 in one sentence and
+    say in the next that realigning to GRCh38 "is not anticipated to alter the main findings". What
+    settles the assembly half is a build the methods name AND the reference bioAF already resolved
+    agrees with, which is a fact about the same reference rather than a second guess at it.
+    """
+    from app.services.validation_reference import assemblies_named
+
+    wanted = {row["assembly"] for row in assemblies_named(stated)}
+    if not wanted:
+        return {"label": None, "quote": None}
+    for statement in read:
+        if statement.get("build") in wanted:
+            return {"label": statement["build"], "quote": str(statement.get("quote") or "")}
+    return {"label": None, "quote": None}
+
+
 def _references(experiments: list[dict], read: list[dict] | None = None) -> dict:
     """M2: the result-sensitive references a paper's numbers depend on, and whether they can be recovered.
 
@@ -728,6 +747,11 @@ def _reference_recoverability(relevant: list[tuple], scope: str, read: list[dict
             status = str(part.get("status") or "").strip().lower()
             statement = str(part.get("stated") or "").strip()
             unrecorded = not part.get("conflict") and status not in (_USABLE, _UNAVAILABLE, _NOT_READ, _UNRESOLVED)
+            if name == "assembly" and unrecorded and statement:
+                built = _assembly_from_methods(read, statement)
+                if built["label"]:
+                    recovered.append(f"{built['label']} (from the paper's methods)")
+                    continue
             if name == "annotation" and unrecorded and (from_methods["label"] or from_methods["conflict"]):
                 if from_methods["conflict"]:
                     # Not a failure: a paper may legitimately use one release for one analysis and
