@@ -34,7 +34,8 @@ from app.services.validation_evidence_index import (
     RESULTS,
 )
 
-PACKET_VERSION = 1
+# 2: the normalized cutoff and reference statements reach M2, M4 and M5.B as evidence of their own.
+PACKET_VERSION = 2
 
 # What one request may carry, against the input budget `validation_decision_budgets` declares for a
 # documentary judgment. plan_8_6 section 11 asked to start at 8,192 input tokens and to report the
@@ -69,6 +70,12 @@ SUPPLEMENT = "supplement"
 # plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words by
 # `validation_design_summary`. A comparator is not a design, and E2.B is answered from these.
 DESIGN = "design"
+# plan_8_6 section 3 item 4: what bioAF NORMALIZED out of the methods, in front of the obligations
+# that ask about it. M4 is asked whether the decision criteria are specified and unambiguous, and
+# was judged on prose with nothing saying which thresholds bioAF had actually resolved; M2 the same
+# for the reference and annotation releases.
+CUTOFF = "cutoff"
+REFERENCE = "reference"
 
 
 @dataclass(frozen=True)
@@ -235,7 +242,7 @@ _SELECTORS: dict[str, Selector] = {
     "M1": Selector(_PROCEDURE, (CODE, SUPPLEMENT), _ALWAYS_NEEDS, _COMPUTATIONAL, _BENCH_MATERIALS),
     "M2": Selector(
         _PROCEDURE,
-        (CODE, SUPPLEMENT),
+        (REFERENCE, CODE, SUPPLEMENT),
         _ALWAYS_NEEDS,
         _re(
             r"\bgenome\b|\breference\b|\bGRCh\d+|\bhg\d+\b|\bmm\d+\b|\bGENCODE\b|\bEnsembl\b|\bRefSeq\b",
@@ -257,7 +264,7 @@ _SELECTORS: dict[str, Selector] = {
     ),
     "M4": Selector(
         (METHODS, RESULTS, LEGEND, OTHER),
-        (CODE, SUPPLEMENT),
+        (CUTOFF, CODE, SUPPLEMENT),
         _ALWAYS_NEEDS,
         _re(
             r"\bsignifican\w*|\bp-?value\b",
@@ -280,7 +287,7 @@ _SELECTORS: dict[str, Selector] = {
     ),
     "M5.B": Selector(
         _TRACE,
-        (CODE, SUPPLEMENT, TOOLS),
+        (CODE, CUTOFF, REFERENCE, SUPPLEMENT, TOOLS),
         (*_ALWAYS_NEEDS, "code"),
         _re(
             r"\bcode\b|\bscript\w*|\bnotebook\b|\bparameter\w*|\bsetting\w*|\bthreshold\w*|\bcut-?off\b",
@@ -357,9 +364,12 @@ def packet_for(
         # say that the selection was not scoped.
         kept = passages[:MAX_PACKET_PASSAGES]
         rest = passages[MAX_PACKET_PASSAGES:]
-        return _packet(
-            leaf, kept, rest[:MAX_EXPANSION_PASSAGES], _coverage(leaf, passages, kept, 0, rest, rest, [], None)
+        coverage = _coverage(leaf, passages, kept, 0, rest, rest, [], None)
+        expansion = rest[:MAX_EXPANSION_PASSAGES]
+        widened = _coverage(
+            leaf, passages, kept + expansion, 0, rest[len(expansion) :], rest[len(expansion) :], [], None
         )
+        return _packet(leaf, kept, expansion, coverage, widened if expansion else coverage)
 
     eligible = [p for p in passages if p.get("kind") in selector.sections]
     # (rank, relevant, candidate, document order, passage). ``relevant`` is whether the passage
@@ -411,19 +421,25 @@ def packet_for(
 
     kept: list[dict] = []
     deferred: list[dict] = []
-    missed: list[dict] = []
     spent = 0
+    # A row can CARRY another passage's sentence: a design record quotes the legend it read its
+    # replication out of and names its id, and that is the form E2.B is answered from. Spending the
+    # budget on the legend again buys nothing and costs a passage that says something new, and
+    # counting it as evidence bioAF failed to carry would make the fuller packet report itself as
+    # truncated and leave the obligation unable to report an absence (section 8).
+    carried_ids: set[str] = set()
     for _, relevant, _, _, passage in chosen:
         text = str(passage.get("text") or "")
+        if str(passage.get("id")) in carried_ids:
+            continue
         if len(kept) < MAX_PACKET_PASSAGES and spent + len(text) <= budget_chars:
             kept.append(passage)
             spent += len(text)
+            carried_ids.update(str(i) for i in passage.get("covers") or [])
             continue
-        deferred.append(passage)
-        if relevant:
-            # Evidence that matched this obligation's own terms and did not fit. This is what makes
-            # the packet truncated, and what section 8 refuses to report an absence over.
-            missed.append(passage)
+        deferred.append((relevant, passage))
+    missed = [p for relevant, p in deferred if relevant and str(p.get("id")) not in carried_ids]
+    deferred = [p for _, p in deferred if str(p.get("id")) not in carried_ids]
 
     # Back into document order: an assessor reading a procedure needs its steps in the order the
     # paper wrote them, not in the order a ranking function liked them.
@@ -431,18 +447,30 @@ def packet_for(
     kept.sort(key=lambda p: order_of.get(id(p), 0))
     # What the one targeted expansion may add: the relevant passages the budget left out first, then
     # the eligible sections the ranking passed over. One second ask, not a nested retry loop.
-    expansion = deferred + [row[4] for row in spare]
+    expansion = (deferred + [row[4] for row in spare])[:MAX_EXPANSION_PASSAGES]
     coverage = _coverage(leaf, eligible, kept, excluded, deferred, missed, limitations or [], selector)
     coverage["selected_by"] = "section" if by_section_only else "relevance"
-    return _packet(leaf, kept, expansion[:MAX_EXPANSION_PASSAGES], coverage)
+    # plan_8_6 section 11, and the owner's review 2026-09-21: "Expansion also reuses the original
+    # coverage record." A widened request is judged on what IT was shown, and an absence finding
+    # rests on that record (section 8), so the coverage of the widened packet is computed here
+    # rather than the first packet's being handed to the second request.
+    added = {id(p) for p in expansion}
+    widened = kept + expansion
+    still_deferred = [p for p in deferred if id(p) not in added]
+    still_missed = [p for p in missed if id(p) not in added]
+    expanded = _coverage(leaf, eligible, widened, excluded, still_deferred, still_missed, limitations or [], selector)
+    expanded["selected_by"] = coverage["selected_by"]
+    return _packet(leaf, kept, expansion, coverage, expanded if expansion else coverage)
 
 
-def _packet(leaf: str, kept: list[dict], expansion: list[dict], coverage: dict) -> dict:
+def _packet(leaf: str, kept: list[dict], expansion: list[dict], coverage: dict, expanded: dict) -> dict:
     return {
         "leaf": leaf,
         "passages": [_supplied(p) for p in kept],
         "expansion": [_supplied(p) for p in expansion],
         "coverage": coverage,
+        # What the ONE targeted expansion would cover, for the request that is actually widened.
+        "expanded_coverage": expanded,
     }
 
 
@@ -458,6 +486,9 @@ def _supplied(passage: dict) -> dict:
         # plan_8_6 section 7: what kind of fact this passage carries, where it is more than the
         # paper's running text. E2.B's acceptance rests on being cited a design fact.
         "carries": passage.get("carries"),
+        # The passages this row quotes, so the budget does not report a sentence the assessor is
+        # reading as one it never saw.
+        "covers": passage.get("covers"),
     }
 
 

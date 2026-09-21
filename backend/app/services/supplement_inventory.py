@@ -648,6 +648,66 @@ BUDGET_EXHAUSTED = "budget_exhausted"
 MAX_CONCURRENT_MEMBERS = 3
 AGGREGATE_TRANSFER_BYTES = 400 * 1024 * 1024
 
+
+class TransferAllowance:
+    """The new network bytes one assessment attempt may spend, shared by every fetch it makes.
+
+    plan_8_6 section 11: "Count transfers as they stream, cancel at limits". The owner's review of
+    the deployed code, 2026-09-21, on why counting them AFTERWARDS is not that:
+
+        "Member retrieval checks its budget between batches and counts successful response sizes
+        afterward. Three simultaneous requests can exceed the remaining allowance. Failed transfers
+        count as zero, and the member budget is separate from repository and bundle transfers."
+
+    So a request RESERVES what it may move before it starts, and settles for what it actually moved.
+    A transfer that failed still moved its bytes and still costs them. One allowance is threaded
+    through the bundle, the article pages, the members and the repository archive, because a budget
+    spent separately in three places is three budgets.
+    """
+
+    def __init__(self, budget: int = AGGREGATE_TRANSFER_BYTES):
+        self.budget = max(0, int(budget))
+        self._reserved = 0
+        self._spent_ok = 0
+        self._spent_failed = 0
+
+    @property
+    def spent(self) -> int:
+        return self._spent_ok + self._spent_failed
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.budget - self.spent - self._reserved)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining <= 0
+
+    def reserve(self, want: int) -> int:
+        """How many bytes this request may transfer, taken out of the allowance before it starts."""
+        granted = max(0, min(int(want), self.remaining))
+        self._reserved += granted
+        return granted
+
+    def settle(self, reserved: int, *, transferred: int, ok: bool = True) -> None:
+        """Give back what the request did not use, and charge what it did, whether or not it worked."""
+        self._reserved = max(0, self._reserved - max(0, int(reserved)))
+        moved = max(0, min(int(transferred), max(0, int(reserved))))
+        if ok:
+            self._spent_ok += moved
+        else:
+            self._spent_failed += moved
+
+    def record(self) -> dict:
+        """What this attempt transferred, for the measurement section 11 asks to be kept."""
+        return {
+            "budget": self.budget,
+            "spent": self.spent,
+            "transferred_ok": self._spent_ok,
+            "failed": self._spent_failed,
+        }
+
+
 _HREF_RE = re.compile(r"""(?:href|src)\s*=\s*["']([^"']+)["']""", re.I)
 _ABSOLUTE_RE = re.compile(r"""https?://[^\s"'<>\\]+""")
 # The version segment a publisher appends to its own copy of a file the manifest names without one
@@ -682,7 +742,9 @@ def _failure_outcome(status: int | None) -> str:
     return TRANSIENT
 
 
-async def _retrieve_bundle(url: str, fetcher, covered: list[str], ledger: list[dict]) -> tuple[dict | None, dict]:
+async def _retrieve_bundle(
+    url: str, fetcher, covered: list[str], ledger: list[dict], allowance: "TransferAllowance | None" = None
+) -> tuple[dict | None, dict]:
     """Fetch and open the bundle, recording every attempt. Returns (members or None, last entry)."""
     entry: dict = {}
     for attempt in range(1, MAX_ATTEMPTS + 1):
@@ -691,7 +753,16 @@ async def _retrieve_bundle(url: str, fetcher, covered: list[str], ledger: list[d
         try:
             # plan_8_6 section 5: streamed and stopped at the cap where the transport can, so an
             # oversized bundle is refused without transferring all of it first.
-            blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES)
+            blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES, allowance)
+        except TransferBudgetExhausted as exc:
+            # Section 11: budget exhaustion cannot start another automatic attempt to evade the cap.
+            outcome, error_class = BUDGET_EXHAUSTED, type(exc).__name__
+            logger.info("supplementary bundle not attempted for %s: %s", url, exc)
+            entry = _entry(
+                ledger, source=BUNDLE_SOURCE, label=BUNDLE_SOURCE_LABEL, url=url, outcome=outcome, artifacts=covered
+            )
+            ledger.append(entry)
+            return None, entry
         except Exception as exc:  # noqa: BLE001 - a fetch failure is a limitation of the run
             status = _status_of(exc)
             outcome, error_class = _failure_outcome(status), type(exc).__name__
@@ -834,13 +905,62 @@ def _member_priority(row: dict) -> tuple[int, str]:
     return (0 if _PRIORITY_NAMES.search(name) else 1), name
 
 
-async def _fetch_within(fetcher, url: str, max_bytes: int) -> bytes:
+async def _fetch_within(fetcher, url: str, max_bytes: int, allowance: "TransferAllowance | None" = None) -> bytes:
     """Fetch, asking the transport to stop at ``max_bytes`` where it can. Never downloads blindly
-    past the cap when the fetcher supports a limit; a fetcher that does not is used as it is."""
+    past the cap when the fetcher supports a limit; a fetcher that does not is used as it is.
+
+    ``allowance`` is the shared transfer budget (section 11). The request reserves what it may move
+    BEFORE it starts, so three in flight cannot each spend what was left for one, and settles for
+    what actually arrived - a failed transfer included, because its bytes moved too.
+    """
+    if allowance is None:
+        try:
+            return await fetcher(url, max_bytes=max_bytes)
+        except TypeError:
+            return await fetcher(url)
+    granted = allowance.reserve(max_bytes)
+    if granted <= 0:
+        raise TransferBudgetExhausted(f"the assessment's transfer allowance was spent before {url}")
     try:
-        return await fetcher(url, max_bytes=max_bytes)
-    except TypeError:
-        return await fetcher(url)
+        try:
+            blob = await fetcher(url, max_bytes=granted)
+        except TypeError:
+            blob = await fetcher(url)
+    except TransferBudgetExhausted:
+        allowance.settle(granted, transferred=0)
+        raise
+    except Exception as exc:
+        # A failure that carried bytes over the wire spent them, and they are charged. What bioAF
+        # can observe is what the transport reports: a response body it read before failing. A 404
+        # that returned a short error page moved a short error page, and charging it a whole
+        # reservation would exhaust the allowance on three refusals.
+        allowance.settle(granted, transferred=_transferred_by(exc), ok=False)
+        raise
+    # A response OVER the cap moved its bytes and produced nothing usable, which is a failed
+    # transfer and is accounted as one: "failed transfers count as zero" was the defect. `settle`
+    # charges no more than the reservation either way.
+    allowance.settle(granted, transferred=len(blob), ok=len(blob) <= max_bytes)
+    return blob
+
+
+class TransferBudgetExhausted(RuntimeError):
+    """This assessment attempt has spent its transfer allowance; the words say so."""
+
+
+def _transferred_by(exc: Exception) -> int:
+    """The bytes a failed transfer moved, as far as the transport reports them.
+
+    A response bioAF read before the failure is the honest number. Where there is none, zero is the
+    honest number: charging a reservation bioAF never used would make three refusals exhaust the
+    allowance for the whole paper. The case the budget exists for, a whole oversized file arriving
+    and being refused, is charged at its real size by the caller above.
+    """
+    for attribute in ("transferred", "bytes_transferred"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int) and value >= 0:
+            return value
+    body = getattr(getattr(exc, "response", None), "content", None)
+    return len(body) if isinstance(body, (bytes, bytearray)) else 0
 
 
 async def _retrieve_members(
@@ -849,17 +969,30 @@ async def _retrieve_members(
     fetcher,
     article_urls: list[str] | None,
     ledger: list[dict],
-    transfer_budget: int,
+    allowance: "TransferAllowance | None" = None,
 ) -> tuple[dict[str, bytes], dict[str, str]]:
     """Fetch each named attachment on its own. Returns (bytes by filename, ledger id by filename).
 
     plan_8_6 section 5. Every attempt is its own ledger entry naming its own file, so a member that
     is too large is recorded as that one file's limitation and costs the others nothing.
     """
+    if allowance is not None and allowance.exhausted:
+        # Never "bioAF could not work out where its members live": nothing was looked for.
+        ledger.append(
+            _entry(
+                ledger,
+                source=MEMBER_SOURCE,
+                label=MEMBER_SOURCE_LABEL,
+                url=None,
+                outcome=BUDGET_EXHAUSTED,
+                artifacts=[r["identity"] for r in rows if r.get("filename")],
+            )
+        )
+        return {}, {}
     pages: list[str] = []
     for url in (article_urls or [])[:2]:
         try:
-            blob = await _fetch_within(fetcher, url, _MAX_ARTICLE_PAGE_BYTES)
+            blob = await _fetch_within(fetcher, url, _MAX_ARTICLE_PAGE_BYTES, allowance)
         except Exception as exc:  # noqa: BLE001 - a page bioAF cannot read lists no members
             logger.info("could not read the article page at %s: %s", url, exc)
             continue
@@ -892,7 +1025,6 @@ async def _retrieve_members(
     )
     contents: dict[str, bytes] = {}
     ledger_for: dict[str, str] = {}
-    spent = 0
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_MEMBERS)
     exhausted = False
 
@@ -900,22 +1032,24 @@ async def _retrieve_members(
         url = locations[row["identity"]]
         async with semaphore:
             try:
-                blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES)
+                blob = await _fetch_within(fetcher, url, _MAX_BUNDLE_BYTES, allowance)
+            except TransferBudgetExhausted:
+                return row, None, BUDGET_EXHAUSTED, None, None
             except Exception as exc:  # noqa: BLE001 - one member's failure is one member's
                 return row, None, _failure_outcome(_status_of(exc)), _status_of(exc), type(exc).__name__
         if len(blob) > _MAX_BUNDLE_BYTES:
             return row, None, TOO_LARGE, None, None
         return row, bytes(blob), RETRIEVED, None, None
 
-    # In priority batches, at most three requests in flight, counting transferred bytes as they land
-    # and stopping at the aggregate budget rather than starting another attempt behind it.
+    # In priority batches, at most three requests in flight. Each RESERVES what it may move before
+    # it starts (`_fetch_within`), so three concurrent requests cannot each spend what the allowance
+    # had left for one, and a transfer that fails still costs the bytes it moved.
     for start in range(0, len(ordered), MAX_CONCURRENT_MEMBERS):
         if exhausted:
             break
         batch = ordered[start : start + MAX_CONCURRENT_MEMBERS]
-        if spent >= transfer_budget:
+        if allowance is not None and allowance.exhausted:
             exhausted = True
-            batch_rows = ordered[start:]
             ledger.append(
                 _entry(
                     ledger,
@@ -923,12 +1057,13 @@ async def _retrieve_members(
                     label=MEMBER_SOURCE_LABEL,
                     url=None,
                     outcome=BUDGET_EXHAUSTED,
-                    artifacts=[r["identity"] for r in batch_rows],
+                    artifacts=[r["identity"] for r in ordered[start:]],
                 )
             )
             break
         for row, blob, outcome, status, error_class in await asyncio.gather(*(_one(r) for r in batch)):
-            spent += len(blob) if blob is not None else 0
+            if outcome == BUDGET_EXHAUSTED:
+                exhausted = True
             entry = _entry(
                 ledger,
                 source=MEMBER_SOURCE,
@@ -969,7 +1104,8 @@ async def resolve_supplements(
     *,
     fetcher,
     article_urls: list[str] | None = None,
-    transfer_budget: int = AGGREGATE_TRANSFER_BYTES,
+    transfer_budget: int | None = None,
+    allowance: "TransferAllowance | None" = None,
     thresholds: list[float] | None = None,
     ledger: list[dict] | None = None,
     predicates: list[dict] | None = None,
@@ -999,6 +1135,11 @@ async def resolve_supplements(
     rows = establish_identity(references)
     if ledger is None:
         ledger = []
+    # plan_8_6 section 11: ONE allowance for this attempt, shared by the bundle, the article pages,
+    # the members and the repository archive. ``transfer_budget`` stays as the older per-call number
+    # a caller may still pass; where both are absent the default budget applies.
+    if allowance is None:
+        allowance = TransferAllowance(transfer_budget if transfer_budget is not None else AGGREGATE_TRANSFER_BYTES)
     covered = [r["identity"] for r in rows if r["kind"] not in (KIND_FIGURE, KIND_INDEX)]
     url = _SUPPLEMENTARY_BUNDLE.format(pmcid=pmcid)
     ledger_for: dict[str, str] = {}
@@ -1012,7 +1153,7 @@ async def resolve_supplements(
     if refused is not None:
         contents, entry = None, refused
     else:
-        contents, entry = await _retrieve_bundle(url, fetcher, covered, ledger)
+        contents, entry = await _retrieve_bundle(url, fetcher, covered, ledger, allowance)
 
     if contents is None and entry.get("outcome") == TOO_LARGE:
         # plan_8_6 section 5: the bundle being over the cap is a reason to fetch its members, not a
@@ -1023,7 +1164,7 @@ async def resolve_supplements(
             fetcher=fetcher,
             article_urls=article_urls,
             ledger=ledger,
-            transfer_budget=transfer_budget,
+            allowance=allowance,
         )
         entry = ledger[-1] if ledger else entry
 

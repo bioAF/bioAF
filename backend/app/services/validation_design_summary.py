@@ -45,10 +45,13 @@ _UNIT = re.compile(
     r"\b(?:per|each)\s+(?P<unit>sample|clone|line|condition|group|animal|mouse|donor|time\s?point|replicate)\b",
     re.I,
 )
+# A count written as a digit is the same design fact as one written as a word: study 65's Figure 5
+# states "2 replicates of human ovaroids ... and 1 replicate of mouse xeno-ovaroids", and reading
+# only the spelled-out forms reported that comparison as stating no group size at all.
 _GROUP_SIZE = re.compile(
     r"\bn\s*=\s*\d+"
     r"|\b\d+\s+\w+s?\s+per\s+\w+"
-    r"|\b(?:one|two|three|four|five|six|a single)\s+(?:\w+\s+){0,2}?"
+    r"|\b(?:one|two|three|four|five|six|a single|\d+)\s+(?:\w+\s+){0,2}?"
     r"(?:sample|replicate|clone|line|animal|mouse|donor|ovaroid|embryo)s?\b",
     re.I,
 )
@@ -119,16 +122,26 @@ def _first(passages: list[dict], pattern: re.Pattern) -> dict | None:
 
 
 def _all(passages: list[dict], pattern: re.Pattern, limit: int = _MAX_QUOTES) -> list[dict]:
+    """Every sentence stating this kind of fact, not the first one in each passage.
+
+    A figure legend is one passage and states the design of every panel under it: study 65's Figure 4
+    gives `n = 2 biological replicates for each of 9 clones` for panel A and `n = 1 sample per
+    ovaroid per condition` for panel B, and reading one match per passage reported the first and lost
+    the second.
+    """
     found: list[dict] = []
     for passage in passages:
-        match = pattern.search(str(passage.get("text") or ""))
-        if not match:
-            continue
-        found.append(
-            {"quote": _around(str(passage["text"]), match), "id": passage.get("id"), "section": passage.get("section")}
-        )
-        if len(found) >= limit:
-            break
+        text = str(passage.get("text") or "")
+        seen: set[str] = set()
+        for match in pattern.finditer(text):
+            quote = _around(text, match)
+            if quote in seen:
+                # Two facts stated in one sentence are one quote, not two.
+                continue
+            seen.add(quote)
+            found.append({"quote": quote, "id": passage.get("id"), "section": passage.get("section")})
+            if len(found) >= limit:
+                return found
     return found
 
 
@@ -148,8 +161,18 @@ def design_summary(index: dict | None) -> dict:
     "unknown", "facts"}``. Every field is present; a field the paper does not state carries
     ``unknown`` and is named in ``unknown``, because an assessor must be able to tell a design bioAF
     read from one bioAF could not find.
+
+    This is the PAPER-WIDE reading, and on its own it answers E2.B about whichever experiment the
+    document described first. `design_comparisons` reads the same fields per comparison, and
+    `design_facts` supplies those; this stays as the fallback for a paper that anchors nothing.
     """
-    passages = _passages(index)
+    summary = _fields(_passages(index))
+    summary["facts"] = _facts(summary)
+    return summary
+
+
+def _fields(passages: list[dict]) -> dict:
+    """The design fields read out of one set of passages: the paper's, or one comparison's."""
     unknown: list[str] = []
 
     biological = _first(passages, _BIOLOGICAL)
@@ -210,7 +233,7 @@ def design_summary(index: dict | None) -> dict:
     if not group_sizes:
         unknown.append("group_sizes")
 
-    summary = {
+    return {
         "summary_version": SUMMARY_VERSION,
         "experimental_unit": experimental_unit,
         "replication": replication,
@@ -220,8 +243,171 @@ def design_summary(index: dict | None) -> dict:
         "group_sizes": group_sizes,
         "unknown": unknown,
     }
-    summary["facts"] = _facts(summary)
-    return summary
+
+
+# A design statement belongs to the experiment the paper wrote it under. A legend is one figure's
+# design; a methods subsection is one procedure's. Anything the paper states without such a heading
+# is read once more for the paper as a whole, and said to be that.
+_ANCHOR_SECTIONS = (LEGEND, METHODS)
+# How long one comparison's record may be before it is carried as several passages. Never a cut: a
+# record over this is SPLIT at its own lines, so a fact bioAF read still reaches the assessor with an
+# id it can cite. plan_8_6 section 3, and the owner on silent truncation, 2026-09-21.
+MAX_RECORD_CHARS = 900
+PAPER_WIDE = "the paper as a whole"
+
+
+def _anchors(index: dict | None) -> list[tuple[str, str, list[dict]]]:
+    """``[(anchor, kind, passages)]``: the headings under which this paper states a design.
+
+    Ordered as `_passages` orders them, so a comparison the methods describe is read before the
+    results narrate around it.
+    """
+    grouped: dict[tuple[str, str], list[dict]] = {}
+    for passage in _passages(index):
+        if passage.get("kind") not in _ANCHOR_SECTIONS:
+            continue
+        title = str(passage.get("section") or "").strip()
+        if not title:
+            continue
+        grouped.setdefault((title, str(passage.get("kind"))), []).append(passage)
+    return [(title, kind, rows) for (title, kind), rows in grouped.items()]
+
+
+def _states_a_design(fields: dict, kind: str) -> bool:
+    """Whether this heading describes a COMPARISON, rather than a procedure with no design in it.
+
+    **A comparator is not a design** (section 7), and that holds for what makes a record too. A
+    figure legend naming a control is describing that figure's design; a methods subsection that
+    says a medium was changed "relative to" another is a culture step, and building a design record
+    for it spends the packet's budget on the paper's reagent list. A methods anchor needs a
+    replication, a group size or a selection: a fact about the structure, not about a comparison
+    word appearing in a procedure.
+    """
+    structural = bool(fields["group_sizes"] or fields["replication"]["quote"] or fields["selection"]["stated"])
+    if kind == LEGEND:
+        return structural or bool(fields["comparators"]["named"])
+    return structural
+
+
+def _claim_of(passages: list[dict], kind: str) -> str:
+    """What the anchor says it is about: a legend's opening statement, else its heading.
+
+    A figure legend leads with the claim the figure makes ("Hormonal signaling by granulosa-like
+    cells"), which is exactly the claim E2.B weighs the design against. A methods subsection leads
+    with a reagent sentence, and its HEADING is what names the procedure; quoting its first sentence
+    put 240 characters of buffer composition where the claim belongs.
+    """
+    heading = str((passages or [{}])[0].get("section") or "").strip()
+    if kind != LEGEND:
+        return heading
+    first = str((passages or [{}])[0].get("text") or "").strip()
+    stop = first.find(". ")
+    lead = first[: stop + 1] if 0 < stop < 240 else first[:240]
+    return lead.strip() or heading
+
+
+def design_comparisons(index: dict | None) -> list[dict]:
+    """One design record per comparison this paper states, each with the claim it is about.
+
+    plan_8_6 section 7, and the owner's review of the deployed code, 2026-09-21: "Associate design
+    facts with their experiments and claims before judging adequacy." A paper-wide summary answers
+    E2.B about whichever experiment the document described first, and study 65 states `n = 2
+    biological replicates for each of 9 clones` in one legend and `1 replicate of mouse
+    xeno-ovaroids` in the next.
+
+    Each record is ``{"anchor", "anchor_kind", "claim", ...the fields of `design_summary`}``. A
+    heading that states no comparison yields no record: an empty design per section heading would be
+    noise, not evidence.
+    """
+    found: list[dict] = []
+    for anchor, kind, passages in _anchors(index):
+        fields = _fields(passages)
+        if not _states_a_design(fields, kind):
+            continue
+        found.append({**fields, "anchor": anchor, "anchor_kind": kind, "claim": _claim_of(passages, kind)})
+    return found
+
+
+def _covered_ids(summary: dict) -> list[str]:
+    """The passages whose sentences this record quotes, so nobody counts them as evidence bioAF held back.
+
+    A design record carries the fact AND the sentence it was read from, with the passage id beside
+    it. The same passage deferred by a packet's budget is not evidence the assessor never saw: it is
+    in front of them, in the form the obligation is answered from.
+    """
+    ids = [
+        summary["experimental_unit"].get("id"),
+        summary["replication"].get("id"),
+        summary["pairing"].get("id") if summary["pairing"]["stated"] else None,
+        summary["selection"].get("id") if summary["selection"]["stated"] else None,
+        *summary["comparators"]["ids"],
+        *[group.get("id") for group in summary["group_sizes"]],
+    ]
+    return sorted({str(i) for i in ids if i})
+
+
+def _lines(summary: dict) -> list[str]:
+    """One line per design fact this record read, and one naming what it did not.
+
+    A sentence is quoted ONCE per record. Study 65's Figure 4 legend states the replication, the
+    group size and the comparator in one sentence, and repeating it three times spent a comparison's
+    words on the same 400 characters: the packet's budget is what E2's own evidence competes for.
+    """
+    lines: list[str] = []
+    seen: dict[str, str] = {}
+
+    def quoted(label: str, fact: str, passage_id, quote) -> None:
+        text = str(quote or "").strip()
+        if not text:
+            lines.append(f"{label}: {fact}" if fact else label)
+            return
+        if text in seen:
+            lines.append(f"{label}: {fact} (from the same quote as {seen[text]})" if fact else f"{label}: {seen[text]}")
+            return
+        seen[text] = label.lower()
+        lines.append((f"{label}: {fact}. " if fact else f"{label}. ") + f"Quote [{passage_id}]: {text}")
+
+    unit = summary["experimental_unit"]
+    if unit["unit"] != UNKNOWN:
+        quoted("Experimental unit", unit["unit"], unit["id"], unit["quote"])
+    replication = summary["replication"]
+    if replication["kind"] != UNKNOWN or replication["quote"]:
+        quoted(
+            "Replication",
+            replication["kind"] + (f", {replication['count']} per group" if replication["count"] else ""),
+            replication["id"],
+            replication["quote"],
+        )
+    if summary["pairing"]["stated"]:
+        quoted("Pairing or blocking", "", summary["pairing"]["id"], summary["pairing"]["quote"])
+    for position, quote in enumerate(summary["comparators"]["named"]):
+        quoted("Comparator", "", summary["comparators"]["ids"][position], quote)
+    if summary["selection"]["stated"]:
+        quoted("Selection of clones or lines", "", summary["selection"]["id"], summary["selection"]["quote"])
+    for group in summary["group_sizes"]:
+        quoted("Group size", "", group["id"], group["quote"])
+    if lines and summary["unknown"]:
+        lines.append(
+            f"Not established here: {', '.join(summary['unknown'])}. These are {NOT_STATED}, which is not the "
+            "same fact as the design lacking them"
+        )
+    return lines
+
+
+def _split(lines: list[str]) -> list[str]:
+    """One record as passages of at most `MAX_RECORD_CHARS`, split between its lines, never inside a
+    fact. A line longer than the bound on its own is kept whole: a design fact written as one long
+    sentence is still that fact."""
+    found: list[str] = []
+    current = ""
+    for line in lines:
+        if current and len(current) + 1 + len(line) > MAX_RECORD_CHARS:
+            found.append(current)
+            current = ""
+        current = f"{current}\n{line}" if current else line
+    if current:
+        found.append(current)
+    return found
 
 
 def _facts(summary: dict) -> list[dict]:
@@ -272,5 +458,39 @@ def _facts(summary: dict) -> list[dict]:
 
 
 def design_facts(index: dict | None) -> list[dict]:
-    """The design facts as evidence an obligation can be given and an answer can cite."""
-    return design_summary(index)["facts"]
+    """The design of each comparison, as evidence an obligation can be given and an answer can cite.
+
+    One record per comparison, so E2.B weighs the replication of the comparison it is answering
+    about rather than reconciling a flat list of every number in the paper. A paper that anchors no
+    comparison falls back to the paper-wide reading, which is still better than nothing in front of
+    the obligation.
+    """
+    rows: list[dict] = []
+    comparisons = design_comparisons(index)
+    for comparison in comparisons:
+        lines = _lines(comparison)
+        if not lines:
+            continue
+        pieces = _split(lines)
+        for part, piece in enumerate(pieces, start=1):
+            rows.append(
+                {
+                    "id": f"design:{comparison['anchor']}" + (f"#{part}" if part > 1 else ""),
+                    "kind": "design",
+                    "carries": "design",
+                    "comparison": comparison["anchor"],
+                    "covers": _covered_ids(comparison),
+                    "source": f"the design bioAF read for {comparison['anchor']}",
+                    "text": (
+                        f"Design of {comparison['anchor']} ({comparison['claim']})"
+                        + (f", part {part} of {len(pieces)}" if len(pieces) > 1 else "")
+                        + ":\n"
+                        + piece
+                    ),
+                }
+            )
+    if rows:
+        return rows
+    summary = design_summary(index)
+    summary["facts"] = _facts(summary)
+    return summary["facts"]

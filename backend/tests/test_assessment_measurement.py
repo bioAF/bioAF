@@ -4,8 +4,6 @@
 not prove better coverage." Neither half of that can be argued from numbers nobody kept.
 """
 
-import pathlib
-
 import pytest
 
 from app.services.validation_assessment import _measured

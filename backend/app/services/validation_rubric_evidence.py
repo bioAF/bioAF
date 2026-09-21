@@ -101,8 +101,12 @@ def assess_evidence(
     assessed.update(_accounting(experiments, plan, evidence))
     assessed.update(_replication(evidence))
     assessed.update(_units(evidence))
-    assessed.update(_references(experiments))
-    assessed.update(_decision_criteria(claims or [], contrasts, plan.get("differential_design")))
+    # plan_8_6 section 3 item 4: what bioAF normalized out of the paper's OWN methods, so M2 and M4
+    # are settled against the paper's statements rather than against whichever of them the
+    # extraction happened to attach to an experiment or a contrast.
+    read = _read_from_methods(evidence)
+    assessed.update(_references(experiments, read["references"]))
+    assessed.update(_decision_criteria(claims or [], contrasts, plan.get("differential_design"), read["criteria"]))
     assessed.update(_author_results(claims or [], inventory))
     assessed.update(_code(evidence))
     assessed = _with_judgments(assessed, evidence)
@@ -248,8 +252,7 @@ def _species_agreement(named: list[str], evidence: dict) -> dict:
             return _finding(
                 FAILED,
                 f"the paper states {', '.join(sorted(set(missing)))} and the deposit's sample records state "
-                f"{', '.join(sorted(declared.values()))}"
-                + (f" ({', '.join(disagreeing)})" if disagreeing else ""),
+                f"{', '.join(sorted(declared.values()))}" + (f" ({', '.join(disagreeing)})" if disagreeing else ""),
                 scope=scope,
                 impact=(
                     "an analysis against the paper's stated organism would align the wrong species and answer "
@@ -345,9 +348,7 @@ def _arm_support(contrasts: list[dict], evidence: dict) -> dict:
             + [sample.get("title"), sample.get("source_name")]
             if str(value or "").strip()
         }
-        matched = sorted(
-            arm for arm in wanted if any(arm in value or value in arm for value in described if value)
-        )
+        matched = sorted(arm for arm in wanted if any(arm in value or value in arm for value in described if value))
         if matched:
             return _finding(
                 VERIFIED,
@@ -605,7 +606,51 @@ def _replication(evidence: dict) -> dict:
     }
 
 
-def _references(experiments: list[dict]) -> dict:
+def _read_from_methods(evidence: dict) -> dict:
+    """``{"references", "criteria"}``: bioAF's normalized reading of this paper's methods.
+
+    plan_8_6 section 3 item 4, and the owner's review of the deployed code, 2026-09-21: M2.B said
+    "bioAF's read recorded no annotation release for this experiment" and M4.A said "the
+    comparison's significance cutoff is not stated" about a paper whose methods state `Ensembl
+    GRCh38 v96` and `log 2 fc >3, p adj < 0.05`. Neither was the paper's silence; both were bioAF's.
+
+    Never raises: a study with no index reads as a paper bioAF normalized nothing from, which is
+    exactly what these checks did before.
+    """
+    from app.services.validation_documentary_review import _index_of
+
+    try:
+        from app.services.validation_evidence_index import methods_paragraphs
+        from app.services.validation_methods_cutoffs import analysis_statements
+        from app.services.validation_reference import reference_statements
+
+        paragraphs = methods_paragraphs(_index_of(evidence or {}))
+        return {"references": reference_statements(paragraphs), "criteria": analysis_statements(paragraphs)}
+    except Exception:  # noqa: BLE001 - a reading bioAF cannot make leaves the checks as they were
+        return {"references": [], "criteria": []}
+
+
+def _annotation_from_methods(read: list[dict]) -> dict:
+    """``{"label", "quote"}`` where the methods name ONE annotation release, else what they disagree on.
+
+    Two different releases are not resolved by picking one: plan_8_6 section 3 item 4, "never choose
+    a cutoff because it reproduces a desired count", and the same rule holds for a reference.
+    """
+    labels: dict[str, str] = {}
+    for statement in read:
+        annotation = statement.get("annotation") or {}
+        label = str(annotation.get("label") or "").strip()
+        if label:
+            labels.setdefault(label, str(statement.get("quote") or ""))
+    if len(labels) == 1:
+        label, quote = next(iter(labels.items()))
+        return {"label": label, "quote": quote, "conflict": None}
+    if len(labels) > 1:
+        return {"label": None, "quote": None, "conflict": ", ".join(sorted(labels))}
+    return {"label": None, "quote": None, "conflict": None}
+
+
+def _references(experiments: list[dict], read: list[dict] | None = None) -> dict:
     """M2: the result-sensitive references a paper's numbers depend on, and whether they can be recovered.
 
     plan_8_5 section 3.3. B asks whether the paper specified its reference versions and identifiers
@@ -651,7 +696,7 @@ def _references(experiments: list[dict]) -> dict:
             scope=scope,
             next_action="read the paper's methods again",
         )
-    return {"M2.A": identified, "M2.B": _reference_recoverability(relevant, scope)}
+    return {"M2.A": identified, "M2.B": _reference_recoverability(relevant, scope, read or [])}
 
 
 # What each recorded status says about the PAPER's statement, as `validation_reference` sets them.
@@ -665,8 +710,15 @@ _USABLE, _UNAVAILABLE, _UNRESOLVED, _NOT_READ, _UNSTATED = (
 _REFERENCE_PARTS = ("assembly", "annotation")
 
 
-def _reference_recoverability(relevant: list[tuple], scope: str) -> dict:
-    """M2.B: whether every result-sensitive reference the paper states resolves to one identifier."""
+def _reference_recoverability(relevant: list[tuple], scope: str, read: list[dict]) -> dict:
+    """M2.B: whether every result-sensitive reference the paper states resolves to one identifier.
+
+    Where the extraction attached no annotation to an experiment, the paper's OWN methods are read
+    for one (plan_8_6 section 3 item 4). A release bioAF read out of the methods is the paper
+    stating it; two different releases are a conflict the paper has to settle, and picking one here
+    would be inventing the answer.
+    """
+    from_methods = _annotation_from_methods(read)
     conflicts: list[str] = []
     open_parts: list[str] = []
     recovered: list[str] = []
@@ -675,6 +727,21 @@ def _reference_recoverability(relevant: list[tuple], scope: str) -> dict:
             part = reference.get(name) or {}
             status = str(part.get("status") or "").strip().lower()
             statement = str(part.get("stated") or "").strip()
+            unrecorded = not part.get("conflict") and status not in (_USABLE, _UNAVAILABLE, _NOT_READ, _UNRESOLVED)
+            if name == "annotation" and unrecorded and (from_methods["label"] or from_methods["conflict"]):
+                if from_methods["conflict"]:
+                    # Not a failure: a paper may legitimately use one release for one analysis and
+                    # another for the next, and reporting that as an irrecoverable reference would
+                    # be a negative about bioAF not knowing which experiment each belongs to. What
+                    # is true is that this experiment's release is not established.
+                    open_parts.append(
+                        f"the paper's methods name more than one annotation release "
+                        f"({from_methods['conflict']}), and which one this experiment's results rest "
+                        "on is not stated"
+                    )
+                else:
+                    recovered.append(f"{from_methods['label']} (from the paper's methods)")
+                continue
             if part.get("conflict"):
                 conflicts.append(str(part.get("reason") or f"the paper's {name} statements disagree"))
             elif status in (_USABLE, _UNAVAILABLE) and statement:
@@ -711,7 +778,32 @@ def _reference_recoverability(relevant: list[tuple], scope: str) -> dict:
     )
 
 
-def _decision_criteria(claims: list[dict], contrasts: list[dict], design: dict | None) -> dict:
+# The analysis scope whose criteria ARE a contrast's decision criteria. A threshold selecting the
+# input to a gene-ontology enrichment is a decision criterion of that enrichment, not of the
+# differential test the contrast is: plan_8_6 section 3 item 4, "Reconcile conflicting thresholds
+# within their actual analysis scope".
+_CONTRAST_ANALYSIS = "differential testing"
+
+
+def _criteria_from_methods(read: list[dict]) -> dict:
+    """``{"own", "other"}``: the criteria the paper states FOR a differential test, and for anything else.
+
+    ``own`` is what a contrast's decision criteria can be established from. ``other`` is what the
+    paper states about a different operation, which M4.A names rather than reporting silence: "the
+    paper states criteria for gene ontology enrichment and none for this comparison" is a different
+    fact from "the comparison's significance cutoff is not stated".
+    """
+    own, other = [], []
+    for statement in read or []:
+        words = ", ".join(f"{c['kind']} {c['operator']} {c['value']}" for c in statement.get("cutoffs") or [])
+        row = {"analysis": statement.get("analysis"), "read": words, "quote": statement.get("quote")}
+        (own if _CONTRAST_ANALYSIS in str(statement.get("analysis") or "") else other).append(row)
+    return {"own": own, "other": other}
+
+
+def _decision_criteria(
+    claims: list[dict], contrasts: list[dict], design: dict | None, read: list[dict] | None = None
+) -> dict:
     """M4: the decision criteria a paper's results rest on, and whether their reading is unambiguous.
 
     plan_8_5 section 3.3. Both obligations are read from the normalized scientific predicate, never
@@ -728,7 +820,7 @@ def _decision_criteria(claims: list[dict], contrasts: list[dict], design: dict |
       establishes nothing, and its absence is never proof that nothing is ambiguous.
     """
     return {
-        "M4.A": _criteria_stated(contrasts, design),
+        "M4.A": _criteria_stated(contrasts, design, _criteria_from_methods(read or [])),
         "M4.B": _criteria_reading(claims, contrasts),
     }
 
@@ -737,9 +829,10 @@ def _contrast_name(contrast: dict, index: int) -> str:
     return str(contrast.get("name") or "").strip() or f"comparison {index + 1}"
 
 
-def _criteria_stated(contrasts: list[dict], design: dict | None) -> dict:
+def _criteria_stated(contrasts: list[dict], design: dict | None, from_methods: dict | None = None) -> dict:
     from app.services.validation_claim_cutoffs import analysis_cutoffs
 
+    from_methods = from_methods or {"own": [], "other": []}
     scope = f"{len(contrasts)} {'contrast' if len(contrasts) == 1 else 'contrasts'}"
     if not contrasts:
         return _open(
@@ -751,13 +844,28 @@ def _criteria_stated(contrasts: list[dict], design: dict | None) -> dict:
     refused: list[str] = []
     for index, contrast in enumerate(contrasts):
         cutoffs = analysis_cutoffs(contrast, design or {})
-        if cutoffs.get("refusal"):
-            refused.append(f"{_contrast_name(contrast, index)}: {cutoffs['refusal']}")
-        elif cutoffs.get("statement"):
+        if cutoffs.get("statement"):
             applied.append(f"{_contrast_name(contrast, index)}: {cutoffs['statement']}")
+        elif from_methods["own"]:
+            # The paper states the criteria for its differential testing, and the extraction did not
+            # attach them to this contrast. M4.A asks whether the paper SPECIFIES them, so the
+            # paper's own sentence settles it; nothing here is inherited into a claim, which stays
+            # `validation_methods_cutoffs.inherited_cutoffs` under plan_8_2's rule.
+            applied.append(
+                f"{_contrast_name(contrast, index)}: the methods state {from_methods['own'][0]['read']} "
+                f'("{from_methods["own"][0]["quote"]}")'
+            )
+        elif cutoffs.get("refusal"):
+            refused.append(f"{_contrast_name(contrast, index)}: {cutoffs['refusal']}")
     if refused:
+        elsewhere = (
+            "; the paper does state criteria for "
+            + "; ".join(f'{row["analysis"]} ({row["read"]}: "{row["quote"]}")' for row in from_methods["other"][:2])
+            if from_methods["other"]
+            else ""
+        )
         return _open(
-            "; ".join(refused),
+            "; ".join(refused) + elsewhere,
             scope=scope,
             next_action="record the cutoff from the paper's methods, with its quote",
         )

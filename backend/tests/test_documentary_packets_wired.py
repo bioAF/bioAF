@@ -48,12 +48,17 @@ class _Client:
                 "citations": [self._first_id(payload)],
                 "scope": "the single-cell preprocessing described in this paper",
                 "impact": "a reader cannot repeat the filtering this analysis applied",
+                "basis": "absent",
                 "confidence": 0.7,
             }
         answer = answer or {
             "outcome": self.outcome,
             "rationale": self.rationale,
             "citations": [self._first_id(payload)],
+            "scope": "the preprocessing of the sequencing data described in this paper",
+            # Contract 3: an `unmet` answer says WHICH of the four kinds of defect it is. These
+            # stubs report an absence, which is what the coverage record is there to settle.
+            "basis": "absent",
             "confidence": 0.7,
         }
         return json.dumps(answer)

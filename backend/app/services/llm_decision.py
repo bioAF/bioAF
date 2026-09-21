@@ -407,8 +407,13 @@ async def decide_with_recovery(
     max_tokens: int | None = None,
     validate=None,
     provider: str | None = None,
+    recovery: bool = True,
 ) -> Decision:
     """plan_8_3 stage 6: one decision, with at most ONE semantic recovery.
+
+    ``recovery=False`` makes the call once and returns what came back. plan_8_6 section 11: an
+    obligation's targeted evidence expansion SHARES the one recovery allowance rather than nesting a
+    second retry loop inside it, so a caller that has already spent it asks again without one.
 
     A cut-off answer is asked again with a larger budget, within the model's documented maximum and
     what its measured rate can produce before the provider's deadline. An answer that arrived whole
@@ -425,7 +430,7 @@ async def decide_with_recovery(
 
     provider = provider or provider_of(client)
     attempts: list[dict] = []
-    ask_payload, ask_budget, retried = payload, max_tokens, False
+    ask_payload, ask_budget, retried = payload, max_tokens, not recovery
 
     while True:
         decision = await decide(

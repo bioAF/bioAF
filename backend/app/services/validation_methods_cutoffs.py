@@ -62,10 +62,15 @@ _AT_MOST = (r"<=|≤|=<|less than or equal to|at most|not exceeding", "<=")
 _BELOW = (r"<|less than|lower than|smaller than|below|under", "<")
 _AT_LEAST = (r">=|≥|=>|greater than or equal to|at least", ">=")
 _ABOVE = (r">|greater than|more than|higher than|above|over|exceeding", ">")
+# `P_adj` reaches bioAF as "p adj" once a JATS article's subscripts are flattened, and study 65
+# writes exactly that: "log 2 fc >3, p adj < 0.05". A reader that knew only `padj` and "adjusted P
+# value" normalized the paper's own stated threshold to nothing, so M4 saw no cutoff on a paper that
+# states two. The separator is optional whitespace, a hyphen or a dot, in either order.
 _SIGNIFICANCE = re.compile(
     r"(?P<kind>benjamini[- ]hochberg[- ]adjusted\s+p[- ]?values?|bh[- ]adjusted\s+p[- ]?values?"
-    r"|bonferroni[- ](?:corrected|adjusted)\s+p[- ]?values?|adjusted\s+p[- ]?values?|adj\.?\s*p(?:[- ]?values?)?"
-    r"|p\.?adj|padj|fdr|false discovery rate|q[- ]?values?|p[- ]?values?|\bp\b)"
+    r"|bonferroni[- ](?:corrected|adjusted)\s+p[- ]?values?|adjusted\s+p[- ]?values?"
+    r"|adj\.?\s*[-.]?\s*[pq](?:[- ]?values?)?|[pq]\s*[-.]?\s*adj\.?(?:usted)?(?:[- ]?values?)?"
+    r"|fdr|false discovery rate|q[- ]?values?|p[- ]?values?|\bp\b)"
     r"\s*(?:\([^)]{0,20}\)\s*)?(?:of\s+)?(?P<op>" + "|".join(p for p, _ in (_AT_MOST, _BELOW)) + r")\s*" + _NUMBER,
     re.IGNORECASE,
 )
@@ -194,6 +199,65 @@ def methods_statements(paragraphs: list[str]) -> list[dict]:
     return statements
 
 
+# The analysis operation a cutoff governs. plan_8_6 section 3 item 4: "Reconcile conflicting
+# thresholds within their actual analysis scope, retaining the quotes." A threshold selecting the
+# input to a GO enrichment and a threshold defining a differential table are two decision criteria,
+# not one paper-level cutoff and not an ambiguity, and M4 is asked about both.
+_OPERATIONS: tuple[tuple[str, re.Pattern], ...] = (
+    (
+        "gene ontology or pathway enrichment",
+        re.compile(r"\bgene ontology\b|\bGO (?:term|enrichment|analysis)|\benrich\w*|\bpathway\b|\bKEGG\b", re.I),
+    ),
+    (
+        "differential testing",
+        re.compile(
+            r"differential(?:ly)?[\s-]+(?:expressed|expression|accessib\w*|bound|binding|abundan\w*|methylat\w*)"
+            r"|\bDEGs?\b|\bDESeq2\b|\bedgeR\b|\blimma\b|\bWald test\b",
+            re.I,
+        ),
+    ),
+    ("marker or cluster selection", re.compile(r"\bmarker genes?\b|\bcluster\w*|\bLeiden\b|\brank_genes", re.I)),
+    (
+        "quality filtering",
+        re.compile(r"\bfilter\w*|\bexclud\w*|\bdiscard\w*|\bremoved\b|\bquality control\b|\bQC\b", re.I),
+    ),
+    ("correlation or similarity", re.compile(r"\bcorrelat\w*|\bsimilarity\b|\bTROM\b|\bdistance\b", re.I)),
+)
+
+
+def analysis_statements(paragraphs: list[str] | None) -> list[dict]:
+    """Every methods sentence that states a cutoff AND names the analysis operation it governs.
+
+    This is EVIDENCE, not inheritance. `methods_statements` keeps the narrower set that plan_8_2's
+    owner decision 2 allows a claim to inherit a cutoff from; a GO-enrichment input threshold is not
+    that, and nothing here makes it one. M4 asks whether the decision criteria applied to the
+    analysis output are specified and unambiguous, and a threshold nobody read cannot answer it.
+    """
+    from app.services.validation_table_binding import sentences
+
+    found: list[dict] = []
+    for index, paragraph in enumerate(paragraphs or []):
+        for sentence in sentences(paragraph or ""):
+            cutoffs = _cutoffs(sentence)
+            if not cutoffs:
+                continue
+            operations = [name for name, words in _OPERATIONS if words.search(sentence)]
+            if not operations:
+                # A number with no operation named is not a decision criterion bioAF can scope, and
+                # reporting it as one would put "the threshold was 0.05" in front of M4 as though
+                # the paper had said what it decides.
+                continue
+            found.append(
+                {
+                    "quote": sentence,
+                    "cutoffs": cutoffs,
+                    "analysis": "; ".join(operations),
+                    "paragraph": index,
+                }
+            )
+    return found
+
+
 def record(paragraphs: list[str] | None, *, source: str | None) -> dict:
     """What the study keeps of its methods: the defining sentences, and how many paragraphs were read."""
     return {
@@ -201,6 +265,9 @@ def record(paragraphs: list[str] | None, *, source: str | None) -> dict:
         "source": source,
         "paragraphs": len(paragraphs or []),
         "statements": methods_statements(paragraphs or []),
+        # plan_8_6 section 3 item 4: the decision criteria M4 is asked about, scoped to the analysis
+        # each governs. Kept apart from `statements`, which is the inheritance path and is narrower.
+        "analysis_statements": analysis_statements(paragraphs or []),
     }
 
 

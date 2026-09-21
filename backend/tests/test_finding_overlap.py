@@ -26,10 +26,15 @@ def _failed(citations, *, scope, rationale="the supplied code disagrees with the
     }
 
 
-def _verified(citations, *, rationale="the design is appropriate"):
+def _verified(citations, *, rationale="the design is appropriate", scope=""):
+    """A positive, with the scope its answer named. Contract 3 asks every answer for one: the
+    reconciliation compares the scopes, because a negative about a GO threshold and a positive about
+    sample preparation can cite the same methods paragraph and be about different facts."""
     return {
         "outcome": VERIFIED,
         "rationale": rationale,
+        "scope": scope,
+        "scope_stated": bool(scope),
         "evidence": {"citations": list(citations)},
         "method": "model_assisted",
     }
@@ -113,6 +118,7 @@ class TestAPositiveCannotStandOnEvidenceANegativeContradicts:
             ),
             "M3.B": _verified(
                 ["p61", "design:3"],
+                scope="bulk RNA-seq differential expression of the TF-overexpression samples",
                 rationale="each named test is matched to its data type and to a stated replication unit",
             ),
         }
@@ -132,7 +138,7 @@ class TestAPositiveCannotStandOnEvidenceANegativeContradicts:
     def test_the_positive_keeps_what_it_found(self):
         judgments = {
             "S5.A": _failed(["p61", "design:3"], scope="the replicate structure"),
-            "M3.B": _verified(["p61", "design:3"]),
+            "M3.B": _verified(["p61", "design:3"], scope="the replicate structure of the comparison"),
         }
         found = reconcile_findings(judgments)
         assert found["M3.B"]["withheld"]["outcome"] == VERIFIED
@@ -174,7 +180,7 @@ class TestSharingAPassageIsNotRestingOnTheSameFact:
     def test_a_positive_resting_on_nothing_more_is_still_withdrawn(self):
         judgments = {
             "S5.A": _failed(["p61", "design:3", "GSE213156/GSM6573673"], scope="the replicate structure"),
-            "M3.B": _verified(["p61", "design:3"]),
+            "M3.B": _verified(["p61", "design:3"], scope="the replicate structure of the comparison"),
         }
         found = reconcile_findings(judgments)
         assert found["M3.B"]["outcome"] == UNDETERMINED
