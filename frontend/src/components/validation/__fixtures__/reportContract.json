@@ -1368,7 +1368,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "3.5 positive points \u00b7 96.5 untested points \u00b7 0 negative points",
       "display": {
@@ -5314,7 +5314,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "6 positive points \u00b7 94 untested points \u00b7 0 negative points",
       "display": {
@@ -7754,7 +7754,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
@@ -10816,7 +10816,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
@@ -13965,7 +13965,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
@@ -16518,7 +16518,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
@@ -18576,7 +18576,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "12 positive points \u00b7 88 untested points \u00b7 0 negative points",
       "display": {
@@ -21131,7 +21131,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
@@ -23312,7 +23312,7 @@
           "section": "R"
         }
       ],
-      "checker_version": 1,
+      "checker_version": 2,
       "concerns": [],
       "counts_label": "0 positive points \u00b7 100 untested points \u00b7 0 negative points",
       "display": {
