@@ -340,8 +340,43 @@ _SELECTORS: dict[str, Selector] = {
 
 
 def selector_for(leaf: str) -> Selector | None:
-    """The selector for one obligation: its own, else its criterion's."""
-    return _SELECTORS.get(leaf) or _SELECTORS.get(str(leaf).partition(".")[0])
+    """The selector for one obligation: its own, else its criterion's.
+
+    plan_8_7 stage 1: a leaf may name the analysis unit it is about (``M3.B#exp:e1``). The selector is
+    the obligation's; what the unit changes is the ranking and, for an implementation, which supplied
+    source is eligible at all.
+    """
+    base = str(leaf).partition("#")[0]
+    return _SELECTORS.get(base) or _SELECTORS.get(base.partition(".")[0])
+
+
+# What a passage naming this analysis unit's own subject is worth. Big enough that the arm's own
+# methods paragraph outranks the other arm's, small enough that it cannot make an irrelevant passage
+# into evidence: eligibility is still the section and the exclusion still drops what the obligation is
+# not about.
+UNIT_WEIGHT = 4
+
+
+def _unit_terms(unit: dict | None) -> list[str]:
+    return [t.lower() for t in (unit or {}).get("terms") or [] if str(t).strip()]
+
+
+def _unit_bonus(text: str, terms: list[str]) -> int:
+    if not terms:
+        return 0
+    body = (text or "").lower()
+    return UNIT_WEIGHT * sum(1 for term in terms if term in body)
+
+
+def _is_other_source(extra: dict, other_paths: set[str]) -> bool:
+    """Whether this row is a supplied source file belonging to a DIFFERENT implementation unit."""
+    if not isinstance(extra, dict) or extra.get("kind") != CODE:
+        return False
+    identity = str(extra.get("id") or "")
+    if not identity.startswith("code:"):
+        return False
+    path = identity[len("code:") :].rpartition("#")[0] or identity[len("code:") :]
+    return path in other_paths
 
 
 # How much a passage's SECTION is worth against the terms it matches. A long results narration
@@ -359,6 +394,29 @@ def _section_bonus(selector: Selector, kind: str, *, extras: bool = False) -> in
     if kind not in declared:
         return 0
     return SECTION_WEIGHT * (len(declared) - declared.index(kind))
+
+
+def _excluded_sections(eligible: list[dict], selector: Selector) -> set[str]:
+    """The sections this obligation is not about, read a section at a time rather than a line at a time.
+
+    A section counts as excluded when its own paragraphs, taken together, say something the obligation
+    explicitly excludes and nothing it includes. That is a coherent procedure bioAF is not being asked
+    about; carrying its neutral sentences would put the culture protocol in front of a question about
+    preprocessing, one paragraph at a time.
+    """
+    if selector.exclude is None:
+        return set()
+    sections: dict[str, list[str]] = {}
+    for passage in eligible:
+        label = str(passage.get("section") or "")
+        if label:
+            sections.setdefault(label, []).append(str(passage.get("text") or ""))
+    found = set()
+    for label, texts in sections.items():
+        body = f"{label}\n" + "\n".join(texts)
+        if selector.exclude.search(body) and not selector.include.search(body):
+            found.add(label)
+    return found
 
 
 def _score(text: str, selector: Selector, section: str) -> tuple[int, bool]:
@@ -380,6 +438,7 @@ def packet_for(
     extras: list[dict] | None = None,
     limitations: list[dict] | None = None,
     budget_chars: int = MAX_PACKET_CHARS,
+    unit: dict | None = None,
 ) -> dict:
     """``{"passages", "expansion", "coverage"}``: the evidence this obligation may be judged on.
 
@@ -387,8 +446,17 @@ def packet_for(
     ``kind`` (``deposit``, ``code``, ``tools``, ``supplement``). ``limitations`` are the sources
     bioAF tried and could not get, as ``{"needs", "reason"}``; one that names a source this
     obligation depends on makes its coverage insufficient for an absence finding.
+
+    ``unit`` is the analysis unit this leaf is about (`validation_analysis_units`). Its own words rank
+    its evidence first, so two arms of one paper are judged on different passages, and an
+    implementation unit is shown its own source and not another unit's.
     """
     selector = selector_for(leaf)
+    unit = unit if isinstance(unit, dict) else None
+    unit_terms = _unit_terms(unit)
+    # The paths belonging to another implementation unit. Only those are dropped: a manifest, the
+    # paper's own methods and bioAF's parser observations are shared evidence about every unit.
+    other_paths = set((unit or {}).get("other_paths") or [])
     passages = [p for p in (index or {}).get("passages") or [] if isinstance(p, dict)]
     if selector is None:
         # No selector declared: supply the article's text in document order rather than nothing, and
@@ -403,17 +471,36 @@ def packet_for(
         return _packet(leaf, kept, expansion, coverage, widened if expansion else coverage)
 
     eligible = [p for p in passages if p.get("kind") in selector.sections]
+    # plan_8_7 stage 1: "carry coherent procedures ... rather than isolated matching sentences". A
+    # paper's Methods holds a bench procedure and a computational one under one kind, so eligibility
+    # is read a section at a time: a subsection whose paragraphs are about what this obligation
+    # EXCLUDES and about nothing it includes is not eligible, and its neutral opening sentence goes
+    # with it. Without this, dropping the keyword gate put "Two parental hiPSC lines were used" in
+    # front of a preprocessing question, which is the defect plan_8_6 removed.
+    skipped_sections = _excluded_sections(eligible, selector)
+    skipped = 0
+    if skipped_sections:
+        kept_eligible = [p for p in eligible if str(p.get("section") or "") not in skipped_sections]
+        # Counted, never forgotten: a section bioAF declined to read is on the coverage record beside
+        # the passages it dropped one at a time.
+        skipped = len(eligible) - len(kept_eligible)
+        eligible = kept_eligible
+    if other_paths:
+        # An implementation unit is about ITS file. Another unit's source is not evidence about it, and
+        # spending its packet on one would be how a paper-wide verdict creeps back in.
+        extras = [e for e in extras or [] if not _is_other_source(e, other_paths)]
     # (rank, relevant, candidate, document order, passage). ``relevant`` is whether the passage
     # matched this obligation's own terms, kept apart from the section bonus so that a neutral
     # paragraph deferred by budget is not reported as relevant evidence bioAF failed to carry.
     # ``candidate`` is whether it is supplied before the ranking has to fall back on the section.
     ranked: list[tuple[int, bool, bool, int, dict]] = []
-    excluded = 0
+    excluded = skipped
     for order, passage in enumerate(eligible):
         rank, dropped = _score(str(passage.get("text") or ""), selector, str(passage.get("section") or ""))
         if dropped:
             excluded += 1
             continue
+        rank += _unit_bonus(str(passage.get("text") or ""), unit_terms)
         # plan_8_7 section 6 stage 1: "Missing keyword matches do not establish irrelevance." A
         # paragraph of the section this obligation is about is candidate evidence for it however it is
         # worded: the owner's repeated-observations sentence matched none of M3's vocabulary, ranked
@@ -429,6 +516,7 @@ def packet_for(
         if dropped:
             excluded += 1
             continue
+        rank += _unit_bonus(f"{extra.get('text') or ''} {extra.get('source') or ''}", unit_terms)
         # Evidence that is not the article's text is eligible BECAUSE of what it is: a deposit record
         # answers "do independent records agree" whether or not it repeats the paper's vocabulary.
         # What it is NOT is automatically relevant: a source file is carried whole now, and most of
@@ -488,7 +576,10 @@ def packet_for(
     # the eligible sections the ranking passed over. One second ask, not a nested retry loop.
     expansion = (deferred + [row[4] for row in spare])[:MAX_EXPANSION_PASSAGES]
     coverage = _coverage(leaf, eligible, kept, excluded, deferred, missed, limitations or [], selector)
+    coverage["eligible"] = len(ranked)
     coverage["selected_by"] = "section" if by_section_only else "relevance"
+    coverage["unit"] = (unit or {}).get("id") or (unit or {}).get("label")
+    coverage["excluded_sections"] = sorted(skipped_sections)
     # plan_8_6 section 11, and the owner's review 2026-09-21: "Expansion also reuses the original
     # coverage record." A widened request is judged on what IT was shown, and an absence finding
     # rests on that record (section 8), so the coverage of the widened packet is computed here
@@ -498,7 +589,10 @@ def packet_for(
     still_deferred = [p for p in deferred if id(p) not in added]
     still_missed = [p for p in missed if id(p) not in added]
     expanded = _coverage(leaf, eligible, widened, excluded, still_deferred, still_missed, limitations or [], selector)
+    expanded["eligible"] = len(ranked)
     expanded["selected_by"] = coverage["selected_by"]
+    expanded["unit"] = coverage["unit"]
+    expanded["excluded_sections"] = coverage["excluded_sections"]
     return _packet(leaf, kept, expansion, coverage, expanded if expansion else coverage)
 
 

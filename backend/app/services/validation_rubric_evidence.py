@@ -85,6 +85,7 @@ def assess_evidence(
     evidence: dict | None,
     claims: list[dict] | None = None,
     inventory: dict | None = None,
+    units: dict | None = None,
 ) -> dict:
     """Every rubric v3 leaf this build can settle from the study's held evidence, keyed by leaf id.
 
@@ -119,7 +120,78 @@ def assess_evidence(
             leaf_id,
             _finding(UNDETERMINED, limit["reason"], scope="not assessed", method=MEASUREMENT, capability_limit=True),
         )
-    return assessed
+    # plan_8_7 stage 1: where the scope established units, every unit gets its OWN outcome. The code
+    # units are parsed separately, so their outcomes differ by construction; the rest take the
+    # judgment made about that unit, and an obligation with no answer for a unit stays open for that
+    # unit alone. Nothing paper-wide is copied into a unit.
+    return _per_unit(assessed, evidence, units)
+
+
+def _per_unit(assessed: dict, evidence: dict, units: dict | None) -> dict:
+    """One outcome per (obligation, unit), keyed the way ``allocate`` spells its leaves."""
+    scope = (units or {}).get("units") or {}
+    if not scope:
+        return assessed
+    definitions = (units or {}).get("definitions") or {}
+    unresolved = set((units or {}).get("unresolved") or [])
+    code = _code_by_unit(evidence, definitions)
+    judged = _judgments_of(evidence)
+    found = {leaf: row for leaf, row in assessed.items() if leaf not in scope}
+    for leaf, unit_ids in scope.items():
+        for unit_id in unit_ids:
+            leaf_id = f"{leaf}#{unit_id}"
+            if unit_id in unresolved:
+                found[leaf_id] = _open(
+                    "bioAF's read of the paper did not identify this experiment, so nothing it holds can be "
+                    "attributed to it and the points it carries are held open",
+                    scope=(definitions.get(unit_id) or {}).get("label") or unit_id,
+                    next_action="identify this experiment at the gate, then assess it again",
+                )
+                continue
+            settled = (code.get(unit_id) or {}).get(leaf) or judged.get(leaf_id)
+            found[leaf_id] = settled or _open(
+                "this obligation was not answered for this analysis on its own",
+                scope=(definitions.get(unit_id) or {}).get("label") or unit_id,
+                next_action="assess this analysis again so the obligation is answered about it",
+            )
+    return found
+
+
+def _code_by_unit(evidence: dict, definitions: dict) -> dict[str, dict]:
+    """The code section, parsed once per supplied implementation.
+
+    "Assess separate analysis implementations separately; running one script does not establish that
+    all supplied code works" (plan_8_7 section 3). This is the deterministic half of that: each unit's
+    own sources, parsed on their own, with the manifests they share.
+    """
+    from app.services.validation_code_checks import assess_code
+
+    inspection = evidence.get("code_inspection") if isinstance(evidence.get("code_inspection"), dict) else {}
+    sources = [s for s in (inspection or {}).get("sources") or [] if isinstance(s, dict)]
+    if not sources:
+        return {}
+    found: dict[str, dict] = {}
+    for unit_id, definition in definitions.items():
+        if definition.get("kind") != "implementation":
+            continue
+        paths = set(definition.get("paths") or [])
+        own = [s for s in sources if str(s.get("path") or "") in paths]
+        if not own:
+            continue
+        found[unit_id] = assess_code(
+            sources=own,
+            manifests=(inspection or {}).get("manifests"),
+            defects=(inspection or {}).get("reviews"),
+            execution=((inspection or {}).get("execution_by_unit") or {}).get(unit_id)
+            or (inspection or {}).get("execution"),
+        )
+    return found
+
+
+def _judgments_of(evidence: dict) -> dict:
+    held = evidence.get("rubric_judgments")
+    judgments = (held or {}).get("judgments") if isinstance(held, dict) else None
+    return {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)} if isinstance(judgments, dict) else {}
 
 
 def _with_judgments(assessed: dict, evidence: dict) -> dict:

@@ -31,7 +31,12 @@ from fractions import Fraction
 # and the decision criteria bioAF normalized out of them, and M2.B names the arm each open half is
 # open for. Study 65's held outcomes were made by a checker that did neither, and they survived a
 # forced republish because the evidence and plan digests had not moved: the CHECKER had.
-CHECKER_VERSION = 2
+#
+# 3: plan_8_7 stage 1. C3.B and C4.A are judged with the paper's claimed steps in front of the
+# assessor instead of being awarded by a regex, the packets stopped treating keyword absence as
+# irrelevance, and the obligations are allocated and assessed over the analysis units bioAF
+# established. Every one of those changes what an accepted outcome means.
+CHECKER_VERSION = 3
 
 # What the checks actually read. Evidence outside this cannot change an outcome, so it cannot
 # invalidate one either: a re-fetched artifact must not cost every study a fresh set of judgments.
@@ -63,9 +68,15 @@ def assessment_inputs(*, plan: dict | None, evidence: dict | None, claims, inven
     """What this assessment rests on, as hashes: the evidence, the plan, the claims, the inventory."""
     plan = plan or {}
     evidence = evidence or {}
+    from app.services.validation_analysis_units import analysis_units
+
     return {
         "evidence": _digest({key: evidence.get(key) for key in EVIDENCE_KEYS}),
         "plan": _digest({key: plan.get(key) for key in PLAN_KEYS}),
+        # plan_8_7 stage 1: "A scope revision changes allocations transparently and invalidates
+        # affected assessments." The units are established from the plan and the evidence before any
+        # outcome is known, so their revision is an input to the assessment like everything else.
+        "units_revision": analysis_units(plan=plan, evidence=evidence)["revision"],
         "claims": _digest(
             [{key: claim.get(key) for key in CLAIM_KEYS} for claim in claims or [] if isinstance(claim, dict)]
         ),
@@ -122,6 +133,7 @@ def build_assessment(
     revision: int = 1,
 ) -> dict:
     """Settle every obligation this build can settle from the study's held evidence, as one record."""
+    from app.services.validation_analysis_units import analysis_units
     from app.services.validation_rubric_evidence import assess_evidence, profile_for
     from app.services.validation_rubric_v3 import RUBRIC_VERSION, allocate, result_allocation
 
@@ -132,7 +144,11 @@ def build_assessment(
         e.get("workflow") for e in plan.get("reported_experiments") or [] if isinstance(e, dict) and e.get("workflow")
     ]
     profile = profile_for(plan=plan)
-    leaves = allocate(profile, results=result_allocation(inventory, workflows=workflows))
+    # plan_8_7 stage 1: the units are established from the plan and the held evidence BEFORE any
+    # outcome is known, and the same record scopes the allocation and the assessment, so a weight can
+    # never be split across arms the assessment did not answer about separately.
+    units = analysis_units(plan=plan, evidence=evidence)
+    leaves = allocate(profile, units=units["units"], results=result_allocation(inventory, workflows=workflows))
     return {
         "rubric_version": RUBRIC_VERSION,
         "checker_version": CHECKER_VERSION,
@@ -140,7 +156,8 @@ def build_assessment(
         "at": _now_iso(),
         "profile": _serialize_profile(profile),
         "leaves": _serialize_leaves(leaves),
-        "outcomes": assess_evidence(plan=plan, evidence=evidence, claims=claims, inventory=inventory),
+        "units": units,
+        "outcomes": assess_evidence(plan=plan, evidence=evidence, claims=claims, inventory=inventory, units=units),
         "inputs": assessment_inputs(plan=plan, evidence=evidence, claims=claims, inventory=inventory),
     }
 

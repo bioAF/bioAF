@@ -930,12 +930,23 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     # plan_8_6 section 3: one packet per obligation, built from this study's section-aware index,
     # so a computational question is not answered from the culture protocol and an absence finding
     # rests on what the packet actually covered.
-    packets = packets_for(evidence=evidence, plan=plan_dict, leaves=JUDGED_LEAVES)
+    # plan_8_7 stage 1: the analysis units, established from the plan and the held evidence before any
+    # outcome is known. Where the paper has two arms or two implementations, each obligation about them
+    # is asked about ONE of them, with that unit's own evidence ranked first, so a defect in one arm
+    # cannot settle the other. The same record allocates the weights in `build_assessment`.
+    from app.services.validation_analysis_units import analysis_units
+
+    scope = analysis_units(plan=plan_dict, evidence=evidence)
+    leaves = _leaves_for(scope)
+    packets = packets_for(
+        evidence=evidence, plan=plan_dict, leaves=leaves, units=scope["definitions"]
+    )
     fingerprints = {leaf: _packet_fingerprint(packet) for leaf, packet in packets.items()}
     identity = {
         "packets": {leaf: [p["id"] for p in packet["passages"]] for leaf, packet in packets.items()},
         "fingerprints": fingerprints,
         "model": model,
+        "units_revision": scope["revision"],
     }
     held = evidence.get("rubric_judgments") if isinstance(evidence.get("rubric_judgments"), dict) else None
     if held is not None and held.get("inputs") == identity:
@@ -946,7 +957,13 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     settled = _unchanged_judgments(held, fingerprints, model)
     try:
         reviewed = await review_documents(
-            packets=packets, client=client, model=model or "", api_key=api_key, settled=settled
+            packets=packets,
+            client=client,
+            model=model or "",
+            api_key=api_key,
+            settled=settled,
+            leaves=leaves,
+            units=scope["definitions"],
         )
     except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
         logger.warning("study %s: the documentary review could not run: %s", study.id, exc)
@@ -956,6 +973,25 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     study.evidence_json = evidence
     await session.flush()
     return record
+
+
+def _leaves_for(scope: dict) -> tuple[str, ...]:
+    """The obligations to ask about, once per analysis unit where the scope established units.
+
+    plan_8_7 stage 1: the unit ids come from `validation_analysis_units`, which is the same record
+    `build_assessment` allocates over, so the weights and the answers can never disagree about which
+    arms this paper has.
+    """
+    from app.services.validation_documentary_review import JUDGED_LEAVES
+
+    units = scope.get("units") or {}
+    found: list[str] = []
+    for leaf in JUDGED_LEAVES:
+        for unit_id in units.get(leaf) or []:
+            found.append(f"{leaf}#{unit_id}")
+        if not units.get(leaf):
+            found.append(leaf)
+    return tuple(found)
 
 
 def _packet_fingerprint(packet: dict) -> str:
@@ -973,6 +1009,7 @@ def _packet_fingerprint(packet: dict) -> str:
     from app.services.validation_evidence_packets import PACKET_VERSION
     from app.services.validation_finding_overlap import OVERLAP_VERSION
     from app.services.validation_judgment import CONTRACT_VERSION
+    from app.services.validation_semantic_reconciliation import RECONCILIATION_VERSION
 
     payload = _json.dumps(
         {
@@ -983,6 +1020,8 @@ def _packet_fingerprint(packet: dict) -> str:
             "review": REVIEW_VERSION,
             "packet": PACKET_VERSION,
             "overlap": OVERLAP_VERSION,
+            # plan_8_7: a changed semantic reconciliation is a different answer about the same pair.
+            "reconciliation": RECONCILIATION_VERSION,
         },
         sort_keys=True,
         default=str,
