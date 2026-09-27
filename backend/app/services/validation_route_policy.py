@@ -35,12 +35,17 @@ from dataclasses import dataclass, field
 
 PROCEED = "proceed"
 UNDETERMINED = "undetermined"
+# plan_8_7 stage 2: the DEFAULT route. It asks the paper for nothing and authorizes no execution, so
+# clicking Validate starts the assessment instead of a spend decision. It is an action of its own
+# because the three terminals must stay apart: an assessment-only study is not a paper with no
+# adapter, no input or no authorization, and must never read as one.
+ASSESSMENT_ONLY = "assessment_only"
 CONTESTED = "contested"
 NO_ADAPTER = "no_adapter"
 NO_INPUT = "no_input"
 NOT_AUTHORIZED = "not_authorized"
 
-ACTIONS = (PROCEED, UNDETERMINED, CONTESTED, NO_ADAPTER, NO_INPUT, NOT_AUTHORIZED)
+ACTIONS = (PROCEED, UNDETERMINED, CONTESTED, NO_ADAPTER, NO_INPUT, NOT_AUTHORIZED, ASSESSMENT_ONLY)
 
 # The actions that end the execution attempt. Owner decision 1: none of them has an override.
 # `deposit_override` and `species_override` answer a contested scientific judgment, which is a
@@ -51,7 +56,11 @@ OVERRIDABLE_ACTIONS = (CONTESTED,)
 # would hide a workable route behind a timeout.
 EXECUTING_ACTIONS = (PROCEED, UNDETERMINED)
 
-# What each route needs the paper to have, and how to say it to a reader.
+# The route a study is requested for when nobody chose one: assess the paper, spend nothing.
+ASSESSMENT = "assessment"
+
+# What each route needs the paper to have, and how to say it to a reader. `assessment` is absent on
+# purpose: it requires nothing of the paper, which is why it can be the default.
 ROUTE_REQUIREMENTS: dict[str, str] = {"deposit": "preprocessed_data", "pipeline": "raw_data"}
 ROUTE_NEEDS: dict[str, str] = {
     "deposit": "pre-processed data to reproduce the finding from",
@@ -60,7 +69,7 @@ ROUTE_NEEDS: dict[str, str] = {
 
 # Precedence when legs disagree. A contested judgment is the reader's to answer, so it is reported
 # first; a terminal refusal outranks an unknown, because something WAS established.
-_PRECEDENCE = (CONTESTED, NO_ADAPTER, NOT_AUTHORIZED, NO_INPUT, UNDETERMINED, PROCEED)
+_PRECEDENCE = (ASSESSMENT_ONLY, CONTESTED, NO_ADAPTER, NOT_AUTHORIZED, NO_INPUT, UNDETERMINED, PROCEED)
 
 
 @dataclass(frozen=True)
@@ -125,6 +134,12 @@ def legs_for(route: str) -> tuple[str, ...]:
     return (route,)
 
 
+ASSESSMENT_REASON = (
+    "this validation was requested as an assessment of the paper's evidence, which spends no compute. "
+    "Reproducing its results is an advanced choice, and choosing it authorizes what it costs"
+)
+
+
 def decide_route(
     *,
     route: str,
@@ -141,6 +156,10 @@ def decide_route(
     network fetch in the way of every approval and let an outage decide the answer.
     """
     caps = capabilities or {}
+    if route == ASSESSMENT:
+        # Nothing about the paper is consulted: the answer does not depend on it. A refusal here would
+        # be a refusal to read a paper, and the reason says what was requested rather than what failed.
+        return _single(route, ASSESSMENT_ONLY, ASSESSMENT_REASON)
 
     if conflict and not deposit_override:
         reason = str(conflict.get("message") or "the deposit contradicts the plan")

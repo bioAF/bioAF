@@ -64,7 +64,28 @@ def _caps(deposits, **answers):
 
 class TestTheSixActions:
     def test_every_action_is_declared(self):
-        assert set(ACTIONS) == {PROCEED, UNDETERMINED, CONTESTED, NO_ADAPTER, NO_INPUT, NOT_AUTHORIZED}
+        """plan_8_7 stage 2 adds a seventh: `assessment_only`, the default route's answer. It is its own
+        action because the three terminal refusals must stay apart, and a study requested for an
+        assessment is not a paper with no adapter, no input or no authorization."""
+        from app.services.validation_route_policy import ASSESSMENT_ONLY
+
+        assert set(ACTIONS) == {
+            PROCEED,
+            UNDETERMINED,
+            CONTESTED,
+            NO_ADAPTER,
+            NO_INPUT,
+            NOT_AUTHORIZED,
+            ASSESSMENT_ONLY,
+        }
+
+    def test_the_assessment_route_authorizes_no_execution_and_refuses_nothing(self):
+        from app.services.validation_route_policy import ASSESSMENT, ASSESSMENT_ONLY
+
+        decision = decide_route(route=ASSESSMENT, capabilities=_caps([], preprocessed_data="no"))
+        assert decision.action == ASSESSMENT_ONLY
+        assert decision.authorizes_execution is False
+        assert decision.terminal is False
 
     def test_an_acquirable_deposit_proceeds(self):
         decision = decide_route(route="deposit", capabilities=_caps([_OPEN_GEO], preprocessed_data="yes"))

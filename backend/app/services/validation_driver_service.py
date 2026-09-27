@@ -70,7 +70,7 @@ from app.services.validation_acquisition_outcome import (
     retrieval_cause,
 )
 from app.services.contrast_selection import selected_contrast_for
-from app.services.validation_route_policy import decide_route
+from app.services.validation_route_policy import ASSESSMENT, decide_route
 from app.services.validation_ownership import (
     ClaimLost,
     adopt,
@@ -1457,6 +1457,14 @@ class ValidationDriverService:
         route = study.intended_route
         if not route:  # pragma: no cover - the loop's predicate already filtered these out
             return False
+        if route == ASSESSMENT:
+            # plan_8_7 stage 2: the default. Everything that needs no compute is assessed and the study
+            # reaches a stated outcome; reproducing the paper's results is an advanced choice with its
+            # own authorization, and the report says so rather than reporting a blocker.
+            from app.services.validation_assessment import assessment_only_reason
+
+            await ValidationDriverService._finish_without_execution(session, study, assessment_only_reason())
+            return True
 
         evidence = dict(study.evidence_json or {})
         if evidence.get("route_blocked"):
