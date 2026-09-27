@@ -813,11 +813,22 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
         model=cfg.model if cfg else None,
         api_key=cfg.api_key if cfg else None,
     )
+    # plan_8_7 stage 2: whether the result supports each stated conclusion, in the design, uncertainty
+    # and population actually examined. It runs here, before any execution, because an inference can be
+    # assessed from the paper's own evidence and a missing run is bioAF's limitation rather than a
+    # reason to say nothing.
+    interpreted = await refresh_interpretation_review(
+        session,
+        study,
+        client=get_client(cfg.provider) if cfg else None,
+        model=cfg.model if cfg else None,
+        api_key=cfg.api_key if cfg else None,
+    )
     # plan_8_6 section 11: what this assessment actually cost, recorded rather than estimated. A
     # cheaper configuration is only acceptable once the accuracy gates pass, and neither can be
     # argued from numbers nobody kept.
     evidence = dict(study.evidence_json or {})
-    record["measured"] = _measured(evidence, reviewed, seconds=time.monotonic() - started)
+    record["measured"] = _measured(evidence, reviewed, seconds=time.monotonic() - started, interpreted=interpreted)
     evidence["assessment"] = record
     study.evidence_json = evidence
     await session.flush()
@@ -829,7 +840,7 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     return record
 
 
-def _measured(evidence: dict, reviewed: dict | None, *, seconds: float) -> dict:
+def _measured(evidence: dict, reviewed: dict | None, *, seconds: float, interpreted: dict | None = None) -> dict:
     """plan_8_6 section 11: bytes moved, model calls made, and obligations settled, for this attempt."""
     ledger = [e for e in evidence.get("retrieval_ledger") or [] if isinstance(e, dict)]
     judgments = ((reviewed or {}).get("judgments") or {}) if isinstance(reviewed, dict) else {}
@@ -847,6 +858,11 @@ def _measured(evidence: dict, reviewed: dict | None, *, seconds: float) -> dict:
         "evidence_chars": (reviewed or {}).get("evidence_chars", 0),
         "obligations_judged": len(judgments),
         "obligations_settled": len(settled),
+        # plan_8_7 stage 2: the interpretation review and the semantic reconciliation spend from the
+        # same aggregate ceiling, so their cost is recorded beside the obligations'.
+        "reconciliation_requests": ((reviewed or {}).get("asked") or {}).get("reconciliation_requests", 0),
+        "interpretation_requests": ((interpreted or {}).get("asked") or {}).get("requests", 0),
+        "conclusions_reviewed": len(((interpreted or {}).get("reviews") or {})),
     }
 
 
@@ -998,6 +1014,144 @@ def _leaves_for(scope: dict) -> tuple[str, ...]:
         if not units.get(leaf):
             found.append(leaf)
     return tuple(found)
+
+
+async def refresh_interpretation_review(session: AsyncSession, study, *, client=None, model=None, api_key=None) -> dict:
+    """plan_8_7 stage 2: assess each stated conclusion in the analysis context it rests on.
+
+    The owner's September 21 assessment: "Interpretation review is limited to execution-related numbers
+    and short context." `signal_assessment`'s two questions reason FROM a comparison, so a paper whose
+    data cannot be acquired, whose assay has no adapter or whose code will not resolve received no
+    interpretation review at all.
+
+    Cached on what it was shown, so a refresh, a recovery and a second assessment cost nothing. Never
+    raises: a provider failure leaves the conclusions unresolved with what would settle them, and
+    everything else the assessment established stands.
+    """
+    from app.services.validation_interpretation_review import review_interpretations
+
+    evidence = dict(study.evidence_json or {})
+    conclusions = await _stated_conclusions(session, study)
+    context = _interpretation_context(evidence)
+    comparisons = _completed_comparisons(evidence)
+    identity = {
+        "conclusions": [c["id"] for c in conclusions],
+        "context": [c["id"] for c in context],
+        "comparisons": [c.get("id") for c in comparisons],
+        "model": model,
+    }
+    held = evidence.get("interpretation_review") if isinstance(evidence.get("interpretation_review"), dict) else None
+    if held is not None and held.get("inputs") == identity:
+        return held
+    try:
+        reviewed = await review_interpretations(
+            conclusions=conclusions,
+            context=context,
+            comparisons=comparisons,
+            client=client,
+            model=model or "",
+            api_key=api_key,
+        )
+    except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
+        logger.warning("study %s: the interpretation review could not run: %s", study.id, exc)
+        return held or {"reviews": {}, "reason": str(exc)}
+    record = {**reviewed, "inputs": identity}
+    evidence["interpretation_review"] = record
+    study.evidence_json = evidence
+    await session.flush()
+    return record
+
+
+async def _stated_conclusions(session: AsyncSession, study) -> list[dict]:
+    """The paper's own stated conclusions, as the extraction read them off its claims."""
+    from sqlalchemy import select
+
+    from app.models.comparison_target import ComparisonTarget
+
+    if not study.reproduction_plan_id:
+        return []
+    rows = (
+        (
+            await session.execute(
+                select(ComparisonTarget)
+                .where(ComparisonTarget.reproduction_plan_id == study.reproduction_plan_id)
+                .order_by(ComparisonTarget.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    found: list[dict] = []
+    for position, row in enumerate(rows, start=1):
+        statement = str(getattr(row, "claim_text", "") or "").strip()
+        if not statement:
+            continue
+        found.append(
+            {
+                "id": f"claim:{row.id}",
+                "statement": statement,
+                "passage": None,
+                "locator": getattr(row, "source_locator", None),
+                "position": position,
+            }
+        )
+    return found
+
+
+# What the review may cite: the design, the procedure, the results, the samples and the code. It is
+# the same evidence the documentary obligations are judged on, carried whole rather than per
+# obligation, because an inference crosses those boundaries by nature.
+_INTERPRETATION_SECTIONS = ("methods", "results", "legend", "discussion", "other")
+
+
+def _interpretation_context(evidence: dict) -> list[dict]:
+    """The rows a conclusion's review may cite, from what this study holds."""
+    from app.services.validation_documentary_review import extras_for
+
+    index = _index_of_evidence(evidence)
+    rows = [
+        {
+            "id": str(p.get("id")),
+            "source": f"the paper ({p.get('section')})" if p.get("section") else "the paper",
+            "text": str(p.get("text") or ""),
+        }
+        for p in (index or {}).get("passages") or []
+        if isinstance(p, dict) and str(p.get("kind") or "") in _INTERPRETATION_SECTIONS
+    ]
+    for extra in extras_for(evidence=evidence, plan={}):
+        rows.append(
+            {"id": str(extra.get("id")), "source": str(extra.get("source") or "bioAF"), "text": str(extra.get("text") or "")}
+        )
+    return rows
+
+
+def _index_of_evidence(evidence: dict) -> dict:
+    from app.services.validation_documentary_review import _index_of
+
+    return _index_of(evidence or {})
+
+
+def _completed_comparisons(evidence: dict) -> list[dict]:
+    """The comparisons bioAF actually finished, as context for the inference and never as it.
+
+    plan_8_7 section 3: reproducing the authors' output, independently supporting a result and
+    supporting the authors' interpretation are three conclusions, and success at one does not establish
+    the others. So a comparison travels as evidence the review may cite, with no claim attached.
+    """
+    found: list[dict] = []
+    for position, row in enumerate((evidence.get("comparisons") or []), start=1):
+        if not isinstance(row, dict):
+            continue
+        found.append(
+            {
+                "id": f"comparison:{position}",
+                "metric": row.get("metric") or row.get("metric_key"),
+                "paper": row.get("paper_value", row.get("claimed_value")),
+                "ours": row.get("our_value", row.get("computed_value")),
+                "agrees": row.get("agrees"),
+            }
+        )
+    return found
 
 
 def _packet_fingerprint(packet: dict) -> str:
