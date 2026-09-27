@@ -299,6 +299,16 @@ def coverage_supports_absence(coverage: dict | None) -> tuple[bool, str]:
         return True, ""
     if not isinstance(coverage, dict):
         return False, "the coverage of this obligation's evidence was not recorded in a form bioAF can read"
+    # plan_8_7 section 6 stage 1: "A narrowly demonstrated contradiction can stand on sufficient local
+    # evidence; a paper-wide absence claim cannot stand on an incomplete search." A demonstrated defect
+    # never reaches here (`demonstrates_defect` exempts it); what does is a claim that the sources do
+    # not carry something, and eligible context nobody inspected is where such a claim goes wrong.
+    if coverage.get("inspection_complete") is False:
+        return False, (
+            f"{coverage.get('uninspected') or 'some'} eligible passages of this obligation's own sources were "
+            "not inspected by the request that answered it, and an absence is a claim about what was "
+            "inspected; inspect them, or narrow the finding to what the evidence shows"
+        )
     if coverage.get("truncated"):
         return False, (
             "the evidence packet was truncated by its budget, and a packet that did not carry every "

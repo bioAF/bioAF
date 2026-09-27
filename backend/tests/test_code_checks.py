@@ -156,8 +156,13 @@ class TestTheEnvironmentIsJudgedOnWhatWasInspected:
 
 
 class TestExecutionCompleteness:
-    def test_an_entry_point_and_a_declared_step_verify_it(self):
-        assert _assess()["C4.A"]["outcome"] == VERIFIED
+    def test_an_entry_point_is_recorded_as_an_observation_and_settles_nothing(self):
+        """plan_8_7 section 6 stage 1 (the owner, 2026-09-27): an entry point is one observation,
+        never proof that all the claimed steps exist. The parser records what it found and the
+        obligation is judged with the paper's claimed steps in front of the assessor."""
+        found = _assess()["C4.A"]
+        assert found["outcome"] == UNDETERMINED
+        assert found["observation"]["declared_entry_points"] == ["analysis.py"]
 
     def test_source_with_no_entry_point_at_all_is_undetermined(self):
         found = _assess(sources=_sources("def helper():\n    return 1\n"))["C4.A"]
@@ -258,7 +263,9 @@ class TestTheOwnersCodeExample:
     with the defect downgraded to an unverified concern gives 18 verified and 2 undetermined.
 
     The fixture is controlled: it supplies the recorded results of the isolated execution path for the
-    obligations that need one, because those cannot be established by reading the source."""
+    obligations that need one, because those cannot be established by reading the source. plan_8_7
+    adds C4.A to that list: analysis coverage is judged against the steps the paper claims, which are
+    not in the source, so the accepted documentary judgment is supplied here the same way."""
 
     _EXECUTION = {
         "load": {"status": "succeeded", "environment": "python:3.11.8", "ref": "run-1"},
@@ -273,12 +280,22 @@ class TestTheOwnersCodeExample:
         "verdict": "appropriate",
     }
 
+    _COVERAGE = {
+        "outcome": VERIFIED,
+        "rationale": "each analysis step the paper claims is performed by a named function in the supplied script",
+        "scope": "analysis.py",
+        "method": "model_assisted",
+    }
+
     def _card(self, defects):
         from app.services.validation_rubric_v3 import allocate, default_profile, score
 
-        assessed = assess_code(
-            sources=_sources(), manifests=[_MANIFEST, _ENVIRONMENT], defects=defects, execution=self._EXECUTION
-        )
+        assessed = {
+            **assess_code(
+                sources=_sources(), manifests=[_MANIFEST, _ENVIRONMENT], defects=defects, execution=self._EXECUTION
+            ),
+            "C4.A": self._COVERAGE,
+        }
         # The other obligations are not this example's subject; only the code section is scored.
         leaves = [leaf for leaf in allocate(default_profile()) if leaf["section"] == "C"]
         return score(leaves, assessed)["sections"]["C"]
@@ -398,14 +415,15 @@ class TestCoverageIsNotTheMerePresenceOfAStatement:
         assert "top-level" in found["C4.A"]["rationale"]
         assert "cover" in found["C4.A"]["rationale"] or "steps" in found["C4.A"]["rationale"]
 
-    def test_a_declared_entry_point_is_a_different_fact_and_still_verifies(self):
-        """A `__main__` guard says THIS is how the analysis starts. Whether it covers the claimed
-        steps is a further question flagged to the owner, not silently changed here."""
+    def test_a_declared_entry_point_is_a_different_fact_and_is_recorded_as_one(self):
+        """A `__main__` guard says THIS is how the analysis starts. plan_8_7 settled the further
+        question the owner was asked: it does not establish coverage of the claimed steps either."""
         from app.services.validation_code_checks import assess_code
 
         text = "def main():\n    return 1\n\n\nif __name__ == '__main__':\n    main()\n"
         found = assess_code(sources=[{"path": "a.py", "language": "python", "text": text}])
-        assert found["C4.A"]["outcome"] == "verified"
+        assert found["C4.A"]["outcome"] == "undetermined"
+        assert found["C4.A"]["observation"]["declared_entry_points"] == ["a.py"]
 
     def test_a_source_that_starts_nothing_is_still_the_weaker_statement(self):
         from app.services.validation_code_checks import assess_code
