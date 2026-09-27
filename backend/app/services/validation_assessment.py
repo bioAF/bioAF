@@ -863,6 +863,12 @@ async def publish_assessment(session: AsyncSession, study, *, reason: str) -> No
         await record_scorecard(session, study, reason=reason, force=False)
     except Exception as exc:  # noqa: BLE001 - publishing a score cannot fail the stage that earned it
         logger.warning("study %s: the rubric assessment could not be published: %s", study.id, exc)
+    # plan_8_7 stage 2: the assessment's own progress, recorded rather than inferred from `classified`.
+    held = (study.evidence_json or {}).get("rubric_assessment")
+    if isinstance(held, dict) and held.get("outcomes"):
+        study.assessment_state = ASSESSMENT_PUBLISHED
+        study.assessment_revision = held.get("revision")
+        await session.flush()
 
 
 def _deposit_identity(deposits: list[dict]) -> list[str]:
@@ -1177,6 +1183,91 @@ async def settle_dependents(session: AsyncSession, study) -> dict:
         plan.blockers_json = remaining
     await session.flush()
     return result
+
+
+# plan_8_7 stage 2: how far the paper's assessment has got. Four values, because those are the four
+# things a reader needs to tell apart: bioAF is still finding the sources, it is reviewing them, it has
+# published a revision, or it cannot proceed and says why. None of them is the execution's business.
+ASSESSMENT_DISCOVERING = "discovering"
+ASSESSMENT_REVIEWING = "reviewing"
+ASSESSMENT_PUBLISHED = "published"
+ASSESSMENT_BLOCKED = "blocked"
+ASSESSMENT_STATES = (ASSESSMENT_DISCOVERING, ASSESSMENT_REVIEWING, ASSESSMENT_PUBLISHED, ASSESSMENT_BLOCKED)
+
+# What the execution is doing, which is a different question with a different answer.
+_EXECUTION_FROM_STATE = {
+    "requested": "not_started",
+    "reading": "not_started",
+    "plan_ready": "awaiting_authorization",
+    "plan_declined": "declined",
+    "acquiring_data": "running",
+    "acquiring_processed": "running",
+    "inspecting_deposit": "running",
+    "samples_mismatch": "held",
+    "setup": "running",
+    "running": "running",
+    "extracting": "running",
+    "reproducing": "running",
+    "comparing": "running",
+    "classified": "finished",
+    "error": "failed",
+}
+
+
+def assessment_progress(study) -> dict:
+    """``{"state", "revision", "derived", "execution"}``: where the assessment is, beside the execution.
+
+    plan_8_7 stage 2. A historical row recorded neither, so its progress is PROJECTED from `state` and
+    says so: nothing is rescored and no stored report changes. A row that recorded them is reported as
+    it was recorded.
+    """
+    from app.services.validation_route_policy import ASSESSMENT
+
+    state = getattr(study, "assessment_state", None)
+    recorded = state in ASSESSMENT_STATES
+    if not recorded:
+        state = {
+            "error": ASSESSMENT_BLOCKED,
+            "plan_declined": ASSESSMENT_BLOCKED,
+            "requested": ASSESSMENT_DISCOVERING,
+            "reading": ASSESSMENT_DISCOVERING,
+        }.get(
+            str(getattr(study, "state", "") or ""),
+            ASSESSMENT_PUBLISHED
+            if str(getattr(study, "state", "") or "") == "classified"
+            else ASSESSMENT_REVIEWING,
+        )
+    evidence = getattr(study, "evidence_json", None) or {}
+    blocked = evidence.get("route_blocked") if isinstance(evidence.get("route_blocked"), dict) else None
+    route = getattr(study, "intended_route", None)
+    if route == ASSESSMENT:
+        execution = {"status": "not_requested", "available": True, "reason": None}
+    elif blocked:
+        execution = {"status": "blocked", "available": False, "reason": blocked.get("reason")}
+    else:
+        execution = {
+            "status": _EXECUTION_FROM_STATE.get(str(getattr(study, "state", "") or ""), "not_started"),
+            "available": True,
+            "reason": None,
+        }
+    return {
+        "state": state,
+        "revision": getattr(study, "assessment_revision", None),
+        "derived": not recorded,
+        "execution": execution,
+    }
+
+
+def assessment_only_reason() -> str:
+    """Why an assessment-first study stops where it does: it was asked for an assessment.
+
+    plan_8_7 stage 2. It is not a blocker and must not read as one. "An unsupported assay, missing
+    execution input or restricted deposit cannot prevent methods/code/interpretation review" is the
+    other half of the same rule, and this is the half that says a completed assessment is a result.
+    """
+    from app.services.validation_route_policy import ASSESSMENT_REASON
+
+    return ASSESSMENT_REASON
 
 
 async def conclude_without_execution(

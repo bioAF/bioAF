@@ -15,7 +15,9 @@ class ValidationStudyRequest(BaseModel):
     source_accession: str | None = None
     # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
     # from one decision; validated after the read, because nothing about the deposit is known yet.
-    intended_route: Literal["deposit", "pipeline", "both"] | None = None
+    # plan_8_7 stage 2: `assessment` is the default, and it authorizes no execution. The other three
+    # are the advanced choices and behave exactly as they did.
+    intended_route: Literal["assessment", "deposit", "pipeline", "both"] | None = None
 
 
 class ReadRequest(BaseModel):
@@ -260,7 +262,9 @@ class ValidationStudySummary(BaseModel):
     source_accession: str | None = None
     # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
     # from one decision; validated after the read, because nothing about the deposit is known yet.
-    intended_route: Literal["deposit", "pipeline", "both"] | None = None
+    # plan_8_7 stage 2: `assessment` is the default, and it authorizes no execution. The other three
+    # are the advanced choices and behave exactly as they did.
+    intended_route: Literal["assessment", "deposit", "pipeline", "both"] | None = None
     experiment_id: int | None = None
     created_at: datetime | None = None
     # plan_8 section 7: the compact Validation Scorecard (the overall score, the assessed scope and the
@@ -284,12 +288,17 @@ class ValidationStudyResponse(BaseModel):
     source_accession: str | None = None
     # The route chosen at the button. Asked there rather than at the C1 gate so the study runs itself
     # from one decision; validated after the read, because nothing about the deposit is known yet.
-    intended_route: Literal["deposit", "pipeline", "both"] | None = None
+    # plan_8_7 stage 2: `assessment` is the default, and it authorizes no execution. The other three
+    # are the advanced choices and behave exactly as they did.
+    intended_route: Literal["assessment", "deposit", "pipeline", "both"] | None = None
     experiment_id: int | None = None
     reproduction_plan_id: int | None = None
     approved_by_user_id: int | None = None
     failure_reason: str | None = None
     plan: ReproductionPlanResponse | None = None
+    # plan_8_7 stage 2: how far the paper's assessment has got, and what its execution is doing, as
+    # two separate facts. `derived` says the row recorded neither and this is projected from `state`.
+    assessment: dict | None = None
     # The assembled evidence bundle (computed QC metrics beside the paper's claimed targets, plus the
     # linked run ids) the human reads to classify by hand at the comparing gate. Null until extracting.
     evidence: dict | None = None

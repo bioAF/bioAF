@@ -200,6 +200,8 @@ async def _paper_titles(session: AsyncSession, studies: list[ValidationStudy], o
 
 
 async def _study_response(session: AsyncSession, study: ValidationStudy, org_id: int) -> ValidationStudyResponse:
+    from app.services.validation_assessment import assessment_progress
+
     plan = await ReproductionPlanService.get_plan(session, study.id, org_id)
     paper_title = (await _paper_titles(session, [study], org_id)).get(study.paper_id) if study.paper_id else None
     return ValidationStudyResponse(
@@ -228,6 +230,9 @@ async def _study_response(session: AsyncSession, study: ValidationStudy, org_id:
         # Study 37: whether bioAF moves this study on by itself and whether a worker holds it now, so
         # the page shows the work under way instead of offering a click that races it.
         activity=await study_activity(session, study),
+        # plan_8_7 stage 2: how far the ASSESSMENT has got, beside what the execution is doing. A
+        # historical row recorded neither and is projected from `state`, which it says.
+        assessment=assessment_progress(study),
     )
 
 

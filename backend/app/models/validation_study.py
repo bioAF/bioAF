@@ -228,6 +228,13 @@ class ValidationStudy(Base):
     # turns out to be impossible. Null keeps the manual C1 gate, so other entry points are unchanged.
     intended_route: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
+    # plan_8_7 stage 2: how far the paper's ASSESSMENT has got, which `state` cannot say. `state` is
+    # the execution lifecycle and its `classified` is the end of that; a study whose data could not be
+    # acquired and one whose evidence has been reviewed in full both reach it. Null on every historical
+    # row, which reads as "derived from state" so no stored report changes.
+    assessment_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    assessment_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     evidence_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
