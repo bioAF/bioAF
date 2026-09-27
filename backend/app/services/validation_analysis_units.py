@@ -32,18 +32,16 @@ from __future__ import annotations
 import hashlib
 import json
 
-# The obligations about one experiment and the analysis it received.
+# The obligations about one experiment and the analysis it received, and ONLY the ones bioAF asks
+# about each arm separately. plan_8_7: "Splitting weights while copying the same paper-wide verdict
+# into every unit is not implementation." The measured checks of the S and M sections (the organism
+# every experiment states, the reference releases bioAF resolved, the sample accounting) are computed
+# over the paper's whole reading in one pass and have no per-arm evidence behind them today, so they
+# keep their paper-wide scope rather than being split into copies of one answer.
 EXPERIMENT_SCOPED = (
-    "S1.A",
-    "S1.B",
     "S2.A",
     "S2.B",
-    "S3.A",
-    "S3.B",
-    "S4.A",
-    "S4.B",
     "S5.A",
-    "S5.B",
     "E1.A",
     "E1.B",
     "E2.A",
@@ -52,12 +50,8 @@ EXPERIMENT_SCOPED = (
     "E3.B",
     "M1.A",
     "M1.B",
-    "M2.A",
-    "M2.B",
     "M3.A",
     "M3.B",
-    "M4.A",
-    "M4.B",
 )
 # The obligations about one supplied implementation.
 CODE_SCOPED = ("C1.A", "C1.B", "C2.A", "C2.B", "C3.A", "C3.B", "C4.A", "C4.B", "C5.A", "C5.B")

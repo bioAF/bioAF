@@ -182,8 +182,10 @@ def _code_by_unit(evidence: dict, definitions: dict) -> dict[str, dict]:
             sources=own,
             manifests=(inspection or {}).get("manifests"),
             defects=(inspection or {}).get("reviews"),
-            execution=((inspection or {}).get("execution_by_unit") or {}).get(unit_id)
-            or (inspection or {}).get("execution"),
+            # ONE unit's recorded run. plan_8_7 section 3: "running one script does not establish that
+            # all supplied code works", so a run recorded against the study as a whole is not evidence
+            # about this implementation, and C1.B/C2.B stay open for a unit nothing ran.
+            execution=((inspection or {}).get("execution_by_unit") or {}).get(unit_id),
         )
     return found
 

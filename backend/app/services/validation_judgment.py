@@ -300,6 +300,32 @@ def demonstrates_defect(basis: str, observations: list[dict], scope: str) -> boo
     return basis in SHOWABLE_KINDS and len(observations) >= MIN_OBSERVATIONS and bool(scope.strip())
 
 
+def coverage_supports_positive(coverage: dict | None) -> tuple[bool, str]:
+    """Whether a `met` answer can stand, given what this obligation's packet could not get.
+
+    plan_8_7 stage 1: "Validate evidence sufficiency before final acceptance for positive and negative
+    judgments, not only after a model returns uncertainty." The asymmetry with an absence is the point.
+    A positive rests on the passage that states it, so another paragraph nobody read does not unstate
+    it; what does undo it is the obligation's own SUBJECT being a source bioAF never got. M5.B asking
+    whether the supplied code and the methods agree, answered `met` on a paper whose repository never
+    arrived, is certainty about a file nobody opened.
+
+    Only the needs beyond the paper's own text and attachments count, because those two are needed by
+    every obligation and holding every positive on one unretrieved attachment would make every
+    difficult check grey, which plan_8_7 forbids in the same breath.
+    """
+    if not isinstance(coverage, dict):
+        return True, ""
+    missing = [str(need) for need in coverage.get("needs_unavailable") or []]
+    if not missing:
+        return True, ""
+    return False, (
+        f"this obligation is about the paper's {', '.join(missing)}, and bioAF did not retrieve "
+        + ("; ".join(str(u) for u in coverage.get("unavailable") or []) or "it")
+        + ", so a positive answer here would be certainty about a source nobody inspected"
+    )
+
+
 def coverage_supports_absence(coverage: dict | None) -> tuple[bool, str]:
     """Whether the evidence record establishes that the sources an absence is about were inspected.
 
@@ -399,7 +425,18 @@ def judgment_from(
             conflict={"outcome": outcome, "rationale": rationale},
             coverage=coverage,
         )
-    required = REQUIRES_CARRIED.get(leaf)
+    if outcome == MET:
+        supported, why = coverage_supports_positive(coverage)
+        if not supported:
+            return _open(
+                why,
+                next_action="retrieve the sources this obligation is about, then ask again",
+                assessor=assessor,
+                confidence=answer.get("confidence"),
+                withheld={"outcome": outcome, "rationale": rationale},
+                coverage=coverage,
+            )
+    required = REQUIRES_CARRIED.get(str(leaf).partition("#")[0])
     if outcome == MET and required is not None:
         carried = {
             str(p.get("id"))
