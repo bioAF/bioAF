@@ -1,4 +1,4 @@
-"""One demonstrated failure is one deduction, and a positive cannot stand on evidence a negative contradicts.
+"""Which findings rest on the same evidence, so a person or a model can read them together.
 
 The owner, 2026-09-21, on study 65's deployed run:
 
@@ -10,31 +10,28 @@ The owner, 2026-09-21, on study 65's deployed run:
 
 Obligations are judged ONE PER REQUEST, which is a design invariant of the judgment contract and is
 what keeps an assessor from rating the paper. Neither problem can be seen from inside a single
-judgment, so this is the pass that reconciles them afterwards.
+judgment, so a pass afterwards has to reconcile them.
 
-It reconciles from what a judgment CITED and what scope it named, not from what its prose happened
-to say. Two negatives resting on the same evidence about the same scope are one finding; the
-obligation the finding is about keeps the deduction and the other records the cross-reference. A
-positive resting on evidence a negative has contradicted cannot stand on it either.
+**This module finds the candidates. It does not decide anything.** plan_8_7, agreed with the owner on
+2026-09-27: "Citation overlap, containment and scope-word similarity may find candidates for review.
+Remove their authority to demote a supported finding, merge failures or decide contradiction." The
+counterexample is "processing is explicitly described" beside "the described statistical design is
+inappropriate", on the same passage and the same analysis: both propositions are true, and comparing
+the scopes they named converted the positive to undetermined. What the two findings MEAN is read by
+`validation_semantic_reconciliation`, with the shared evidence in front of the configured model.
 
-**Nothing is discarded.** A demoted judgment keeps what it found under ``withheld``, because the
-reader needs to see that bioAF found the same thing twice, not that it found it once.
-
-Pure: it is given judgments and returns judgments. No network, no model, no database.
+Pure: it is given judgments and returns groups of leaf ids. No network, no model, no database.
 """
 
 from __future__ import annotations
 
 import re
 
-from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
+from app.services.validation_rubric_v3 import FAILED, VERIFIED
 
-# 2: the positive side compares the scope each answer named, not its citation set alone.
-OVERLAP_VERSION = 2
-
-# A measurement outranks a model's review, which is plan_8_5's rule for the same obligation and is
-# the same rule here for WHICH of two findings keeps the deduction.
-_METHOD_RANK = {"measurement": 3, "human_assisted": 2, "model_assisted": 1}
+# 3: plan_8_7. Overlap proposes; it no longer demotes, merges or decides a contradiction, so a
+# judgment accepted under 2 was reconciled by a rule that no longer exists and is asked again.
+OVERLAP_VERSION = 3
 
 _WORD = re.compile(r"[a-z0-9_.]+")
 # Words that appear in every scope sentence and say nothing about which scope it is.
@@ -64,16 +61,20 @@ _COMMON = {
     "on",
 }
 
-
-def _citations(judgment: dict) -> set[str]:
-    evidence = judgment.get("evidence") if isinstance(judgment.get("evidence"), dict) else {}
-    return {str(c) for c in (evidence or {}).get("citations") or []}
-
-
 # What `judgment_from` fills `scope` with when the answer named none. It is the same sentence on
 # every judgment of every paper, so comparing it finds a match between any two answers: an artefact,
 # never a scope bioAF read out of an answer.
 _UNNAMED_SCOPE = re.compile(r"^\s*\d+\s+supplied passages\s*$", re.I)
+
+# How much scope vocabulary two findings share before they are worth reading together. It is a
+# threshold on a CANDIDATE list now, so it is deliberately loose: a group nobody needed to reconcile
+# costs one reading and changes nothing, and a pair that never reaches the reader costs the repair.
+_SCOPE_OVERLAP = 0.4
+
+
+def _citations(judgment: dict) -> set[str]:
+    evidence = judgment.get("evidence") if isinstance(judgment.get("evidence"), dict) else {}
+    return {str(c) for c in (evidence or {}).get("citations") or []}
 
 
 def _scope_words(judgment: dict) -> set[str]:
@@ -85,119 +86,62 @@ def _scope_words(judgment: dict) -> set[str]:
     return {word for word in _WORD.findall(text) if word not in _COMMON and len(word) > 2}
 
 
-def _same_scope(one: dict, other: dict) -> bool:
-    """Whether two findings are about the same thing, from the scope each one named.
+def related(one: dict, other: dict) -> bool:
+    """Whether two findings are worth reading together: shared evidence, or a shared named scope.
 
     Distinct failures may rest on the same passage: study 65's M1.B (single-cell preprocessing) and
-    M5.B (the GO enrichment step) both cite the methods and the same script. What tells them apart
-    is what each said it was about.
+    M5.B (the GO enrichment step) both cite the methods and the same script. That is exactly why this
+    answers "worth reading together" and not "the same thing".
     """
+    if _citations(one) & _citations(other):
+        return True
     a, b = _scope_words(one), _scope_words(other)
     if not a or not b:
-        # Neither named a scope, so bioAF cannot tell them apart and does not pretend to.
-        return not a and not b
-    overlap = len(a & b) / min(len(a), len(b))
-    return overlap >= 0.6
+        return False
+    return len(a & b) / min(len(a), len(b)) >= _SCOPE_OVERLAP
 
 
-def _names_scope(judgment: dict) -> bool:
-    """Whether this answer said what it is about, rather than leaving bioAF to fill the field in."""
-    return bool(_scope_words(judgment))
+def candidate_groups(judgments: dict[str, dict] | None) -> list[list[str]]:
+    """The groups of findings that rest on the same evidence, for semantic reconciliation to read.
 
-
-def _rank(judgment: dict) -> int:
-    return _METHOD_RANK.get(str(judgment.get("method") or "model_assisted"), 1)
-
-
-def _demote(judgment: dict, rationale: str, **extra) -> dict:
-    """Keep the finding, stop it deducting. The reader still sees what bioAF found."""
-    return {
-        "outcome": UNDETERMINED,
-        "rationale": rationale,
-        "scope": judgment.get("scope"),
-        "method": judgment.get("method"),
-        "assessor": judgment.get("assessor"),
-        "coverage": judgment.get("coverage"),
-        "evidence": judgment.get("evidence"),
-        "evidence_ids": judgment.get("evidence_ids"),
-        "withheld": {k: v for k, v in judgment.items() if k in ("outcome", "rationale", "impact", "finding_scope")},
-        "overlap_version": OVERLAP_VERSION,
-        **extra,
+    A group is a connected component of the "worth reading together" relation over the findings that
+    concluded something. An obligation nobody settled has no proposition to reconcile.
+    """
+    rows = {
+        leaf: judgment
+        for leaf, judgment in (judgments or {}).items()
+        if isinstance(judgment, dict) and judgment.get("outcome") in (VERIFIED, FAILED)
     }
+    leaves = sorted(rows)
+    parent = {leaf: leaf for leaf in leaves}
+
+    def find(leaf: str) -> str:
+        while parent[leaf] != leaf:
+            parent[leaf] = parent[parent[leaf]]
+            leaf = parent[leaf]
+        return leaf
+
+    for i, one in enumerate(leaves):
+        for other in leaves[i + 1 :]:
+            if related(rows[one], rows[other]):
+                parent[find(one)] = find(other)
+    groups: dict[str, list[str]] = {}
+    for leaf in leaves:
+        groups.setdefault(find(leaf), []).append(leaf)
+    return [sorted(group) for group in groups.values() if len(group) > 1]
 
 
 def reconcile_findings(judgments: dict[str, dict] | None) -> dict[str, dict]:
-    """``judgments``, with duplicate negatives and contradicted positives demoted. Never raises."""
+    """``judgments``, with the groups worth reading together recorded on them and nothing changed.
+
+    plan_8_7 removed this pass's authority to decide. It stays as the deterministic half: every
+    finding carries the other findings that rest on its evidence, so a report and a reader can see
+    the grouping even where the semantic pass could not run.
+    """
     rows = {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)}
     found = dict(judgments or {})
-
-    negatives = [(leaf, j) for leaf, j in rows.items() if j.get("outcome") == FAILED and _citations(j)]
-    # The obligation whose finding it is keeps the deduction: the better-evidenced method first, then
-    # the one resting on more evidence, then the leaf's own order so the result is deterministic.
-    negatives.sort(key=lambda pair: (-_rank(pair[1]), -len(_citations(pair[1])), pair[0]))
-
-    kept: list[tuple[str, dict]] = []
-    for leaf, judgment in negatives:
-        citations = _citations(judgment)
-        owner = next(
-            (other for other, held in kept if citations <= _citations(held) and _same_scope(judgment, held)),
-            None,
-        )
-        if owner is None:
-            kept.append((leaf, judgment))
-            continue
-        found[leaf] = _demote(
-            judgment,
-            f"bioAF found this under {owner} as well, on the same evidence and about the same thing, and one "
-            f"demonstrated failure is one deduction; see {owner} for the finding and what it costs",
-            same_finding_as=owner,
-        )
-
-    # A positive cannot rest on evidence a standing negative has contradicted. Containment finds the
-    # CANDIDATES; the scope decides. The owner, 2026-09-21: "Citation overlap is not proof of
-    # contradiction... Shared citations can identify candidates for review; they cannot decide the
-    # outcome." A paper's methods paragraph carries the sample preparation and the enrichment
-    # threshold both, so a negative about the second contained a positive about the first and took
-    # it down. Each answer names what it is about, and two answers collide only when they are about
-    # the same thing.
-    standing = [(leaf, rows[leaf]) for leaf, _ in kept]
-    for leaf, judgment in rows.items():
-        if judgment.get("outcome") != VERIFIED or not _citations(judgment):
-            continue
-        citations = _citations(judgment)
-        # Both sides have to have SAID what they are about. Where either did not, bioAF cannot
-        # establish that they are about the same thing, and it does not withdraw an established
-        # point on a guess: the tension below records it for a person instead.
-        against = next(
-            (
-                other
-                for other, negative in standing
-                if citations <= _citations(negative)
-                and _names_scope(judgment)
-                and _names_scope(negative)
-                and _same_scope(judgment, negative)
-            ),
-            None,
-        )
-        if against is not None:
-            # It rests on nothing the negative did not already account for, so it cannot stand on it.
-            found[leaf] = _demote(
-                judgment,
-                f"this rests on the same evidence as {against}, which found a problem in it that this does "
-                f"not resolve, so bioAF has not established it either way; see {against}",
-                contradicted_by=against,
-            )
-            continue
-        # It rests on evidence of its own as well. The two are in tension and a person reconciles
-        # them; bioAF does not silently withdraw a point it established.
-        overlapping = next((other for other, negative in standing if citations & _citations(negative)), None)
-        if overlapping is not None:
-            found[leaf] = {
-                **judgment,
-                "tension_with": overlapping,
-                "tension": (
-                    f"{overlapping} found a problem in evidence this also rests on, and this answer does not "
-                    f"address it; both are reported and neither is withdrawn"
-                ),
-            }
+    for group in candidate_groups(rows):
+        for leaf in group:
+            others = [other for other in group if other != leaf]
+            found[leaf] = {**rows[leaf], "rests_on_shared_evidence_with": others, "overlap_version": OVERLAP_VERSION}
     return found
