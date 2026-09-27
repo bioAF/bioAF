@@ -78,6 +78,10 @@ SIGNAL_VERDICT = "signal_verdict"
 SIGNAL_CANDIDATE = "signal_candidate"
 # plan_8_5 section 3.6: one obligation of the rubric, judged on the paper's own passages.
 DOCUMENTARY_JUDGMENT = "documentary_judgment"
+# plan_8_7: one group of findings that rest on the same evidence, read together before publication.
+SEMANTIC_RECONCILIATION = "semantic_reconciliation"
+# plan_8_7: one substantive conclusion of the paper, assessed in its own analysis context.
+INTERPRETATION_REVIEW = "interpretation_review"
 
 
 @dataclass(frozen=True)
@@ -285,6 +289,34 @@ DECISIONS: dict[str, DecisionPolicy] = {
             # against 24,000, so a full documentary review of a paper this size roughly doubles from
             # 373,187 characters of evidence across eighteen requests to about 750,000. A lower
             # organization limit still wins.
+            max_input_tokens=16384,
+        ),
+        _policy(
+            SEMANTIC_RECONCILIATION,
+            decision="Semantic reconciliation of related findings",
+            module="app/services/validation_semantic_reconciliation.py",
+            max_tokens=_FIXED_ANSWER,
+            recovery=ONE_RETRY,
+            measurement=CONTRACT,
+            basis="one row per PAIR in one group: two ids, one of three relations, a sentence and an "
+            "optional id. A group is the findings that rest on one piece of evidence, which is a handful, "
+            "and the number of groups is bounded by the number of obligations (MAX_GROUPS)",
+            # The two findings, their obligations and the passages they share. A pair carries at most
+            # MAX_PASSAGE_CHARS of each cited passage, and a group is a handful of findings.
+            max_input_tokens=8192,
+        ),
+        _policy(
+            INTERPRETATION_REVIEW,
+            decision="Interpretation review of one conclusion",
+            module="app/services/validation_interpretation_review.py",
+            max_tokens=_FIXED_ANSWER,
+            recovery=ONE_RETRY,
+            measurement=CONTRACT,
+            basis="one object about ONE stated conclusion: whether the design, uncertainty and population "
+            "examined support it, the inferential step at issue, its consequence, the ids it cites and a "
+            "confidence. It produces no number the score uses",
+            # The conclusion, its procedure and design, its results, the sample and replication
+            # records, the relevant code and any completed comparison.
             max_input_tokens=16384,
         ),
     )

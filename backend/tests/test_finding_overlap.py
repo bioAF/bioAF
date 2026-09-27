@@ -7,11 +7,16 @@ And the other direction: "M3.B awards positive credit for statistical-design app
 resolving this same concern [S5.A's]. Those judgments need reconciliation."
 
 The obligations are judged one per request, which is a design invariant, so neither can be seen from
-inside a single judgment. This is the pass that reconciles them afterwards, deterministically, from
-what each one CITED rather than from what it happened to say.
+inside a single judgment. A pass afterwards has to reconcile them.
+
+plan_8_7, agreed with the owner on 2026-09-27, moved the DECISION out of this module: citation and
+scope overlap identify candidates for review and no longer decide contradiction, duplication or the
+withdrawal of a supported finding. What each pair means is read by
+`validation_semantic_reconciliation`, and this file now asserts what the deterministic half still
+promises: every one of the owner's cases reaches that reading, and nothing else does.
 """
 
-from app.services.validation_finding_overlap import reconcile_findings
+from app.services.validation_finding_overlap import candidate_groups, reconcile_findings, related
 from app.services.validation_rubric_v3 import FAILED, UNDETERMINED, VERIFIED
 
 
@@ -27,9 +32,6 @@ def _failed(citations, *, scope, rationale="the supplied code disagrees with the
 
 
 def _verified(citations, *, rationale="the design is appropriate", scope=""):
-    """A positive, with the scope its answer named. Contract 3 asks every answer for one: the
-    reconciliation compares the scopes, because a negative about a GO threshold and a positive about
-    sample preparation can cite the same methods paragraph and be about different facts."""
     return {
         "outcome": VERIFIED,
         "rationale": rationale,
@@ -40,8 +42,8 @@ def _verified(citations, *, rationale="the design is appropriate", scope=""):
     }
 
 
-class TestOneFailureIsOneDeduction:
-    def test_a_negative_whose_evidence_another_already_covers_stops_deducting(self):
+class TestTheOwnersDuplicateCasesReachReview:
+    def test_two_negatives_on_the_same_evidence_are_offered_together(self):
         """Study 65's C5.B cited p61, supp3 and two lines of deg_interpretation.py, all of which
         M5.B also cited, for the same GO-threshold mismatch in the same script."""
         judgments = {
@@ -54,62 +56,38 @@ class TestOneFailureIsOneDeduction:
                 scope="GO enrichment step of DEG/deg_interpretation.py",
             ),
         }
-        found = reconcile_findings(judgments)
-        assert found["M5.B"]["outcome"] == FAILED, "the obligation the finding is about keeps it"
-        assert found["C5.B"]["outcome"] == UNDETERMINED
-        assert found["C5.B"]["same_finding_as"] == "M5.B"
-        assert "M5.B" in found["C5.B"]["rationale"]
+        assert candidate_groups(judgments) == [["C5.B", "M5.B"]]
 
-    def test_the_duplicate_keeps_what_it_found_so_nothing_is_lost(self):
-        """With identical evidence and identical scope neither obligation is better placed to own
-        the finding, so which one keeps it is not asserted: exactly one does, and the other says so
-        while keeping what it found."""
+    def test_neither_of_them_is_demoted_by_the_grouping_itself(self):
         judgments = {
             "M5.B": _failed(["p61", "code:a.py#3"], scope="the GO step"),
             "C5.B": _failed(["p61", "code:a.py#3"], scope="the GO step"),
         }
         found = reconcile_findings(judgments)
-        deducting = [leaf for leaf, j in found.items() if j["outcome"] == FAILED]
-        demoted = [leaf for leaf, j in found.items() if j.get("same_finding_as")]
-        assert len(deducting) == 1
-        assert len(demoted) == 1
-        assert found[demoted[0]]["same_finding_as"] == deducting[0]
-        assert found[demoted[0]]["withheld"]["outcome"] == FAILED
-        assert found[demoted[0]]["withheld"]["rationale"]
+        assert [j["outcome"] for j in found.values()] == [FAILED, FAILED]
+        assert found["C5.B"]["rests_on_shared_evidence_with"] == ["M5.B"]
 
-    def test_two_negatives_on_different_evidence_both_stand(self):
+    def test_two_negatives_on_different_evidence_are_not_a_group(self):
         judgments = {
             "M5.B": _failed(["p61", "code:a.py#3"], scope="the GO step"),
             "C2.B": _failed(["code:b.py#1"], scope="the imports of b.py"),
         }
-        found = reconcile_findings(judgments)
-        assert found["M5.B"]["outcome"] == FAILED
-        assert found["C2.B"]["outcome"] == FAILED
+        assert candidate_groups(judgments) == []
 
-    def test_a_negative_that_shares_evidence_but_names_a_different_scope_stands(self):
-        """Distinct failures may rest on the same passage. The scope is what tells them apart."""
+    def test_a_negative_that_shares_evidence_and_names_a_different_scope_is_still_offered(self):
+        """Distinct failures may rest on the same passage. plan_8_7: what tells them apart is what
+        they MEAN, and that is read, not inferred from the words each scope happened to use."""
         judgments = {
             "M5.B": _failed(["p61", "code:a.py#3"], scope="the GO enrichment step of a.py"),
             "M1.B": _failed(["p61", "code:a.py#3"], scope="single-cell preprocessing from Parse counts matrices"),
         }
-        found = reconcile_findings(judgments)
-        assert found["M5.B"]["outcome"] == FAILED
-        assert found["M1.B"]["outcome"] == FAILED
-
-    def test_a_measured_finding_outranks_a_reviewed_one_for_which_keeps_the_deduction(self):
-        judgments = {
-            "C5.B": {**_failed(["p61"], scope="the GO step"), "method": "model_assisted"},
-            "M4.A": {**_failed(["p61"], scope="the GO step"), "method": "measurement"},
-        }
-        found = reconcile_findings(judgments)
-        assert found["M4.A"]["outcome"] == FAILED
-        assert found["C5.B"]["outcome"] == UNDETERMINED
+        assert candidate_groups(judgments) == [["M1.B", "M5.B"]]
 
 
-class TestAPositiveCannotStandOnEvidenceANegativeContradicts:
-    def test_credit_for_the_design_cannot_stand_beside_an_unresolved_design_negative(self):
+class TestThePositiveAndNegativeCasesReachReviewToo:
+    def test_the_design_positive_and_the_replicate_negative_are_offered_together(self):
         """S5.A failed on the line-confounded replicates while M3.B awarded credit for the
-        statistical design on the same evidence. Both cannot be true."""
+        statistical design on the same evidence."""
         judgments = {
             "S5.A": _failed(
                 ["p61", "design:3", "GSE213156/GSM6573673"],
@@ -122,29 +100,25 @@ class TestAPositiveCannotStandOnEvidenceANegativeContradicts:
                 rationale="each named test is matched to its data type and to a stated replication unit",
             ),
         }
-        found = reconcile_findings(judgments)
-        assert found["S5.A"]["outcome"] == FAILED
-        assert found["M3.B"]["outcome"] == UNDETERMINED
-        assert found["M3.B"]["contradicted_by"] == "S5.A"
+        assert candidate_groups(judgments) == [["M3.B", "S5.A"]]
 
-    def test_a_positive_on_unrelated_evidence_is_untouched(self):
+    def test_a_positive_on_unrelated_evidence_is_not_offered_or_touched(self):
         judgments = {
             "S5.A": _failed(["p61", "design:3"], scope="the replicate structure"),
             "M2.A": _verified(["p70"]),
         }
-        found = reconcile_findings(judgments)
-        assert found["M2.A"]["outcome"] == VERIFIED
+        assert candidate_groups(judgments) == []
+        assert reconcile_findings(judgments)["M2.A"]["outcome"] == VERIFIED
 
-    def test_the_positive_keeps_what_it_found(self):
+    def test_the_positive_keeps_its_outcome_until_something_reads_the_pair(self):
         judgments = {
             "S5.A": _failed(["p61", "design:3"], scope="the replicate structure"),
             "M3.B": _verified(["p61", "design:3"], scope="the replicate structure of the comparison"),
         }
-        found = reconcile_findings(judgments)
-        assert found["M3.B"]["withheld"]["outcome"] == VERIFIED
+        assert reconcile_findings(judgments)["M3.B"]["outcome"] == VERIFIED
 
 
-class TestItChangesNothingItNeedNot:
+class TestItChangesNoOutcomeAtAll:
     def test_a_set_with_no_overlap_comes_back_as_it_was(self):
         judgments = {"M1.A": _verified(["p1"]), "M2.A": _verified(["p2"])}
         assert reconcile_findings(judgments) == judgments
@@ -156,15 +130,20 @@ class TestItChangesNothingItNeedNot:
         judgments = {"M1.A": {"outcome": UNDETERMINED, "rationale": "nothing to judge"}}
         assert reconcile_findings(judgments) == judgments
 
+    def test_an_unsettled_obligation_has_no_proposition_to_reconcile(self):
+        judgments = {
+            "M1.A": {"outcome": UNDETERMINED, "rationale": "nothing", "evidence": {"citations": ["p1"]}},
+            "M3.B": _failed(["p1"], scope="the design"),
+        }
+        assert candidate_groups(judgments) == []
 
-class TestSharingAPassageIsNotRestingOnTheSameFact:
-    """Found by running the reconciliation on study 65: a negative citing seven background passages
-    demoted every positive that happened to cite two of them, and the score fell for the wrong
-    reason. A positive is only withdrawn where it rests on NOTHING the negative did not already
-    account for; where the two merely overlap, the tension is recorded and the score is left alone
-    for a person to reconcile."""
 
-    def test_a_positive_resting_on_more_than_the_negative_keeps_its_outcome(self):
+class TestSharingAPassageIsWorthReadingNotDeciding:
+    """Found by running the old reconciliation on study 65: a negative citing seven background
+    passages demoted every positive that happened to cite two of them, and the score fell for the
+    wrong reason. Sharing a passage now means the pair is read; it decides nothing by itself."""
+
+    def test_a_positive_overlapping_a_broad_negative_keeps_its_outcome(self):
         judgments = {
             "E2.B": _failed(
                 ["p59", "p61", "p71", "p68", "p133", "p44", "p40"],
@@ -174,17 +153,7 @@ class TestSharingAPassageIsNotRestingOnTheSameFact:
         }
         found = reconcile_findings(judgments)
         assert found["E1.B"]["outcome"] == VERIFIED
-        assert found["E1.B"]["tension_with"] == "E2.B", "the conflict is recorded for a person"
-        assert "E2.B" in found["E1.B"]["tension"]
-
-    def test_a_positive_resting_on_nothing_more_is_still_withdrawn(self):
-        judgments = {
-            "S5.A": _failed(["p61", "design:3", "GSE213156/GSM6573673"], scope="the replicate structure"),
-            "M3.B": _verified(["p61", "design:3"], scope="the replicate structure of the comparison"),
-        }
-        found = reconcile_findings(judgments)
-        assert found["M3.B"]["outcome"] == UNDETERMINED
-        assert found["M3.B"]["contradicted_by"] == "S5.A"
+        assert found["E1.B"]["rests_on_shared_evidence_with"] == ["E2.B"]
 
     def test_one_negative_does_not_take_down_a_whole_report(self):
         judgments = {
@@ -193,3 +162,8 @@ class TestSharingAPassageIsNotRestingOnTheSameFact:
         }
         found = reconcile_findings(judgments)
         assert all(found[f"X{i}.A"]["outcome"] == VERIFIED for i in range(6, 12))
+
+    def test_relatedness_is_shared_evidence_or_a_shared_named_scope(self):
+        assert related(_verified(["p1"]), _failed(["p1"], scope="x")) is True
+        assert related(_verified(["p1"], scope="the GO enrichment step"), _failed(["p9"], scope="the GO enrichment step"))
+        assert related(_verified(["p1"]), _failed(["p9"], scope="x")) is False

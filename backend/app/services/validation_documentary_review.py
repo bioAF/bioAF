@@ -653,9 +653,24 @@ async def review_documents(
     # The owner, 2026-09-21: one demonstrated failure must not be several deductions, and a positive
     # cannot stand on evidence a negative contradicts. Obligations are judged one per request, so
     # neither can be seen from inside a judgment; this is where they are reconciled.
+    #
+    # plan_8_7, agreed with the owner 2026-09-27: the overlap pass finds the candidates and the
+    # configured model reads what each pair MEANS, with the evidence they share in front of it. A
+    # positive that a negative does not contradict is preserved, and a failure that could not be
+    # reconciled is reported as unreconciled rather than as consistent.
     from app.services.validation_finding_overlap import reconcile_findings
+    from app.services.validation_semantic_reconciliation import reconcile_semantically
 
     accepted = reconcile_findings(accepted)
+    reconciled = await reconcile_semantically(
+        judgments=accepted,
+        passages=_passage_texts(packets, shared),
+        client=client,
+        model=model,
+        api_key=api_key,
+    )
+    accepted = reconciled["judgments"]
+    asked["reconciliation_requests"] = reconciled["examined"]
     return {
         "judgments": accepted,
         "failures": failures,
@@ -663,6 +678,10 @@ async def review_documents(
         "model": model,
         "contract_version": CONTRACT_VERSION,
         "review_version": REVIEW_VERSION,
+        "semantic_reconciliation": {
+            key: reconciled[key]
+            for key in ("status", "reason", "examined", "unresolved", "unreconciled", "reconciliation_version")
+        },
         "asked": asked,
         "evidence_chars": sum(
             len(str(p.get("text") or "")) for packet in packets.values() for p in packet.get("passages") or []
@@ -670,6 +689,18 @@ async def review_documents(
         or sum(len(str(p.get("text") or "")) for p in shared),
         "reason": None,
     }
+
+
+def _passage_texts(packets: dict[str, dict], shared: list[dict]) -> dict[str, str]:
+    """Every passage any obligation was shown, by the id a judgment cites it as.
+
+    The semantic pass reasons from the evidence two findings share, so it needs the words, not the ids.
+    """
+    found = {str(p.get("id")): str(p.get("text") or "") for p in shared}
+    for packet in packets.values():
+        for row in list((packet or {}).get("passages") or []) + list((packet or {}).get("expansion") or []):
+            found.setdefault(str(row.get("id")), str(row.get("text") or ""))
+    return found
 
 
 async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure, recovery=True):
