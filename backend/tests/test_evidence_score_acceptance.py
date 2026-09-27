@@ -242,9 +242,17 @@ class TestASuppliedScriptScoresTheCodeSection:
             checks=None,
         )
         code = next(s for s in summary["evidence_score"]["sections"] if s["section"] == "C")
-        assert code["verified"] == 12, "syntax, imports, pinning, runtime, entry point and coherence"
+        # plan_8_7 stage 1: a declared entry point and a runtime version are observations, not the
+        # obligations. C4.A asks whether the supplied source covers the steps the paper CLAIMS and
+        # C3.B how the environment would be rebuilt: this Dockerfile names a runtime and no procedure
+        # that rebuilds anything, and there are no claimed steps in front of the parser at all. Both
+        # are asked of the configured assessor with the paper's methods, and no model ran here.
+        assert code["verified"] == 8, "syntax, imports, pinning and coherence"
         assert code["failed"] == 0
-        assert code["undetermined"] == 8, "the build, the resolution and the fitness review are not in hand"
+        assert code["undetermined"] == 12, (
+            "the build, the resolution and the fitness review are not in hand, and analysis coverage "
+            "and environment reconstruction are judged in the paper's context"
+        )
 
 
 class TestTheStiffnessPapersProfileFitsItsOwnMethods:

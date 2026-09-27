@@ -648,6 +648,18 @@ def _coverage(
         for limit in limitations
         if isinstance(limit, dict) and str(limit.get("needs")) in needs
     ]
+    # WHICH of this obligation's needs went unmet, kept apart from the sentence that explains it.
+    # plan_8_7 stage 1 validates sufficiency for positives too, and what decides that is whether the
+    # missing source is the obligation's own subject (its deposit, its code) rather than the paper's
+    # text and attachments, which every obligation depends on.
+    needs_unavailable = sorted(
+        {
+            str(limit.get("needs"))
+            for limit in limitations
+            if isinstance(limit, dict) and str(limit.get("needs")) in needs
+        }
+        - set(_ALWAYS_NEEDS)
+    )
     supplied = []
     for passage in kept:
         label = str(passage.get("section") or passage.get("source") or "").strip()
@@ -679,6 +691,7 @@ def _coverage(
         "passages_supplied": len(kept),
         "excluded_irrelevant": excluded,
         "unavailable": unavailable,
+        "needs_unavailable": needs_unavailable,
         "deferred": [str(p.get("id")) for p in deferred],
         "deferred_relevant": [str(p.get("id")) for p in missed],
         "truncated": bool(missed),
