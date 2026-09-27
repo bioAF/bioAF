@@ -56,6 +56,13 @@ JUDGED_LEAVES = (
     "M3.B",
     "M5.A",
     "M5.B",
+    # plan_8_7 section 6 stage 1: C3.B and C4.A are questions about the paper's own claims and its
+    # environment, not about the source text. A parser establishes what is in the supplied files; it
+    # cannot establish which of the steps this paper claims they cover, or whether the environment
+    # they name could be reconstructed. Both are asked with the methods and the code in front of the
+    # assessor, and the parser's observations travel with them as evidence.
+    "C3.B",
+    "C4.A",
     "C5.A",
     "C5.B",
 )
@@ -110,12 +117,13 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
     could not carry whole reaches the packet's coverage the same way a source it never fetched does,
     so section 8 refuses an absence finding over the part nobody read.
     """
-    from app.services.validation_evidence_packets import CODE, CUTOFF, DEPOSIT, REFERENCE, SUPPLEMENT, TOOLS
+    from app.services.validation_evidence_packets import CHECKS, CODE, CUTOFF, DEPOSIT, REFERENCE, SUPPLEMENT, TOOLS
 
     evidence, plan = evidence or {}, plan or {}
     rows: list[dict] = []
     omissions: list[dict] = []
     rows += _normalized_rows(evidence, cutoff_kind=CUTOFF, reference_kind=REFERENCE)
+    rows += _check_rows(evidence, checks_kind=CHECKS)
     # plan_8_6 section 7: the design facts a comparison rests on, read from the paper's own words.
     # E2.B was verified from a list of comparators because nothing else about the design was ever
     # put in front of it.
@@ -235,6 +243,80 @@ def carried_evidence(*, evidence: dict | None, plan: dict | None) -> dict:
             }
         )
     return {"rows": rows, "omissions": omissions}
+
+
+def _check_rows(evidence: dict, *, checks_kind: str) -> list[dict]:
+    """What bioAF's own parser established about the supplied code, as evidence about it.
+
+    plan_8_7 section 6 stage 1. An entry point is one observation and a runtime version is another.
+    Both were reported as the obligations themselves, so a script printing `hello` earned analysis
+    coverage. They are true observations, and the assessor that judges the obligation in the paper's
+    context needs to see them rather than re-derive them from the source.
+    """
+    from app.services.validation_code_checks import assess_code
+
+    inspection = evidence.get("code_inspection") if isinstance(evidence.get("code_inspection"), dict) else {}
+    sources = [s for s in (inspection or {}).get("sources") or [] if isinstance(s, dict)]
+    if not sources:
+        return []
+    manifests = [m for m in (inspection or {}).get("manifests") or [] if isinstance(m, dict)]
+    try:
+        assessed = assess_code(sources=sources, manifests=manifests, execution=(inspection or {}).get("execution"))
+    except Exception:  # noqa: BLE001 - a parser failure is not evidence about the paper
+        return []
+    rows: list[dict] = []
+    coverage = (assessed.get("C4.A") or {}).get("observation") or {}
+    if coverage:
+        declared = coverage.get("declared_entry_points") or []
+        bare = coverage.get("runs_top_level") or []
+        rows.append(
+            {
+                "id": "check:entry_points",
+                "kind": checks_kind,
+                "source": "bioAF's own reading of the supplied source",
+                "text": (
+                    "What bioAF's parser established about the supplied source, as an observation and not as an "
+                    f"answer. Files read: {', '.join(coverage.get('files') or []) or 'none'}. "
+                    + (
+                        f"Declares an entry point that starts it: {', '.join(declared)}. "
+                        if declared
+                        else "Declares no entry point. "
+                    )
+                    + (f"Runs top-level statements without declaring an entry point: {', '.join(bare)}. " if bare else "")
+                    + (
+                        ""
+                        if coverage.get("starts")
+                        else "Nothing in the supplied source runs, so it states no way to start the analysis. "
+                    )
+                    + "Which of the steps this paper claims these files perform is NOT established by this reading."
+                ),
+            }
+        )
+    environment = (assessed.get("C3.B") or {}).get("observation") or {}
+    if environment:
+        system = environment.get("system_dependencies") or []
+        rows.append(
+            {
+                "id": "check:environment",
+                "kind": checks_kind,
+                "source": "bioAF's own reading of the supplied environment specification",
+                "text": (
+                    "What bioAF's parser read out of the supplied environment specification "
+                    f"({', '.join(environment.get('manifests') or []) or 'none'}), as an observation. "
+                    f"States a runtime version: {'yes' if environment.get('runtime_stated') else 'no'}. "
+                    f"States a procedure that rebuilds the environment (an install command, a container "
+                    f"definition or a lockfile): {'yes' if environment.get('procedure_stated') else 'no'}. "
+                    + (
+                        f"Names the system dependencies {', '.join(system)}. "
+                        if system
+                        else "Names no system or operating-system dependencies. "
+                    )
+                    + "Whether that is enough to rebuild the environment THIS analysis ran in is not "
+                    "established by this reading."
+                ),
+            }
+        )
+    return rows
 
 
 def _normalized_rows(evidence: dict, *, cutoff_kind: str, reference_kind: str) -> list[dict]:

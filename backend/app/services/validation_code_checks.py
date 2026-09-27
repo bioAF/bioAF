@@ -623,22 +623,88 @@ def _environment(sources, readings, manifests) -> dict:
             scope=", ".join(str(m.get("path")) for m in manifests),
             next_action="add a declared parser for this source's language",
         )
+    return {"C3.A": pinned, "C3.B": _reconstruction(manifests)}
+
+
+# What a manifest says about rebuilding: the command or lockfile a person would actually run. plan_8_7
+# section 6 stage 1: C3.B requires "the relevant runtime/system dependencies and a reconstructable
+# procedure", and a version number is neither.
+_PROCEDURE = re.compile(
+    r"\bpip\s+install\b|\bpip3\s+install\b|\bpoetry\s+install\b|\buv\s+(?:sync|pip)\b|\bpipenv\s+install\b"
+    r"|\bconda\s+(?:env\s+)?(?:create|install)\b|\bmamba\s+(?:create|install)\b"
+    r"|\brenv::restore\b|\bremotes::install|\bdevtools::install|\bBiocManager::install|\binstall\.packages\b"
+    r"|\bmake\b|\bsnakemake\b|\bnextflow\s+run\b|\bdocker\s+build\b|\bsingularity\s+build\b"
+    r"|\bRUN\s+|\bsetup\.py\b|\brequirements\.txt\b|\benvironment\.ya?ml\b",
+    re.I,
+)
+# A lockfile IS a procedure: it names every resolved version, which is what a restore replays.
+_LOCKFILE = re.compile(r"(?:^|/)(?:renv\.lock|poetry\.lock|uv\.lock|conda-lock\.ya?ml|Pipfile\.lock)$", re.I)
+# The dependencies that are not the language's own packages, and that a rebuild has to install first.
+_SYSTEM_DEPENDENCY = re.compile(
+    r"(?:apt-get|apt|yum|dnf|apk add|brew install)\s+(?:-\w+\s+|install\s+|add\s+)*([A-Za-z0-9][\w.+-]*)", re.I
+)
+_SYSTEM_REQUIREMENTS = re.compile(r"^\s*SystemRequirements\s*:\s*(.+)$", re.I | re.M)
+
+
+def _system_dependencies(text: str) -> list[str]:
+    """The non-language dependencies the supplied specification names."""
+    found = {m.group(1) for m in _SYSTEM_DEPENDENCY.finditer(text) if m.group(1).lower() not in ("install", "add")}
+    for match in _SYSTEM_REQUIREMENTS.finditer(text):
+        found |= {part.strip() for part in re.split(r"[,;]", match.group(1)) if part.strip()}
+    return sorted(found)
+
+
+def _reconstruction(manifests) -> dict:
+    """C3.B, as the observations a parser can make and nothing more.
+
+    plan_8_7 section 4: a runtime token alone earned this obligation. Three different facts were read
+    as one: which runtime, what it needs underneath, and how a person rebuilds it. Each is recorded
+    separately, and whether they add up to a reconstructable environment for THIS paper's analysis is
+    judged with the paper's methods in front of the assessor.
+    """
+    scope = ", ".join(str(m.get("path")) for m in manifests)
     text = "\n".join(str(m.get("text") or "") for m in manifests)
-    if _RUNTIME_VERSION.search(text) or _R_RUNTIME.search(text):
-        runtime = _finding(
-            VERIFIED,
-            "the supplied specification states the runtime it was built against and how to rebuild it",
-            scope=", ".join(str(m.get("path")) for m in manifests),
-        )
-    else:
-        runtime = _finding(
+    runtime_stated = bool(_RUNTIME_VERSION.search(text) or _R_RUNTIME.search(text))
+    procedure_stated = bool(_PROCEDURE.search(text)) or any(
+        _LOCKFILE.search(str(m.get("path") or "")) for m in manifests
+    )
+    observation = {
+        "runtime_stated": runtime_stated,
+        "procedure_stated": procedure_stated,
+        "system_dependencies": _system_dependencies(text),
+        "manifests": [str(m.get("path")) for m in manifests],
+    }
+    if not runtime_stated:
+        # An established consequential omission, not missing inspected evidence: the specification was
+        # read and it names no runtime, so what produced the results cannot be rebuilt as it was.
+        return _finding(
             FAILED,
             "the supplied environment specification states no runtime version, so the environment it "
             "describes cannot be reconstructed as it was",
-            scope=", ".join(str(m.get("path")) for m in manifests),
+            scope=scope,
             impact="a rebuild picks whatever runtime is current, which is not the one that produced the results",
+            observation=observation,
         )
-    return {"C3.A": pinned, "C3.B": runtime}
+    if not procedure_stated:
+        return _open(
+            "the supplied specification states a runtime version and no way to rebuild the environment "
+            "around it, so whether it could be reconstructed is not established by reading it",
+            scope=scope,
+            next_action="retrieve the container definition, lockfile or install procedure this analysis was built with",
+            observation=observation,
+        )
+    return _finding(
+        VERIFIED,
+        "the supplied specification states the runtime it was built against and a procedure that rebuilds "
+        "the environment around it"
+        + (
+            f", including the system dependencies {', '.join(observation['system_dependencies'])}"
+            if observation["system_dependencies"]
+            else ""
+        ),
+        scope=scope,
+        observation=observation,
+    )
 
 
 def _entry_points(trees) -> tuple[list[str], list[str]]:
@@ -723,11 +789,23 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
     running = [str(r["source"].get("path")) for r in readings if r["language"] == "r" and r["r"]["runs"]]
     entry += running
     declared_entry += running
+    # plan_8_7 section 6 stage 1: "An entry point is one observation, never proof that all steps
+    # exist." What the parser establishes is recorded here; whether the supplied source covers the
+    # steps THIS paper claims is judged with the paper's methods in front of the assessor, because
+    # the claimed steps are not in the source at all.
+    observation = {
+        "declared_entry_points": sorted(set(declared_entry)),
+        "runs_top_level": sorted(set(entry) - set(declared_entry)),
+        "starts": bool(entry),
+        "files": [str(s.get("path") or "an unnamed file") for s in sources or []],
+    }
     if declared_entry:
-        covers = _finding(
-            VERIFIED,
-            f"the supplied source has an entry point that runs the analysis ({', '.join(declared_entry)})",
+        covers = _open(
+            f"the supplied source declares an entry point that starts it ({', '.join(sorted(set(declared_entry)))}); "
+            "which of the steps this paper claims that entry point covers is not established by reading it",
             scope=_scope(sources),
+            next_action="bind each claimed analysis step to the supplied script that performs it",
+            observation=observation,
         )
     elif entry:
         # The owner, 2026-09-21: this awarded complete-analysis coverage merely because the scripts
@@ -740,6 +818,7 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
             "claims, is not established by reading them",
             scope=_scope(sources),
             next_action="bind each claimed analysis step to the supplied script that performs it",
+            observation=observation,
         )
     else:
         covers = _open(
@@ -747,6 +826,7 @@ def _completeness(sources, readings, unsupported, unreadable) -> dict:
             "analysis is started",
             scope=_scope(sources),
             next_action="retrieve the script or notebook that calls this code",
+            observation=observation,
         )
     unbound: list[str] = []
     personal: list[str] = []

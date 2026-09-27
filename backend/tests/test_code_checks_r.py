@@ -68,8 +68,12 @@ class TestWhatTheSourceRequires:
 
 
 class TestWhatTheSourceCoversAndWhereItReads:
-    def test_a_source_that_does_work_has_an_entry_point(self):
-        assert _outcome(assess_code(sources=[_GOOD]), "C4.A") == "verified"
+    def test_a_source_that_does_work_states_how_it_starts_and_no_more(self):
+        """plan_8_5 section 3.5: an R source that does work when it runs states how the analysis
+        starts. plan_8_7: that is an observation, not coverage of the paper's claimed steps."""
+        assessed = assess_code(sources=[_GOOD])
+        assert _outcome(assessed, "C4.A") == "undetermined"
+        assert assessed["C4.A"]["observation"]["starts"] is True
 
     def test_a_source_that_only_defines_functions_states_no_way_to_start(self):
         definitions = {**_GOOD, "text": "f <- function(x) x + 1\ng <- function(y) y - 1\n"}

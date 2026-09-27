@@ -76,6 +76,12 @@ DESIGN = "design"
 # for the reference and annotation releases.
 CUTOFF = "cutoff"
 REFERENCE = "reference"
+# plan_8_7 section 6 stage 1: what bioAF's own parser established about the supplied code, in front of
+# the obligations that are judged in the paper's context. C4.A asks whether the supplied source covers
+# the steps the paper CLAIMS and C3.B how its environment would be REBUILT; neither is answerable from
+# the source alone, and both need the narrow observation beside the claim so the assessor can see what
+# was read rather than inferring it.
+CHECKS = "checks"
 
 
 @dataclass(frozen=True)
@@ -305,6 +311,31 @@ _SELECTORS: dict[str, Selector] = {
             r"\btool\b|\bpackage\b|\blibrar\w*|\bfunction\b|\bmode\b|\bflag\b",
         ),
     ),
+    # plan_8_7 section 6 stage 1: how the environment that ran the analysis could be rebuilt. The
+    # manifest, the parser's reading of it and whatever the paper says about its environment.
+    "C3.B": Selector(
+        (METHODS, AVAILABILITY, OTHER),
+        (CHECKS, CODE, TOOLS, SUPPLEMENT),
+        (*_ALWAYS_NEEDS, "code"),
+        _re(
+            r"\bversion \d|\bv\d+\.\d+|\bruntime\b|\bpython\b|\bR\s+\d|\bconda\b|\bdocker\b|\bcontainer\b|\bimage\b",
+            r"\benvironment\b|\brequirements?\b|\block\s?file\b|\brenv\b|\bDESCRIPTION\b|\bSystemRequirements\b",
+            r"\binstall\w*|\bbuild\b|\bdependenc\w*|\blibrar\w*|\bpackage\b|\bcompil\w*|\bapt\b|\byum\b",
+        ),
+    ),
+    # Whether the supplied entry points, scripts and configuration cover the analysis the paper claims.
+    # It needs the claimed steps (the methods) and the code, together, which is why it is asked at all.
+    "C4.A": Selector(
+        (METHODS, LEGEND, RESULTS, AVAILABILITY, OTHER),
+        (CHECKS, CODE, TOOLS, SUPPLEMENT),
+        (*_ALWAYS_NEEDS, "code"),
+        _re(
+            r"\bscript\w*|\bnotebook\b|\bcode\b|\bpipeline\b|\bworkflow\b|\bentry\s?point\b|\brepositor\w*",
+            r"\bperformed (?:using|with)\b|\banalys\w* (?:using|with)\b|\bcomputed\b|\bcalculated\b",
+            _COMPUTATIONAL.pattern,
+        ),
+        _BENCH_MATERIALS,
+    ),
 }
 
 
@@ -383,8 +414,13 @@ def packet_for(
         if dropped:
             excluded += 1
             continue
+        # plan_8_7 section 6 stage 1: "Missing keyword matches do not establish irrelevance." A
+        # paragraph of the section this obligation is about is candidate evidence for it however it is
+        # worded: the owner's repeated-observations sentence matched none of M3's vocabulary, ranked
+        # zero, and was passed over for paragraphs that said `DESeq2`. Ranking still decides what a
+        # tight budget spends itself on; it no longer decides what is offered at all.
         ranked.append(
-            (rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, rank > 0, order, passage)
+            (rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, True, order, passage)
         )
     for order, extra in enumerate(extras or [], start=len(eligible)):
         if not isinstance(extra, dict) or extra.get("kind") not in selector.extras:
@@ -416,7 +452,10 @@ def packet_for(
     # in words no selector knows still assessable.
     candidates = [row for row in ranked if row[2]]
     chosen = candidates or ranked
-    by_section_only = not candidates and bool(ranked)
+    # Whether NOTHING matched this obligation's own terms, so the section alone carried the packet.
+    # It is a fact about the ranking, and it stays on the record after eligibility stopped depending
+    # on the vocabulary.
+    by_section_only = not any(row[1] for row in ranked) and bool(ranked)
     spare = [row for row in ranked if not row[2]] if candidates else []
 
     kept: list[dict] = []
@@ -530,6 +569,12 @@ def _coverage(
         reasons.append("; ".join(unavailable))
     if missed:
         reasons.append(f"{len(missed)} relevant passages did not fit this request's budget")
+    # plan_8_7 section 6 stage 1: "uninspected eligible context cannot be silently counted as
+    # inspected". This is the whole of the eligible evidence the packet did not carry, whatever its
+    # ranking said, and an absence finding is a claim about a search that has to have finished.
+    uninspected = [p for p in deferred if str(p.get("id")) not in {str(k.get("id")) for k in kept}]
+    if uninspected and not missed:
+        reasons.append(f"{len(uninspected)} eligible passages were not inspected by this request")
     sufficient = bool(kept) and not unavailable and not missed
     return {
         "packet_version": PACKET_VERSION,
@@ -543,5 +588,9 @@ def _coverage(
         "deferred": [str(p.get("id")) for p in deferred],
         "deferred_relevant": [str(p.get("id")) for p in missed],
         "truncated": bool(missed),
+        # What the packet did and did not read, kept apart from what it deferred as less relevant.
+        "eligible": len(eligible),
+        "uninspected": len(uninspected),
+        "inspection_complete": not uninspected and not unavailable,
         "reason": "; ".join(reasons),
     }
