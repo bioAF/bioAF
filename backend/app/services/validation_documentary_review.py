@@ -81,6 +81,12 @@ REVIEW_VERSION = 3
 # used to carry its own, which permitted four semantic attempts where the plan allows two.
 ATTEMPTS_PER_LEAF = 2
 
+# plan_8_7 stage 0: the aggregate ceiling on one assessment's documentary requests, declared as a
+# number rather than inherited from the per-request budget. Per-analysis units share it: a paper with
+# two arms and two implementations asks about more obligations, and it does not get a bigger budget
+# for doing so. Exhaustion preserves the work already done and names the obligations it did not reach.
+MAX_REQUESTS = 96
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -484,21 +490,43 @@ def limitations_for(evidence: dict | None) -> list[dict]:
     return found
 
 
-def packets_for(*, evidence: dict | None, plan: dict | None, leaves: tuple[str, ...]) -> dict[str, dict]:
+def packets_for(
+    *,
+    evidence: dict | None,
+    plan: dict | None,
+    leaves: tuple[str, ...],
+    units: dict | None = None,
+    budget_chars: int | None = None,
+) -> dict[str, dict]:
     """One bounded evidence packet per obligation, with what it covered.
 
     plan_8_6 section 3. A study recorded before the index still has its held passages read: the
     bounded methods, statements and claim passages become a one-section index rather than being
     left unassessed.
+
+    plan_8_7 stage 1: a leaf may name the analysis unit it is about, and ``units`` maps a unit id to
+    its definition (`validation_analysis_units`). The unit's own words rank its evidence, so the two
+    arms of one paper are asked about different passages rather than handed one packet twice.
     """
-    from app.services.validation_evidence_packets import packet_for
+    from app.services.validation_evidence_packets import MAX_PACKET_CHARS, packet_for
 
     index = _index_of(evidence or {})
     carried = carried_evidence(evidence=evidence, plan=plan)
     # A source bioAF held and could not carry whole is a limitation of this study's evidence in the
     # same way a source it never fetched is: section 8 will not report an absence over either.
     limitations = limitations_for(evidence) + carried["omissions"]
-    return {leaf: packet_for(leaf, index=index, extras=carried["rows"], limitations=limitations) for leaf in leaves}
+    definitions = units or {}
+    return {
+        leaf: packet_for(
+            leaf,
+            index=index,
+            extras=carried["rows"],
+            limitations=limitations,
+            budget_chars=budget_chars or MAX_PACKET_CHARS,
+            unit=definitions.get(str(leaf).partition("#")[2]),
+        )
+        for leaf in leaves
+    }
 
 
 def _index_of(evidence: dict) -> dict:
@@ -560,6 +588,7 @@ async def review_documents(
     leaves: tuple[str, ...] = JUDGED_LEAVES,
     on_failure=None,
     settled: dict[str, dict] | None = None,
+    units: dict | None = None,
 ) -> dict:
     """``{"judgments", "failures", "at", "model", "reason"}``: one judgment per obligation asked.
 
@@ -606,7 +635,16 @@ async def review_documents(
             accepted[leaf] = _untested(reason, coverage)
             asked["skipped_without_evidence"] += 1
             continue
+        if asked["requests"] >= MAX_REQUESTS:
+            accepted[leaf] = _untested(
+                f"the assessment's model budget of {MAX_REQUESTS} documentary requests was spent before this "
+                "obligation was asked",
+                coverage,
+            )
+            asked["budget_exhausted"] = asked.get("budget_exhausted", 0) + 1
+            continue
         asked["requests"] += 1
+        unit = (units or {}).get(str(leaf).partition("#")[2])
         judged, failure, spent = await _ask(
             leaf,
             rows,
@@ -615,6 +653,7 @@ async def review_documents(
             model=model,
             api_key=api_key,
             on_failure=on_failure,
+            unit=unit,
         )
         if failure is not None:
             failures.append(failure)
@@ -632,6 +671,7 @@ async def review_documents(
             again, failure, _ = await _ask(
                 leaf,
                 widened,
+                unit=unit,
                 # Section 11: the widened request is judged on what IT was shown. An absence finding
                 # rests on this record, and handing it the first packet's would let a negative rest
                 # on coverage of evidence the assessor never saw.
@@ -703,7 +743,7 @@ def _passage_texts(packets: dict[str, dict], shared: list[dict]) -> dict[str, st
     return found
 
 
-async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure, recovery=True):
+async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure, recovery=True, unit=None):
     """One obligation, asked once. Returns (judgment or None, failure or None, attempts spent).
 
     ``recovery`` is the shared allowance of plan_8_6 section 11: one initial call plus one recovery
@@ -711,11 +751,12 @@ async def _ask(leaf, rows, *, coverage, client, model, api_key, on_failure, reco
     expansion, never on both. Never raises.
     """
     try:
-        request = build_request(leaf, passages=rows)
+        request = build_request(leaf, passages=rows, unit=unit)
     except JudgmentRefused as refusal:
         return None, {"leaf": leaf, "reason": str(refusal)}, 0
     decision = await decide_with_recovery(
-        intent=f"judging {request['criterion']} {leaf.rpartition('.')[2]}: {request['title']}",
+        intent=f"judging {request['criterion']} {str(leaf).partition('#')[0].rpartition('.')[2]}: {request['title']}"
+        + (f" ({request['unit']})" if request.get("unit") else ""),
         system=request["system"],
         payload=request["payload"],
         client=client,

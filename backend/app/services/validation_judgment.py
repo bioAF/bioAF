@@ -178,7 +178,7 @@ def _context_for(criterion_id: str) -> str:
     return "\n".join(lines)
 
 
-def build_request(leaf: str, *, passages: list[dict] | None) -> dict:
+def build_request(leaf: str, *, passages: list[dict] | None, unit: dict | None = None) -> dict:
     """The request for one obligation: its place in the rubric, its scope, and the evidence to judge it on.
 
     plan_8_6 section 6: the section name, the criterion title and BOTH halves of the criterion travel
@@ -186,7 +186,12 @@ def build_request(leaf: str, *, passages: list[dict] | None) -> dict:
     Computational methods row about preprocessing, and an assessor shown only the sentence read it as
     laboratory materials and verified the obligation from culture media.
     """
-    criterion_id, _, obligation = str(leaf).partition(".")
+    # plan_8_7 stage 1: a leaf may name the analysis unit it is about (``M3.B#exp:e1``). The obligation
+    # is the same obligation; what the unit changes is which analysis the answer is about, and the
+    # assessor is told, because "the paper's design is appropriate" and "THIS arm's design is
+    # appropriate" are different answers.
+    base, _, _unit_id = str(leaf).partition("#")
+    criterion_id, _, obligation = base.partition(".")
     criterion = CRITERIA_BY_ID.get(criterion_id)
     if criterion is None or obligation not in ("A", "B"):
         raise JudgmentRefused(f"{leaf} is not an obligation rubric v3 declares")
@@ -212,8 +217,15 @@ def build_request(leaf: str, *, passages: list[dict] | None) -> dict:
             f"The other half of {criterion.id} ({criterion.id}.{'B' if obligation == 'A' else 'A'}), for context "
             f"only and NOT what you are answering: {other}"
         )
+    label = str((unit or {}).get("label") or "").strip()
+    if label:
+        question.append(
+            f"\nThis question is about ONE analysis of this paper: {label}. Answer about that analysis only, "
+            "and name it as your scope. Evidence about another analysis of the same paper does not answer it."
+        )
     return {
         "leaf": leaf,
+        "unit": label or None,
         "criterion": criterion.id,
         "obligation": statement,
         "title": criterion.title,

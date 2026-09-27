@@ -52,10 +52,33 @@ class TestAMethodsSentenceReachesAMethodsQuestion:
         assert [p["id"] for p in packet["passages"]] == ["p2"]
 
     def test_a_passage_the_obligation_excludes_is_still_dropped(self):
+        computational = "Reads were trimmed and aligned with STAR, and cells were filtered at 500 genes."
         bench = "Cells were cultured in mTeSR Plus on Matrigel-coated plates and passaged with EDTA."
-        packet = packet_for("M1.B", index=_index(_MATCHES, bench))
-        assert "p2" not in [p["id"] for p in packet["passages"]]
+        packet = packet_for("M1.B", index=_index(computational, bench))
+        assert [p["id"] for p in packet["passages"]] == ["p1"]
         assert packet["coverage"]["excluded_irrelevant"] == 1
+
+    def test_a_whole_section_about_what_the_obligation_excludes_is_skipped_together(self):
+        """plan_8_7: "carry coherent procedures". A paper's Methods holds the bench procedure and the
+        computational one under one kind, and the opening sentence of the bench subsection names no
+        reagent at all, so dropping the keyword gate put it in front of a preprocessing question."""
+        computational = {
+            "id": "p1",
+            "kind": "methods",
+            "section": "Data processing",
+            "text": "Reads were trimmed and aligned with STAR.",
+        }
+        opening = {"id": "p2", "kind": "methods", "section": "Cell culture", "text": "Two parental lines were used."}
+        reagents = {
+            "id": "p3",
+            "kind": "methods",
+            "section": "Cell culture",
+            "text": "Cells were grown in mTeSR Plus on Matrigel and passaged with EDTA.",
+        }
+        packet = packet_for("M1.B", index={"passages": [computational, opening, reagents]})
+        assert [p["id"] for p in packet["passages"]] == ["p1"]
+        assert packet["coverage"]["excluded_sections"] == ["Cell culture"]
+        assert packet["coverage"]["excluded_irrelevant"] == 2
 
 
 class TestUninspectedContextIsRecordedAsUninspected:

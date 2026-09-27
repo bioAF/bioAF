@@ -162,12 +162,25 @@ class TestNothingIsAskedWithoutEvidence:
 class TestTheOneTargetedExpansion:
     @pytest.mark.asyncio
     async def test_an_unsettled_obligation_is_asked_once_more_with_more_evidence(self, session, admin_user):
+        """plan_8_7 stage 1 narrowed what an expansion can add: eligibility no longer depends on the
+        vocabulary, so the first packet already carries the eligible context the budget fits, and the
+        expansion is what the BUDGET deferred. M3's design question is the obligation on this paper
+        whose eligible evidence does not fit one request."""
+        study = await _study(session, admin_user, {"paper_index": _index()})
+        client = _Client(outcome="cannot_establish", rationale="the evidence supplied does not settle it")
+        await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
+        asked = [a for a in client.asked if a["leaf"].startswith("Obligation (M3 B)")]
+        assert len(asked) >= 2, "one expansion, within the existing recovery allowance"
+        assert len(asked[-1]["payload"]) > len(asked[0]["payload"])
+
+    @pytest.mark.asyncio
+    async def test_an_obligation_whose_evidence_all_fitted_is_not_asked_again(self, session, admin_user):
+        """There is nothing to add. Asking again would buy the same answer at twice the price."""
         study = await _study(session, admin_user, {"paper_index": _index()})
         client = _Client(outcome="cannot_establish", rationale="the evidence supplied does not settle it")
         await refresh_documentary_review(session, study, client=client, model="m", api_key="k")
         asked = [a for a in client.asked if a["leaf"].startswith("Obligation (M1 B)")]
-        assert len(asked) >= 2, "one expansion, within the existing recovery allowance"
-        assert len(asked[-1]["payload"]) > len(asked[0]["payload"])
+        assert len(asked) == 1
 
     @pytest.mark.asyncio
     async def test_a_settled_obligation_is_not_asked_twice(self, session, admin_user):
