@@ -37,6 +37,25 @@ _CAUGHT = _answer(
 )
 
 
+class TestTheCorpusShipsWithTheApplication:
+    def test_it_is_not_under_the_tests_directory(self):
+        """Found by verifying the deployed container: the backend image carries no `tests/`, so a
+        corpus path under it resolved to nothing and every gate would have passed on zero cases."""
+        from app.services.validation_acceptance import CASES
+
+        assert "tests" not in CASES.parts
+        assert CASES.is_dir()
+
+    def test_an_empty_corpus_is_an_error_rather_than_an_empty_result(self, tmp_path, monkeypatch):
+        from app.services import validation_acceptance
+
+        validation_acceptance.frozen_cases.cache_clear()
+        monkeypatch.setattr(validation_acceptance, "CASES", tmp_path)
+        with pytest.raises(FileNotFoundError):
+            validation_acceptance.frozen_cases()
+        validation_acceptance.frozen_cases.cache_clear()
+
+
 class TestTheCorpusIsFrozenAndSourceBacked:
     def test_every_case_records_who_established_it_and_from_what(self):
         for case in frozen_cases():

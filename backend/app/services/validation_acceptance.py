@@ -35,7 +35,12 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-CASES = Path(__file__).resolve().parent.parent.parent / "tests" / "data" / "plan_8_7"
+# The corpus ships WITH the application, not with the tests. Found by verifying the deployed
+# container: the backend image carries no `tests/` directory, so a path under it resolved to nothing
+# and `frozen_cases()` returned an empty tuple, which would have made the whole acceptance gate pass
+# vacuously. An acceptance gate that finds no cases is the "make every difficult check grey" failure
+# plan_8_7 forbids, so a missing corpus raises rather than returning nothing.
+CASES = Path(__file__).resolve().parent / "acceptance_cases" / "plan_8_7"
 
 PASSED = "passed"
 MATERIAL_ERROR = "material_error"
@@ -84,8 +89,17 @@ _FORBIDS: dict[str, tuple[str, ...]] = {
 
 @lru_cache(maxsize=None)
 def frozen_cases() -> tuple[dict, ...]:
-    """Every case frozen before the implementation moved, in a stable order."""
-    return tuple(json.loads(path.read_text(encoding="utf-8")) for path in sorted(CASES.glob("*.json")))
+    """Every case frozen before the implementation moved, in a stable order.
+
+    An empty corpus is an error, never an empty result: a gate with no cases would accept anything.
+    """
+    found = tuple(json.loads(path.read_text(encoding="utf-8")) for path in sorted(CASES.glob("*.json")))
+    if not found:
+        raise FileNotFoundError(
+            f"no frozen acceptance cases were found under {CASES}; an acceptance gate with no cases "
+            "accepts anything, so this is a broken install rather than an empty corpus"
+        )
+    return found
 
 
 def frozen_case(name: str) -> dict:
