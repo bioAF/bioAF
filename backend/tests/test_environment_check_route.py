@@ -27,7 +27,11 @@ class TestTheRequestAPersonApproves:
         request = environment_check_request(sources=[_PY], manifests=[{"path": "requirements.txt", "text": "numpy==1.26.4\n"}])
         assert request["language"] == "python"
         assert request["files"] == ["analysis.py", "requirements.txt"]
-        assert request["limits"]["network"] == "denied"
+        # plan_8_7 stage 3: the two phases declare the network each one needs, because they differ.
+        # Installing the paper's declared dependencies needs a package index; loading them does not.
+        assert request["limits"]["network"] == "install_only"
+        assert request["phases"]["install"]["network"] == "allowed"
+        assert request["phases"]["runtime"]["network"] == "denied"
         assert request["limits"]["timeout_seconds"] > 0
         assert request["approval"]["required"] is True
 

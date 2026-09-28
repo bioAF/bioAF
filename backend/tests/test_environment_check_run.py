@@ -31,6 +31,15 @@ class TestTheScriptThatRuns:
         assert "importlib.import_module" in script
         assert "analysis.py" not in script, "it loads the modules, it does not run the paper's script"
 
+    def test_it_installs_the_declared_dependencies_before_loading_anything(self):
+        """plan_8_7 stage 3: the check imported against whatever image this install configures, so a
+        repository whose environment cannot be built looked like one whose packages happen to be
+        present. Installing the paper's own specification is now the first phase."""
+        script = check_script(sources=[_PY], manifests=[{"path": "requirements.txt", "text": "numpy==1.26.4\n"}])
+        assert "BIOAF_INSTALL" in script
+        assert "pip install" in script
+        assert script.index("BIOAF_INSTALL") < script.index("BIOAF_LOAD")
+
     def test_the_r_check_attaches_what_the_source_attaches(self):
         script = check_script(sources=[_R], manifests=[])
         assert "DESeq2" in script and "dplyr" in script
@@ -118,16 +127,32 @@ class TestWhatIsStaged:
 
 
 class TestWhatARunEstablishes:
+    """plan_8_7 stage 3 changed what a transcript with no INSTALL phase establishes, and the change is
+    flagged rather than silent: a load that succeeded in an environment bioAF never built from the
+    paper's own specification is a fact about the base image, so every transcript here declares whether
+    the declared environment was built."""
+
     def test_a_clean_run_verifies_both_obligations(self):
-        transcript = "BIOAF_LOAD numpy ok\nBIOAF_LOAD os ok\nBIOAF_RESOLVE ok\n"
+        transcript = (
+            "BIOAF_INSTALL requirements.txt ok\nBIOAF_LOAD numpy ok\nBIOAF_LOAD os ok\nBIOAF_RESOLVE ok\n"
+        )
         found = outcome_from_run(exit_code=0, transcript=transcript, environment="python:3.12-slim", ref="cs-1")
         assert found["load"]["status"] == "succeeded"
         assert found["dependency_resolution"]["status"] == "succeeded"
         assert found["load"]["environment"] == "python:3.12-slim"
         assert found["load"]["ref"] == "cs-1"
 
+    def test_the_same_run_without_the_declared_environment_establishes_less(self):
+        transcript = "BIOAF_INSTALL none\nBIOAF_LOAD numpy ok\nBIOAF_LOAD os ok\nBIOAF_RESOLVE ok\n"
+        found = outcome_from_run(exit_code=0, transcript=transcript, environment="python:3.12-slim", ref="cs-1")
+        assert found["load"]["status"] == "inconclusive"
+        assert "did not build" in found["load"]["reason"] or "not build" in found["load"]["reason"]
+
     def test_a_module_that_will_not_load_fails_the_load_and_names_it(self):
-        transcript = "BIOAF_LOAD numpy ok\nBIOAF_LOAD scanpy failed: No module named 'scanpy'\n"
+        transcript = (
+            "BIOAF_INSTALL requirements.txt ok\nBIOAF_LOAD numpy ok\n"
+            "BIOAF_LOAD scanpy failed: No module named 'scanpy'\n"
+        )
         found = outcome_from_run(exit_code=1, transcript=transcript, environment="python:3.12-slim", ref="cs-2")
         assert found["load"]["status"] == "failed"
         assert "scanpy" in found["load"]["reason"]
@@ -151,14 +176,14 @@ class TestWhatARunEstablishes:
 class TestAnEnvironmentBioafDidNotProvisionIsNotThePapersDefect:
     """plan_8_4 section 3.4: a failure of bioAF's own environment produces undetermined points.
 
-    The isolated run uses whatever image this install configures. If that image simply does not hold
-    the paper's ecosystem, every package "fails to load" and the paper reads as one whose every
-    dependency is broken. A paper whose every single declared package is missing is far more likely
-    an environment nobody provisioned, so it establishes nothing rather than a failure.
+    plan_8_7 stage 3 replaced HOW that is decided: "Attribute failure from observed conditions, not the
+    number of missing packages." Counting them gave two genuinely broken dependencies the same answer
+    as an image nobody provisioned. What decides it now is whether the declared environment was built.
     """
 
-    def test_every_package_missing_establishes_nothing(self):
+    def test_every_package_missing_with_nothing_installed_establishes_nothing(self):
         transcript = (
+            "BIOAF_INSTALL none\n"
             "BIOAF_LOAD DESeq2 failed: not installed\n"
             "BIOAF_LOAD dplyr failed: not installed\n"
             "BIOAF_RESOLVE failed: DESeq2, dplyr\n"
@@ -167,8 +192,19 @@ class TestAnEnvironmentBioafDidNotProvisionIsNotThePapersDefect:
         assert found.get("load", {}).get("status") != "failed"
         assert found.get("dependency_resolution", {}).get("status") != "failed"
 
+    def test_every_package_missing_after_a_successful_install_is_the_papers(self):
+        transcript = (
+            "BIOAF_INSTALL renv.lock ok\n"
+            "BIOAF_LOAD DESeq2 failed: not installed\n"
+            "BIOAF_LOAD dplyr failed: not installed\n"
+            "BIOAF_RESOLVE failed: DESeq2, dplyr\n"
+        )
+        found = outcome_from_run(exit_code=1, transcript=transcript, environment="python:3.12-slim", ref="cs-9")
+        assert found["load"]["status"] == "failed"
+
     def test_one_package_missing_among_many_is_still_the_papers_defect(self):
         transcript = (
+            "BIOAF_INSTALL renv.lock ok\n"
             "BIOAF_LOAD DESeq2 ok\n"
             "BIOAF_LOAD dplyr ok\n"
             "BIOAF_LOAD scanpy failed: not installed\n"
@@ -179,8 +215,12 @@ class TestAnEnvironmentBioafDidNotProvisionIsNotThePapersDefect:
         assert "scanpy" in found["load"]["reason"]
 
     def test_a_single_package_that_fails_is_not_read_as_a_whole_empty_environment(self):
-        """One declared package and it is missing: that IS what the check establishes."""
+        """One declared package and it is missing, in an environment that built: that IS what the
+        check establishes."""
         found = outcome_from_run(
-            exit_code=1, transcript="BIOAF_LOAD DESeq2 failed: not installed\n", environment="e", ref="cs-11"
+            exit_code=1,
+            transcript="BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 failed: not installed\n",
+            environment="e",
+            ref="cs-11",
         )
         assert found["load"]["status"] == "failed"
