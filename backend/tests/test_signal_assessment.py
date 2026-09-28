@@ -1,32 +1,33 @@
-"""plan_7 step 17: was this noise read as signal, and what else could explain the difference?
+"""plan_7 step 17: what could explain the difference between the paper's result and ours?
 
-Two model calls, both AFTER an execution arm diverged, and both deliberately hedged.
+One model call, AFTER an execution arm diverged, and deliberately hedged.
 
 **The tool never concludes that authors got it wrong.** `authors_misinterpreted` was REMOVED from
-the outcome vocabulary. Divergence is always "we could not reproduce", and the possibility that the
-paper read noise as signal is carried BESIDE the outcome as a flagged possible issue, with our
-numbers shown next to theirs so the user makes their own judgement.
+the outcome vocabulary. Divergence is always "we could not reproduce".
 
 **The assessment's candidate set always includes bioAF's own side.** Their code, run by us, on data
 we selected and mounted, with arguments a model chose, in an environment we built: any of those can
 produce a different number, and ours is usually the cheapest to check. Study 26 is the proof, and
 its own reasoning is the standard this has to meet.
 
-Neither call fires on the pipeline route. That is a deliberate scope line: a pipeline-route
-divergence like study 26's 7,389 vs 4,054 peaks still gets prose only, because only the execution
-arms give us a like-for-like result to set against the paper's own.
+It does not fire on the pipeline route. That is a deliberate scope line: a pipeline-route divergence
+like study 26's 7,389 vs 4,054 peaks still gets prose only, because only the execution arms give us a
+like-for-like result to set against the paper's own.
+
+**A second call stood here and plan_8_7 stage 4 removed it**, flagged rather than deleted quietly.
+`assess_signal` asked whether the paper's result could be noise read as signal, which is a judgment
+about whether the result supports what the paper concluded from it.
+`validation_interpretation_review` owns that question now, asks it from the paper's own design rather
+than from one pair of numbers, and does not wait for a divergence to exist before it can be asked at
+all. Its tests are `test_plan_8_7_interpretation_review.py`; the consolidation itself is held in
+`test_plan_8_7_consolidation.py`.
 """
 
 import json
 
 import pytest
 
-from app.services.signal_assessment import (
-    LIKELY,
-    NOT_LIKELY,
-    assess_causes,
-    assess_signal,
-)
+from app.services.signal_assessment import assess_causes
 
 
 class _Client:
@@ -47,84 +48,6 @@ class _Client:
 
 def _fenced(obj) -> str:
     return "```json\n" + json.dumps(obj) + "\n```"
-
-
-async def _assess(**kw):
-    return await assess_signal(
-        method=kw.pop("method", "authors_code"),
-        paper_value=kw.pop("paper_value", 7389),
-        our_value=kw.pop("our_value", 4054),
-        metric=kw.pop("metric", "peak_count"),
-        context=kw.pop("context", "FRiP 0.008, NSC 1.02"),
-        client=kw.pop(
-            "client", _Client(_fenced({"verdict": "likely", "reason": "weak enrichment", "confidence": 0.7}))
-        ),
-        model=kw.pop("model", "claude-opus-4-8"),
-        api_key=None,
-        **kw,
-    )
-
-
-class TestWhenItFires:
-    @pytest.mark.asyncio
-    async def test_it_fires_after_an_execution_arm_diverged(self):
-        result = await _assess()
-        assert result is not None
-        assert result["verdict"] == LIKELY
-
-    @pytest.mark.asyncio
-    async def test_it_does_not_fire_on_the_pipeline_route(self):
-        """A deliberate scope line, not an oversight. Only the arms that ran code give a
-        like-for-like result to set against the paper's own."""
-        client = _Client(_fenced({"verdict": "likely", "reason": "x", "confidence": 0.9}))
-        assert await _assess(method="deseq2", client=client) is None
-        assert client.calls == 0
-
-    @pytest.mark.asyncio
-    async def test_it_does_not_fire_when_there_is_nothing_to_compare(self):
-        client = _Client(_fenced({"verdict": "likely", "reason": "x", "confidence": 0.9}))
-        assert await _assess(paper_value=None, client=client) is None
-        assert await _assess(our_value=None, client=_Client()) is None
-
-    @pytest.mark.asyncio
-    async def test_it_fires_for_the_generated_arm_too(self):
-        assert await _assess(method="llm_from_methods") is not None
-
-
-class TestWhatItReturns:
-    @pytest.mark.asyncio
-    async def test_a_closed_set_with_a_reason_and_a_confidence(self):
-        result = await _assess()
-        assert result["verdict"] in (LIKELY, NOT_LIKELY)
-        assert result["reason"]
-        assert result["confidence"] == 0.7
-        assert result["model"] == "claude-opus-4-8"
-        assert result["assessed_at"]
-
-    @pytest.mark.asyncio
-    async def test_a_verdict_outside_the_set_is_refused_rather_than_coerced(self):
-        client = _Client(_fenced({"verdict": "definitely wrong", "reason": "x", "confidence": 1.0}))
-        assert await _assess(client=client) is None
-
-    @pytest.mark.asyncio
-    async def test_a_provider_failure_leaves_no_assessment(self):
-        """No assessment is honest. An invented one would be an accusation nobody made."""
-        from app.services.llm_provider_clients import ProviderError
-
-        assert await _assess(client=_Client(error=ProviderError("down", error_class="server"))) is None
-
-    @pytest.mark.asyncio
-    async def test_both_numbers_are_put_in_front_of_the_model(self):
-        client = _Client(_fenced({"verdict": "not likely", "reason": "x", "confidence": 0.4}))
-        await _assess(client=client)
-        assert "7389" in client.payloads[0]
-        assert "4054" in client.payloads[0]
-
-    @pytest.mark.asyncio
-    async def test_the_prompt_forbids_concluding_the_authors_were_wrong(self):
-        client = _Client(_fenced({"verdict": "not likely", "reason": "x", "confidence": 0.4}))
-        await _assess(client=client)
-        assert "hedge" in client.prompts[0].lower() or "not an accusation" in client.prompts[0].lower()
 
 
 class TestTheCausalAssessment:

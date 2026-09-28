@@ -74,7 +74,9 @@ ANALYSIS_SELECTION = "analysis_selection"
 COLUMN_RESOLUTION = "column_resolution"
 GENERATED_ANALYSIS = "generated_analysis"
 CODE_EXECUTION = "code_execution"
-SIGNAL_VERDICT = "signal_verdict"
+# plan_8_7 stage 4 removed `signal_verdict`: whether a paper's result could be noise read as signal is
+# `validation_interpretation_review`'s question, asked from the paper's own design rather than from one
+# pair of numbers, and two authoritative answers to one question was the defect.
 SIGNAL_CANDIDATE = "signal_candidate"
 # plan_8_5 section 3.6: one obligation of the rubric, judged on the paper's own passages.
 DOCUMENTARY_JUDGMENT = "documentary_judgment"
@@ -250,15 +252,6 @@ DECISIONS: dict[str, DecisionPolicy] = {
             recovery=ONE_RETRY,
             measurement=CONTRACT,
             basis="one object: an entry point, its arguments, a sentence and a confidence",
-        ),
-        _policy(
-            SIGNAL_VERDICT,
-            decision="First signal-assessment decision",
-            module="app/services/signal_assessment.py",
-            max_tokens=_FIXED_ANSWER,
-            recovery=ONE_RETRY,
-            measurement=CONTRACT,
-            basis="one object: likely or not likely, one or two sentences and a confidence",
         ),
         _policy(
             SIGNAL_CANDIDATE,
