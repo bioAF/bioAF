@@ -51,11 +51,16 @@ NOTHING = "nothing_to_reconcile"
 
 INTENT = "reconciling related propositions about one paper before they are published"
 
-# What one group may cost. plan_8_7 section 6: "Reuse the bounded initial/recovery allowance for each
-# reconciliation work item", which is `decide_with_recovery`'s own one-retry policy, and "avoid an
-# unbounded all-pairs review": a group is examined once and the number of groups is bounded by the
-# number of obligations.
-MAX_GROUPS = 18
+# What one request may cost, and what the whole pass may. plan_8_7 section 6: "Reuse the bounded
+# initial/recovery allowance for each reconciliation work item", which is `decide_with_recovery`'s own
+# one-retry policy, and "avoid an unbounded all-pairs review".
+#
+# Both bounds are on PAIRS, which is the unit a model answers about. Found by running the reassessment
+# on study 65: bounding the number of GROUPS bounded nothing, because relatedness is transitive over
+# shared citations and every finding on one paper cites the methods paragraph. Thirty leaves became one
+# group, one request asked about 435 pairs, and the pass returned "not performed" on the whole report.
+MAX_PAIRS_PER_REQUEST = 6
+MAX_REQUESTS = 6
 # How much of a cited passage travels with the pair. The propositions are short; the passage they
 # both rest on is what decides whether they are about the same thing.
 MAX_PASSAGE_CHARS = 1200
@@ -103,14 +108,20 @@ def _measured(judgment: dict) -> bool:
     return str(judgment.get("method") or "") == "measurement"
 
 
-def _pairs_of(group: list[str]) -> list[tuple[str, str]]:
-    return [(group[i], group[j]) for i in range(len(group)) for j in range(i + 1, len(group))]
+def _leaves_of(pairs: list[tuple[str, str]]) -> list[str]:
+    """The findings a batch of pairs is about, in a stable order and without repeats."""
+    found: list[str] = []
+    for one, other in pairs:
+        for leaf in (one, other):
+            if leaf not in found:
+                found.append(leaf)
+    return found
 
 
-def _payload(group: list[str], judgments: dict[str, dict], passages: dict[str, str]) -> str:
+def _payload(pairs: list[tuple[str, str]], judgments: dict[str, dict], passages: dict[str, str]) -> str:
     lines: list[str] = []
     cited: list[str] = []
-    for leaf in group:
+    for leaf in _leaves_of(pairs):
         judgment = judgments[leaf]
         outcome = str(judgment.get("outcome"))
         citations = [str(c) for c in (judgment.get("evidence") or {}).get("citations") or []]
@@ -126,28 +137,28 @@ def _payload(group: list[str], judgments: dict[str, dict], passages: dict[str, s
     evidence = "\n\n".join(
         f"[{key}] {str(passages.get(key) or '')[:MAX_PASSAGE_CHARS]}" for key in cited if passages.get(key)
     )
-    pairs = ", ".join(f"{a} with {b}" for a, b in _pairs_of(group))
+    named = ", ".join(f"{a} with {b}" for a, b in pairs)
     return (
         "Findings:\n\n"
         + "\n\n".join(lines)
-        + f"\n\nPairs to answer about: {pairs}."
+        + f"\n\nPairs to answer about: {named}."
         + (f"\n\nThe evidence they rest on:\n{evidence}" if evidence else "\n\nbioAF holds none of the cited passages.")
     )
 
 
-def _validate(group: list[str]):
+def _validate(pairs: list[tuple[str, str]]):
     def check(data: dict) -> list[str]:
         problems: list[str] = []
         rows = [p for p in (data or {}).get("pairs") or [] if isinstance(p, dict)]
         if not rows:
             return ["`pairs` must carry one entry per pair listed in the question"]
-        wanted = {frozenset(pair) for pair in _pairs_of(group)}
+        wanted = {frozenset(pair) for pair in pairs}
         for row in rows:
             named = frozenset({str(row.get("a") or ""), str(row.get("b") or "")})
             if named not in wanted:
                 problems.append(
                     f"{sorted(named)} is not one of the pairs asked about; answer about "
-                    + ", ".join(f"{a}/{b}" for a, b in _pairs_of(group))
+                    + ", ".join(f"{a}/{b}" for a, b in pairs)
                 )
             if str(row.get("relation") or "").strip().lower() not in RELATIONS:
                 problems.append("`relation` must be exactly one of " + ", ".join(RELATIONS))
@@ -184,44 +195,48 @@ async def reconcile_semantically(
     client,
     model: str,
     api_key: str | None,
-    groups: list[list[str]] | None = None,
+    pairs: list[tuple[str, str]] | None = None,
 ) -> dict:
     """``{"judgments", "status", "examined", "unresolved", "unreconciled", "reason"}``. Never raises.
 
     ``passages`` maps a citation id to its text, so the pass reasons from the evidence rather than
     from the wording of the two findings.
     """
-    from app.services.validation_finding_overlap import candidate_groups
+    from app.services.validation_finding_overlap import candidate_pairs
 
     rows = {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)}
     found = dict(judgments or {})
-    candidates = [g for g in (groups if groups is not None else candidate_groups(rows)) if len(g) > 1][:MAX_GROUPS]
-    if not candidates:
+    candidates = [tuple(pair) for pair in (pairs if pairs is not None else candidate_pairs(rows)) if len(pair) == 2]
+    batches = [candidates[i : i + MAX_PAIRS_PER_REQUEST] for i in range(0, len(candidates), MAX_PAIRS_PER_REQUEST)][
+        :MAX_REQUESTS
+    ]
+    if not batches:
         return _record(found, NOTHING, reason=None)
     if client is None or not model:
         return _record(
             found,
             NOT_PERFORMED,
             reason="no language model is configured for this organisation, so related findings were not reconciled",
-            unreconciled=candidates,
+            unreconciled=[list(pair) for pair in candidates],
         )
     examined = 0
     unresolved: list[dict] = []
     unreconciled: list[list[str]] = []
-    for group in candidates:
+    for batch in batches:
         decision = await decide_with_recovery(
             intent=INTENT,
             system=_SYSTEM,
-            payload=_payload(group, rows, passages or {}),
+            payload=_payload(batch, rows, passages or {}),
             client=client,
             model=model,
             api_key=api_key,
             purpose=budgets.SEMANTIC_RECONCILIATION,
-            validate=_validate(group),
+            validate=_validate(batch),
         )
         if decision.outcome != OUTCOME_OK:
-            logger.info("a group of related findings could not be reconciled (%s): %s", decision.outcome, group)
-            unreconciled.append(group)
+            logger.info("a batch of related findings could not be reconciled (%s): %s", decision.outcome, batch)
+            # Only the pairs THIS request was about: a failure here says nothing about the others.
+            unreconciled += [list(pair) for pair in batch]
             continue
         examined += 1
         _apply(decision.data, rows, found, unresolved, model=model)
@@ -231,7 +246,7 @@ async def reconcile_semantically(
         status,
         reason=None
         if examined
-        else "every group of related findings was left unreconciled, so bioAF has not established that they agree",
+        else "every pair of related findings was left unreconciled, so bioAF has not established that they agree",
         examined=examined,
         unresolved=unresolved,
         unreconciled=unreconciled,
