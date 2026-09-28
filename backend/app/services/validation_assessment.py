@@ -837,6 +837,56 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # and publish them. The score follows the evidence as it settles; it does not wait for approval,
     # for an acquired input or for a finding inventory, and nothing is judged at render time.
     await publish_assessment(session, study, reason="the assessment stage ran")
+    # plan_8_7 stage 2: the short lead, written over the outcomes that were just published and stored
+    # with them, so rendering the report performs no model call. A failed synthesis leaves the factual
+    # summary the projection always carries.
+    await refresh_report_synthesis(
+        session,
+        study,
+        client=get_client(cfg.provider) if cfg else None,
+        model=cfg.model if cfg else None,
+        api_key=cfg.api_key if cfg else None,
+    )
+    return record
+
+
+async def refresh_report_synthesis(session: AsyncSession, study, *, client=None, model=None, api_key=None) -> dict:
+    """Write the report's leading sentences over the assessment this study has published. Never raises.
+
+    plan_8_7 stage 2: "All views and exports use that same revision." It is stored beside the
+    assessment and keyed on it, so a page load performs no paid work and two surfaces cannot show two
+    different leads for one revision.
+    """
+    from app.services.validation_report_areas import assessment_summary
+    from app.services.validation_report_synthesis import synthesize
+
+    evidence = dict(study.evidence_json or {})
+    held_assessment = evidence.get("rubric_assessment") if isinstance(evidence.get("rubric_assessment"), dict) else None
+    summary = assessment_summary(
+        {
+            "assessment": held_assessment,
+            "interpretation_review": evidence.get("interpretation_review"),
+            "comparisons": {},
+            "attempt": {},
+        }
+    )
+    identity = {
+        "revision": summary.get("assessment_revision"),
+        "checker": summary.get("checker_version"),
+        "model": model,
+    }
+    held = evidence.get("report_synthesis") if isinstance(evidence.get("report_synthesis"), dict) else None
+    if held is not None and held.get("inputs") == identity:
+        return held
+    try:
+        written = await synthesize(summary=summary, client=client, model=model or "", api_key=api_key)
+    except Exception as exc:  # noqa: BLE001 - a summary cannot fail the assessment it leads
+        logger.warning("study %s: the report synthesis could not run: %s", study.id, exc)
+        return held or {}
+    record = {**written, "inputs": identity}
+    evidence["report_synthesis"] = record
+    study.evidence_json = evidence
+    await session.flush()
     return record
 
 
@@ -940,7 +990,7 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
     assessment do not reroll a paper's score. Never raises: a provider failure leaves the obligations
     it was asked about grey, with what would settle them, and everything already established stands.
     """
-    from app.services.validation_documentary_review import JUDGED_LEAVES, packets_for, review_documents
+    from app.services.validation_documentary_review import packets_for, review_documents
 
     evidence = dict(study.evidence_json or {})
     plan = await active_plan(session, study)
@@ -960,9 +1010,7 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
 
     scope = analysis_units(plan=plan_dict, evidence=evidence)
     leaves = _leaves_for(scope)
-    packets = packets_for(
-        evidence=evidence, plan=plan_dict, leaves=leaves, units=scope["definitions"]
-    )
+    packets = packets_for(evidence=evidence, plan=plan_dict, leaves=leaves, units=scope["definitions"])
     fingerprints = {leaf: _packet_fingerprint(packet) for leaf, packet in packets.items()}
     identity = {
         "packets": {leaf: [p["id"] for p in packet["passages"]] for leaf, packet in packets.items()},
@@ -1120,7 +1168,11 @@ def _interpretation_context(evidence: dict) -> list[dict]:
     ]
     for extra in extras_for(evidence=evidence, plan={}):
         rows.append(
-            {"id": str(extra.get("id")), "source": str(extra.get("source") or "bioAF"), "text": str(extra.get("text") or "")}
+            {
+                "id": str(extra.get("id")),
+                "source": str(extra.get("source") or "bioAF"),
+                "text": str(extra.get("text") or ""),
+            }
         )
     return rows
 
@@ -1387,9 +1439,7 @@ def assessment_progress(study) -> dict:
             "reading": ASSESSMENT_DISCOVERING,
         }.get(
             str(getattr(study, "state", "") or ""),
-            ASSESSMENT_PUBLISHED
-            if str(getattr(study, "state", "") or "") == "classified"
-            else ASSESSMENT_REVIEWING,
+            ASSESSMENT_PUBLISHED if str(getattr(study, "state", "") or "") == "classified" else ASSESSMENT_REVIEWING,
         )
     evidence = getattr(study, "evidence_json", None) or {}
     blocked = evidence.get("route_blocked") if isinstance(evidence.get("route_blocked"), dict) else None

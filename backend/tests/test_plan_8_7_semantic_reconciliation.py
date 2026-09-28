@@ -58,7 +58,9 @@ _DUPLICATE_PAIR = {
     "M1.B": _judgment(
         FAILED, "the deposited sample count disagrees with the methods", scope=_ANALYSIS, citations=["p1", "p2"]
     ),
-    "M5.B": _judgment(FAILED, "the sample count in the methods is not the deposited one", scope=_ANALYSIS, citations=["p1"]),
+    "M5.B": _judgment(
+        FAILED, "the sample count in the methods is not the deposited one", scope=_ANALYSIS, citations=["p1"]
+    ),
 }
 
 _PASSAGES = {"p1": "Libraries were trimmed, aligned and quantified; every harvest entered one fitted model."}

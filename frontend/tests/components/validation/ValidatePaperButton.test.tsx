@@ -1,16 +1,18 @@
 /**
- * The route is chosen at the button now, not at the C1 gate.
+ * Validate starts the ASSESSMENT; reproducing the results is the advanced choice beside it.
  *
- * Two assertions here CHANGED, and both were owner decisions on 2026-09-08 rather than drift, so
- * they are flagged per ai_guides/tdd.md:
+ * Three rounds of owner decisions are held here, each flagged per ai_guides/tdd.md:
  *
- * 1. The button was "Validate reproduction" and is now "Validate findings". It named the mechanism;
- *    what a scientist wants validated is the paper's findings.
- * 2. Clicking used to POST immediately. It now opens the route dialog and creates nothing until the
- *    reader chooses. The old behaviour created a study in `requested` and dropped the reader on a
- *    page reading "Step 1 of 9" with an in-progress badge, while TWO further clicks ("Read paper",
- *    then "Approve") stood between it and any work. Both looked like progress, so a study could sit
- *    untouched while the page implied it was running.
+ * 1. 2026-09-08: the button was "Validate reproduction" and is now "Validate findings". It named the
+ *    mechanism; what a scientist wants validated is the paper's findings.
+ * 2. 2026-09-08: clicking used to POST immediately. It then opened the route dialog, because the old
+ *    behaviour created a study in `requested` and dropped the reader on a page reading "Step 1 of 9"
+ *    with an in-progress badge, while two further clicks stood between it and any work.
+ * 3. plan_8_7 stage 2: clicking POSTS immediately again, with `assessment`, and the route dialog
+ *    moved to its own control. The dialog was asking the reader to authorize either a deposit
+ *    reproduction or hours of cluster compute BEFORE bioAF had read the paper, and discovery is what
+ *    establishes which of those is even possible. An assessment spends nothing, so nothing has to be
+ *    authorized to start one; the routes keep their chooser, their warnings and their behaviour.
  *
  * The permission gate, the beta gate and the error path are unchanged and still held below.
  */
@@ -44,7 +46,7 @@ beforeEach(() => {
 });
 
 async function openDialog() {
-  await userEvent.click(screen.getByRole("button", { name: /validate findings/i }));
+  await userEvent.click(screen.getByRole("button", { name: /reproduce results too/i }));
 }
 
 describe("ValidatePaperButton", () => {
@@ -53,7 +55,22 @@ describe("ValidatePaperButton", () => {
     expect(screen.getByRole("button", { name: /validate findings/i })).toBeInTheDocument();
   });
 
-  it("creates nothing until the reader has chosen a route", async () => {
+  it("starts the assessment as soon as it is clicked, with no route question", async () => {
+    mockPost.mockResolvedValue({ id: 41, state: "requested" });
+    render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
+    await userEvent.click(screen.getByRole("button", { name: /validate findings/i }));
+
+    await waitFor(() =>
+      expect(mockPost).toHaveBeenCalledWith("/api/validation-studies", {
+        paper_id: 9,
+        source_doi: "10.1/x",
+        intended_route: "assessment",
+      }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("creates nothing until the reader has chosen a route for a reproduction", async () => {
     render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
     await openDialog();
 
@@ -61,7 +78,7 @@ describe("ValidatePaperButton", () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it("asks what to validate as soon as it is clicked", async () => {
+  it("asks what to reproduce when the advanced control is used", async () => {
     render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
     await openDialog();
 
@@ -108,6 +125,13 @@ describe("ValidatePaperButton", () => {
     await userEvent.click(screen.getByRole("radio", { name: /Raw reads/i }));
 
     expect(screen.getByText(/spends compute on your cloud account/i)).toBeInTheDocument();
+  });
+
+  it("says the assessment runs either way, so the choice is about the reproduction", async () => {
+    render(<ValidatePaperButton paperId={9} doi="10.1/x" />);
+    await openDialog();
+
+    expect(screen.getByText(/assessment of the paper.s evidence runs either way/i)).toBeInTheDocument();
   });
 
   it("says the study runs itself after the choice, so waiting never looks like nothing happening", async () => {

@@ -82,6 +82,8 @@ DOCUMENTARY_JUDGMENT = "documentary_judgment"
 SEMANTIC_RECONCILIATION = "semantic_reconciliation"
 # plan_8_7: one substantive conclusion of the paper, assessed in its own analysis context.
 INTERPRETATION_REVIEW = "interpretation_review"
+# plan_8_7: the two or three sentences that lead the report, over the accepted outcomes.
+REPORT_SYNTHESIS = "report_synthesis"
 
 
 @dataclass(frozen=True)
@@ -318,6 +320,18 @@ DECISIONS: dict[str, DecisionPolicy] = {
             # The conclusion, its procedure and design, its results, the sample and replication
             # records, the relevant code and any completed comparison.
             max_input_tokens=16384,
+        ),
+        _policy(
+            REPORT_SYNTHESIS,
+            decision="Report synthesis",
+            module="app/services/validation_report_synthesis.py",
+            max_tokens=_FIXED_ANSWER,
+            recovery=ONE_RETRY,
+            measurement=CONTRACT,
+            basis="one object: two or three sentences and two short lists of ids. It summarises outcomes "
+            "that are already accepted and produces no number, no finding and no verdict",
+            # The accepted conclusions of one paper, each a sentence: MAX_SUMMARY_ROWS of each kind.
+            max_input_tokens=4096,
         ),
     )
 }

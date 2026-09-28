@@ -570,6 +570,96 @@ export interface ReportSummary {
   scorecard?: ValidationScorecardData | null;
   // plan_8_4. Absent from a report projected before rubric v3 existed.
   evidence_score?: EvidenceScore | null;
+  // plan_8_7 stage 2: the six areas a scientist asked about, the short factual account that leads
+  // them, and the model-assisted lead where one was produced and validated. Absent from a report
+  // projected before them, which renders exactly as it did.
+  areas?: ReportArea[] | null;
+  assessment_summary?: AssessmentSummary | null;
+  synthesis?: ReportSynthesis | null;
+  current_retrieval?: CurrentRetrieval | null;
+}
+
+/** plan_8_7 stage 2: one conclusion as the report states it, with where it applies and what it costs. */
+export interface AreaStatement {
+  leaf: string;
+  statement: string;
+  scope?: string | null;
+  impact?: string | null;
+  method?: string | null;
+  next_action?: string | null;
+  citations?: string[] | null;
+  inferential_step?: string | null;
+  reproduction?: string | null;
+  withheld?: Record<string, unknown> | null;
+  capability_limit?: boolean;
+}
+
+/**
+ * One of the six areas of plan_8_7 section 3. There is deliberately no outcome field: an area holds
+ * supported observations, demonstrated concerns and untested questions together, and forcing it into
+ * one pass/fail label is what the plan forbids.
+ */
+export interface ReportArea {
+  key: "data" | "experimental_methods" | "computational_methods" | "code" | "results" | "interpretation";
+  title: string;
+  question: string;
+  summary: string;
+  supported: AreaStatement[];
+  concerns: AreaStatement[];
+  untested: AreaStatement[];
+  reproduction?: {
+    attempted: boolean;
+    performed: boolean;
+    label?: string | null;
+    reason?: string | null;
+    agreed: boolean;
+    unresolved: boolean;
+    comparisons: { metric?: string | null; paper?: unknown; ours?: unknown; agrees?: boolean | null }[];
+  } | null;
+  resources?: unknown[];
+  sources?: unknown[];
+  scope?: string | null;
+}
+
+/** The factual account that leads the report. It carries no score, by design. */
+export interface AssessmentSummary {
+  assessment_revision: number | null;
+  assessed_at: string | null;
+  checker_version: number | null;
+  supported: AreaStatement[];
+  concerns: AreaStatement[];
+  untested: AreaStatement[];
+  supported_count: number;
+  concern_count: number;
+  untested_count: number;
+  counts: {
+    obligations_attempted: number;
+    obligations_conclusive: number;
+    findings_conclusive: number;
+    obligations_untested: number;
+    conclusions_reviewed: number;
+    conclusions_unresolved: number;
+  };
+  reproduction: { attempted: boolean; performed: boolean; agreed: boolean; unresolved: boolean };
+  reason: string | null;
+  method: string;
+}
+
+export interface ReportSynthesis {
+  lead: string;
+  most_consequential: string[];
+  untested: string[];
+  method: "factual" | "model_assisted";
+  model?: string | null;
+  reason?: string | null;
+}
+
+export interface CurrentRetrieval {
+  retrieved: string[];
+  failures: { url: string; source: string; outcome: string | null; outcome_label: string | null; attempts: number }[];
+  history: { url: string; outcome: string | null; outcome_label: string | null; at: string | null }[];
+  historical_failures: number;
+  next_actions: { cause: string | null; action: string; source: string }[];
 }
 
 // Shown beside anything that rests on the paper's prose alone (section 6).

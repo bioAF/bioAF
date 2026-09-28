@@ -41,9 +41,7 @@ class TestTheAllocationIsOverTheUnits:
         from app.services.validation_rubric_assessment import assessment_inputs, reusable
 
         one = build_assessment(plan={"reported_experiments": [_RNA]}, evidence={}, claims=[], inventory=None)
-        inputs = assessment_inputs(
-            plan={"reported_experiments": [_RNA, _CHIP]}, evidence={}, claims=[], inventory=None
-        )
+        inputs = assessment_inputs(plan={"reported_experiments": [_RNA, _CHIP]}, evidence={}, claims=[], inventory=None)
         assert reusable(one, inputs) is False
 
 
@@ -82,13 +80,22 @@ class TestEachUnitIsAskedAboutItself:
             "paper_index": {
                 "passages": [
                     {"id": "p1", "kind": "methods", "section": "Methods", "text": "DESeq2 was used with a Wald test."},
-                    {"id": "p2", "kind": "methods", "section": "Methods", "text": "MACS2 called peaks with default settings."},
+                    {
+                        "id": "p2",
+                        "kind": "methods",
+                        "section": "Methods",
+                        "text": "MACS2 called peaks with default settings.",
+                    },
                 ]
             }
         }
         units = {"exp:e1": {"terms": ["bulk RNA-seq", "DESeq2"], "label": "bulk RNA-seq"}}
         packets = packets_for(
-            evidence=evidence, plan={}, leaves=("M3.B#exp:e1",), units=units, budget_chars=len("DESeq2 was used with a Wald test.") + 5
+            evidence=evidence,
+            plan={},
+            leaves=("M3.B#exp:e1",),
+            units=units,
+            budget_chars=len("DESeq2 was used with a Wald test.") + 5,
         )
         assert [p["id"] for p in packets["M3.B#exp:e1"]["passages"]] == ["p1"]
 
@@ -104,13 +111,17 @@ class TestEachUnitIsAskedAboutItself:
 
     def test_a_code_unit_is_shown_only_its_own_source(self):
         evidence = {
-            "paper_index": {"passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]},
+            "paper_index": {
+                "passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]
+            },
             "code_inspection": {"sources": [_BROKEN, _FINE]},
         }
         from app.services.validation_analysis_units import analysis_units
 
         units = analysis_units(plan={}, evidence=evidence)["definitions"]
-        packet = packets_for(evidence=evidence, plan={}, leaves=("C4.A#code:fine.py",), units=units)["C4.A#code:fine.py"]
+        packet = packets_for(evidence=evidence, plan={}, leaves=("C4.A#code:fine.py",), units=units)[
+            "C4.A#code:fine.py"
+        ]
         ids = [str(p["id"]) for p in packet["passages"]]
         assert any(i.startswith("code:fine.py") for i in ids)
         assert not any(i.startswith("code:broken.py") for i in ids)
@@ -120,14 +131,18 @@ class TestEachUnitIsAskedAboutItself:
         from app.services.validation_analysis_units import analysis_units
 
         evidence = {
-            "paper_index": {"passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]},
+            "paper_index": {
+                "passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]
+            },
             "code_inspection": {
                 "sources": [_BROKEN, _FINE],
                 "manifests": [{"path": "requirements.txt", "text": "numpy==1.26.4\n"}],
             },
         }
         units = analysis_units(plan={}, evidence=evidence)["definitions"]
-        packet = packets_for(evidence=evidence, plan={}, leaves=("C3.B#code:fine.py",), units=units)["C3.B#code:fine.py"]
+        packet = packets_for(evidence=evidence, plan={}, leaves=("C3.B#code:fine.py",), units=units)[
+            "C3.B#code:fine.py"
+        ]
         ids = [str(p["id"]) for p in packet["passages"]]
         assert any(i.startswith("code:requirements.txt") for i in ids)
 

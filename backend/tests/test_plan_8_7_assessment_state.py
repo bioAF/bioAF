@@ -76,7 +76,7 @@ class TestExecutionStatusTravelsBesideIt:
 
     @pytest.mark.asyncio
     async def test_a_blocked_route_does_not_make_the_assessment_blocked(self, session, admin_user):
-        """"A pending execution is one pending check, not a reason to withhold the rest of the report.\""""
+        """ "A pending execution is one pending check, not a reason to withhold the rest of the report.\""""
         study = await _study(
             session,
             admin_user,

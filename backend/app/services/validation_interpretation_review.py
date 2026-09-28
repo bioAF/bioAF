@@ -172,9 +172,8 @@ async def review_interpretations(
     context = [c for c in context or [] if isinstance(c, dict)]
     comparisons = [c for c in comparisons or [] if isinstance(c, dict)]
     reproduction = _reproduction_of(comparisons)
-    scope = (
-        f"{len(rows)} stated conclusion{'' if len(rows) == 1 else 's'}, "
-        + (f"with {len(comparisons)} completed comparison(s)" if comparisons else "with no reproduction performed")
+    scope = f"{len(rows)} stated conclusion{'' if len(rows) == 1 else 's'}, " + (
+        f"with {len(comparisons)} completed comparison(s)" if comparisons else "with no reproduction performed"
     )
     asked = {"requests": 0}
     if not rows:

@@ -80,7 +80,9 @@ class TestItDoesNotGreyOutEveryPositive:
 
         packet = packet_for(
             "M1.A",
-            index={"passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]},
+            index={
+                "passages": [{"id": "p1", "kind": "methods", "section": "Methods", "text": "Counts were filtered."}]
+            },
             limitations=[{"needs": "supplements", "reason": "2 attachments were not retrieved"}],
         )
         assert packet["coverage"]["needs_unavailable"] == []
