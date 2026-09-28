@@ -342,6 +342,10 @@ def summarize(
         # What bioAF holds NOW, apart from the attempts that failed on the way. The owner's September 21
         # assessment found a retrieval failure reported beside the resource a later attempt retrieved.
         "current_retrieval": current_retrieval(evidence),
+        # plan_8_7 section 3: what attempting this paper's published code requires, per implementation,
+        # and what has been attempted. A reader sees the required work and its exact blocker, not
+        # silence where an attempt should be.
+        "code_followup": evidence.get("code_followup") if isinstance(evidence.get("code_followup"), dict) else None,
     }
     # plan_8_4 section 7: two cards cannot both be called the Validation Scorecard. Where the v3
     # evidence score is present it IS that card, and the v2 card is named for what it measures: the

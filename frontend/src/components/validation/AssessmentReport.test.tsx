@@ -184,6 +184,42 @@ describe("the six areas", () => {
     expect(screen.getByText(/treating two parental lines as biological replicates/)).toBeInTheDocument();
   });
 
+  it("names what attempting the authors' code requires, per implementation", async () => {
+    const withFollowup = areas.map((a) =>
+      a.key === "code"
+        ? {
+            ...a,
+            followup: [
+              {
+                unit: "code:sim.jl",
+                paths: ["sim.jl"],
+                action: "blocked" as const,
+                missing: "runtime" as const,
+                reason: "bioAF supplies no runtime for julia, so it cannot build or load this implementation",
+                next_action: "add a supported runtime for julia",
+                source: { commit_sha: "c0ffeec0ffeec0ffee" },
+              },
+            ],
+            followup_blocked: [{ action: "attempt_bounded_check", reason: "this install has no isolated identity" }],
+          }
+        : a,
+    );
+    render(<AssessmentReport areas={withFollowup} summary={summary} synthesis={synthesis} />);
+    await userEvent.click(screen.getByText("Published code and environment"));
+    const followup = screen.getByTestId("code-followup");
+    expect(followup).toHaveTextContent(/sim\.jl/);
+    expect(followup).toHaveTextContent(/Blocked/);
+    expect(followup).toHaveTextContent(/no runtime for julia/);
+    expect(followup).toHaveTextContent(/c0ffeec0ffee/);
+    expect(followup).toHaveTextContent(/no isolated identity/);
+  });
+
+  it("says nothing about the authors' code where no follow-up was recorded", async () => {
+    render(<AssessmentReport areas={areas} summary={summary} synthesis={synthesis} />);
+    await userEvent.click(screen.getByText("Published code and environment"));
+    expect(screen.queryByTestId("code-followup")).not.toBeInTheDocument();
+  });
+
   it("keeps reproduction depth as its own statement", async () => {
     render(<AssessmentReport areas={areas} summary={summary} synthesis={synthesis} />);
     await userEvent.click(screen.getByText("Results and reproduction"));

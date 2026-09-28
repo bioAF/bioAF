@@ -621,7 +621,10 @@ def outcome_from_run(*, exit_code: int | None, transcript: str, environment: str
                 "reason": answer.partition(":")[2].strip() or answer,
                 **where,
             }
-        elif answer == "ok" and exit_code == 0:
+        elif answer == "ok":
+            # The resolve marker is the LAST thing the check prints, so its presence is what says the
+            # run reached the end. The exit status is not consulted here: the script exits non-zero
+            # when it found a problem, and a problem it named is exactly what these branches read.
             if mismatched or unknown:
                 found["dependency_resolution"] = {
                     "status": "inconclusive",
