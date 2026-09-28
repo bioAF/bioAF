@@ -619,6 +619,24 @@ export interface ReportArea {
   resources?: unknown[];
   sources?: unknown[];
   scope?: string | null;
+  // plan_8_7 section 3: what attempting this paper's published code requires, per implementation.
+  followup?: CodeFollowup[];
+  followup_blocked?: { action: string; reason: string }[];
+}
+
+/** One published implementation, its revision, and the attempt or the prerequisite that blocks it. */
+export interface CodeFollowup {
+  unit: string;
+  paths?: string[];
+  language?: string | null;
+  runtime?: string | null;
+  action: "attempt_reproduction" | "attempt_bounded_check" | "needs_authorization" | "blocked";
+  missing?: "runtime" | "input" | "authorization" | "source" | null;
+  reason: string;
+  next_action?: string;
+  attempted?: boolean;
+  claimed_analysis?: string;
+  source?: { repo_url?: string | null; commit_sha?: string | null; digest?: string | null };
 }
 
 /** The factual account that leads the report. It carries no score, by design. */

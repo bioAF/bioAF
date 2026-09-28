@@ -112,6 +112,36 @@ class TestTheSixAreas:
         assert any("parent lines" in row["statement"] for row in found["concerns"])
         assert found["concerns"][0]["inferential_step"]
 
+    def test_the_code_area_carries_the_required_follow_up_and_its_blocker(self):
+        """plan_8_7 section 3: silence about a published implementation reads as a paper that
+        published none, which is a different and false statement."""
+        found = next(
+            a
+            for a in areas_for(
+                _projection(
+                    code_followup={
+                        "followups": [
+                            {
+                                "unit": "code:sim.jl",
+                                "action": "blocked",
+                                "missing": "runtime",
+                                "reason": "bioAF supplies no runtime for julia",
+                                "source": {"commit_sha": "abc"},
+                            }
+                        ],
+                        "blocked": [{"action": "attempt_bounded_check", "reason": "no isolated identity"}],
+                    }
+                )
+            )
+            if a["key"] == "code"
+        )
+        assert found["followup"][0]["missing"] == "runtime"
+        assert found["followup_blocked"][0]["reason"] == "no isolated identity"
+
+    def test_a_paper_with_no_follow_up_recorded_carries_an_empty_list(self):
+        found = next(a for a in areas_for(_projection()) if a["key"] == "code")
+        assert found["followup"] == []
+
     def test_reproduction_depth_is_its_own_statement_in_the_results_area(self):
         found = next(a for a in areas_for(_projection()) if a["key"] == "results")
         assert found["reproduction"]["attempted"] is False

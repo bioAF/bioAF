@@ -1,7 +1,13 @@
 "use client";
 
 import { Card } from "@/components/ui/Card";
-import type { AreaStatement, AssessmentSummary, ReportArea, ReportSynthesis } from "@/lib/validationReport";
+import type {
+  AreaStatement,
+  AssessmentSummary,
+  CodeFollowup,
+  ReportArea,
+  ReportSynthesis,
+} from "@/lib/validationReport";
 
 /**
  * plan_8_7 stage 2: one summary leads, six areas expand, the numbers sit behind them.
@@ -93,6 +99,54 @@ function ReproductionDepth({ area }: { area: ReportArea }) {
   );
 }
 
+const FOLLOWUP_LABEL: Record<CodeFollowup["action"], string> = {
+  attempt_reproduction: "Reproduction scheduled",
+  attempt_bounded_check: "Bounded build and load",
+  needs_authorization: "Not run: needs authorisation",
+  blocked: "Blocked",
+};
+
+/**
+ * plan_8_7 section 3: what attempting each published implementation requires. Silence here would read
+ * as a paper that published no code, which is a different and false statement.
+ */
+function CodeFollowupRows({ area }: { area: ReportArea }) {
+  const rows = area.followup ?? [];
+  const blocked = area.followup_blocked ?? [];
+  if (rows.length === 0 && blocked.length === 0) return null;
+  return (
+    <div className="space-y-1.5" data-testid="code-followup">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+        Attempting the authors&apos; code
+      </h4>
+      <ul className="space-y-2">
+        {rows.map((row) => (
+          <li key={row.unit} className="border-l-2 border-gray-300 pl-3">
+            <p className="text-sm text-gray-800">
+              <span className="font-mono text-xs">{(row.paths ?? [row.unit]).join(", ")}</span>
+              {" - "}
+              {FOLLOWUP_LABEL[row.action]}
+              {row.attempted ? " (attempted)" : ""}
+            </p>
+            <p className="text-xs text-gray-600">{row.reason}</p>
+            {row.next_action && <p className="text-xs text-gray-600">What would settle it: {row.next_action}</p>}
+            {row.source?.commit_sha && (
+              <p className="text-xs text-gray-500">
+                At revision <span className="font-mono">{row.source.commit_sha.slice(0, 12)}</span>
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {blocked.map((row, i) => (
+        <p key={i} className="text-xs text-amber-800">
+          bioAF could not start this: {row.reason}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function Area({ area }: { area: ReportArea }) {
   const total = area.supported.length + area.concerns.length + area.untested.length;
   return (
@@ -106,6 +160,7 @@ function Area({ area }: { area: ReportArea }) {
       </summary>
       <div className="mt-3 space-y-3 pl-1">
         {area.key === "results" && <ReproductionDepth area={area} />}
+        {area.key === "code" && <CodeFollowupRows area={area} />}
         <Group label="Supported" rows={area.supported} tone={SUPPORTED} />
         <Group label="Concerns bioAF demonstrated" rows={area.concerns} tone={CONCERN} />
         <Group label="Questions bioAF could not settle" rows={area.untested} tone={UNTESTED} />

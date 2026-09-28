@@ -32,6 +32,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -119,6 +121,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -475,6 +478,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -567,6 +572,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -779,6 +785,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -899,6 +907,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -1399,6 +1408,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [
@@ -2200,6 +2211,7 @@
         "value": 9.0
       }
     ],
+    "code_followup": null,
     "code_sources": [
       {
         "execution": {
@@ -3935,6 +3947,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -4022,6 +4036,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -4293,6 +4308,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -4399,6 +4416,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -4662,6 +4680,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -4747,6 +4767,7 @@
       "total": 0
     },
     "claims": [],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -5016,6 +5037,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -5299,6 +5322,7 @@
         "value": 524
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": null,
@@ -6154,6 +6178,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [
@@ -7328,6 +7354,7 @@
         "value": 9.0
       }
     ],
+    "code_followup": null,
     "code_sources": [
       {
         "execution": {
@@ -10060,6 +10087,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -10519,6 +10548,7 @@
         "value": 1001
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -12364,6 +12394,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -12481,6 +12513,7 @@
         "value": null
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -12994,6 +13027,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -14377,6 +14412,7 @@
         "value": 1013
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -17853,6 +17889,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -18223,6 +18261,7 @@
         "value": 1000
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -19929,6 +19968,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -20199,6 +20240,7 @@
         "value": 524
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Reproduction comparisons not performed",
@@ -20522,6 +20564,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -20639,6 +20683,7 @@
         "value": null
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -21152,6 +21197,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -21611,6 +21658,7 @@
         "value": 1001
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -23750,6 +23798,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -24313,6 +24363,7 @@
         "value": 524
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Reproduction comparisons not performed",
@@ -26113,6 +26164,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -26396,6 +26449,7 @@
         "value": 524
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": null,
@@ -27182,6 +27236,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -27641,6 +27697,7 @@
         "value": 1001
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -29777,6 +29834,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -30467,6 +30526,7 @@
         "value": 1004
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": "Comparisons not performed",
@@ -32794,6 +32854,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [],
@@ -33177,6 +33239,7 @@
         "value": 524
       }
     ],
+    "code_followup": null,
     "code_sources": [],
     "comparisons": {
       "label": null,
@@ -33622,6 +33685,8 @@
       },
       {
         "concerns": [],
+        "followup": [],
+        "followup_blocked": [],
         "key": "code",
         "question": "What source did bioAF inspect, and what was actually loaded or run?",
         "sources": [
@@ -34209,6 +34274,7 @@
         "value": 9.0
       }
     ],
+    "code_followup": null,
     "code_sources": [
       {
         "execution": {

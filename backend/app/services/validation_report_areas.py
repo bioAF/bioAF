@@ -208,6 +208,12 @@ def areas_for(projection: dict) -> list[dict]:
             entry["resources"] = [r for r in projection.get("resources") or [] if isinstance(r, dict)]
         if area["key"] == "code":
             entry["sources"] = [s for s in projection.get("code_sources") or [] if isinstance(s, dict)]
+            # plan_8_7 section 3: the required follow-up per published implementation, with the attempt
+            # or the specific prerequisite that blocks it. Silence here would read as a paper that
+            # published no code, which is a different and false statement.
+            followup = projection.get("code_followup") if isinstance(projection.get("code_followup"), dict) else None
+            entry["followup"] = (followup or {}).get("followups") or []
+            entry["followup_blocked"] = (followup or {}).get("blocked") or []
         if area["key"] == "interpretation" and review is not None:
             entry["scope"] = review.get("scope")
         found.append(entry)

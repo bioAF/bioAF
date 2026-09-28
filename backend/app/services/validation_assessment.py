@@ -813,6 +813,9 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
         model=cfg.model if cfg else None,
         api_key=cfg.api_key if cfg else None,
     )
+    # plan_8_7 section 3: what attempting this paper's published code requires, per implementation, and
+    # the bounded check where the study's own authorization already covers it.
+    await schedule_code_followup(session, study)
     # plan_8_7 stage 2: whether the result supports each stated conclusion, in the design, uncertainty
     # and population actually examined. It runs here, before any execution, because an inference can be
     # assessed from the paper's own evidence and a missing run is bioAF's limitation rather than a
@@ -1062,6 +1065,67 @@ def _leaves_for(scope: dict) -> tuple[str, ...]:
         if not units.get(leaf):
             found.append(leaf)
     return tuple(found)
+
+
+async def schedule_code_followup(session: AsyncSession, study) -> dict:
+    """plan_8_7 section 3: record what attempting this paper's published code requires, and start it.
+
+    "A user must not need to discover an advanced toggle to trigger work already covered by their
+    authorization." So the normal assessment produces the follow-up and launches what the study's own
+    authorization already covers. An assessment-only study spends nothing and names what would
+    authorize the attempt; a study whose route authorizes execution gets the bounded build and load
+    with no further route question.
+
+    Never raises. A refused execution is recorded beside the documentary follow-up, which survives it:
+    "If all execution is blocked, publish its cause and preserve the documentary report."
+    """
+    from app.services.validation_code_followup import ATTEMPT_BOUNDED, ATTEMPT_REPRODUCTION, code_followup
+    from app.services.validation_environment_check import EnvironmentCheckRefused, request_environment_check
+
+    evidence = dict(study.evidence_json or {})
+    plan = await active_plan(session, study)
+    plan_dict = {}
+    if plan is not None:
+        from app.services.validation_report_summary import plan_projection
+
+        plan_dict = plan_projection(plan)
+    found = code_followup(evidence=evidence, plan=plan_dict, route=getattr(study, "intended_route", None))
+    scheduled: list[str] = []
+    blocked: list[dict] = []
+    # The bounded check is the one this stage can start on its own: it builds the declared environment,
+    # loads the implementation and checks the interfaces, under the isolated identity and its approval.
+    # A full reproduction runs on acquired inputs and belongs to the execution half that already owns
+    # the authors-code arm, so it is scheduled there and recorded as required here.
+    held = ((evidence.get("code_inspection") or {}).get("environment_check") or {}).get("status")
+    wants_bounded = any(row["action"] == ATTEMPT_BOUNDED for row in found["followups"])
+    # plan_8_7 section 3: "Deduplicate attempts by existing source/input/environment/operation
+    # identities and reuse valid results." The identity is what the follow-up is ABOUT: the same
+    # implementations, at the same revisions, asking for the same thing. A second assessment over
+    # unchanged evidence launches nothing.
+    identity = [
+        {"unit": row["unit"], "digest": row["source"]["digest"], "action": row["action"]} for row in found["followups"]
+    ]
+    before = evidence.get("code_followup") if isinstance(evidence.get("code_followup"), dict) else {}
+    already = (before or {}).get("identity") == identity and "bounded_check" in ((before or {}).get("scheduled") or [])
+    if wants_bounded and not already and held not in ("running", "settled", "inconclusive"):
+        try:
+            await request_environment_check(session, study, user_id=study.requested_by_user_id)
+            scheduled.append("bounded_check")
+        except EnvironmentCheckRefused as refusal:
+            blocked.append({"action": ATTEMPT_BOUNDED, "reason": str(refusal)})
+        except Exception as exc:  # noqa: BLE001 - a refused execution cannot fail the assessment
+            logger.warning("study %s: the bounded author-code check could not be started: %s", study.id, exc)
+            blocked.append({"action": ATTEMPT_BOUNDED, "reason": str(exc)})
+    if any(row["action"] == ATTEMPT_REPRODUCTION for row in found["followups"]):
+        scheduled.append("reproduction")
+    if already:
+        scheduled.append("bounded_check")
+    record = {**found, "identity": identity, "scheduled": scheduled, "blocked": blocked, "at": _now_iso()}
+    evidence = dict(study.evidence_json or {})
+    evidence["code_followup"] = record
+    study.evidence_json = evidence
+    await session.flush()
+    return record
 
 
 async def refresh_interpretation_review(session: AsyncSession, study, *, client=None, model=None, api_key=None) -> dict:
