@@ -53,6 +53,7 @@ import { TechnicalDetails } from "@/components/validation/TechnicalDetails";
 import { InventoryRetryNotice } from "@/components/validation/InventoryRetryNotice";
 import { RecoveryNotice } from "@/components/validation/RecoveryNotice";
 import { ReportSection, useDisclosureLinks } from "@/components/validation/ReportSection";
+import { AssessmentReport } from "@/components/validation/AssessmentReport";
 import { ReportFindings } from "@/components/validation/ReportFindings";
 import { ReportDataAndCode } from "@/components/validation/ReportDataAndCode";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -392,24 +393,48 @@ export default function ValidationStudyPage() {
           )}
         </div>
 
-        {/* plan_8_2 section 4.2 (approved 2026-09-14): the scorecard, with the outcome in it, leads; a strip of
-            the decisions the study is waiting on follows; then four sections, each with its summary. */}
-        {/* plan_8_4 section 7: the evidence score leads, because it is the number that says what bioAF
-            has established about this paper. The v2 findings scorecard follows it, unchanged. */}
-        {summary?.evidence_score && (
-          <div className="mb-4">
-            <EvidenceScorecard card={summary.evidence_score} />
-          </div>
-        )}
-        {summary?.scorecard ? (
-          <div className="mb-4">
-            <ValidationScorecard scorecard={summary.scorecard} variant="summary" header={outcome} />
+        {/* plan_8_7 stage 2: ONE assessment summary leads, with the six areas under it. The owner's
+            September 21 assessment found two prominent scorecards with different semantics at the head
+            of this page, and a reader could not tell which number to believe. Both cards are kept, in
+            full, as secondary detail: the findings and the check evidence they carry are not removed,
+            and a historical report that published no v3 card renders exactly as it did. */}
+        {summary?.areas && summary.assessment_summary ? (
+          <div className="mb-4 space-y-4">
+            <AssessmentReport
+              areas={summary.areas}
+              summary={summary.assessment_summary}
+              synthesis={summary.synthesis ?? null}
+            />
+            <section>{outcome}</section>
+            <details className="rounded border border-gray-200 bg-white p-3">
+              <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                Scoring detail: the numerical rubric and the findings scorecard
+              </summary>
+              <div className="mt-3 space-y-4">
+                {summary.evidence_score && <EvidenceScorecard card={summary.evidence_score} />}
+                {summary.scorecard && <ValidationScorecard scorecard={summary.scorecard} variant="summary" />}
+              </div>
+            </details>
           </div>
         ) : (
-          <section className="mb-6">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
-            {outcome}
-          </section>
+          <>
+            {/* A report projected before plan_8_7, rendered the way it was published. */}
+            {summary?.evidence_score && (
+              <div className="mb-4">
+                <EvidenceScorecard card={summary.evidence_score} />
+              </div>
+            )}
+            {summary?.scorecard ? (
+              <div className="mb-4">
+                <ValidationScorecard scorecard={summary.scorecard} variant="summary" header={outcome} />
+              </div>
+            ) : (
+              <section className="mb-6">
+                <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-gray-500">Outcome</h2>
+                {outcome}
+              </section>
+            )}
+          </>
         )}
 
         {decisionsVisible && (
@@ -660,11 +685,17 @@ export default function ValidationStudyPage() {
                   <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     {summary.comparisons.label}
                   </h3>
-                  <p className="mb-2 text-xs text-gray-600">
-                    {summary.comparisons.reason
-                      ? `${summary.comparisons.reason.charAt(0).toUpperCase()}${summary.comparisons.reason.slice(1)}.`
-                      : null}
-                  </p>
+                  {/* plan_8_7 stage 2: the reproduction depth statement in the Results area says this
+                      now. Repeating it here put the same sentence on the page twice, which is the kind
+                      of duplication the owner's September 21 assessment was about. A report projected
+                      before the areas keeps the sentence here, where it was its only home. */}
+                  {!summary.areas && (
+                    <p className="mb-2 text-xs text-gray-600">
+                      {summary.comparisons.reason
+                        ? `${summary.comparisons.reason.charAt(0).toUpperCase()}${summary.comparisons.reason.slice(1)}.`
+                        : null}
+                    </p>
+                  )}
                 </>
               ) : (
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">

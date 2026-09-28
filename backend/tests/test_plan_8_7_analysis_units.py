@@ -21,7 +21,12 @@ from app.services.validation_analysis_units import (
     unit_of,
 )
 
-_RNA = {"id": "e1", "assay": "bulk RNA-seq", "description": "differential expression after induction", "tools": ["DESeq2"]}
+_RNA = {
+    "id": "e1",
+    "assay": "bulk RNA-seq",
+    "description": "differential expression after induction",
+    "tools": ["DESeq2"],
+}
 _CHIP = {"id": "e2", "assay": "ChIP-seq", "description": "FOXL2 occupancy", "tools": ["MACS2"]}
 
 
@@ -31,7 +36,9 @@ def _source(path, text="import os\nprint(os.getcwd())\n"):
 
 class TestUnitsExistOnlyWhereTheEvidenceSeparates:
     def test_one_experiment_and_one_script_produce_no_units(self):
-        found = analysis_units(plan={"reported_experiments": [_RNA]}, evidence={"code_inspection": {"sources": [_source("a.py")]}})
+        found = analysis_units(
+            plan={"reported_experiments": [_RNA]}, evidence={"code_inspection": {"sources": [_source("a.py")]}}
+        )
         assert found["units"] == {}
         assert found["definitions"] == {}
 

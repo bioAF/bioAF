@@ -506,9 +506,7 @@ def packet_for(
         # worded: the owner's repeated-observations sentence matched none of M3's vocabulary, ranked
         # zero, and was passed over for paragraphs that said `DESeq2`. Ranking still decides what a
         # tight budget spends itself on; it no longer decides what is offered at all.
-        ranked.append(
-            (rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, True, order, passage)
-        )
+        ranked.append((rank + _section_bonus(selector, str(passage.get("kind") or "")), rank > 0, True, order, passage))
     for order, extra in enumerate(extras or [], start=len(eligible)):
         if not isinstance(extra, dict) or extra.get("kind") not in selector.extras:
             continue

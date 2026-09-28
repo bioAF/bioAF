@@ -179,7 +179,10 @@ def analysis_units(*, plan: dict | None, evidence: dict | None) -> dict:
     if len(implementations) > 1:
         for leaf in CODE_SCOPED:
             units[leaf] = sorted(implementations)
-    definitions = {**(experiments if len(experiments) > 1 else {}), **(implementations if len(implementations) > 1 else {})}
+    definitions = {
+        **(experiments if len(experiments) > 1 else {}),
+        **(implementations if len(implementations) > 1 else {}),
+    }
     record = {
         "units": units,
         "definitions": definitions,

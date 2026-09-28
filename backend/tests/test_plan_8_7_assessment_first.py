@@ -73,9 +73,7 @@ class TestItStopsBeforeSpendingAnything:
         async def _conclude(session, study, reason, **kw):
             assessed.append(reason)
 
-        monkeypatch.setattr(
-            ValidationDriverService, "_finish_without_execution", staticmethod(_conclude)
-        )
+        monkeypatch.setattr(ValidationDriverService, "_finish_without_execution", staticmethod(_conclude))
         moved = await ValidationDriverService._handle_plan_ready(session, study)
         assert moved is True
         assert approved == []

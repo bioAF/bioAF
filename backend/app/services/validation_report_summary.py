@@ -331,6 +331,17 @@ def summarize(
         # plan_8_4: rubric v3's evidence score, beside it. The two are separate cards with separate
         # semantics and are never read as one another: a v2 score of 100 is not a v3 score of 100.
         "evidence_score": evidence_scorecard(study=study, evidence=evidence, plan=plan, claims=claims, attempt=attempt),
+        # plan_8_7 stage 2: the interpretation review this study published. The six areas and the
+        # leading summary are projected from it and from the published assessment, so what a reader
+        # sees is one revision's conclusions and not a fresh reading of the evidence at render time.
+        # The assessment RECORD itself is not published here: it carries the input digests reuse is
+        # keyed on, which are bioAF's bookkeeping and not a statement about the paper.
+        "interpretation_review": (
+            evidence.get("interpretation_review") if isinstance(evidence.get("interpretation_review"), dict) else None
+        ),
+        # What bioAF holds NOW, apart from the attempts that failed on the way. The owner's September 21
+        # assessment found a retrieval failure reported beside the resource a later attempt retrieved.
+        "current_retrieval": current_retrieval(evidence),
     }
     # plan_8_4 section 7: two cards cannot both be called the Validation Scorecard. Where the v3
     # evidence score is present it IS that card, and the v2 card is named for what it measures: the
@@ -343,6 +354,22 @@ def summarize(
 
     projection["scorecard"]["units"] = units(projection["scorecard"], claims=claims, applicability=applies)
     projection["sections"] = sections(projection, checks=checks, issues=issues)
+    # plan_8_7 stage 2: the six areas a scientist asked about, and the short factual account that leads
+    # them. A model-assisted synthesis replaces the lead only where one was produced and validated
+    # (`validation_report_synthesis`); the projection always carries the factual one.
+    from app.services.validation_report_areas import areas_for, assessment_summary
+
+    held = evidence.get("rubric_assessment") if isinstance(evidence.get("rubric_assessment"), dict) else None
+    projection["areas"] = areas_for({**projection, "assessment": held})
+    projection["assessment_summary"] = assessment_summary({**projection, "assessment": held})
+    projection["synthesis"] = (evidence.get("report_synthesis") or None) if isinstance(evidence, dict) else None
+    # plan_8_7 section 6: "Remove the competing findings score from the current report's headline
+    # presentation, while retaining the findings and check evidence." Both cards stay in the projection
+    # with everything they carried; what changes is that neither is the headline, and a report that
+    # published no v3 card is a historical report and is untouched.
+    if projection["evidence_score"]:
+        projection["evidence_score"] = {**projection["evidence_score"], "secondary": True}
+        projection["scorecard"] = {**projection["scorecard"], "secondary": True}
     # plan_8_3 (reporting): the projection checks itself for a section contradicting another.
     report_contradictions(projection)
     return projection
@@ -1618,6 +1645,86 @@ def _measurements(row: dict) -> list[str]:
     for name, count in (row.get("threshold_splits") or {}).items():
         parts.append(f"{count} with {name}")
     return parts
+
+
+# plan_8_7 stage 2: what a later attempt achieved, per source. The ledger is append-only and right to
+# be; what was wrong was reading a failed entry as the CURRENT state of a source a later entry got.
+_RETRIEVED = "retrieved"
+
+# What would actually address each recorded cause. plan_8_7 section 6: "Recommend only actions that can
+# address the recorded cause; credentials cannot supply a missing assay implementation." A source that
+# does not exist is not a credentials problem, and a bundle too large for one request is not either.
+_RETRIEVAL_ACTIONS = {
+    "unauthorized": "record the credentials or the per-dataset authorisation this archive requires, then retrieve it again",
+    "forbidden": "record the credentials or the per-dataset authorisation this archive requires, then retrieve it again",
+    "not_found": "check the identifier the paper published: nothing is served at the address it names",
+    "too_large": "retrieve this source in parts, or raise the transfer limit for this organisation",
+    "timeout": "retrieve this source again; the archive did not answer in time",
+    "decode_failed": "inspect this source by hand: bioAF holds its bytes and cannot read its format",
+}
+_DEFAULT_RETRIEVAL_ACTION = "retrieve this source again, and record what the archive answers"
+
+
+def current_retrieval(evidence: dict | None) -> dict:
+    """``{"retrieved", "failures", "history", "historical_failures", "next_actions"}``: now, and before.
+
+    plan_8_7 stage 2, from the owner's September 21 assessment: the report showed a retrieval failure
+    beside the resource a later attempt had retrieved. The current state of each source is read from its
+    LAST entry; the attempts that failed stay as history a reader can open, and a cause that a later
+    success resolved recommends nothing.
+    """
+    ledger = [e for e in (evidence or {}).get("retrieval_ledger") or [] if isinstance(e, dict)]
+    latest: dict[str, dict] = {}
+    attempts: dict[str, list[dict]] = {}
+    for entry in ledger:
+        key = str(entry.get("url") or entry.get("source_label") or entry.get("id") or "")
+        if not key:
+            continue
+        attempts.setdefault(key, []).append(entry)
+        latest[key] = entry
+    retrieved = sorted(key for key, entry in latest.items() if entry.get("outcome") == _RETRIEVED)
+    failures = []
+    for key, entry in sorted(latest.items()):
+        if entry.get("outcome") == _RETRIEVED:
+            continue
+        failures.append(
+            {
+                "url": key,
+                "source": entry.get("source_label") or "a source this paper names",
+                "outcome": entry.get("outcome"),
+                "outcome_label": RETRIEVAL_OUTCOME_LABELS.get(entry.get("outcome"), entry.get("outcome")),
+                "attempts": len(attempts.get(key) or []),
+                "first_at": (attempts.get(key) or [entry])[0].get("at"),
+                "last_at": entry.get("at"),
+                "http_status": entry.get("http_status"),
+                "error_class": entry.get("error_class"),
+            }
+        )
+    history = [
+        {
+            "url": str(entry.get("url") or entry.get("source_label") or entry.get("id") or ""),
+            "outcome": entry.get("outcome"),
+            "outcome_label": RETRIEVAL_OUTCOME_LABELS.get(entry.get("outcome"), entry.get("outcome")),
+            "at": entry.get("at"),
+        }
+        for entry in ledger
+        if entry.get("outcome") != _RETRIEVED
+    ]
+    seen: set[str] = set()
+    next_actions = []
+    for failure in failures:
+        action = _RETRIEVAL_ACTIONS.get(str(failure["outcome"]), _DEFAULT_RETRIEVAL_ACTION)
+        if action in seen:
+            continue
+        seen.add(action)
+        next_actions.append({"cause": failure["outcome"], "action": action, "source": failure["url"]})
+    return {
+        "retrieved": retrieved,
+        "failures": failures,
+        "history": history,
+        "historical_failures": len(history),
+        "next_actions": next_actions,
+    }
 
 
 def _retrieval_failures(evidence: dict, artifacts: list[dict]) -> list[dict]:

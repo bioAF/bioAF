@@ -168,18 +168,38 @@ test("the page shows the paper's resources and each claim's checks", async () =>
   expect(screen.getByTestId("claim-selection-current")).toBeInTheDocument();
 });
 
-test("the Validation Scorecard leads the report, above the outcome (plan_8 section 6)", async () => {
+test("the assessment leads the report and the two scorecards are secondary detail (plan_8_7 stage 2)", async () => {
   mockGet.mockResolvedValue({ ...study(), report_summary: contract.scorecard_scored });
   render(<ValidationStudyPage />);
-  // plan_8_4 section 7: the evidence score holds the name "Validation Scorecard" and leads; the v2
-  // card follows it, named for what it measures. Both are above the outcome.
-  const scorecard = await screen.findByRole("heading", { name: "Validation Scorecard" });
+  // plan_8_4 section 7 had the evidence score leading with the v2 card under it. The owner's
+  // September 21 assessment found that two prominent cards with different semantics left a reader
+  // unable to tell which number to believe, so plan_8_7 stage 2 leads with the assessment itself and
+  // moves both cards, unchanged and complete, into one collapsed scoring detail.
+  const assessment = await screen.findByRole("heading", { name: /What bioAF established about this paper/i });
+  const scorecard = screen.getByRole("heading", { name: "Validation Scorecard" });
   const findings = screen.getByRole("heading", { name: "Findings Scorecard" });
-  const outcome = screen.getByRole("heading", { name: "Outcome" });
+  expect(assessment.compareDocumentPosition(scorecard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(scorecard.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(scorecard.compareDocumentPosition(outcome) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText(/Scoring detail/i)).toBeInTheDocument();
+  // Neither card lost anything: both numbers are still there to be read.
   expect(screen.getByTestId("scorecard-score")).toHaveTextContent("67 / 100");
   expect(screen.getByTestId("scorecard-scope")).toHaveTextContent("5 / 5 assessed");
+});
+
+test("the six areas of the assessment are on the page (plan_8_7 section 3)", async () => {
+  mockGet.mockResolvedValue({ ...study(), report_summary: contract.scorecard_scored });
+  render(<ValidationStudyPage />);
+  await screen.findByRole("heading", { name: /What bioAF established about this paper/i });
+  for (const title of [
+    "Data and metadata",
+    "Experimental methods",
+    "Computational methods",
+    "Published code and environment",
+    "Results and reproduction",
+    "Interpretation",
+  ]) {
+    expect(screen.getAllByText(title).length).toBeGreaterThan(0);
+  }
 });
 
 test("a report projected before the scorecard existed renders no card and no error", async () => {

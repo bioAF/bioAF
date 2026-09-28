@@ -32,7 +32,11 @@ _CONCLUSION = {
     "passage": "Cells expressing all three factors upregulated FOXL2 and AMH relative to controls (p < 0.01).",
 }
 _CONTEXT = [
-    {"id": "d1", "source": "the paper's design", "text": "Two clones per condition, each from a different parent line."},
+    {
+        "id": "d1",
+        "source": "the paper's design",
+        "text": "Two clones per condition, each from a different parent line.",
+    },
     {"id": "m1", "source": "the paper's methods", "text": "Significance was assessed with an unpaired t-test."},
 ]
 

@@ -288,7 +288,11 @@ def _check_rows(evidence: dict, *, checks_kind: str) -> list[dict]:
                         if declared
                         else "Declares no entry point. "
                     )
-                    + (f"Runs top-level statements without declaring an entry point: {', '.join(bare)}. " if bare else "")
+                    + (
+                        f"Runs top-level statements without declaring an entry point: {', '.join(bare)}. "
+                        if bare
+                        else ""
+                    )
                     + (
                         ""
                         if coverage.get("starts")

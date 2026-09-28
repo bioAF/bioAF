@@ -193,7 +193,9 @@ def _code_by_unit(evidence: dict, definitions: dict) -> dict[str, dict]:
 def _judgments_of(evidence: dict) -> dict:
     held = evidence.get("rubric_judgments")
     judgments = (held or {}).get("judgments") if isinstance(held, dict) else None
-    return {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)} if isinstance(judgments, dict) else {}
+    return (
+        {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)} if isinstance(judgments, dict) else {}
+    )
 
 
 def _with_judgments(assessed: dict, evidence: dict) -> dict:
