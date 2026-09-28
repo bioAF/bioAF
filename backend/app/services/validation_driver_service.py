@@ -3816,16 +3816,16 @@ class ValidationDriverService:
     async def _assess_execution(
         session: AsyncSession, study: ValidationStudy, evidence: dict, result: dict
     ) -> dict | None:
-        """plan_7 step 17's two hedged calls, when an execution arm diverged. None otherwise.
+        """plan_7 step 17's hedged cause diagnostic, when an execution arm diverged. None otherwise.
 
-        Both are scoped to the arms that ran code: only they give a like-for-like result to set
-        against the paper's own. A pipeline-route divergence like study 26's 7,389 vs 4,054 peaks
-        still gets prose only, deliberately.
+        It is scoped to the arms that ran code: only they give a like-for-like result to set against
+        the paper's own. A pipeline-route divergence like study 26's 7,389 vs 4,054 peaks still gets
+        prose only, deliberately.
 
         **Evidence is passed explicitly**, not re-read off the study, per plan_7 defect 4 and the
         ordering trap `_handle_extracting` documents at length.
         """
-        from app.services.signal_assessment import assess_causes, assess_signal
+        from app.services.signal_assessment import assess_causes
 
         execution = evidence.get("code_execution") or {}
         observation = execution.get("observation") or {}
@@ -3853,21 +3853,11 @@ class ValidationDriverService:
         client = get_client(cfg.provider)
 
         out: dict = {}
-        signal = await assess_signal(
-            method=method,
-            paper_value=observation.get("paper_value"),
-            our_value=observation.get("our_value"),
-            metric=observation.get("metric"),
-            context=str(result.get("reasoning") or "")[:1500],
-            client=client,
-            model=cfg.model,
-            api_key=cfg.api_key,
-        )
-        if signal:
-            # Its own top-level key, matching `capabilities`, `precompute_checks`,
-            # `deposit_selection` and `level3`, so step 19 reads one place whichever arm ran.
-            out["signal_assessment"] = signal
-
+        # plan_8_7 stage 4: the second call that stood here asked whether the paper's result could be
+        # noise read as signal, which is a judgment about whether the result supports what the paper
+        # concluded from it. `validation_interpretation_review` owns that question now and answers it
+        # from the paper's own design, without waiting for a divergence to exist. What is left here is
+        # the diagnostic about bioAF's own run.
         causes = await assess_causes(
             observation=observation, method=method, client=client, model=cfg.model, api_key=cfg.api_key
         )

@@ -1434,6 +1434,10 @@ def _append_code_section(parts: list[str], evidence: dict[str, Any]) -> None:
             parts.append(f"Considered: {'; '.join(considered)}.")
         parts.append("")
 
+    # plan_8_7 stage 4: nothing WRITES this key any more. `assess_signal` asked whether the paper's
+    # result could be noise read as signal, and `validation_interpretation_review` owns that question
+    # now. This stays as a historical adapter: a study that stored one keeps its stored statement,
+    # rendered as it was. It translates a stored shape and makes no current assessment.
     signal = evidence.get("signal_assessment") or {}
     if signal:
         if signal.get("verdict") == "likely":

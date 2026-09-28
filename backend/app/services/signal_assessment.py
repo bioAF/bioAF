@@ -1,25 +1,27 @@
-"""plan_7 step 17: was this noise read as signal, and what else could explain the difference?
+"""plan_7 step 17: what could explain the difference between the paper's result and ours?
 
-Two model calls, both made AFTER step 17 or step 18 has executed code and the result diverges from
-the paper. Neither fires on the pipeline route: that is a deliberate scope line, because only the
-arms that ran code give us a like-for-like result to set against the paper's own. A pipeline-route
+One model call, made AFTER step 17 or step 18 has executed code and the result diverges from the
+paper. It does not fire on the pipeline route: that is a deliberate scope line, because only the arms
+that ran code give us a like-for-like result to set against the paper's own. A pipeline-route
 divergence like study 26's 7,389 vs 4,054 peaks still gets prose only.
 
 **The tool never concludes that the authors got it wrong.** An earlier draft had
 ``authors_misinterpreted`` as an outcome the classifier could pick, described as the one that
 indicts the science rather than the artefact. That was removed. Divergence is always "we could not
-reproduce", and the possibility that a paper read noise as signal is carried BESIDE the outcome as a
-flagged possible issue, hedged, with our numbers shown next to theirs so the reader judges.
+reproduce".
 
-This is also why no human ratification step is needed here: a hedged possible-issue flag beside both
-sets of numbers is not an accusation, and requiring a person would put a mandatory human step inside
-a feature whose acceptance criterion is a fully autonomous run.
+**The candidate set always includes bioAF's own side.** Their code, run by us, on data we selected
+and mounted, with arguments a model chose, in an environment we built: any of those can produce a
+different number, and ours is usually the cheapest to check. Study 26's own reasoning is the
+standard: "a peak-caller/threshold difference on our side plausibly explains the gap, so the paper
+cannot be indicted."
 
-**The causal assessment's candidate set always includes bioAF's own side.** Their code, run by us,
-on data we selected and mounted, with arguments a model chose, in an environment we built: any of
-those can produce a different number, and ours is usually the cheapest to check. Study 26's own
-reasoning is the standard: "a peak-caller/threshold difference on our side plausibly explains the
-gap, so the paper cannot be indicted."
+**There was a second call here and plan_8_7 removed it.** ``assess_signal`` asked whether the paper's
+result could be noise read as signal, which is a judgment about whether the paper's result supports
+what the paper concluded from it. That is `validation_interpretation_review`'s question now, answered
+from the paper's own design and reported in the Interpretation area, and it no longer waits for a
+divergence to exist before it can be asked at all. Two authoritative answers to one question was the
+defect; what stayed here is the diagnostic about bioAF's own run, which nothing else answers.
 """
 
 from __future__ import annotations
@@ -33,10 +35,6 @@ from app.services.llm_decision import decide_with_recovery
 
 logger = logging.getLogger("bioaf.signal_assessment")
 
-LIKELY = "likely"
-NOT_LIKELY = "not likely"
-
-SIGNAL_INTENT = "judging whether the paper's result could be noise read as signal"
 CAUSE_INTENT = "weighing what could explain the difference between the paper's result and ours"
 
 # Only the arms that ran code. Everything else has no like-for-like comparison to reason from.
@@ -64,22 +62,6 @@ _METHOD_LABEL = {
     METHOD_LLM_FROM_METHODS: "an analysis generated from the paper's prose",
 }
 
-_SIGNAL_SYSTEM = (
-    "You are comparing a published result with the result an independent re-run produced, and "
-    "answering ONE narrow question: could the paper's number plausibly be noise read as signal?\n\n"
-    "Respond with a SINGLE fenced JSON block (```json ... ```) and nothing else:\n"
-    '{"verdict": "likely" or "not likely", "reason": "one or two sentences", '
-    '"confidence": 0.0 to 1.0}\n\n'
-    "Rules:\n"
-    "- This is NOT an accusation and it will never be published as a verdict. A 'likely' is rendered "
-    "as a hedged possible issue beside both sets of numbers, and the reader judges.\n"
-    "- 'not likely' is the ordinary answer. Say it whenever the paper's number looks like a real "
-    "measurement, whatever the size of the difference.\n"
-    "- Weak enrichment, a low signal-to-noise ratio, a small number of events, or a result at the "
-    "edge of a threshold are what make 'likely' reasonable. A large difference on its own is not.\n"
-    "- Hedge. You are reasoning from two numbers and a little context, not from the raw data."
-)
-
 _CAUSE_SYSTEM = (
     "An independent re-run of a paper's published analysis produced a different result. You are "
     "naming the MOST LIKELY explanation from a fixed list, or declining to name one.\n\n"
@@ -105,58 +87,6 @@ _CAUSE_SYSTEM = (
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-async def assess_signal(
-    *,
-    method: str,
-    paper_value,
-    our_value,
-    metric: str | None,
-    context: str,
-    client,
-    model: str,
-    api_key: str | None,
-) -> dict | None:
-    """Could the paper's result be a misinterpretation of noise as signal? Or None.
-
-    None means the question was not asked or could not be answered, which is the honest state: an
-    invented assessment would be an accusation nobody made.
-    """
-    if method not in _EXECUTION_METHODS:
-        return None
-    if paper_value is None or our_value is None:
-        return None
-
-    payload = (
-        f"Metric: {metric or 'the reported result'}\n"
-        f"The paper reports: {paper_value}\n"
-        f"Our re-run of the authors' own analysis produced: {our_value}\n"
-        f"{('Context: ' + context) if (context or '').strip() else ''}"
-    )
-    decision = await decide_with_recovery(
-        intent=SIGNAL_INTENT,
-        system=_SIGNAL_SYSTEM,
-        payload=payload,
-        client=client,
-        model=model,
-        api_key=api_key,
-        allowed=[LIKELY, NOT_LIKELY],
-        purpose=budgets.SIGNAL_VERDICT,
-    )
-    if not decision.ok:
-        return None
-    verdict = decision.choice("verdict")
-    if verdict is None:
-        logger.info("signal assessment returned no usable verdict while %s", SIGNAL_INTENT)
-        return None
-    return {
-        "verdict": verdict,
-        "reason": decision.reason,
-        "confidence": decision.confidence(),
-        "model": model,
-        "assessed_at": _now(),
-    }
 
 
 async def assess_causes(*, observation: dict, method: str, client, model: str, api_key: str | None) -> dict | None:
