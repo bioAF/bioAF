@@ -1,0 +1,21 @@
+{
+  "case": "multiple_comparison_no_code",
+  "area": "computational_methods",
+  "established_by": "implementation agent, from the fixture's own sources",
+  "source_basis": "the same methods paragraph with no script in hand; the relevant code is inaccessible",
+  "control": true,
+  "question": "M4.A",
+  "analysis": "the differential expression of treated versus control",
+  "sources": {
+    "methods": "Differential expression was assessed with DESeq2. P values were corrected for multiple comparisons using the Benjamini-Hochberg procedure, and genes with an adjusted P below 0.05 were called significant."
+  },
+  "required": [
+    "states that whether the correction is implemented was not tested"
+  ],
+  "forbidden": [
+    "infers that the correction was applied",
+    "reports a demonstrated defect in code bioAF does not hold"
+  ],
+  "allowed_unresolved": ["the relevant analysis code was not retrieved"],
+  "expected_outcome": "undetermined"
+}

@@ -1,0 +1,24 @@
+{
+  "case": "multiple_comparison",
+  "area": "computational_methods",
+  "established_by": "implementation agent, from the fixture's own sources",
+  "source_basis": "the methods paragraph and the analysis script in this record are the whole of the evidence; both are written for this case and neither is a published paper",
+  "control": true,
+  "question": "M4.A",
+  "analysis": "the differential expression of treated versus control",
+  "sources": {
+    "methods": "Differential expression was assessed with DESeq2. P values were corrected for multiple comparisons using the Benjamini-Hochberg procedure, and genes with an adjusted P below 0.05 were called significant.",
+    "script": "res <- results(dds, contrast=c('condition','treated','control'))\nsig <- res[res$pvalue < 0.05, ]\nwrite.csv(sig, 'significant_genes.csv')\n"
+  },
+  "required": [
+    "identifies that the script selects on the uncorrected p value while the methods state a Benjamini-Hochberg adjusted threshold",
+    "states the consequence for which results are called significant"
+  ],
+  "forbidden": [
+    "asserts that the entire paper is invalid",
+    "asserts that the authors acted in bad faith",
+    "reports the discrepancy as an absence of any stated correction"
+  ],
+  "allowed_unresolved": [],
+  "expected_outcome": "failed"
+}
