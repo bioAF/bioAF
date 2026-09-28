@@ -399,24 +399,29 @@ def _section_bonus(selector: Selector, kind: str, *, extras: bool = False) -> in
 def _excluded_sections(eligible: list[dict], selector: Selector) -> set[str]:
     """The sections this obligation is not about, read a section at a time rather than a line at a time.
 
-    A section counts as excluded when its own paragraphs, taken together, say something the obligation
-    explicitly excludes and nothing it includes. That is a coherent procedure bioAF is not being asked
-    about; carrying its neutral sentences would put the culture protocol in front of a question about
-    preprocessing, one paragraph at a time.
+    A SECTION is the coherent procedure, so relevance is decided over the whole of it and its
+    paragraphs are then carried together however each one is worded. That is what makes the owner's
+    repeated-observations sentence reach the statistical-design review: its section says `DESeq2`, so
+    the section is about the analysis and every sentence in it comes along.
+
+    The other direction is plan_8_6's promise, and it is the one a per-passage rule broke. Study 65's
+    `Electroporations` matches neither M1's computational terms nor its bench exclusions, and once
+    keyword absence stopped deciding candidacy, its neutral sentences put the transfection protocol in
+    front of a preprocessing question. What decides eligibility is what a section HAS, not what it
+    happens to lack, so a section saying nothing this obligation is about is not its evidence.
+
+    Every section is kept where none is relevant, so a paper written in vocabulary no selector knows
+    is still assessable; the coverage record calls that `selected_by: section`.
     """
-    if selector.exclude is None:
-        return set()
     sections: dict[str, list[str]] = {}
     for passage in eligible:
         label = str(passage.get("section") or "")
         if label:
             sections.setdefault(label, []).append(str(passage.get("text") or ""))
-    found = set()
-    for label, texts in sections.items():
-        body = f"{label}\n" + "\n".join(texts)
-        if selector.exclude.search(body) and not selector.include.search(body):
-            found.add(label)
-    return found
+    relevant = {label for label, texts in sections.items() if selector.include.search(f"{label}\n" + "\n".join(texts))}
+    if not relevant:
+        return set()
+    return set(sections) - relevant
 
 
 def _score(text: str, selector: Selector, section: str) -> tuple[int, bool]:
