@@ -38,7 +38,12 @@ from app.services.validation_rubric_v3 import CRITERIA_BY_ID, FAILED, UNDETERMIN
 logger = logging.getLogger("bioaf.validation_semantic_reconciliation")
 
 # 1: the first version of the pass that reads propositions rather than citation sets.
-RECONCILIATION_VERSION = 1
+#
+# 2: it reads PAIRS rather than the transitive closure of the report. Found by re-running the
+# reassessment of study 65 after the repair and getting the old answer back: the documentary review is
+# cached on what it was shown, and the reconciliation runs inside it, so a corrected reconciliation is
+# a different answer about the same evidence and the version has to move for it to be asked again.
+RECONCILIATION_VERSION = 2
 
 COMPATIBLE = "compatible"
 DUPLICATE = "duplicate"
