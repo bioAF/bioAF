@@ -82,7 +82,9 @@ class TestRequestingOne:
         study = await _study(session, admin_user)
         record = await request_environment_check(session, study, user_id=admin_user.id)
         assert record["session_id"] == 77
-        assert submitted["entry_point"] == "bioaf_environment_check.R"
+        # plan_8_7 stage 3: the check is four phases now (install, load, versions, interfaces), so its
+        # entry point is the shell that runs them in order rather than one interpreter script.
+        assert submitted["entry_point"] == "bioaf_environment_check.sh"
         assert any(uri.endswith("environment-check.tar.gz") for uri in storage.written)
         assert record["status"] == "running"
 
@@ -154,7 +156,7 @@ class TestSettlingOne:
         monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
         monkeypatch.setattr(
             "app.services.validation_environment_check._compute_session",
-            self._session("completed", "BIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"),
+            self._session("completed", "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"),
         )
         await settle_environment_check(session, study)
         execution = study.evidence_json["code_inspection"]["execution"]
@@ -178,7 +180,7 @@ class TestSettlingOne:
         monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
         monkeypatch.setattr(
             "app.services.validation_environment_check._compute_session",
-            self._session("failed", "BIOAF_LOAD DESeq2 failed: not installed\n", exit_code=1),
+            self._session("failed", "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 failed: not installed\n", exit_code=1),
         )
         await settle_environment_check(session, study)
         execution = study.evidence_json["code_inspection"]["execution"]
@@ -218,7 +220,7 @@ class TestSettlingOne:
         monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
         monkeypatch.setattr(
             "app.services.validation_environment_check._compute_session",
-            self._session("running", "BIOAF_LOAD DESeq2 ok\n"),
+            self._session("running", "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 ok\n"),
         )
         await settle_environment_check(session, study)
         assert study.evidence_json["code_inspection"]["environment_check"]["status"] == "running"
@@ -317,7 +319,7 @@ class TestAskingAgainSettlesRatherThanDuplicates:
         _patch(monkeypatch)
         study = await _study(session, admin_user)
         await request_environment_check(session, study, user_id=admin_user.id)
-        self._transcript = "BIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"
+        self._transcript = "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"
         held = SimpleNamespace(id=77, status="completed", failure_message=None)
 
         async def _get(session_, session_id):
