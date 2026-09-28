@@ -101,6 +101,44 @@ def related(one: dict, other: dict) -> bool:
     return len(a & b) / min(len(a), len(b)) >= _SCOPE_OVERLAP
 
 
+# How many pairs bioAF will offer for reading at all. Found by running the reassessment on study 65:
+# every finding on one paper cites the methods paragraph, so a transitive closure was the whole report
+# and one request asked about 435 pairs. plan_8_7 section 6 forbids an unbounded all-pairs review, and
+# a bound on the number of GROUPS is not a bound on the number of pairs in one.
+MAX_PAIRS = 24
+
+
+def candidate_pairs(judgments: dict[str, dict] | None) -> list[tuple[str, str]]:
+    """The pairs of findings worth reading together, as PAIRS and never as a closure.
+
+    A pair is the unit the semantic pass answers about, so it is the unit offered. Two findings reach
+    this list when they are DIRECTLY related: they share a citation, or they named the same scope.
+    Relatedness is not transitive, and treating it as transitive is what collapsed thirty leaves on
+    study 65 into one unanswerable question.
+
+    Ordered so the most-shared evidence is read first, and bounded, because a paper with forty findings
+    has hundreds of pairs and the point is to read the ones that might actually conflict.
+    """
+    rows = {
+        leaf: judgment
+        for leaf, judgment in (judgments or {}).items()
+        if isinstance(judgment, dict) and judgment.get("outcome") in (VERIFIED, FAILED)
+    }
+    leaves = sorted(rows)
+    found: list[tuple[int, int, str, str]] = []
+    for i, one in enumerate(leaves):
+        for other in leaves[i + 1 :]:
+            if not related(rows[one], rows[other]):
+                continue
+            shared = len(_citations(rows[one]) & _citations(rows[other]))
+            # A positive beside a negative is the pair the owner's counterexample was about, so it is
+            # read before two findings that agree.
+            mixed = 0 if rows[one].get("outcome") != rows[other].get("outcome") else 1
+            found.append((mixed, -shared, one, other))
+    found.sort()
+    return [(one, other) for _, _, one, other in found[:MAX_PAIRS]]
+
+
 def candidate_groups(judgments: dict[str, dict] | None) -> list[list[str]]:
     """The groups of findings that rest on the same evidence, for semantic reconciliation to read.
 

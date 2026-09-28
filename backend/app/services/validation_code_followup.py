@@ -95,9 +95,19 @@ def code_followup(*, evidence: dict | None, plan: dict | None, route: str | None
     inputs_available = processed in ("yes", "unknown", "")
     authorized = str(route or "") in EXECUTING_ROUTES
     attempted_units = set((inspection or {}).get("execution_by_unit") or {})
-    # One unit per distinct implementation, from the same record that scopes the obligations.
+    # One unit per distinct implementation, from the same record that scopes the obligations. Only the
+    # IMPLEMENTATION units are this function's business: found by running the reassessment on study 65,
+    # which reports three experiments and publishes nine scripts. Three experiment definitions made the
+    # map non-empty, the fallback never fired, every definition was skipped for not being an
+    # implementation, and a paper with nine published scripts reported no follow-up at all.
     units = analysis_units(plan=plan, evidence=evidence)
-    definitions = units["definitions"] or {
+    definitions = {
+        unit_id: definition
+        for unit_id, definition in (units["definitions"] or {}).items()
+        if definition.get("kind") == "implementation"
+    } or {
+        # No implementation units, which happens when the paper supplies one script (nothing to split)
+        # or more than the ceiling (bioAF declined to split). Either way the follow-up is per script.
         f"code:{str(s.get('path') or 'an unnamed file')}": {
             "kind": "implementation",
             "paths": [str(s.get("path") or "an unnamed file")],
@@ -108,8 +118,6 @@ def code_followup(*, evidence: dict | None, plan: dict | None, route: str | None
     }
     followups: list[dict] = []
     for unit_id, definition in sorted(definitions.items()):
-        if definition.get("kind") != "implementation":
-            continue
         own = [s for s in authors if str(s.get("path") or "an unnamed file") in set(definition.get("paths") or [])]
         if not own:
             continue
