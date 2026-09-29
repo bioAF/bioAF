@@ -14,6 +14,16 @@ import pytest
 from app.services.validation_assessment import refresh_documentary_review
 from app.services.validation_study_service import ValidationStudyService
 
+
+@pytest.fixture(autouse=True)
+def _room_for_every_request(monkeypatch):
+    """These tests prove what a judgment concludes, not where the aggregate allowance stops. Its
+    character ceiling binds before its request count on this paper's packets, so give it room."""
+    from app.services.validation_decision_budgets import AssessmentBudget
+
+    monkeypatch.setitem(AssessmentBudget.__init__.__kwdefaults__, "max_chars", 100_000_000)
+
+
 _JATS = (pathlib.Path(__file__).parent / "fixtures" / "granulosa" / "fulltext_jats.xml").read_text()
 
 

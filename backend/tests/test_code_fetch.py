@@ -134,7 +134,7 @@ class TestTheArtifactComesFirst:
             sources=[_source(kind="supplementary", url="https://journal.org/supp/code.zip")], fetcher=fetch
         )
         assert result.outcome == CODE_UNREACHABLE
-        assert "journal.org" in result.reason or "code.zip" in result.reason
+        assert "https://journal.org/supp/code.zip" in result.reason or "code.zip" in result.reason
 
 
 class TestTheRepository:

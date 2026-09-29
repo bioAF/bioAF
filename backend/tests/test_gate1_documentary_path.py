@@ -19,6 +19,7 @@ from app.services.validation_report_summary import (
 )
 from app.services.validation_study_service import ValidationStudyService
 
+
 _EXPERIMENTS = [
     {
         "id": "e1",
@@ -82,33 +83,36 @@ def _obligation(card: dict, leaf: str) -> dict:
 
 class TestTheDepositsRecordsSettleTheSpeciesObligation:
     @pytest.mark.asyncio
-    async def test_records_that_agree_earn_the_obligation_its_points(self, session, admin_user):
+    async def test_records_that_agree_wait_for_the_cited_sample_comparison(self, session, admin_user):
+        """A matching organism string does not settle identity or experiment membership on its own."""
         study = await _assessed(session, admin_user, matrix=_matrix("Homo sapiens"))
         card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
         row = _obligation(card, "S1.B")
-        assert row["outcome"] == "verified"
-        assert row["points"] == 1.5
-        assert "GSM1" not in row["rationale"], "an agreement names what it read, not a list of samples"
+        assert row["outcome"] == "undetermined"
+        assert row["next_action"]
+        assert "GSM1" not in row["rationale"], "the rationale names what it read, not a list of samples"
         assert "Homo sapiens" in row["rationale"]
 
     @pytest.mark.asyncio
-    async def test_records_that_contradict_the_paper_are_a_negative_with_their_cause(self, session, admin_user):
+    async def test_records_that_differ_deduct_nothing_without_the_cited_sample_comparison(self, session, admin_user):
+        """A differing descriptor is not a species disagreement until the samples are mapped."""
         study = await _assessed(session, admin_user, matrix=_matrix("Mus musculus"))
         card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
         row = _obligation(card, "S1.B")
-        assert row["outcome"] == "failed"
-        assert row["impact"]
+        assert row["outcome"] == "undetermined"
+        assert card["failed"] == 0
         assert "Mus musculus" in row["rationale"]
 
     @pytest.mark.asyncio
-    async def test_correcting_only_that_defect_moves_only_that_obligation(self, session, admin_user):
-        """plan_8_5 section 4's matched repaired control: the same paper, one fact changed."""
+    async def test_the_organism_string_alone_moves_no_points(self, session, admin_user):
+        """plan_8_5 section 4's matched control: the same paper, one fact changed, and without the
+        cited sample comparison neither record set settles S1.B."""
         wrong = await _assessed(session, admin_user, matrix=_matrix("Mus musculus"))
         right = await _assessed(session, admin_user, matrix=_matrix("Homo sapiens"))
         bad = (await report_summary_for(session, wrong, admin_user.organization_id))["evidence_score"]
         good = (await report_summary_for(session, right, admin_user.organization_id))["evidence_score"]
-        assert good["score"] - bad["score"] == 1.5
-        assert bad["failed"] - good["failed"] == 1.5
+        assert good["score"] == bad["score"]
+        assert good["failed"] == bad["failed"] == 0
         assert bad["undetermined"] == good["undetermined"], "nothing else moved"
         assert bad["scope"]["assessed"] == good["scope"]["assessed"]
 
@@ -143,7 +147,7 @@ class TestTheWholeApplicationShowsTheSameAnswer:
     async def test_the_score_was_published_before_any_input_was_acquired(self, session, admin_user):
         study = await _assessed(session, admin_user, matrix=_matrix("Homo sapiens"))
         evidence = study.evidence_json or {}
-        assert evidence["rubric_assessment"]["outcomes"]["S1.B"]["outcome"] == "verified"
+        assert evidence["rubric_assessment"]["outcomes"]["S1.B"]["outcome"] == "undetermined"
         assert evidence["scorecard_record"]["evidence_score"]["score"] > 0
         assert "deposit" not in evidence, "nothing was acquired"
         assert "input_choice" not in evidence, "no analysis input was chosen"
@@ -193,7 +197,9 @@ class TestTheSampleObligationsDoNotWaitForAnAnalysisInput:
     async def test_the_counts_reconcile_without_a_chosen_input(self, session, admin_user):
         study = await self._study(session, admin_user)
         card = (await report_summary_for(session, study, admin_user.organization_id))["evidence_score"]
-        assert _obligation(card, "S4.B")["outcome"] == "verified"
+        row = _obligation(card, "S4.B")
+        assert row["outcome"] == "undetermined", "a whole-series count is not an experiment's count"
+        assert "membership mapping" in row["rationale"]
         assert "input_choice" not in (study.evidence_json or {})
 
     @pytest.mark.asyncio
