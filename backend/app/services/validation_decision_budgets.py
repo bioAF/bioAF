@@ -21,16 +21,93 @@ did not satisfy the caller's schema. Transport retries stay in the provider clie
 from __future__ import annotations
 
 import json
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from app.services.validation_read_budget import (
-    NOT_MEASURED_NOTE,
-    Budget,
-    model_output_limit,
-    recovery_budget,
-)
+from app.services.llm_provider_clients import ProviderError
+from app.services.validation_read_budget import NOT_MEASURED_NOTE, Budget, model_output_limit, recovery_budget
+
+ACTIVE_ASSESSMENT: ContextVar = ContextVar("validation_assessment_budget", default=None)
+ACTIVE_REQUEST: ContextVar = ContextVar("validation_model_request", default=None)
+
+
+class AssessmentBudget:
+    """One persisted allowance shared by every provider attempt in an assessment."""
+
+    def __init__(self, *, saved=None, max_requests=96, max_chars=1_200_000, max_seconds=1800, checkpoint=None):
+        saved = saved or {}
+        self.requests = int(saved.get("requests", 0))
+        self.characters = int(saved.get("input_characters", 0))
+        self.seconds = float(saved.get("elapsed_seconds", 0))
+        self.max_requests, self.max_chars, self.max_seconds = max_requests, max_chars, max_seconds
+        self.started = time.monotonic()
+        self.blocker = saved.get("blocker")
+        self.checkpoint = checkpoint
+        self.by_purpose = dict(saved.get("by_purpose") or {})
+
+    @property
+    def remaining_seconds(self):
+        return max(0, self.max_seconds - self.seconds - (time.monotonic() - self.started))
+
+    def record(self):
+        return {
+            "requests": self.requests,
+            "input_characters": self.characters,
+            "elapsed_seconds": self.seconds + time.monotonic() - self.started,
+            "limits": {"requests": self.max_requests, "input_characters": self.max_chars, "seconds": self.max_seconds},
+            "blocker": self.blocker,
+            "by_purpose": dict(self.by_purpose),
+        }
+
+    async def persist(self):
+        if self.checkpoint:
+            await self.checkpoint(self.record())
+
+    async def reserve(self, characters, purpose=None):
+        if not self.blocker:
+            if self.requests >= self.max_requests:
+                self.blocker = {
+                    "outcome": "budget_exhausted",
+                    "reason": "The assessment's model request limit was reached.",
+                }
+            elif self.characters + characters > self.max_chars:
+                self.blocker = {
+                    "outcome": "budget_exhausted",
+                    "reason": "The assessment's model input limit was reached.",
+                }
+            elif self.remaining_seconds <= 0:
+                self.blocker = {"outcome": "budget_exhausted", "reason": "The assessment's time limit was reached."}
+        if self.blocker:
+            raise ProviderError(self.blocker["reason"], error_class=self.blocker["outcome"])
+        self.requests += 1
+        self.characters += characters
+        key = purpose or "other"
+        self.by_purpose[key] = self.by_purpose.get(key, 0) + 1
+        await self.persist()
+
+    async def stop(self, outcome, reason):
+        self.blocker = {"outcome": outcome, "reason": reason}
+        await self.persist()
+
+    @contextmanager
+    def activate(self):
+        token = ACTIVE_ASSESSMENT.set(self)
+        try:
+            yield self
+        finally:
+            ACTIVE_ASSESSMENT.reset(token)
+
+
+async def reserve_transport_retry(attempt):
+    """The first transport attempt was reserved by decide; every retry reserves another."""
+    budget, request = ACTIVE_ASSESSMENT.get(), ACTIVE_REQUEST.get()
+    if attempt and budget is not None and request is not None:
+        await budget.reserve(*request)
+
 
 RECORDS = Path(__file__).resolve().parent / "read_measurements"
 

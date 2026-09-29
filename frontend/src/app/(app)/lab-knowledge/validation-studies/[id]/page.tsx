@@ -240,6 +240,18 @@ export default function ValidationStudyPage() {
   const fallbackTitle = `Study #${study.id}`;
   const displayTitle = study.title || fallbackTitle;
   const sections = summary?.sections ?? null;
+  const accountFailure = [...(study.issues ?? [])].reverse().find((issue) => issue.outcome === "account")?.message;
+  const retryNotice = study.state === "error" ? (
+    <RetryNotice
+      studyId={study.id}
+      accountFailure={accountFailure}
+      failureReason={study.failure_reason}
+      readFailed={!!summary?.read_failure}
+      reapAfter={study.evidence?.fetch_reap_after as string | undefined}
+      dataDeleted={!!study.evidence?.fetch_reaped}
+      onChanged={(updated) => setStudy(updated as ValidationStudy)}
+    />
+  ) : null;
 
   // The study's outcome (headline, classification, its summary sentences), at the top of the scorecard.
   const outcome = (
@@ -393,6 +405,8 @@ export default function ValidationStudyPage() {
           )}
         </div>
 
+        {accountFailure && retryNotice && <div className="mb-4">{retryNotice}</div>}
+
         {/* plan_8_7 stage 2: ONE assessment summary leads, with the six areas under it. The owner's
             September 21 assessment found two prominent scorecards with different semantics at the head
             of this page, and a reader could not tell which number to believe. Both cards are kept, in
@@ -461,16 +475,7 @@ export default function ValidationStudyPage() {
                     affectedCount={summary?.recovery?.affected_count}
                   />
                 )}
-                {study.state === "error" && (
-                  <RetryNotice
-                    studyId={study.id}
-                    failureReason={study.failure_reason}
-                    readFailed={!!summary?.read_failure}
-                    reapAfter={study.evidence?.fetch_reap_after as string | undefined}
-                    dataDeleted={!!study.evidence?.fetch_reaped}
-                    onChanged={(updated) => setStudy(updated as ValidationStudy)}
-                  />
-                )}
+                {!accountFailure && retryNotice}
                 {study.state === "samples_mismatch" && (
                   <SamplesMismatchNotice
                     studyId={study.id}

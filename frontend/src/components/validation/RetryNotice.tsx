@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/Button";
 export function RetryNotice({
   studyId,
   failureReason,
+  accountFailure,
   reapAfter,
   dataDeleted,
   readFailed,
@@ -27,6 +28,7 @@ export function RetryNotice({
 }: {
   studyId: number;
   failureReason?: string | null;
+  accountFailure?: string | null;
   // plan_8_1 section 1.3: the study's read failed, so Retry reads the paper again rather than resuming.
   readFailed?: boolean;
   // When the study's downloaded data stops being kept for a retry (ISO 8601, set by the server so
@@ -54,8 +56,11 @@ export function RetryNotice({
 
   return (
     <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-4">
-      <h3 className="text-sm font-semibold text-amber-800">This study stopped on a technical failure</h3>
-      <p className="mt-1 text-sm text-gray-700">{failureReason || "The reproduction could not be completed."}</p>
+      <h3 className="text-sm font-semibold text-amber-800">
+        {accountFailure ? "The language model account needs attention" : "This study stopped on a technical failure"}
+      </h3>
+      <p className="mt-1 text-sm text-gray-700">{accountFailure || failureReason || "The reproduction could not be completed."}</p>
+      {accountFailure && <p className="mt-2 text-sm text-amber-900">Resolve the provider&apos;s billing, quota or model-access issue before retrying.</p>}
       <p className="mt-1 text-xs text-gray-600">
         This is not a result about the paper and not a verdict on whether its finding reproduces.{" "}
         {readFailed

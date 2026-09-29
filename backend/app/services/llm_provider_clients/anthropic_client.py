@@ -239,7 +239,10 @@ async def _stream_once(body: dict, api_key: str, state: _StreamState, deadline: 
 async def _streamed(body: dict, api_key: str) -> tuple[str, int | None, int | None, str | None]:
     """The streamed answer, retried within the transport policy: a 429 or 5xx before the stream, a
     dropped connection, or the provider's own transient error event mid-stream."""
+    from app.services.validation_decision_budgets import reserve_transport_retry
+
     for attempt in range(MAX_ATTEMPTS):
+        await reserve_transport_retry(attempt)
         state = _StreamState()
         last = attempt == MAX_ATTEMPTS - 1
         try:

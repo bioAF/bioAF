@@ -209,6 +209,8 @@ class NotebookExecutionService:
         experiment_id: int | None = None,
         project_id: int | None = None,
         timeout_seconds: int = _UNTRUSTED_TIMEOUT_SECONDS,
+        execution_contract: dict | None = None,
+        operation_key: str | None = None,
     ) -> ComputeSession:
         """plan_7 step 17: run code fetched from a paper's authors against the deposited data.
 
@@ -230,12 +232,23 @@ class NotebookExecutionService:
         if identity is None:
             raise ValidationError(UNCONFIGURED_MESSAGE)
 
+        cpu_cores, memory_gb = NotebookService.get_resource_profile(resource_profile)
+        cs = None
+        if operation_key:
+            cs = (
+                await session.execute(
+                    select(ComputeSession).where(
+                        ComputeSession.organization_id == org_id,
+                        ComputeSession.provider_metadata["operation_key"].astext == operation_key,
+                    )
+                )
+            ).scalar_one_or_none()
+            if cs is not None and cs.status != "pending":
+                return cs
         allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=1.0)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
-
-        cpu_cores, memory_gb = NotebookService.get_resource_profile(resource_profile)
-        cs = ComputeSession(
+        cs = cs or ComputeSession(
             user_id=user_id,
             organization_id=org_id,
             session_type=HEADLESS_SESSION_TYPE,
@@ -249,7 +262,11 @@ class NotebookExecutionService:
             started_at=_now(),
         )
         session.add(cs)
+        if operation_key:
+            cs.provider_metadata = {**(cs.provider_metadata or {}), "operation_key": operation_key}
         await session.flush()
+        if operation_key:
+            await session.commit()
 
         spec: dict = {
             "session_type": HEADLESS_SESSION_TYPE,
@@ -272,6 +289,7 @@ class NotebookExecutionService:
                 "code_uri": code_uri,
                 "entry_point": entry_point,
                 "arguments": arguments or "",
+                **({"execution_contract": execution_contract} if execution_contract else {}),
             },
             # A hang has to become an outcome with a reason rather than a study that ticks forever.
             "timeout_seconds": timeout_seconds,
@@ -309,13 +327,31 @@ class NotebookExecutionService:
             cs.k8s_pod_name = result.provider_details.get("pod_name")
             cs.k8s_namespace = result.provider_details.get("namespace") or identity.namespace
             cs.provider_metadata = {
-                k: v
-                for k, v in {
-                    "pod_name": result.provider_details.get("pod_name"),
-                    "namespace": cs.k8s_namespace,
-                    "untrusted": True,
-                }.items()
-                if v is not None
+                **(cs.provider_metadata or {}),
+                **(
+                    {
+                        "execution_contract": {
+                            **execution_contract,
+                            "image": image or "bioaf-scrna:latest",
+                            "cpu": str(cpu_cores),
+                            "memory": f"{memory_gb}Gi",
+                            "timeout_seconds": timeout_seconds,
+                            "enforcement": "bubblewrap",
+                            "runtime_verified": False,
+                        }
+                    }
+                    if execution_contract
+                    else {}
+                ),
+                **{
+                    k: v
+                    for k, v in {
+                        "pod_name": result.provider_details.get("pod_name"),
+                        "namespace": cs.k8s_namespace,
+                        "untrusted": True,
+                    }.items()
+                    if v is not None
+                },
             }
             cs.gcs_home_prefix = result.provider_details.get("gcs_home_prefix")
             cs.status = "failed" if result.status == ServiceState.ERROR else "running"
@@ -372,6 +408,9 @@ class NotebookExecutionService:
             cs.status = "failed"
             cs.failure_message = (status.provider_details or {}).get("message") or "notebook execution failed"
             cs.stopped_at = _now()
+            if (cs.provider_metadata or {}).get("execution_contract"):
+                # Failed author invocations still carry the transcript needed to explain the result.
+                await NotebookExecutionService._finalize_success(session, cs, terminal_status="failed")
             await session.flush()
             return cs
 
@@ -379,7 +418,7 @@ class NotebookExecutionService:
         return cs
 
     @staticmethod
-    async def _finalize_success(session: AsyncSession, cs: ComputeSession) -> None:
+    async def _finalize_success(session: AsyncSession, cs: ComputeSession, *, terminal_status="completed") -> None:
         from app.services.session_output_service import SessionOutputService
 
         # plan_7 step 16a, found in a live backend log: "Outputs sync complete" and nothing landed.
@@ -435,6 +474,6 @@ class NotebookExecutionService:
                 )
                 cs.gcs_output_prefix = final_prefix
 
-        cs.status = "completed"
+        cs.status = terminal_status
         cs.stopped_at = _now()
         await session.flush()

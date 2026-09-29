@@ -231,7 +231,20 @@ def build_request(leaf: str, *, passages: list[dict] | None, unit: dict | None =
         "title": criterion.title,
         "section": section,
         "scope": (CRITERION_EVIDENCE.get(criterion.id) or {}).get("scope"),
-        "system": _SYSTEM,
+        "system": _SYSTEM
+        + (
+            "\nFor this sample comparison, also return sample_scope: {comparable: true or false, "
+            "paper: a paper/design citation id, deposit: a deposit citation id, membership: the "
+            "evidence establishing which deposited samples belong to this experiment}. "
+            "Compare biological organism identity, separating cell-line/material descriptors and "
+            "spike-in controls. A mouse cell-line descriptor is not a different species. "
+            "Never equate a whole-series count with an experiment's subset, biological replicates "
+            "with libraries, or pre-QC with post-QC counts. Both met and unmet require a common "
+            "population established by the cited evidence. Without that mapping, comparable is false "
+            "and the outcome is cannot_establish."
+            if base in ("S1.B", "S4.B")
+            else ""
+        ),
         "payload": "\n".join(p for p in question if p is not None) + f"\n\nEvidence:\n{payload}",
         "evidence": [{"id": p["id"], "source": p.get("source")} for p in rows],
         "schema": {
@@ -425,6 +438,26 @@ def judgment_from(
             conflict={"outcome": outcome, "rationale": rationale},
             coverage=coverage,
         )
+    if str(leaf).partition("#")[0] in ("S1.B", "S4.B"):
+        binding = answer.get("sample_scope") or {}
+        by_id = {str(p.get("id")): p for p in passages or [] if isinstance(p, dict)}
+        paper = by_id.get(str(binding.get("paper")), {}) if isinstance(binding, dict) else {}
+        deposit = by_id.get(str(binding.get("deposit")), {}) if isinstance(binding, dict) else {}
+        if not (
+            isinstance(binding, dict)
+            and binding.get("comparable") is True
+            and str(binding.get("membership") or "").strip()
+            and binding.get("paper") in citations
+            and binding.get("deposit") in citations
+            and paper.get("kind") != "deposit"
+            and deposit.get("kind") == "deposit"
+        ):
+            return _open(
+                "the assessor did not establish a cited mapping between this experiment and the deposited samples",
+                next_action="identify the experiment's samples and comparable counting units, then compare them",
+                assessor=assessor,
+                withheld={"outcome": outcome, "rationale": rationale},
+            )
     if outcome == MET:
         supported, why = coverage_supports_positive(coverage)
         if not supported:
@@ -498,6 +531,8 @@ def judgment_from(
         # What the finding pointed at, so a reader sees the two passages a demonstrated defect rests
         # on rather than being told that one exists.
         found["observations"] = observations
+    if str(leaf).partition("#")[0] in ("S1.B", "S4.B"):
+        found["sample_scope"] = answer["sample_scope"]
     return found
 
 

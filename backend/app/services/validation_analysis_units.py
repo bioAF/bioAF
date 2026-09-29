@@ -39,6 +39,8 @@ import json
 # over the paper's whole reading in one pass and have no per-arm evidence behind them today, so they
 # keep their paper-wide scope rather than being split into copies of one answer.
 EXPERIMENT_SCOPED = (
+    "S1.B",
+    "S4.B",
     "S2.A",
     "S2.B",
     "S5.A",

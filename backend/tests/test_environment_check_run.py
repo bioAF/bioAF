@@ -73,7 +73,7 @@ def _members(data: bytes) -> dict:
     import tarfile
 
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
-        return {m.name: archive.extractfile(m).read().decode() for m in archive.getmembers()}
+        return {m.name.removeprefix("bundle/"): archive.extractfile(m).read().decode() for m in archive.getmembers()}
 
 
 class TestWhatIsStaged:
@@ -81,9 +81,7 @@ class TestWhatIsStaged:
     archive. Staging a directory prefix made a live run fetch nothing and exit clean."""
 
     @pytest.mark.asyncio
-    async def test_it_stages_one_archive_holding_the_sources_the_manifests_and_the_check(
-        self, session, admin_user
-    ):
+    async def test_it_stages_one_archive_holding_the_sources_the_manifests_and_the_check(self, session, admin_user):
         storage = _Storage()
         staged = await stage_environment_check(
             sources=[_PY],
@@ -99,12 +97,13 @@ class TestWhatIsStaged:
         assert "numpy" in members["requirements.txt"]
 
     @pytest.mark.asyncio
-    async def test_a_source_extracted_from_a_document_gets_a_name_that_can_be_run(
-        self, session, admin_user
-    ):
+    async def test_a_source_extracted_from_a_document_gets_a_name_that_can_be_run(self, session, admin_user):
         storage = _Storage()
         staged = await stage_environment_check(
-            sources=[{**_R, "path": "supp_file_2.docx > Figure1_Embryo"}, {**_R, "path": "supp_file_2.docx > R Notebook"}],
+            sources=[
+                {**_R, "path": "supp_file_2.docx > Figure1_Embryo"},
+                {**_R, "path": "supp_file_2.docx > R Notebook"},
+            ],
             manifests=[],
             storage=storage,
             bucket="b",
@@ -133,9 +132,7 @@ class TestWhatARunEstablishes:
     the declared environment was built."""
 
     def test_a_clean_run_verifies_both_obligations(self):
-        transcript = (
-            "BIOAF_INSTALL requirements.txt ok\nBIOAF_LOAD numpy ok\nBIOAF_LOAD os ok\nBIOAF_RESOLVE ok\n"
-        )
+        transcript = "BIOAF_INSTALL requirements.txt ok\nBIOAF_LOAD numpy ok\nBIOAF_LOAD os ok\nBIOAF_RESOLVE ok\n"
         found = outcome_from_run(exit_code=0, transcript=transcript, environment="python:3.12-slim", ref="cs-1")
         assert found["load"]["status"] == "succeeded"
         assert found["dependency_resolution"]["status"] == "succeeded"

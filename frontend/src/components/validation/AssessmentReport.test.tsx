@@ -128,6 +128,26 @@ const synthesis: ReportSynthesis = {
 };
 
 describe("the summary leads", () => {
+  it("does not call a proposed reproduction scheduled", async () => {
+    const withFollowup = areas.map((area) => area.title === "Published code and environment" ? {
+      ...area, followup: [{unit: "code:a.py", action: "attempt_reproduction" as const, reason: "Inputs are bound."}],
+    } : area);
+    render(<AssessmentReport areas={withFollowup} summary={summary} synthesis={null} />);
+    await userEvent.click(screen.getByText("Published code and environment"));
+    expect(screen.getByText(/Reproduction required/)).toBeInTheDocument();
+    expect(screen.queryByText(/Reproduction scheduled/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a successful code invocation separate from result agreement", async () => {
+    const withFollowup = areas.map((area) => area.title === "Published code and environment" ? {
+      ...area, followup: [{unit: "code:a.py", action: "attempt_bounded_check" as const, status: "settled" as const,
+        reason: "The source completed.", outcome: {status: "succeeded", reproduced: false}}],
+    } : area);
+    render(<AssessmentReport areas={withFollowup} summary={summary} synthesis={null} />);
+    await userEvent.click(screen.getByText("Published code and environment"));
+    expect(screen.getByText(/Agreement with the paper's results has not been established/)).toBeInTheDocument();
+    expect(screen.queryByText("Results reproduced")).not.toBeInTheDocument();
+  });
   it("shows the lead sentences", () => {
     render(<AssessmentReport areas={areas} summary={summary} synthesis={synthesis} />);
     expect(screen.getByText(/treats repeated harvests as independent/)).toBeInTheDocument();

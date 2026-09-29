@@ -61,10 +61,10 @@ class TestTheSpecificationIsWhatWillActuallyRun:
         assert request["phases"]["runtime"]["network"] == "denied"
         assert request["limits"]["network"] == "install_only"
 
-    def test_with_no_manifest_nothing_installs_and_no_network_is_asked_for(self):
+    def test_with_no_manifest_nothing_installs_and_runtime_network_stays_denied(self):
         request = environment_check_request(sources=[_SOURCE], manifests=[])
         assert request["phases"]["install"]["network"] == "denied"
-        assert request["limits"]["network"] == "denied"
+        assert request["phases"]["runtime"]["network"] == "denied"
 
     def test_a_working_directory_is_part_of_the_contract(self):
         assert environment_check_request(sources=[_SOURCE], manifests=[_MANIFEST])["working_directory"]

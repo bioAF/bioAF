@@ -58,13 +58,14 @@ async def _study(session, admin_user, *, sources=(_SOURCE,), manifests=(_MANIFES
 
 
 class TestTheEffectiveSettingsAreReadBack:
-    def test_a_profile_that_matches_is_reported_as_applied(self):
+    def test_a_matching_profile_without_an_enforced_contract_is_not_reported_as_applied(self):
         found = effective_settings(
             request={"resource_profile": "small", "limits": {"cpu": "2", "memory": "8Gi", "timeout_seconds": 900}},
             compute=_Compute(),
             timeout_seconds=900,
         )
-        assert found["applied"] is True
+        assert found["applied"] is False
+        assert "no enforced execution contract" in found["reason"]
         assert found["cpu"] == "2" and found["memory"] == "8Gi"
         assert found["timeout_seconds"] == 900
 

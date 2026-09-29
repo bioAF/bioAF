@@ -122,6 +122,9 @@ def _parsed(sources: list[dict]) -> tuple[list[dict], list[dict], list[dict], li
     unreadable: list[dict] = []
     for source in sources or []:
         language = _language(source)
+        if any(s.get("unterminated") for s in _segments(source)):
+            unreadable.append(source)
+            continue
         if language not in SUPPORTED_LANGUAGES:
             unsupported.append(source)
             continue
@@ -174,7 +177,9 @@ def assess_code(
     specifications as text. ``defects`` are recorded evidence-backed reviews. ``execution`` holds the
     results of the isolated execution path, which is the only thing that verifies C1.B and C2.B.
     """
-    supplied = [s for s in sources or [] if isinstance(s, dict)]
+    from app.services.validation_code_inspection import normalize_sources
+
+    supplied = normalize_sources(sources)
     # plan_8_4 section 3.3: code bioAF generated to stand in for the authors' establishes nothing about
     # the authors' code. It is not source the paper supplied, and this section is about what it did.
     generated = [s for s in supplied if s.get("generated")]
@@ -265,6 +270,18 @@ def _syntax(readings, broken, unsupported, unreadable) -> dict:
 
 def _build(sources, execution) -> dict:
     load = (execution or {}).get("load") or {}
+    invocation = (execution or {}).get("invocation") or {}
+    if invocation.get("invoked") and invocation.get("status") == "succeeded":
+        return {
+            "C1.B": _finding(
+                VERIFIED,
+                "the author's entry point completed within the isolated execution limits",
+                scope=_scope(sources),
+                evidence={"ref": (execution or {}).get("operation_id")},
+            )
+        }
+    if load.get("scope") == "dependency_environment_only":
+        load = {}
     if load.get("status") == "succeeded":
         return {
             "C1.B": _finding(

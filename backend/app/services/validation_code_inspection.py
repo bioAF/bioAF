@@ -157,12 +157,29 @@ def inspect_code(supplements: list[dict] | None, *, bytes_for: dict[str, bytes] 
             manifests.append(entry)
             continue
         suffix = pathlib.PurePosixPath(name).suffix.lower()
+        if suffix == ".rmd":
+            sources.extend(_rmarkdown_sources(name, text, provenance=entry["provenance"]))
+            continue
         sources.append({**entry, "language": LANGUAGES.get(suffix, "unknown")})
     return {"sources": sources, "manifests": manifests, "unreadable": unreadable}
 
 
 # The chunk engines bioAF reads back into source, and the language each one is.
 _ENGINES = {"r": "r", "python": "python", "bash": "shell", "sh": "shell"}
+
+
+def normalize_sources(sources: list[dict] | None) -> list[dict]:
+    """Reinspect held legacy R Markdown text without refetching or altering its provenance."""
+    return [
+        row
+        for source in sources or []
+        if isinstance(source, dict)
+        for row in (
+            _rmarkdown_sources(source["path"], source.get("text") or "", provenance=source.get("provenance") or {})
+            if str(source.get("path") or "").lower().endswith(".rmd") and not source.get("segments")
+            else [source]
+        )
+    ]
 
 
 def _documented_sources(name: str, blob: bytes) -> list[dict]:
@@ -173,29 +190,41 @@ def _documented_sources(name: str, blob: bytes) -> list[dict]:
     all of its code. One source per DOCUMENT the authors wrote, its chunks kept in order with their
     labels and their places, and the prose between them left out, because prose is not source.
     """
-    from app.services.code_documents import has_rmarkdown_chunks, rmarkdown_documents
+    from app.services.code_documents import has_rmarkdown_chunks
     from app.services.supplement_inventory import extract_docx_text
 
     text = extract_docx_text(blob)
     if not text or not has_rmarkdown_chunks(text):
         return []
+    return _rmarkdown_sources(
+        name,
+        text,
+        provenance={"from": "supplement", "sha256": _sha256(blob), "bytes": len(blob)},
+    )
+
+
+def _rmarkdown_sources(name: str, text: str, *, provenance: dict) -> list[dict]:
+    """Read document code without parsing prose, retaining unsupported and incomplete chunks."""
+    from app.services.code_documents import rmarkdown_documents
+
     found: list[dict] = []
     documents = rmarkdown_documents(text)
     titles = [d["title"] or f"document {i}" for i, d in enumerate(documents, start=1)]
     for index, document in enumerate(documents, start=1):
         by_language: dict[str, list[dict]] = {}
         for chunk in document["chunks"]:
-            language = _ENGINES.get(chunk["engine"])
-            if language is None or not (chunk["code"] or "").strip():
+            language = _ENGINES.get(chunk["engine"], chunk["engine"])
+            if not (chunk["code"] or "").strip():
                 continue
             by_language.setdefault(language, []).append(
                 {
                     "id": f"chunk {chunk['order']}" + (f" ({chunk['label']})" if chunk["label"] else ""),
                     "label": chunk["label"] or f"chunk {chunk['order']}",
-                    "line": chunk["line"],
+                    "line": chunk["line"] + 1,
                     "order": chunk["order"],
                     "code": chunk["code"],
                     "unterminated": chunk["unterminated"],
+                    "options": chunk["options"],
                 }
             )
         title = document["title"] or f"document {index}"
@@ -211,17 +240,16 @@ def _documented_sources(name: str, blob: bytes) -> list[dict]:
                     "text": "\n".join(s["code"] for s in segments),
                     "segments": segments,
                     "document": title,
+                    "original_text": text if name.lower().endswith(".rmd") else None,
                     "provenance": {
-                        "from": "supplement",
-                        "sha256": _sha256(blob),
-                        "bytes": len(blob),
-                        "extracted": "r markdown in a word-processed document",
+                        **provenance,
+                        "extracted": "r markdown chunks",
                         "chunks": len(segments),
                         "container": name,
                     },
                 }
             )
-    return found
+    return found or [{"path": name, "language": "unknown", "text": text, "provenance": provenance}]
 
 
 # A notebook magic is notebook syntax, not Python. `%matplotlib inline` and `!pip install` are the
@@ -310,6 +338,7 @@ def _notebook_source(name: str, blob: bytes, *, provenance: dict) -> dict | None
             for c in found["cells"]
         ],
         "notebook": {"kernel": found["kernel"], "cells": len(found["cells"]), "magics": found["magics"]},
+        "original_text": _text(blob),
         "provenance": {**provenance, "extracted": "code cells of a Jupyter notebook"},
     }
 
@@ -462,6 +491,8 @@ def inspect_archive(blob: bytes | None, *, origin: str | None = None) -> dict:
         entry = {"path": safe, "text": text, "provenance": provenance}
         if manifest:
             manifests.append(entry)
+        elif suffix == ".rmd":
+            sources.extend(_rmarkdown_sources(safe, text, provenance=provenance))
         else:
             sources.append({**entry, "language": LANGUAGES.get(suffix, "unknown")})
     return {"sources": sources, "manifests": manifests, "unreadable": unreadable, "skipped": skipped}

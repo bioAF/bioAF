@@ -29,8 +29,8 @@ logger = logging.getLogger("bioaf.validation_environment_check")
 
 # The runtimes bioAF can offer for a bounded environment check, and what each one is asked to do.
 RUNTIMES = {
-    "python": {"runtime": "python:3.12-slim", "action": "import every module the source imports, and nothing else"},
-    "r": {"runtime": "R 4.4 (rocker/r-ver)", "action": "attach every package the source attaches, and nothing else"},
+    "python": {"runtime": "Python in the configured runner image", "action": "check declared Python dependencies"},
+    "r": {"runtime": "R in the configured runner image", "action": "check declared R dependencies"},
 }
 
 # Bounded, and never negotiable by the code being checked. plan_8_7 stage 3: these have to REACH the
@@ -42,7 +42,7 @@ RUNTIMES = {
 # effective numbers beside the requested ones so an unenforced setting cannot read as an applied one.
 RESOURCE_PROFILE = "small"
 TIMEOUT_SECONDS = 900
-FILESYSTEM = "the study's own prefix under the isolated identity's bucket"
+FILESYSTEM = "read-only inputs; writable /work, /tmp and /outputs"
 
 # What the two phases each need of the network, declared separately because they differ. Installing
 # the paper's declared dependencies needs a package index; loading them does not, and a check that
@@ -59,7 +59,7 @@ LIMITS = {
     "filesystem": FILESYSTEM,
 }
 
-ESTABLISHES = ("C1.B", "C2.B")
+ESTABLISHES = ("C2.B",)
 
 
 class EnvironmentCheckRefused(ValueError):
@@ -76,7 +76,7 @@ def _digest(rows: list[dict]) -> str | None:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-WORKING_DIRECTORY = "/workspace/fetched-code"
+WORKING_DIRECTORY = "/work"
 
 
 def environment_check_request(*, sources: list[dict] | None, manifests: list[dict] | None) -> dict:
@@ -105,7 +105,7 @@ def environment_check_request(*, sources: list[dict] | None, manifests: list[dic
     held = [m for m in manifests or [] if isinstance(m, dict) and m.get("path")]
     files = [str(s.get("path")) for s in own] + [str(m.get("path")) for m in held]
     installs = bool(held)
-    limits = {**LIMITS, "network": NETWORK_INSTALL_ONLY if installs else NETWORK_DENIED}
+    limits = {**LIMITS, "network": NETWORK_INSTALL_ONLY}
     return {
         "language": language,
         "runtime": RUNTIMES[language]["runtime"],
@@ -238,13 +238,14 @@ def _python_check(modules: list[str], *, declared: dict[str, str | None], interf
         "    if root not in loaded:\n"
         f"        print('{INTERFACE_MARKER} ' + path + ' unchecked', flush=True)\n"
         "        continue\n"
-        "    target, missing = loaded[root], False\n"
+        "    target, missing, prefix = loaded[root], False, root\n"
         "    for part in path.split('.')[1:]:\n"
+        "        prefix += '.' + part\n"
         "        try:\n"
         "            target = getattr(target, part)\n"
         "        except BaseException:\n"
         "            try:\n"
-        "                target = importlib.import_module(root + '.' + part)\n"
+        "                target = importlib.import_module(prefix)\n"
         "            except BaseException:\n"
         "                missing = True\n"
         "                break\n"
@@ -313,7 +314,7 @@ def _required(sources: list[dict], language: str) -> list[str]:
 def _interfaces(sources: list[dict], language: str) -> list[str]:
     """The dotted attributes the source reaches for on an imported module.
 
-    ``scanpy.pp.pca(...)`` needs `scanpy.pp` to exist, and importing `scanpy` does not establish that.
+    ``scanpy.pp.pca(...)`` needs the full function path, not just the package root.
     Only the names bound to an import are followed: a local object's attribute says nothing about any
     package's interface.
     """
@@ -331,7 +332,14 @@ def _interfaces(sources: list[dict], language: str) -> list[str]:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    imported[(alias.asname or alias.name).split(".")[0]] = alias.name.split(".")[0]
+                    imported[alias.asname or alias.name.split(".")[0]] = (
+                        alias.name if alias.asname else alias.name.split(".")[0]
+                    )
+            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                for alias in node.names:
+                    if alias.name != "*":
+                        imported[alias.asname or alias.name] = f"{node.module}.{alias.name}"
+                        found.add(f"{node.module}.{alias.name}")
         for node in ast.walk(tree):
             if not isinstance(node, ast.Attribute):
                 continue
@@ -343,13 +351,11 @@ def _interfaces(sources: list[dict], language: str) -> list[str]:
             if not isinstance(current, ast.Name) or current.id not in imported:
                 continue
             parts.reverse()
-            # One level past the root: `scanpy.pp` is the interface a reader can check for, and
-            # `scanpy.pp.pca` would be a claim about a function's own attributes.
-            found.add(f"{imported[current.id]}.{parts[0]}")
+            found.add(".".join([imported[current.id], *parts]))
     return sorted(found)
 
 
-def check_script(*, sources: list[dict] | None, manifests: list[dict] | None) -> str:
+def check_script(*, sources: list[dict] | None, manifests: list[dict] | None, install: bool = True) -> str:
     """The script the isolated run executes: install what the paper declared, then read what it built.
 
     Four phases in order, each reporting its own marker (plan_8_7 stage 3): install the paper's
@@ -379,7 +385,9 @@ def check_script(*, sources: list[dict] | None, manifests: list[dict] | None) ->
         [
             "#!/bin/sh",
             "set +e",
-            _install_step(held, language),
+            _install_step(held, language)
+            if install
+            else "# The executor recorded dependency installation before isolation.",
             f"cat <<'BIOAF_CHECK_EOF' > /tmp/bioaf_runtime_check.{'py' if language == 'python' else 'R'}",
             runtime,
             "BIOAF_CHECK_EOF",
@@ -444,9 +452,11 @@ async def stage_environment_check(*, sources, manifests, storage, bucket: str, p
         if not str(row.get("path") or "").strip():
             continue
         members[_member_name(str(row.get("path")), taken)] = str(row.get("text") or "")
-    members[entry_point] = check_script(sources=sources, manifests=manifests)
+    members[entry_point] = check_script(sources=sources, manifests=manifests, install=False)
     uri = storage.build_uri(bucket, f"{prefix}/environment-check.tar.gz")
-    await storage.write_bytes(uri, _archive(members), content_type="application/gzip")
+    await storage.write_bytes(
+        uri, _archive({f"bundle/{path}": text for path, text in members.items()}), content_type="application/gzip"
+    )
     return {
         "code_uri": uri,
         "entry_point": entry_point,
@@ -645,7 +655,7 @@ def outcome_from_run(*, exit_code: int | None, transcript: str, environment: str
 
 
 def record_environment_check(evidence: dict, *, result: dict) -> dict:
-    """Land an isolated check's result where C1.B and C2.B read it, keeping everything else held.
+    """Land dependency observations without crediting C1.B for an author invocation that never happened.
 
     ``result`` carries ``load`` and ``dependency_resolution``, each ``{"status", "ref", ...}``. An
     earlier review, an earlier run and the source itself are evidence in their own right and are not
@@ -656,6 +666,7 @@ def record_environment_check(evidence: dict, *, result: dict) -> dict:
     for key in ("load", "dependency_resolution"):
         if isinstance((result or {}).get(key), dict):
             execution[key] = dict(result[key])
+            execution[key]["scope"] = "dependency_environment_only"
     inspection["execution"] = execution
     evidence["code_inspection"] = inspection
     return execution
@@ -707,14 +718,20 @@ def effective_settings(*, request: dict, compute, timeout_seconds: int) -> dict:
         differences.append(f"{memory} memory where {limits.get('memory')} was requested")
     if int(timeout_seconds) != int(limits.get("timeout_seconds") or 0):
         differences.append(f"a {timeout_seconds}s timeout where {limits.get('timeout_seconds')}s was requested")
+    enforced = (getattr(compute, "provider_metadata", None) or {}).get("execution_contract") or {}
+    if not enforced:
+        differences.append("no enforced execution contract was returned")
     return {
         "resource_profile": profile or None,
         "cpu": cpu or None,
         "memory": memory if cpu else None,
         "timeout_seconds": int(timeout_seconds),
-        "network": limits.get("network"),
-        "filesystem": limits.get("filesystem"),
-        "applied": not differences,
+        "network": enforced.get("network"),
+        "filesystem": enforced.get("filesystem"),
+        "image": enforced.get("image"),
+        "runtime_verified": enforced.get("runtime_verified", False),
+        "configured": not differences,
+        "applied": not differences and enforced.get("runtime_verified") is True,
         "reason": ("the executor ran this with " + "; ".join(differences)) if differences else None,
     }
 
@@ -763,6 +780,13 @@ async def request_environment_check(session, study, *, user_id: int) -> dict:
         # it. These two arguments are what make the cpu, the memory and the timeout on the record true.
         resource_profile=request["resource_profile"],
         timeout_seconds=timeout_seconds,
+        execution_contract={
+            "language": request["language"],
+            "network": "install_only",
+            "working_directory": "/work",
+            "entry_kind": "environment",
+            "filesystem": "read-only inputs; writable /work, /tmp and /outputs",
+        },
     )
     record = {
         "status": "running",
@@ -846,6 +870,19 @@ async def settle_environment_check(session, study) -> dict:
     if getattr(compute, "status", None) in ("running", "pending", "starting"):
         return record
     transcript = await _transcript_of(session, compute)
+    if "BIOAF_SANDBOX_READY" not in transcript:
+        record.update(
+            status="inconclusive", reason="The isolated dependency check did not start; inspect the runner transcript."
+        )
+        inspection["environment_check"] = record
+        study.evidence_json = {**evidence, "code_inspection": inspection}
+        await session.flush()
+        return record
+    record["effective"] = {
+        **(record.get("effective") or {}),
+        "runtime_verified": True,
+        "applied": bool((record.get("effective") or {}).get("configured")),
+    }
     found = outcome_from_run(
         # A compute session carries no exit code of its own: a pod that ended in `failed` is the 1.
         exit_code=1 if getattr(compute, "status", None) == "failed" else 0,

@@ -36,6 +36,7 @@ ADR-053 already owns the call (``client.submit``), the family (``get_client``) a
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import re
 import time
@@ -68,6 +69,7 @@ OUTCOME_SCHEMA_REJECTED = "schema_rejected"
 # administrator can act on, and they arrived as "bioAF could not reach the language model": study 57's
 # whole finding inventory was discarded on one of them. No retry, semantic or otherwise, can succeed.
 OUTCOME_ACCOUNT = "account"
+OUTCOME_BUDGET_EXHAUSTED = "budget_exhausted"
 
 # How much of an unreadable answer reaches the log. It was 400 characters, which is not enough to
 # attribute a failure to a cause: no unparseable response in either of the owner's runs could be
@@ -85,6 +87,7 @@ OUTCOMES = (
     OUTCOME_TIMED_OUT,
     OUTCOME_SCHEMA_REJECTED,
     OUTCOME_ACCOUNT,
+    OUTCOME_BUDGET_EXHAUSTED,
 )
 
 # plan_8_3 stage 6: the failures one more ask can plausibly fix. A transport failure, a refusal and an
@@ -95,6 +98,8 @@ SEMANTIC_FAILURES = (OUTCOME_TRUNCATED, OUTCOME_UNPARSEABLE, OUTCOME_SCHEMA_REJE
 # account exception; the reach failures say bioAF could not get to the LLM; everything else says
 # bioAF hit an internal error. Real detail goes to the logs (`frontend/src/lib/errorReporting.ts`).
 _ERROR_CLASS_OUTCOMES = {
+    "budget_exhausted": OUTCOME_BUDGET_EXHAUSTED,
+    "unreachable": OUTCOME_UNREACHABLE,
     "refusal": OUTCOME_REFUSAL,
     "auth": OUTCOME_UNREACHABLE,
     "rate_limit": OUTCOME_UNREACHABLE,
@@ -297,12 +302,13 @@ async def decide(
     caller names no explicit one, and the audit test walks the application for calls that name neither,
     so a caller added later cannot inherit an unreviewed default.
     """
-    from app.services.validation_decision_budgets import budget_for
+    from app.services.validation_decision_budgets import ACTIVE_ASSESSMENT, ACTIVE_REQUEST, budget_for
 
     allow = tuple(str(a) for a in allowed) if allowed is not None else None
     if max_tokens is None and purpose is not None:
         max_tokens = budget_for(purpose, model).max_tokens
     started = time.monotonic()
+    budget = ACTIVE_ASSESSMENT.get()
 
     def _elapsed() -> float:
         return round(time.monotonic() - started, 3)
@@ -319,7 +325,13 @@ async def decide(
         logger.warning("llm decision failed (%s) while %s: %s", outcome, intent, detail)
         return Decision(
             outcome=outcome,
-            reason=_failure_reason(outcome, intent=intent, model=model, fact=fact),
+            reason=(
+                budget.blocker["reason"]
+                if budget and budget.blocker
+                else detail
+                if outcome == OUTCOME_BUDGET_EXHAUSTED
+                else _failure_reason(outcome, intent=intent, model=model, fact=fact)
+            ),
             model=model,
             intent=intent,
             allowed=allow,
@@ -333,14 +345,26 @@ async def decide(
             purpose=purpose,
         )
 
+    request_token = ACTIVE_REQUEST.set((len(system) + len(payload), purpose))
     try:
-        if max_tokens is None:
-            text = await client.submit(prompt=system, payload=payload, model=model, api_key=api_key)
-        else:
-            text = await client.submit(
-                prompt=system, payload=payload, model=model, api_key=api_key, max_tokens=max_tokens
-            )
+        if budget:
+            await budget.reserve(len(system) + len(payload), purpose)
+        args = {"prompt": system, "payload": payload, "model": model, "api_key": api_key}
+        if max_tokens is not None:
+            args["max_tokens"] = max_tokens
+        async with asyncio.timeout(budget.remaining_seconds if budget else None):
+            text = await client.submit(**args)
     except ProviderError as exc:
+        if budget and exc.error_class in ("account", "auth") and not budget.blocker:
+            await budget.stop(
+                "account" if exc.error_class == "account" else "unreachable",
+                _failure_reason(
+                    _ERROR_CLASS_OUTCOMES.get(exc.error_class, OUTCOME_INTERNAL),
+                    intent=intent,
+                    model=model,
+                    fact=getattr(exc, "account_fact", None),
+                ),
+            )
         return _failed(
             _ERROR_CLASS_OUTCOMES.get(exc.error_class, OUTCOME_INTERNAL),
             f"{exc.error_class}: {exc}",
@@ -350,9 +374,15 @@ async def decide(
             stop_reason=getattr(exc, "stop_reason", None),
             fact=getattr(exc, "account_fact", None),
         )
+    except TimeoutError:
+        if budget:
+            await budget.stop(OUTCOME_BUDGET_EXHAUSTED, "The assessment's time limit was reached.")
+        return _failed(OUTCOME_BUDGET_EXHAUSTED if budget else OUTCOME_TIMED_OUT, "The model request timed out.")
     except Exception as exc:  # noqa: BLE001 - asking a model for help cannot be allowed to fail a study
         logger.exception("llm decision raised while %s", intent)
         return _failed(OUTCOME_INTERNAL, str(exc))
+    finally:
+        ACTIVE_REQUEST.reset(request_token)
 
     output_tokens = getattr(text, "output_tokens", None)
     stop_reason = getattr(text, "stop_reason", None)

@@ -128,7 +128,7 @@ def _payload(conclusion: dict, context: list[dict], comparisons: list[dict]) -> 
         spent += len(text)
         rows.append(f"[{row.get('id')}] ({row.get('source') or 'the paper'}) {text}")
     measured = [
-        f"[{c.get('id')}] {c.get('metric') or 'the reported result'}: the paper reports {c.get('paper')}, "
+        f"[{c.get('id')}] ({c.get('method') or 'independent reanalysis'}) {c.get('metric') or 'the reported result'}: the paper reports {c.get('paper')}, "
         f"bioAF's run produced {c.get('ours')}"
         + (
             ""
@@ -144,7 +144,7 @@ def _payload(conclusion: dict, context: list[dict], comparisons: list[dict]) -> 
         + (f"As stated in the paper: {conclusion['passage']}\n" if conclusion.get("passage") else "")
         + "\nContext:\n"
         + ("\n\n".join(rows) if rows else "bioAF holds no further context for this conclusion.")
-        + "\n\nIndependent comparisons bioAF completed:\n"
+        + "\n\nResult comparisons bioAF completed (author code and independent reanalysis are distinguished):\n"
         + (
             "\n".join(measured)
             if measured
@@ -236,6 +236,7 @@ async def _review(conclusion, context, comparisons, *, supplied, reproduction, c
             reproduction,
             next_action="ask again for this conclusion alone",
             model=model,
+            failure_outcome=decision.outcome,
         )
     data = decision.data or {}
     outcome = str(data.get("outcome") or "").strip().lower()

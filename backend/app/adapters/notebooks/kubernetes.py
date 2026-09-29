@@ -119,6 +119,8 @@ def build_fetched_code_script(fetched: dict, *, copy_in: str, auth: str, timeout
     Dependencies install the ordinary way, over the network, because that is what a notebook session
     does. The isolation is the identity (step 16a), not a severed network.
     """
+    if fetched.get("execution_contract"):
+        return _contract_code_script(fetched, copy_in=copy_in, auth=auth, timeout_seconds=timeout_seconds)
     entry = str(fetched.get("entry_point") or "").strip()
     safe = _safe_entry_point(entry)
     if safe is None:
@@ -166,6 +168,85 @@ def build_fetched_code_script(fetched: dict, *, copy_in: str, auth: str, timeout
             # Anything the run left beside the outputs directory is still its output.
             f"cp -r {_FETCHED_CODE_DIR}/results/* /outputs/ 2>/dev/null || true",
         ]
+    )
+
+
+def _contract_code_script(fetched: dict, *, copy_in: str, auth: str, timeout_seconds: int) -> str:
+    """Install dependencies, then invoke author code with enforced filesystem and network limits."""
+    import shlex
+
+    contract = fetched["execution_contract"]
+    safe = _safe_entry_point(str(fetched.get("entry_point") or ""))
+    if (
+        safe is None
+        or contract.get("language") not in ("python", "r")
+        or contract.get("network") != "install_only"
+        or contract.get("working_directory") != "/work"
+    ):
+        raise ValidationError("The fetched-code execution specification is unsupported")
+    interpreter = "python" if contract["language"] == "python" else "Rscript"
+    command = shlex.join([interpreter, safe, *shlex.split(fetched.get("arguments") or "")])
+    if contract.get("entry_kind") == "environment" and safe.endswith(".sh"):
+        command = shlex.join(["sh", safe])
+    if safe.lower().endswith(".rmd"):
+        if contract["language"] != "r":
+            raise ValidationError("Rendering R Markdown requires the R runtime")
+        command = shlex.join(["Rscript", "-e", "rmarkdown::render(commandArgs(TRUE)[1], output_dir='/outputs')", safe])
+    if safe.lower().endswith(".ipynb"):
+        command = shlex.join(
+            [
+                "jupyter",
+                "nbconvert",
+                "--to",
+                "notebook",
+                "--execute",
+                "--output",
+                "/outputs/executed.ipynb",
+                f"--ExecutePreprocessor.timeout={timeout_seconds}",
+                safe,
+            ]
+        )
+    # The parent owns the transcript outside the author's PID and writable filesystem namespaces.
+    sandbox = (
+        "bwrap --unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts "
+        "--die-with-parent --new-session --ro-bind / / --bind /work /work "
+        "--bind /outputs /outputs --tmpfs /tmp --proc /proc --dev /dev "
+        "--setenv HOME /work/.home --chdir /work"
+    )
+    steps = [
+        "set -eu",
+        "mkdir -p /work /outputs",
+        "cd /work",
+        auth or "true",
+        copy_in.format(uri=shlex.quote(str(fetched.get("code_uri") or "")), local="/work/code.archive"),
+        "tar xzf code.archive --strip-components=1",
+        "mkdir -p /work/.home",
+        "command -v bwrap >/dev/null || { echo BIOAF_SANDBOX_UNAVAILABLE; exit 125; }",
+        f"{sandbox} true || {{ echo BIOAF_SANDBOX_UNAVAILABLE; exit 125; }}",
+        f"command -v {interpreter} >/dev/null || {{ echo BIOAF_RUNTIME_UNAVAILABLE; exit 125; }}",
+        "echo BIOAF_INSTALL_START",
+        "installed=0",
+        "if [ -f requirements.txt ]; then python -m pip install --no-input -r requirements.txt; echo 'BIOAF_INSTALL requirements.txt ok'; installed=1; fi",
+        "if [ -f environment.yml ]; then conda env update -n base -f environment.yml; echo 'BIOAF_INSTALL environment.yml ok'; installed=1; fi",
+        "if [ -f environment.yaml ]; then conda env update -n base -f environment.yaml; echo 'BIOAF_INSTALL environment.yaml ok'; installed=1; fi",
+        "if [ -f pyproject.toml ] || [ -f setup.py ]; then python -m pip install --no-input .; echo 'BIOAF_INSTALL python project ok'; installed=1; fi",
+        "if [ -f renv.lock ]; then Rscript -e 'renv::restore(prompt=FALSE)'; echo 'BIOAF_INSTALL renv.lock ok'; installed=1; fi",
+        "if [ -f DESCRIPTION ]; then Rscript -e 'remotes::install_deps(upgrade=\"never\")'; echo 'BIOAF_INSTALL DESCRIPTION ok'; installed=1; fi",
+        '[ "$installed" = 1 ] || echo "BIOAF_INSTALL none"',
+        "echo BIOAF_INSTALL_OK",
+        f"echo BIOAF_RUNTIME; {interpreter} --version",
+        "set +e",
+        f"timeout {int(timeout_seconds)} {sandbox} sh -c " + shlex.quote("echo BIOAF_SANDBOX_READY; exec " + command),
+        "status=$?",
+        'echo "BIOAF_AUTHOR_EXIT $status"',
+        "cp -r /work/results/. /outputs/ 2>/dev/null || true",
+        'exit "$status"',
+    ]
+    return (
+        "mkdir -p /outputs; "
+        f"timeout {int(timeout_seconds)} sh -c {shlex.quote(chr(10).join(steps))} "
+        "> /tmp/bioaf-author-transcript.txt 2>&1; status=$?; "
+        "cp /tmp/bioaf-author-transcript.txt /outputs/transcript.txt; exit $status"
     )
 
 
@@ -939,6 +1020,9 @@ class KubernetesNotebookProvider(NotebookProvider):
             },
         }
 
+        if (session_spec.get("fetched_code") or {}).get("execution_contract"):
+            pod_manifest["spec"]["activeDeadlineSeconds"] = int(session_spec.get("timeout_seconds", 900)) + 120
+
         # Stash gcs_home_prefix on the manifest for the caller to use
         pod_manifest["_gcs_home_prefix"] = gcs_home_prefix
 
@@ -976,7 +1060,15 @@ class KubernetesNotebookProvider(NotebookProvider):
             container_port = 8787
 
         core_client = self._get_k8s_core_client()
-        core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
+        try:
+            core_client.create_namespaced_pod(namespace=namespace, body=pod_manifest)
+        except Exception as exc:
+            if getattr(exc, "status", None) != 409 or not (session_spec.get("fetched_code") or {}).get(
+                "execution_contract"
+            ):
+                raise
+            # A restart adopts the deterministic session pod after a dispatch lost its response.
+            core_client.read_namespaced_pod(name=pod_name, namespace=namespace)
         logger.info("Created pod %s in %s", pod_name, namespace)
 
         # A headless run exposes no server: skip the LoadBalancer Service and the readiness poll
