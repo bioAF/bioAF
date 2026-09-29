@@ -35,6 +35,7 @@ from app.services.notebook_execution_service import NotebookExecutionService
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_study_service import ValidationStudyService
+from tests.support.urls import host_is
 
 # ---- the paper this study is reproducing, in the shapes GEO actually serves ----
 
@@ -409,7 +410,7 @@ class _Route:
             geo_bytes = self.geo.fetch_bytes
 
             async def _bytes(url: str) -> bytes:
-                if "github.com" in url or "api.github.com" in url:
+                if host_is(url, "github.com", "api.github.com"):
                     if "/commits/" in url:
                         return json.dumps({"sha": "abc1234def"}).encode()
                     return code_repo

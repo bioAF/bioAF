@@ -23,6 +23,7 @@ from app.services.supplement_inventory import (
     member_locations,
     resolve_supplements,
 )
+from tests.support.urls import host_is
 
 _MANIFEST = [
     {"label": "Supplementary file 4", "filename": "elife-83291-supp4.zip", "source": "attached", "kind": "attachment"},
@@ -112,7 +113,7 @@ class _Fetcher:
             raise RuntimeError("404 not found")
         if "supplementaryFiles" in url:
             return b"x" * self.bundle_bytes
-        if url.startswith("https://elifesciences.org") or url.startswith("https://doi.org"):
+        if host_is(url, "elifesciences.org", "doi.org"):
             return self.page.encode()
         name = url.rsplit("/", 1)[-1]
         for filename, blob in self.files.items():
@@ -233,7 +234,7 @@ class TestTheBudget:
             article_urls=_ARTICLE_URLS,
             transfer_budget=1024,
         )
-        member_calls = [u for u in fetcher.asked if "cdn.elifesciences.org" in u]
+        member_calls = [u for u in fetcher.asked if host_is(u, "cdn.elifesciences.org")]
         assert len(member_calls) <= 3, "at most the requests already in flight when the budget ran out"
 
     @pytest.mark.asyncio
@@ -255,7 +256,7 @@ class TestWhatIsFetchedFirst:
             }
         )
         await resolve_supplements("PMC9943069", _MANIFEST, fetcher=fetcher, ledger=[], article_urls=_ARTICLE_URLS)
-        members = [u for u in fetcher.asked if "cdn.elifesciences.org" in u]
+        members = [u for u in fetcher.asked if host_is(u, "cdn.elifesciences.org")]
         assert members.index(next(u for u in members if "supp4" in u)) < members.index(
             next(u for u in members if "fig2-data1" in u)
         )
@@ -288,7 +289,9 @@ class TestNothingChangesWhenTheBundleArrives:
             "PMC9943069", _MANIFEST, fetcher=bundle, ledger=ledger, article_urls=_ARTICLE_URLS
         )
         assert next(r for r in rows if r["identity"] == "elife-83291-supp4.zip")["resolved"] is True
-        assert not any("cdn.elifesciences.org" in u for u in bundle.asked), "no member fetch when the bundle arrives"
+        assert not any(host_is(u, "cdn.elifesciences.org") for u in bundle.asked), (
+            "no member fetch when the bundle arrives"
+        )
 
 
 class TestReuse:

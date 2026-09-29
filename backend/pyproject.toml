@@ -37,6 +37,10 @@ asyncio_mode = "strict"
 [tool.ruff]
 target-version = "py312"
 line-length = 120
+# A paper's own published source, kept byte for byte as the evidence the assessment is tested
+# against. Tests assert on its exact lines, including the commented-out call plan_8_6 turned on, so
+# a lint fix here would edit an author's code and break the fixture it exists to be.
+extend-exclude = ["tests/fixtures"]
 
 [tool.mypy]
 python_version = "3.12"

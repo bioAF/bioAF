@@ -114,8 +114,8 @@ Level 4 verdict, and the plan says so before you approve.
 
 ## Known limitations
 
-**Some assays currently pick the wrong pipeline and a few others decline to run altogether.** 
-These will prompt the user before running. 
+**Some assays currently pick the wrong pipeline and a few others decline to run altogether.**
+These will prompt the user before running.
 Check the pipeline named on the plan before approving, and decline if it is wrong.
 
 | Assay | Should use | Does today |

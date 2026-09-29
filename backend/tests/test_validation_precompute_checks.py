@@ -24,6 +24,7 @@ from app.services.validation_precompute_checks import (
     check_species,
     run_precompute_checks,
 )
+from tests.support.urls import host_is
 
 
 class _Client:
@@ -440,7 +441,7 @@ class TestTheReadGivesEveryConsumerWhatItKnows:
         files = "[" + ",".join('{"extension":"fastq.gz"}' for _ in range(108)) + "]"
 
         async def _fetch(url):
-            if "ega-archive.org" in url:
+            if host_is(url, "ega-archive.org", "metadata.ega-archive.org"):
                 return files if url.endswith("/files") else datasets
             raise RuntimeError(f"404 {url}")
 

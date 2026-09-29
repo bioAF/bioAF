@@ -24,6 +24,7 @@ from app.services.validation_capabilities import (
     YES,
     discover_capabilities,
 )
+from tests.support.urls import host_is
 
 _GSE = "GSE274331"
 
@@ -448,7 +449,7 @@ class _Archives(_Geo):
         self.datasets, self.files = datasets, files
 
     async def __call__(self, url: str) -> str:
-        if "ega-archive.org" in url:
+        if host_is(url, "ega-archive.org", "metadata.ega-archive.org"):
             self.urls.append(url)
             if url.endswith("/files"):
                 return self._or_raise(self.files, url)

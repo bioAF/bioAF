@@ -48,6 +48,7 @@ import ast
 from pathlib import Path
 
 import pytest
+import re
 
 # Top-level packages no non-adapter module may import. boto3/botocore are
 # forbidden pre-emptively: there is no AWS code yet, so it costs nothing now and
@@ -746,6 +747,11 @@ def test_s3_uri_allowlist_count_is_pinned():
 # argv-list form ``["aws", ...]`` is indistinguishable from a ``POLICY["aws"]``
 # subscript by substring, so it is not caught here; the boto3 SDK ban is the
 # primary protection against AWS shell-outs, this is a secondary tripwire.
+#
+# The match is anchored at a word boundary. A plain substring also fired inside
+# ordinary English: "withdraws the answer" ends in ``aws `` and tripped the guard
+# on two service modules that shell out to nothing. Every form the guard is for
+# has a non-letter before the binary name, so the boundary costs it no coverage.
 
 
 AWS_CLI_ALLOWLIST: set[str] = set()
@@ -753,7 +759,7 @@ AWS_CLI_ALLOWLIST: set[str] = set()
 
 def _aws_cli_in_source(source: str) -> bool:
     """True if ``source`` contains an ``aws <subcommand>`` CLI invocation."""
-    return "aws " in source
+    return re.search(r"(?<![A-Za-z])aws\s", source) is not None
 
 
 def test_aws_cli_detector_finds_command_form():
@@ -770,6 +776,9 @@ def test_aws_cli_detector_ignores_config_value_and_sdk_and_prose():
     assert _aws_cli_in_source('client = boto3.client("s3")') is False
     # Prose written as "AWS" (uppercase) is ignored (case-sensitive scan).
     assert _aws_cli_in_source("# AWS-readiness: route through the adapter") is False
+    # An English word that happens to end in the binary's name is not an invocation.
+    assert _aws_cli_in_source("its reasoning withdraws the answer it accompanies") is False
+    assert _aws_cli_in_source("the assessor withdraws that answer") is False
 
 
 def test_no_aws_cli_shell_strings_outside_adapters():

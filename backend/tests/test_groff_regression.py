@@ -22,6 +22,7 @@ import pytest
 
 from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_study_service import ValidationStudyService
+from tests.support.urls import host_is
 
 _FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "groff"
 _JATS = (_FIXTURES / "fulltext_jats.xml").read_text()
@@ -182,7 +183,7 @@ def _groff_world(monkeypatch):
     monkeypatch.setattr("app.services.validation_driver_service.llm_provider_config_service.get_active", _cfg)
 
     async def _fetch_text(url: str) -> str:
-        if "ega-archive.org" in url:
+        if host_is(url, "ega-archive.org", "metadata.ega-archive.org"):
             return _EGA_FILES if url.endswith("/files") else _EGA_DATASETS
         raise RuntimeError(f"404 {url}")
 
