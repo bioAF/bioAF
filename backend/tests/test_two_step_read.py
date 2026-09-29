@@ -171,6 +171,7 @@ class TestTwoCommits:
                     .scalars()
                     .all()
                 )
+                assert plan.finding_inventory_json is not None
                 seen.update(state=row.state, inventory=plan.finding_inventory_json["status"], claims=len(claims))
             return await real(study, **kwargs)
 
@@ -185,7 +186,9 @@ class TestTwoCommits:
         await session.commit()
         assert seen == {"state": "reading", "inventory": "pending", "claims": 2}
         assert study.state == "plan_ready"
-        assert (await _plan(session, study)).finding_inventory_json["status"] == "established"
+        inventory = (await _plan(session, study)).finding_inventory_json
+        assert inventory is not None
+        assert inventory["status"] == "established"
 
     @pytest.mark.asyncio
     async def test_a_pending_inventory_reads_in_progress_on_the_scorecard(self):
@@ -245,7 +248,9 @@ class TestAnInterruptedInventoryResumes:
         await session.refresh(study)
         assert client.calls == ["inventory"]
         assert study.state == "plan_ready"
-        assert (await _plan(session, study)).finding_inventory_json["status"] == "established"
+        inventory = (await _plan(session, study)).finding_inventory_json
+        assert inventory is not None
+        assert inventory["status"] == "established"
 
     @pytest.mark.asyncio
     async def test_a_text_that_changed_is_read_again_not_regrouped(self, session, admin_user, llm, monkeypatch):
@@ -312,6 +317,7 @@ class TestAnInventoryFailureKeepsTheClaims:
         assert len(claims) == 2
         assert study.state == "plan_ready"
         inventory = plan.finding_inventory_json
+        assert inventory is not None
         assert inventory["failed"] is True
         assert inventory["reason"].startswith("bioAF could not group the paper's claims into findings: ")
 
@@ -337,6 +343,7 @@ class TestWhereTheTextComesFrom:
         study = await ValidationDriverService.read_and_plan(
             session, study, "pasted text that is not used", admin_user.organization_id, admin_user.id
         )
+        assert study.evidence_json is not None
         assert study.evidence_json["extraction"]["text"]["source"] == "europe_pmc"
 
     @pytest.mark.asyncio
@@ -374,6 +381,7 @@ class TestWhereTheTextComesFrom:
             session, study, None, admin_user.organization_id, admin_user.id
         )
         assert study.state == "plan_ready"
+        assert study.evidence_json is not None
         assert study.evidence_json["extraction"]["text"]["source"] == "library"
 
     @pytest.mark.asyncio
@@ -389,6 +397,7 @@ class TestWhereTheTextComesFrom:
         study = await ValidationDriverService.read_and_plan(
             session, study, _PAPER, admin_user.organization_id, admin_user.id
         )
+        assert study.evidence_json is not None
         assert study.evidence_json["extraction"]["text"]["source"] == "pasted"
 
 
@@ -425,6 +434,7 @@ class TestRetryingAFailedInventory:
         await session.commit()
         assert client.calls == ["inventory"]
         plan = await _plan(session, study)
+        assert plan.finding_inventory_json is not None
         assert plan.finding_inventory_json["status"] == "established"
         assert study.reproduction_plan_id == plan.id
         assert [
@@ -433,6 +443,7 @@ class TestRetryingAFailedInventory:
                 await session.execute(select(ComparisonTarget).where(ComparisonTarget.reproduction_plan_id == plan.id))
             ).scalars()
         ] == claim_ids
+        assert study.evidence_json is not None
         history = study.evidence_json["inventory_stage_history"]
         assert history[-1]["status"] == "failed"
 
@@ -461,7 +472,9 @@ class TestRetryingAFailedInventory:
             session, study, admin_user.organization_id, admin_user.id, full_text=_PAPER
         )
         assert client.calls == ["inventory"]
-        assert (await _plan(session, study)).finding_inventory_json["status"] == "established"
+        inventory = (await _plan(session, study)).finding_inventory_json
+        assert inventory is not None
+        assert inventory["status"] == "established"
 
     @pytest.mark.asyncio
     async def test_a_hash_mismatch_sends_the_study_to_re_read(self, session, admin_user, llm, monkeypatch):

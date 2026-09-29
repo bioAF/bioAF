@@ -6,6 +6,8 @@ count-matrix file and the matching headless template, producing the dict the dri
 state consumes. Any missing piece degrades honestly to Level-2 (returns None), never a fabricated run.
 """
 
+from typing import Any
+
 import pytest
 import pytest_asyncio
 
@@ -18,7 +20,7 @@ from app.services.validation_driver_service import ValidationDriverService
 from app.services.validation_level3_service import build_level3_inputs, resolve_level3
 from app.services.validation_study_service import ValidationStudyService
 
-_DESIGN = {
+_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
@@ -132,7 +134,7 @@ async def test_build_level3_inputs_assembles_full_gene_bundle(session, admin_use
     assert params["id_column"] == "gene_id"
 
 
-_PAIRED_DESIGN = {
+_PAIRED_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
@@ -1034,6 +1036,7 @@ class TestTheSelectedContrastIsWhatRuns:
 
         assert decision.inputs is None
         assert decision.reason_code == "no_compatible_contrast"
+        assert decision.reason is not None
         assert "no dex contrast here" in decision.reason
 
     @pytest.mark.asyncio

@@ -29,6 +29,7 @@ evidence does not state holds. Unresolved means hold, with the proposal and its 
 from __future__ import annotations
 
 import re
+from typing import Any, cast
 
 from app.services import validation_decision_budgets as budgets
 from app.services.llm_decision import confidence_of, decide_with_recovery, fenced_json
@@ -86,7 +87,7 @@ async def preview_file(url: str, filename: str, *, stream) -> dict:
     delimiter = "\t" if lines and "\t" in lines[0] else ","
     header = [c.strip().strip('"') for c in lines[0].split(delimiter)] if lines else []
     rows = [[c.strip().strip('"') for c in ln.split(delimiter)] for ln in lines[1:]]
-    preview = {
+    preview: dict[str, Any] = {
         "filename": filename,
         "header": header,
         "rows": rows,
@@ -423,14 +424,17 @@ def validate_mapping(
                 if problem:
                     reasons.append(f'column {column} cites "{quote}", which {problem}')
                     continue
-                cited_records.append(record)
+                cited_records.append(cast(dict, record))
                 # A matrix names its own columns, and they often are not the repository's titles, so
                 # a citation is the decision's stated identity for a column bioAF cannot link by
                 # name. What it may NOT do is attach a record to a column that is another record's:
                 # that is a quote from the wrong sample, and it is refused.
-                if _normalized(column) in every_identifier and _normalized(column) not in record["identifiers"]:
+                if (
+                    _normalized(column) in every_identifier
+                    and _normalized(column) not in cast(dict, record)["identifiers"]
+                ):
                     reasons.append(
-                        f'column {column} cites "{quote}", which describes {record["record"].get("title") or "another sample"}, '
+                        f'column {column} cites "{quote}", which describes {cast(dict, record)["record"].get("title") or "another sample"}, '
                         f"not column {column}"
                     )
             elif source == "column_name":

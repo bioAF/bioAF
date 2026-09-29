@@ -28,6 +28,8 @@ The pure follow-up description and the driver of its persisted execution operati
 
 from __future__ import annotations
 
+from typing import cast
+
 # What the follow-up asks for.
 ATTEMPT_REPRODUCTION = "attempt_reproduction"
 ATTEMPT_BOUNDED = "attempt_bounded_check"
@@ -476,7 +478,7 @@ async def advance_code_followups(session, study, *, plan=None, claim=None):
                 )
                 outcome = invocation_outcome(transcript, compute_status=compute.status)
                 if not outcome["invoked"] and getattr(compute, "failure_message", None):
-                    outcome["reason"] += " " + compute.failure_message
+                    outcome["reason"] += " " + cast(str, compute.failure_message)
                 import re
 
                 runtime = re.search(r"BIOAF_RUNTIME\n([^\n]+)", transcript)

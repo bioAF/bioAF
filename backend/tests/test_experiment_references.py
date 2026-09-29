@@ -7,6 +7,8 @@ an assembly where it belongs to exactly one, and a stated release bioAF does not
 quietly swapped for the one it does.
 """
 
+from typing import cast
+
 import pytest
 
 from app.services.validation_reference import (
@@ -57,17 +59,17 @@ def _ref(
     ],
 )
 def test_a_gencode_release_belongs_to_exactly_one_assembly(text, assembly):
-    assert parse_annotation(text)["assembly"] == assembly
+    assert cast(dict, parse_annotation(text))["assembly"] == assembly
 
 
 def test_an_ensembl_release_establishes_an_assembly_only_with_its_organism():
-    assert parse_annotation("Ensembl 102", organism="Mus musculus")["assembly"] == "GRCm38"
-    assert parse_annotation("Ensembl release 75", organism="Homo sapiens")["assembly"] == "GRCh37"
-    assert parse_annotation("Ensembl 102")["assembly"] is None
+    assert cast(dict, parse_annotation("Ensembl 102", organism="Mus musculus"))["assembly"] == "GRCm38"
+    assert cast(dict, parse_annotation("Ensembl release 75", organism="Homo sapiens"))["assembly"] == "GRCh37"
+    assert cast(dict, parse_annotation("Ensembl 102"))["assembly"] is None
 
 
 def test_a_release_whose_assembly_is_not_established_says_so():
-    assert parse_annotation("Ensembl 103", organism="mouse")["assembly"] is None
+    assert cast(dict, parse_annotation("Ensembl 103", organism="mouse"))["assembly"] is None
     assert parse_annotation("RefSeq annotation") is None
 
 
@@ -138,6 +140,7 @@ def test_raw_reanalysis_that_quantifies_genes_needs_the_annotation():
     ref = _ref(annotation="GENCODE M23")
     status, reason = operation_reference(ref, "raw_reanalysis", pipeline_key="nf-core/rnaseq")
     assert status == UNAVAILABLE
+    assert reason is not None
     assert "GENCODE M23" in reason
 
 
@@ -181,6 +184,7 @@ def test_an_experiments_reference_blocker_names_the_experiment_and_the_part():
         "reference": {"assembly": usable, "annotation": unavailable},
     }
     blocker = experiment_reference_blocker(experiment)
+    assert blocker is not None
     assert "e2" in blocker and "GENCODE M23" in blocker
     assert "Checks that need no reference are unaffected" in blocker
     fine = {

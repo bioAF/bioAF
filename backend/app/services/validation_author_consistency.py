@@ -27,6 +27,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+from typing import cast
 
 from app.services.validation_predicate import FAILS, HOLDS, count_passing, evaluate_count
 
@@ -456,7 +457,7 @@ def check_claim(
         return count_passing(rows, pred)
 
     if needs_orientation and orientation is None:
-        flipped = {"up": "down", "down": "up"}[direction]
+        flipped = {"up": "down", "down": "up"}[cast(str, direction)]
         as_stated, reversed_ = _count(predicate), _count({**predicate, "direction": flipped})
         test, reference = (
             (contrast or {}).get("test_condition") or "test",
@@ -556,10 +557,10 @@ def _list_count(record: dict, predicate: dict, table: dict, evidence: dict, done
         values = [_number(r[column]) for r in body if column is not None and column < len(r)]
         present = [v for v in values if v is not None]
         if present and max(present) >= 0.5:
-            record["columns"][role] = header[column]
+            record["columns"][role] = header[cast(int, column)]
             return done(
                 UNRESOLVED,
-                f"the table holds rows with {header[column]} up to {max(present):g}, values no selected list includes, "
+                f"the table holds rows with {header[cast(int, column)]} up to {max(present):g}, values no selected list includes, "
                 "so it is not the claim's selected list",
             )
     count = predicate.get("count") or {}

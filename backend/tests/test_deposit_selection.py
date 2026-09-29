@@ -46,6 +46,7 @@ _INVENTORY = [
 
 def test_the_prompt_carries_the_inventory_but_never_file_contents():
     system, payload = build_selection_prompt(_INVENTORY, pipeline_key="nf-core/rnaseq", kind="gene")
+    assert system is not None and payload is not None
     for e in _INVENTORY:
         assert e.filename in payload
     assert "matrix_normalized" in payload
@@ -56,6 +57,7 @@ def test_the_prompt_carries_the_inventory_but_never_file_contents():
 
 def test_the_prompt_states_the_plan_context():
     system, payload = build_selection_prompt(_INVENTORY, pipeline_key="nf-core/rnaseq", kind="gene")
+    assert payload is not None
     assert "nf-core/rnaseq" in payload
     assert "gene" in payload
 
@@ -177,6 +179,7 @@ async def test_select_deposit_returns_the_choice_with_the_model_that_made_it():
     out = await select_deposit(
         _INVENTORY, pipeline_key="nf-core/rnaseq", kind="gene", client=client, model="claude-x", api_key=None
     )
+    assert out is not None
     assert out["primary_matrix"] == "GSE274331_TPMs_H2AS40-KD.xlsx"
     assert out["model"] == "claude-x"
     assert out["decided_by"] == "model"
@@ -359,4 +362,5 @@ def test_an_empty_deposit_has_no_special_blocker():
 def test_the_prompt_warns_the_model_off_pre_cell_calling_matrices():
     inv = [_entry("GSM1_raw_feature_bc_matrix.h5", "matrix_unfiltered", 1000, gsm="GSM1", level="sample")]
     system, _ = build_selection_prompt(inv, pipeline_key="nf-core/scrnaseq", kind="gene")
+    assert system is not None
     assert "cell-called" in system or "cell calling" in system

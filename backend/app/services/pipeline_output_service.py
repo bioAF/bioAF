@@ -186,7 +186,7 @@ class PipelineOutputService:
         # Collect existing gcs_uris to skip duplicates
         uris = [f["gcs_uri"] for f in collected_files]
         existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
-        existing_uris: set[str] = {row[0] for row in existing.all()}
+        existing_uris: set[str | None] = {row[0] for row in existing.all()}
 
         created: list[File] = []
         unattributed: list[str] = []
@@ -299,7 +299,7 @@ class PipelineOutputService:
         # Check which URIs already exist in DB
         uris = [f["gcs_uri"] for f in metadata_files]
         existing = await session.execute(select(File.storage_uri).where(File.storage_uri.in_(uris)))
-        existing_uris: set[str] = {row[0] for row in existing.all()}
+        existing_uris: set[str | None] = {row[0] for row in existing.all()}
 
         # Check which blobs exist in GCS
         existing_blobs = await _check_gcs_blobs(metadata_files)

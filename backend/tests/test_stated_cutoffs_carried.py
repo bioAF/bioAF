@@ -11,6 +11,7 @@ Each test here runs the real code with no model call.
 import json
 import re
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -139,7 +140,7 @@ def test_a_p_value_cutoff_reads_the_p_value_column_when_both_are_present():
 
 # ---- the level 3 bundle carries the stated definition ----
 
-_P_DESIGN = {
+_P_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
@@ -377,6 +378,7 @@ async def test_the_gate_design_edit_keeps_the_stated_cutoffs(session, admin_user
     saved = await ReproductionPlanService.set_differential_design(
         session, study.id, admin_user.organization_id, admin_user.id, edited, selected_contrast_index=0
     )
+    assert saved.differential_design_json is not None
     contrast = saved.differential_design_json["contrasts"][0]
     assert contrast["cutoffs"] == [_P]
     assert analysis_cutoffs(contrast, saved.differential_design_json)["significance"] == _P
@@ -398,6 +400,7 @@ async def test_a_person_who_types_a_different_cutoff_at_the_gate_is_the_one_reco
     saved = await ReproductionPlanService.set_differential_design(
         session, study.id, admin_user.organization_id, admin_user.id, edited, selected_contrast_index=0
     )
+    assert saved.differential_design_json is not None
     contrast = saved.differential_design_json["contrasts"][0]
     assert analysis_cutoffs(contrast, saved.differential_design_json)["significance"]["kind"] == "padj"
     assert contrast["cutoffs_decided_by"] == "human"

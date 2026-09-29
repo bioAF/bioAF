@@ -221,6 +221,7 @@ async def test_a_read_lists_what_the_text_names_beside_what_the_model_named(sess
         admin_user.organization_id,
         admin_user.id,
     )
+    assert study.evidence_json is not None
     deposits = {d["accession"]: d for d in study.evidence_json["capabilities"]["deposits"]}
     assert set(deposits) == {"GSE555001", "PXD099001", "7ABC"}
     assert deposits["PXD099001"]["archive"] == PRIDE

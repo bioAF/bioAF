@@ -103,6 +103,7 @@ class TestTheCall:
                 )
 
         out = await cr.resolve_columns(_CSAW_HEADER, kind="interval", client=_C(), model="m", api_key=None)
+        assert out is not None
         assert out["columns"]["chrom"] == "regions.seqnames"
         assert out["model"] == "m"
 

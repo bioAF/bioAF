@@ -72,6 +72,7 @@ class TestTheCausalAssessment:
             model="m",
             api_key=None,
         )
+        assert result is not None
         assert result["candidate"] == "bioaf_input_mapping"
         assert result["reason"]
         assert result["confidence"] == 0.6
@@ -106,6 +107,7 @@ class TestTheCausalAssessment:
             model="m",
             api_key=None,
         )
+        assert result is not None
         assert result["candidate"] is None
         assert result["reason"]
 

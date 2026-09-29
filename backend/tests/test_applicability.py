@@ -16,6 +16,8 @@ data. Applicability is decided per experiment and check:
 Paper-shaped fixtures; nothing here is a rule about any one paper.
 """
 
+from typing import Any
+
 import pytest
 
 from app.models.audit_log import AuditLog
@@ -29,7 +31,7 @@ from app.services.validation_report_summary import summarize
 
 _UNAVAILABLE = {k: {"status": "unavailable", "reason": "x"} for k in ("qc_metric", "author_results")}
 _AVAILABLE = {"author_results": {"status": "available", "reason": None}}
-_WET_LAB = {
+_WET_LAB: dict[str, Any] = {
     "reported_experiments": [{"id": "e1", "assay": "qRT-PCR", "workflow": None}],
     "blockers": [
         "No sequencing data or high-throughput omics data was generated.",
@@ -46,6 +48,7 @@ _WET_LAB = {
 class TestApplicability:
     def test_a_paper_whose_experiments_bioaf_has_no_method_for_is_not_applicable(self):
         found = applicability(_WET_LAB, [])
+        assert found is not None
         assert found["status"] == NOT_APPLICABLE
         assert found["statement"].startswith(NO_ELIGIBLE)
         assert "does not establish that the paper contains no quantitative analysis" in found["statement"]
@@ -64,21 +67,28 @@ class TestApplicability:
             {"reported_experiment_id": "e2", "checks": _UNAVAILABLE},
         ]
         found = applicability(plan, targets)
+        assert found is not None
         assert found["status"] == PARTIAL and found["statement"] is None
         assert [(e["id"], e["supported"]) for e in found["experiments"]] == [("e1", True), ("e2", False)]
         assert found["limitation"] == "bioAF has no validation method for western blot (experiment e2)."
 
     def test_a_supported_paper_with_no_deposit_is_applicable(self):
         plan = {"reported_experiments": [{"id": "e1", "assay": "bulk RNA-seq", "workflow": "nf-core/rnaseq"}]}
-        assert applicability(plan, [])["status"] == "applicable"
+        found = applicability(plan, [])
+        assert found is not None
+        assert found["status"] == "applicable"
 
     def test_a_claim_bioaf_can_check_makes_its_experiment_eligible_without_a_workflow(self):
         plan = {"reported_experiments": [{"id": "e1", "assay": "proteomics", "workflow": None}]}
-        assert applicability(plan, [{"reported_experiment_id": "e1", "checks": _AVAILABLE}])["status"] == "applicable"
+        found = applicability(plan, [{"reported_experiment_id": "e1", "checks": _AVAILABLE}])
+        assert found is not None
+        assert found["status"] == "applicable"
 
     def test_methods_too_thin_to_name_an_assay_are_not_called_outside_bioafs_methods(self):
         plan = {"reported_experiments": [], "blockers": ["insufficient method detail to identify an assay"]}
-        assert applicability(plan, [])["status"] == "undetermined"
+        found = applicability(plan, [])
+        assert found is not None
+        assert found["status"] == "undetermined"
 
 
 def _summary(plan=_WET_LAB, classification="missing_data"):

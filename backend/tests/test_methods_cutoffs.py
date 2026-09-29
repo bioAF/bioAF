@@ -255,6 +255,7 @@ class TestThroughTheRead:
         study = await ValidationDriverService.read_and_plan(
             session, study, None, admin_user.organization_id, admin_user.id
         )
+        assert study.evidence_json is not None
         recorded = study.evidence_json["methods_cutoffs"]
         assert [s["quote"] for s in recorded["statements"]] == [_DEFINED]
         assert recorded["source"] == "europe_pmc" and recorded["version"] == 1
@@ -347,7 +348,9 @@ class TestOnlyDependentChecksFollow:
         await consistency.enqueue(session, study, plan, reason="the methods were recorded")
         after = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         assert after[targets[0].id].revision == before[targets[0].id] + 1
-        assert after[targets[0].id].history_json[-1]["superseded_because"] == "the methods were recorded"
+        history = after[targets[0].id].history_json
+        assert history is not None
+        assert history[-1]["superseded_because"] == "the methods were recorded"
         assert after[targets[1].id].revision == before[targets[1].id]
 
 
@@ -444,7 +447,9 @@ class TestThroughTheRecovery:
         assert result["cutoffs_changed"] == 1
         after = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         assert after[targets[0].id].revision == before[targets[0].id] + 1
-        assert after[targets[0].id].history_json[-1]["superseded_because"].startswith("recovery")
+        history = after[targets[0].id].history_json
+        assert history is not None
+        assert history[-1]["superseded_because"].startswith("recovery")
         assert after[targets[1].id].revision == before[targets[1].id]
 
 

@@ -86,6 +86,7 @@ class TestReadingTheAuthorsDocx:
         """Supplemental File S2 is a DOCX carrying the paper's whole analysis. It was fetched and
         stored as an opaque blob, so the code inside it was never read."""
         text = extract_docx_text(_S2)
+        assert text is not None
         assert "DESeq" in text
         assert "library(" in text
         assert text.count("<-") > 100

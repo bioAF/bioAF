@@ -67,6 +67,7 @@ class TestTheApprovedSet:
     async def test_it_holds_the_selected_check_and_the_claims_its_analysis_supports(self, session, admin_user):
         study, plan, targets = await _seed(session, admin_user)
         approval = await approve_workflow_checks(session, study, plan, route="deposit")
+        assert approval is not None
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         assert set(records) == {targets[0].id, targets[1].id}
         assert {r.kind for r in records.values()} == {"processed_reanalysis"}
@@ -115,14 +116,13 @@ class TestAtConclusion:
         }
         await conclude_workflow_checks(session, study, plan)
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
-        assert (records[targets[0].id].state, records[targets[0].id].outcome_json["verdict"]) == ("done", "agree")
+        first = records[targets[0].id]
+        assert first.outcome_json is not None
+        assert (first.state, first.outcome_json["verdict"]) == ("done", "agree")
         shared = records[targets[1].id]
+        assert shared.outcome_json is not None
         assert (shared.state, shared.outcome_json["reason"]) == ("unresolved", SHARED_PREDICATE_REASON)
-        assert (
-            shared.outcome_json["execution_ref"]
-            == records[targets[0].id].outcome_json["execution_ref"]
-            == "level3_session:12"
-        )
+        assert shared.outcome_json["execution_ref"] == first.outcome_json["execution_ref"] == "level3_session:12"
 
     @pytest.mark.asyncio
     async def test_a_run_that_never_executed_leaves_its_records_with_the_governing_limitation(

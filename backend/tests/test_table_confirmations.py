@@ -87,7 +87,9 @@ class TestARecordedConfirmation:
         evidence = {"table_confirmations": [first, second]}
         assert latest(evidence, _DIFFERENTIATION, _CONTRAST) is second
         assert latest(evidence, _DIFFERENTIATION, "another contrast") is None
-        assert interpretation_of(second)["columns"] == _COLUMNS
+        interpretation = interpretation_of(second)
+        assert interpretation is not None
+        assert interpretation["columns"] == _COLUMNS
 
     def test_a_confirmation_of_columns_alone_does_not_bind_the_table(self):
         table = {"name": _DIFFERENTIATION, "source": "deposit"}
@@ -192,6 +194,8 @@ class TestSamd1sHeaderlessDifferentiationTable:
         await consistency.run_pending(session, study, plan, fetcher=_fetcher())
         checked = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}[targets[2].id]
         assert checked.state == queue.DONE
+        assert checked.outcome_json is not None
+        assert checked.history_json is not None
         assert (checked.outcome_json["outcome"], checked.outcome_json["rows_passing"]) == ("agree", 3)
         assert checked.outcome_json["binding"]["evidence"][0]["kind"] == "confirmation"
         assert checked.outcome_json["interpretation"]["source"] == "confirmation"

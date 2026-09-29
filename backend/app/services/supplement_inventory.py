@@ -31,6 +31,7 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+from typing import cast
 
 from app.services.validation_acquisition_outcome import MAX_ATTEMPTS
 
@@ -1012,7 +1013,7 @@ async def _retrieve_members(
                 ledger,
                 source=MEMBER_SOURCE,
                 label=MEMBER_SOURCE_LABEL,
-                url=(article_urls or [None])[0],
+                url=cast("list[str | None]", article_urls or [None])[0],
                 outcome=MEMBERS_UNRESOLVED,
                 artifacts=[r["identity"] for r in rows if r.get("filename")],
             )

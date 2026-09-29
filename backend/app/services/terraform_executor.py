@@ -23,7 +23,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1169,7 +1169,7 @@ class TerraformExecutor:
             WHERE status IN ('planning', 'applying', 'awaiting_confirmation')
             """)
         )
-        active_rows = result.fetchall()
+        active_rows = cast("list[tuple[int, str | None, datetime]]", result.fetchall())
 
         runs_to_fail: list[tuple[int, str | None]] = []
         for run_id, module_name, started_at in active_rows:

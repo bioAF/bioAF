@@ -107,6 +107,7 @@ class TestRatify:
                 return _response("accept")
 
         out = await rat.ratify(clean, autonomy="autonomous", client=_C(), model="claude-opus-4-8", api_key=None)
+        assert out is not None
         assert out["verdict"] == "validated"
         assert out["ratified_by"] == "model"
         assert out["ratified_by_model"] == "claude-opus-4-8"
@@ -122,6 +123,7 @@ class TestRatify:
                 )
 
         out = await rat.ratify(_RESULT, autonomy="autonomous", client=_C(), model="m", api_key=None)
+        assert out is not None
         assert out["verdict"] == "not_validated"
         assert out["suggested_verdict"] == "inconclusive"
         assert out["reasoning"] == "the alignment divergence is the paper's"

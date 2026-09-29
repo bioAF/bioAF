@@ -890,7 +890,7 @@ def _obligation_row(leaf: dict, assessed: dict) -> dict:
     """One allocated obligation, as itself. "Verified" here means THIS obligation was established,
     never that the paper is proven."""
     found = assessed.get(leaf["id"]) or {}
-    outcome = found.get("outcome") if found.get("outcome") in (VERIFIED, FAILED) else UNDETERMINED
+    outcome: str = found.get("outcome") if found.get("outcome") in (VERIFIED, FAILED) else UNDETERMINED
     method = found.get("method") or "measurement"
     return {
         "leaf": leaf["id"],

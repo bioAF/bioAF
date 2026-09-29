@@ -351,6 +351,7 @@ class TestADisagreementIsRecordedNotResolvedBySilence:
         assert target.cutoffs == [{"kind": "pvalue", "operator": "<", "value": 0.005}]
         issues = await ValidationIssueService.list_for_study(session, study.id, admin_user.organization_id)
         assert any("disagrees" in (i.get("message") or "") for i in issues)
+        assert plan.differential_design_json is not None
         assert plan.differential_design_json["contrasts"][0]["thresholds_unresolved"]
 
 
@@ -379,12 +380,14 @@ class TestADirectionalFoldChangeIsNotAnAbsoluteOne:
         from app.services.validation_claim_cutoffs import effect_cutoff
 
         found = effect_cutoff("abs_log2fc", ">", 2)
+        assert found is not None
         assert found["kind"] == "abs_log2fc"
 
     def test_an_upward_directional_cutoff_is_still_directional(self):
         from app.services.validation_claim_cutoffs import effect_cutoff
 
         found = effect_cutoff("log2fc", ">", 2)
+        assert found is not None
         assert found["kind"] == "log2fc"
         assert found["value"] == 2
 

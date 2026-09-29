@@ -369,6 +369,7 @@ class TestItLandsAtReadTime:
             session, study, "the paper body", admin_user.organization_id, admin_user.id
         )
 
+        assert study.evidence_json is not None
         caps = study.evidence_json["capabilities"]
         assert caps["deposit_exists"]["value"] == YES
         assert caps["preprocessed_data"]["value"] == YES
@@ -397,6 +398,7 @@ class TestItLandsAtReadTime:
         )
 
         assert study.state == "plan_ready"
+        assert study.evidence_json is not None
         assert study.evidence_json["capabilities"]["deposit_exists"]["value"] == UNKNOWN
 
     @pytest.mark.asyncio
@@ -602,6 +604,7 @@ class TestTheSupplementManifestLandsAtReadTime(TestItLandsAtReadTime):
         )
         await ValidationDriverService.read_and_plan(session, study, None, admin_user.organization_id, admin_user.id)
 
+        assert study.evidence_json is not None
         supplements = study.evidence_json["supplements"]
         assert [s["label"] for s in supplements] == ["Supplemental File S2"]
         assert supplements[0]["resolved"] is False

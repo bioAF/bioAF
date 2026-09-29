@@ -10,6 +10,8 @@ here runs anything: submitting the request is the isolated path's business, and 
 approved run keeps both obligations untested.
 """
 
+from typing import Any
+
 import pytest
 
 from app.services.validation_environment_check import (
@@ -62,7 +64,7 @@ class TestTheRequestAPersonApproves:
 
 class TestWhereItsResultLands:
     def test_a_successful_load_is_recorded_where_the_obligation_reads_it(self):
-        evidence = {"code_inspection": {"sources": [_PY]}}
+        evidence: dict[str, Any] = {"code_inspection": {"sources": [_PY]}}
         record_environment_check(
             evidence,
             result={"load": {"status": "succeeded", "environment": "python:3.11.8", "ref": "run-1"}},
@@ -74,7 +76,7 @@ class TestWhereItsResultLands:
         from app.services.validation_code_checks import assess_code
 
         assert assess_code(sources=[_PY])["C1.B"]["outcome"] == "undetermined"
-        evidence = {"code_inspection": {"sources": [_PY]}}
+        evidence: dict[str, Any] = {"code_inspection": {"sources": [_PY]}}
         record_environment_check(
             evidence,
             result={
@@ -89,7 +91,7 @@ class TestWhereItsResultLands:
     def test_a_failed_load_is_a_named_failure_with_its_reason(self):
         from app.services.validation_code_checks import assess_code
 
-        evidence = {"code_inspection": {"sources": [_PY]}}
+        evidence: dict[str, Any] = {"code_inspection": {"sources": [_PY]}}
         record_environment_check(
             evidence,
             result={

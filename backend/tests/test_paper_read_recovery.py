@@ -82,6 +82,12 @@ def _measured(monkeypatch):
     )
 
 
+def _cycle(study) -> dict:
+    cycle = current_cycle(study.evidence_json)
+    assert cycle is not None
+    return cycle
+
+
 async def _read(study, client, *, log=None):
     async def checkpoint():
         if log is not None:
@@ -102,7 +108,7 @@ class TestTruncation:
         read = await _read(study, client)
         assert read.ok
         assert [c["max_tokens"] for c in client.calls] == [16000, 32000]
-        attempts = current_cycle(study.evidence_json)["attempts"]
+        attempts = _cycle(study)["attempts"]
         assert [a["outcome"] for a in attempts] == ["truncated", "ok"]
         assert [a["max_tokens"] for a in attempts] == [16000, 32000]
         assert attempts[1]["output_tokens"] == 21000
@@ -129,7 +135,7 @@ class TestTruncation:
         assert len(client.calls) == 2
         assert "cut off" in read.cause
         assert read.issues[-1]["impact"] == "blocked"
-        assert current_cycle(study.evidence_json)["status"] == "failed"
+        assert _cycle(study)["status"] == "failed"
 
 
 class TestStructuralFailure:
@@ -141,7 +147,7 @@ class TestStructuralFailure:
         assert read.ok
         assert [c["max_tokens"] for c in client.calls] == [16000, 16000]
         assert "claims is missing" in client.calls[1]["payload"]
-        assert current_cycle(study.evidence_json)["attempts"][0]["problems"] == ["claims is missing"]
+        assert _cycle(study)["attempts"][0]["problems"] == ["claims is missing"]
 
     @pytest.mark.asyncio
     async def test_an_empty_method_triggers_recovery(self):
@@ -226,7 +232,7 @@ class TestAttemptsSurviveARestart:
         read = await _read(study, client)
         assert not read.ok
         assert len(client.calls) == 1
-        assert [a["outcome"] for a in current_cycle(study.evidence_json)["attempts"]] == ["interrupted", "truncated"]
+        assert [a["outcome"] for a in _cycle(study)["attempts"]] == ["interrupted", "truncated"]
 
     @pytest.mark.asyncio
     async def test_a_cycle_whose_two_attempts_are_spent_submits_nothing_more(self):
@@ -259,7 +265,7 @@ class TestTheBudgetOnTheProvenance:
     async def test_a_measured_model_records_its_budget(self):
         study = _study()
         await _read(study, _Client(_answer()))
-        cycle = current_cycle(study.evidence_json)
+        cycle = _cycle(study)
         assert cycle["budget"]["max_tokens"] == 16000
         assert cycle["budget"]["measured"] is True
         assert cycle["status"] == "succeeded"
@@ -277,4 +283,4 @@ class TestTheBudgetOnTheProvenance:
             checkpoint=None,
         )
         assert read.ok
-        assert current_cycle(study.evidence_json)["budget"]["note"] == "budget not measured for this model"
+        assert _cycle(study)["budget"]["note"] == "budget not measured for this model"

@@ -280,6 +280,7 @@ async def test_the_input_its_mapping_and_the_authors_table_are_chosen_together_a
     kinds = {f["filename"]: f["artifact_type"] for f in evidence["deposit"]["files"]}
     assert kinds == {_MATRIX: "deposited_matrix", _TABLE: "deposited_result_table"}
     plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    assert plan.analysis_selection_json is not None
     current = plan.analysis_selection_json["current"]
     assert current["revision"] == 2
     assert current["input"]["matrix"] == _MATRIX
@@ -299,6 +300,7 @@ async def test_a_validated_mapping_rewrites_the_contrast_and_the_comparison_need
     await ValidationDriverService._handle_inspecting_deposit(session, study, storage_adapter=storage)
 
     plan = await ReproductionPlanService.get_plan(session, study.id, study.organization_id)
+    assert plan.differential_design_json is not None
     contrast = plan.differential_design_json["contrasts"][0]
     assert contrast["test_samples"] == ["KO_c5", "KO_c16"]
     assert contrast["reference_samples"] == ["WT_a", "WT_b"]

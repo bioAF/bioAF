@@ -477,6 +477,7 @@ def test_deposit_selection_is_told_the_experiments_assay_and_the_selected_claim(
         experiment={"id": "e2", "assay": "bulk RNA-seq"},
         claim="257 genes were up in KO",
     )
+    assert payload is not None
     assert "bulk RNA-seq" in payload and "e2" in payload
     assert "257 genes were up in KO" in payload
     assert "The paper's assay maps to" not in payload

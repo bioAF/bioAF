@@ -234,6 +234,7 @@ class TestTheRecordItLeaves:
             intent="binding the paper's claims",
         )
         row = d.as_issue(impact="degraded")
+        assert row is not None
         assert row["step"] == "binding the paper's claims"
         assert row["outcome"] == OUTCOME_REFUSAL
         assert row["impact"] == "degraded"
@@ -243,8 +244,12 @@ class TestTheRecordItLeaves:
     def test_impact_distinguishes_a_step_that_carried_on_from_one_that_produced_nothing(self):
         """Without it the section cries wolf and users learn to ignore it."""
         d = Decision(outcome=OUTCOME_UNREACHABLE, reason="r", model="m", intent="i")
-        assert d.as_issue(impact="degraded")["impact"] == "degraded"
-        assert d.as_issue(impact="blocked")["impact"] == "blocked"
+        degraded = d.as_issue(impact="degraded")
+        assert degraded is not None
+        assert degraded["impact"] == "degraded"
+        blocked = d.as_issue(impact="blocked")
+        assert blocked is not None
+        assert blocked["impact"] == "blocked"
 
     def test_an_ok_decision_has_no_issue_to_record(self):
         d = Decision(outcome=OUTCOME_OK, model="m", intent="i")

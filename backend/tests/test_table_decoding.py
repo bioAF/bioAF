@@ -37,6 +37,7 @@ class TestTheSamd1Fixture:
         decoded = decoding.decode_table(_FIXTURE.read_bytes(), _FIXTURE.name)
         assert decoded.ok
         assert (decoded.compression, decoded.encoding, decoded.format) == ("gzip", "utf-16-le", "text")
+        assert decoded.text is not None
         lines = decoded.text.splitlines()
         assert lines[0].split("\t") == ["GeneID", "Base mean", "log2(FC)", "StdErr", "Wald-Stats", "P-value", "P-adj"]
         assert len(lines) - 1 == 31067
@@ -83,6 +84,7 @@ class TestByteOrderMarks:
 
     def test_plain_utf8_keeps_its_characters(self):
         decoded = decoding.decode_table(_TABLE.encode("utf-8"), "t.txt")
+        assert decoded.text is not None
         assert decoded.ok and decoded.encoding == "utf-8" and "GÉNE" in decoded.text
 
 
@@ -105,6 +107,7 @@ class TestUncertainOrUnsafeInput:
         decoded = decoding.decode_table(b"gene\tvalue\nTP\x0053\t1\n", "t.txt")
         assert not decoded.ok and decoded.reason_kind == decoding.NUL
         assert decoded.text is None
+        assert decoded.reason is not None
         assert "\x00" not in decoded.reason
 
     def test_an_actual_binary_file_is_refused_as_binary(self):
@@ -145,6 +148,7 @@ class TestCompressionThenFormat:
     def test_an_unreadable_workbook_is_unresolved_with_its_name(self):
         decoded = decoding.decode_table(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 64, "t.xls")
         assert not decoded.ok and decoded.reason_kind == decoding.UNREADABLE_WORKBOOK
+        assert decoded.reason is not None
         assert "t.xls" in decoded.reason
 
 

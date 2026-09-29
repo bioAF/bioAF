@@ -150,6 +150,7 @@ async def test_inspection_measures_the_selected_contrasts_samples_only(session, 
         session, study, storage_adapter=_Storage({"s3://m": matrix})
     )
 
+    assert study.evidence_json is not None
     inspection = study.evidence_json["deposit_inspection"]
     assert inspection["design_samples_missing"] == []
     assert inspection["design_samples_found"] == 4

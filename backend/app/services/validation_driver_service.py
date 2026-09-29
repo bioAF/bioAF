@@ -25,6 +25,7 @@ machinery; this driver is the orchestration glue that sequences it and moves the
 import hashlib
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 
@@ -1420,7 +1421,7 @@ class ValidationDriverService:
             await run_assessment(session, study, claim=claim)
             return True
 
-        handlers = {
+        handlers: dict[str, Callable[..., Awaitable[bool]]] = {
             "acquiring_data": ValidationDriverService._handle_acquiring_data,
             "acquiring_processed": ValidationDriverService._handle_acquiring_processed,
             "inspecting_deposit": ValidationDriverService._handle_inspecting_deposit,

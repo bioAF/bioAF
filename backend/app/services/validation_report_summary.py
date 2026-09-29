@@ -21,6 +21,8 @@ database or the network.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 from app.services.validation_reproduction_attempt import ATTEMPTED, reproduction_attempt
 
 # ---- the vocabularies, each worded once --------------------------------------------------------------
@@ -285,7 +287,7 @@ def summarize(
     acquired = any(f["key"] == "input_acquired" and f["value"] == "yes" for f in completion_facts)
     facts = _facts(evidence, artifacts, attempt, counts, acquired=acquired)
 
-    projection = {
+    projection: dict[str, Any] = {
         "version": 1,
         "attempt": attempt,
         "headline": headline,
@@ -1509,7 +1511,12 @@ def _blockers(plan: dict, evidence: dict, *, failure: dict | None = None, applie
         # reference requirements. The limitation leads; each stored blocker is kept, withheld as not applying.
         from app.services.validation_applicability import OUTSIDE_METHODS, REQUIREMENT_DOES_NOT_APPLY
 
-        head = {"text": applies["limitation"], "kind": OUTSIDE_METHODS, "basis": basis, "provisional": False}
+        head = {
+            "text": cast(dict, applies)["limitation"],
+            "kind": OUTSIDE_METHODS,
+            "basis": basis,
+            "provisional": False,
+        }
         withheld = [
             {
                 "text": REQUIREMENT_DOES_NOT_APPLY,
@@ -2115,7 +2122,7 @@ def _claims(
     basis = assessment.get("basis") or "paper_text"
     contrasts = ((plan.get("differential_design") or {}).get("contrasts")) or []
     tested = _tested_count(evidence)
-    claims = []
+    claims: list[dict[str, Any]] = []
     mapped = 0
     experiments = {e.get("id"): e for e in plan.get("reported_experiments") or [] if isinstance(e, dict)}
     for position, target in enumerate(targets):
@@ -2360,7 +2367,7 @@ def _summary_lines(headline: dict, facts: dict, applies: dict | None = None) -> 
     lines: list[str] = []
     if headline["key"] == HEADLINE_NOT_APPLICABLE:
         # plan_8_2 section 4.1: what applies, and nothing about sequencing reads the paper never needed.
-        lines.extend(p for p in (applies["statement"], applies.get("limitation")) if p)
+        lines.extend(p for p in (cast(dict, applies)["statement"], cast(dict, applies).get("limitation")) if p)
     elif headline["key"] == HEADLINE_NOT_ATTEMPTED:
         lines.append("Reproduction not attempted.")
     elif headline["key"] == HEADLINE_COULD_NOT_REPRODUCE:

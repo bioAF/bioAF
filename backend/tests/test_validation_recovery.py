@@ -173,11 +173,14 @@ class TestTheRecovery:
         await consistency.run_pending(session, study, plan, fetcher=_refuse_download)
         await session.commit()
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
-        assert records[targets[0].id].outcome_json["binding"]["status"] == "established"
+        established = records[targets[0].id].outcome_json
+        assert established is not None
+        assert established["binding"]["status"] == "established"
         for target in targets[1:]:
             record = records[target.id]
             assert record.state == queue.UNRESOLVED and record.terminal_reason == queue.BINDING
             # The invalid comparison is kept, whole, as the superseded revision.
+            assert record.history_json is not None
             assert record.history_json[-1]["outcome"]["outcome"] == "disagree"
             assert record.history_json[-1]["superseded_because"].startswith("recovery")
 

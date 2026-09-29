@@ -167,6 +167,8 @@ class TestConcurrentCompletions:
         # plan_8_5 section 3.1: settling a check publishes, so the newer projection is already stored.
         await consistency.run_pending(session, study, plan, fetcher=_fetch)
         newer = await compute_scorecard_record(session, study)
+        assert study.evidence_json is not None
+        assert newer is not None
         assert study.evidence_json["scorecard_record"]["provenance_fingerprint"] == newer["provenance_fingerprint"]
         assert not await publish_scorecard_record(session, study, older, reason="a check completed")
         assert study.evidence_json["scorecard_record"]["compact"]["score_label"] == "100 / 100"

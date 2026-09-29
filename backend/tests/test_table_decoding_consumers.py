@@ -172,8 +172,10 @@ async def test_the_queued_check_reads_a_wide_encoding_as_acquisition_does(sessio
 
     await consistency.run_pending(session, study, plan, fetcher=fetch)
     (record,) = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
+    assert record.outcome_json is not None
     assert record.outcome_json["outcome"] == "agree"
     assert record.outcome_json["columns"]["lfc"] == "log2FoldChange(treated/control)"
+    assert record.attempts_json is not None
     assert record.attempts_json[-1]["decoding"]["encoding"] in ("utf-16-le", "utf-32-le")
 
 
@@ -189,5 +191,6 @@ async def test_the_queued_check_records_a_table_it_could_not_interpret_and_never
     await session.flush()
     (record,) = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
     assert record.state == queue.UNRESOLVED
+    assert record.outcome_json is not None
     assert "arrived but could not be interpreted" in record.outcome_json["reason"]
     assert "\x00" not in str(record.outcome_json) and "\x00" not in str(record.attempts_json)

@@ -313,6 +313,7 @@ class TestRetryReadsAgain:
         assert study.reproduction_plan_id != first_plan.id
         await session.refresh(first_plan)
         assert first_plan.superseded_at is not None
+        assert study.evidence_json is not None
         assert study.evidence_json["extraction"]["status"] == "succeeded"
         assert study.evidence_json["extraction_history"][0]["status"] == "failed"
 

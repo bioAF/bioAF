@@ -236,6 +236,7 @@ class TestTheAccessionIsResolvedTheWayDiscoveryDoes:
     def test_a_study_requested_by_doi_uses_the_extracted_accession(self):
         """The empty-string defect. Both studies 29 and 33 died on it."""
         target = acquisition_accession([{"accession": "EGAS00001003667", "provenance": "extracted"}])
+        assert target is not None
         assert target["accession"] == "EGAS00001003667"
         assert target["archive"] == "ega"
 
@@ -248,6 +249,7 @@ class TestTheAccessionIsResolvedTheWayDiscoveryDoes:
                 {"accession": "EGAS00001003667", "provenance": "extracted"},
             ]
         )
+        assert target is not None
         assert target["accession"] == "GSE309060"
 
     def test_a_route_can_prefer_an_archive_among_extracted_accessions(self):
@@ -258,6 +260,7 @@ class TestTheAccessionIsResolvedTheWayDiscoveryDoes:
             ],
             prefer_archive="geo",
         )
+        assert target is not None
         assert target["accession"] == "GSE309060"
 
     def test_a_sample_accession_is_not_something_a_route_can_be_pointed_at(self):
@@ -372,6 +375,7 @@ class TestStoppingAndResumingNeverNeedTheDatabase:
             session, study.id, admin_user.organization_id, admin_user.id, "wrong accession"
         )
         assert cancelled.state == "classified"
+        assert cancelled.evidence_json is not None
         assert cancelled.evidence_json["cancelled"]["reason"] == "wrong accession"
 
     @pytest.mark.asyncio
@@ -423,6 +427,7 @@ class TestStoppingAndResumingNeverNeedTheDatabase:
         resumed = await ValidationStudyService.resume_study(
             session, study.id, admin_user.organization_id, admin_user.id
         )
+        assert resumed.evidence_json is not None
         assert "acquisition_attempts" not in resumed.evidence_json
         assert "route_blocked" not in resumed.evidence_json
 
@@ -432,6 +437,7 @@ class TestStoppingAndResumingNeverNeedTheDatabase:
         resumed = await ValidationStudyService.resume_study(
             session, study.id, admin_user.organization_id, admin_user.id, "credentials arrived"
         )
+        assert resumed.evidence_json is not None
         assert resumed.evidence_json["resumed"]["reason"] == "credentials arrived"
 
     @pytest.mark.asyncio

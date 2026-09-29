@@ -311,6 +311,7 @@ class TestThePacketIsSizedAgainstADeclaredBudget:
         from app.services.validation_decision_budgets import DOCUMENTARY_JUDGMENT, policy_for
 
         declared = policy_for(DOCUMENTARY_JUDGMENT)
+        assert declared.max_input_tokens is not None
         assert declared.max_input_tokens >= 8192
         assert declared.provenance()["max_input_tokens"] == declared.max_input_tokens
 
@@ -320,6 +321,7 @@ class TestThePacketIsSizedAgainstADeclaredBudget:
 
         declared = policy_for(DOCUMENTARY_JUDGMENT).max_input_tokens
         # Four characters to a token for prose, with room left for the instructions and the question.
+        assert declared is not None
         assert MAX_PACKET_CHARS / 4 < declared * 0.85
 
     def test_the_character_budget_binds_before_the_row_count(self):

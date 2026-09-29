@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from types import SimpleNamespace
+from typing import cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1128,7 +1129,7 @@ def binding_problems(data: dict | None, indexes: list[int]) -> list[str]:
     a different question.
     """
     seen = [
-        item.get("claim_index")
+        cast(int, item.get("claim_index"))
         for item in _as_list((data or {}).get("bindings"))
         if isinstance(item, dict)
         and isinstance(item.get("claim_index"), int)

@@ -8,6 +8,8 @@ claim, and no concordance. The same predicate is applied to both sets, the conco
 the claim's direction, and the count is labelled as coming from a different method.
 """
 
+from typing import Any
+
 import pytest
 import pytest_asyncio
 
@@ -21,7 +23,7 @@ from app.services.validation_level3_service import resolve_level3_from_deposit, 
 
 _P = [{"kind": "pvalue", "operator": "<", "value": 0.01}]
 _COLUMNS = ["WT1", "WT2", "KO1", "KO2"]
-_DESIGN = {
+_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "claim_selection"},
     "contrasts": [
         {
@@ -185,6 +187,7 @@ async def test_confirmed_technical_groups_reach_the_template_aligned_to_the_arms
     }
     study, plan = await _study(session, admin_user, deposit, author_table=False, design=design)
     decision = await resolve_level3_from_deposit(session, study, plan, evidence=study.evidence_json)
+    assert decision.inputs is not None
     assert decision.inputs["parameters"]["technical_group_labels"] == "k1s,k1s,KO2,WT1,WT2"
     assert decision.inputs["collapse"]["rule"] == "mean on the stored scale"
 

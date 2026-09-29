@@ -130,6 +130,7 @@ class TestHowAListCountIsShown:
 
         record = {**_records(values=(value,))[0], "label": "List count agrees with the authors' published list"}
         governed = govern_claim(0, [], [record])
+        assert governed is not None
         assert governed["status"] == "supported" and governed["depth"] == "consistency"
 
 
@@ -227,6 +228,7 @@ class TestThroughRetrievalAndTheQueue:
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         for target, value in zip(targets, (194, 146)):
             outcome = records[target.id].outcome_json
+            assert outcome is not None
             assert (outcome["method"], outcome["outcome"], outcome["rows_passing"]) == (
                 "published_list_count",
                 "agree",

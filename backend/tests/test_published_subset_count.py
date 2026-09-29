@@ -48,6 +48,7 @@ _PARENT = {"verified": True, "count": 8, "source": "Supplemental File 3", "check
 class TestReadingTheFilterFromWhatThePaperSays:
     def test_a_signed_statement_is_read_as_signed_and_says_it_is_unresolved(self):
         found = filter_from_statement("194 genes, 88 of which had a log2 fold change > 2")
+        assert found is not None
         assert found["operator"] == ">"
         assert found["value"] == 2.0
         assert found["scale"] == "log2"
@@ -56,21 +57,26 @@ class TestReadingTheFilterFromWhatThePaperSays:
 
     def test_a_statement_that_says_absolute_is_resolved(self):
         found = filter_from_statement("genes with an absolute log2 fold change > 2")
+        assert found is not None
         assert found["magnitude"] is True
         assert found["unresolved"] is None
 
     def test_a_statement_naming_both_directions_is_resolved_as_magnitude(self):
         found = filter_from_statement("genes up or down by more than 2-fold on a log2 scale")
+        assert found is not None
         assert found["magnitude"] is True
 
     def test_a_statement_naming_one_direction_is_resolved_as_signed(self):
         found = filter_from_statement("genes upregulated with a log2 fold change greater than 2")
+        assert found is not None
         assert found["magnitude"] is False
         assert found["direction"] == "up"
         assert found["unresolved"] is None
 
     def test_an_inclusive_boundary_is_read_as_inclusive(self):
-        assert filter_from_statement("a log2 fold change of at least 2")["operator"] == ">="
+        found = filter_from_statement("a log2 fold change of at least 2")
+        assert found is not None
+        assert found["operator"] == ">="
 
     def test_a_statement_with_no_cutoff_resolves_to_nothing(self):
         assert filter_from_statement("the genes we found most interesting") is None

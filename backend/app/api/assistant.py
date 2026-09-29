@@ -9,6 +9,7 @@ boundary, and the confirm UI warns when an action will spend compute.
 """
 
 from datetime import datetime, timezone
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -230,7 +231,7 @@ async def list_conversations(
                 title=conv.title,
                 preview=previews.get(conv.id),
                 status=conv.status,
-                message_count=int(cnt or 0),
+                message_count=int(cast("int | None", cnt) or 0),
                 created_at=conv.created_at,
                 updated_at=conv.updated_at,
             )

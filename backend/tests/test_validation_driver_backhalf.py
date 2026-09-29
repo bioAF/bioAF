@@ -1087,6 +1087,7 @@ async def test_only_the_selected_contrast_s_picks_are_required(session, admin_us
     await session.refresh(study)
     assert study.state == "setup"
     plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+    assert plan.differential_design_json is not None
     contrasts = plan.differential_design_json["contrasts"]
     assert contrasts[1]["test_samples"] == ["GSM_A_SRR1"]
     # The unselected contrast stays in the plan untouched.

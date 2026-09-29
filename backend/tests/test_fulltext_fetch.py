@@ -194,5 +194,5 @@ def test_the_read_timeout_is_long_enough_for_a_full_text_document():
     paper's text could not be re-read there at all. Connecting still fails fast."""
     from app.services.literature.fulltext_service import _TIMEOUT
 
-    assert _TIMEOUT.read >= 60.0
+    assert _TIMEOUT.read is not None and _TIMEOUT.read >= 60.0
     assert _TIMEOUT.connect is not None and _TIMEOUT.connect <= 30.0

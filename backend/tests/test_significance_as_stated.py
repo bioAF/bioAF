@@ -343,6 +343,7 @@ async def test_a_kept_ambiguity_leaves_the_claim_and_its_contrast_unresolved(ses
     # The cutoffs stay as the claim stated them; neither reading overwrites them.
     assert target.cutoffs == [{"kind": "pvalue", "operator": "<", "value": 0.01}]
 
+    assert plan.differential_design_json is not None
     contrast = plan.differential_design_json["contrasts"][0]
     assert contrast["thresholds_unresolved"]
 
@@ -365,6 +366,7 @@ async def test_an_unshown_ambiguity_leaves_the_stated_reading_standing(session, 
         .all()
     )
     assert target.unresolved_reason is None
+    assert plan.differential_design_json is not None
     contrast = plan.differential_design_json["contrasts"][0]
     assert "thresholds_unresolved" not in contrast
     assert contrast["cutoffs"] == [{"kind": "pvalue", "operator": "<", "value": 0.01}]

@@ -38,6 +38,7 @@ drives the consistency route. The R templates apply no threshold, so nothing is 
 from __future__ import annotations
 
 import math
+from typing import cast
 
 from app.services.validation_claim_cutoffs import (
     SIGNIFICANCE_KINDS,
@@ -118,8 +119,8 @@ def build_predicate(
     assumptions: list[str] = []
     cutoffs, source = _stated_cutoffs(claim, contrast, finding_claim)
     if not cutoffs and (inherited or {}).get("cutoffs"):
-        cutoffs = claim_cutoffs({"cutoffs": inherited["cutoffs"]})
-        source = {"kind": "methods", "quote": inherited.get("quote")}
+        cutoffs = claim_cutoffs({"cutoffs": cast(dict, inherited)["cutoffs"]})
+        source = {"kind": "methods", "quote": cast(dict, inherited).get("quote")}
         assumptions.append(
             f'the claim states no cutoff; the methods state "{inherited.get("quote")}", which covers every '
             "differential test in its experiment"
@@ -304,9 +305,9 @@ def row_passes(predicate: dict, *, pvalue: float | None, padj: float | None, lfc
     if effect.get("kind") == "abs_log2fc" and not _COMPARE[effect["operator"]](abs(lfc), effect["value"]):
         return False
     direction = predicate.get("direction")
-    if direction == "up" and not lfc > 0:
+    if direction == "up" and not cast(float, lfc) > 0:
         return False
-    if direction == "down" and not lfc < 0:
+    if direction == "down" and not cast(float, lfc) < 0:
         return False
     return True
 
@@ -375,7 +376,7 @@ def predicate_words(predicate: dict, *, contrast: dict | None = None) -> str:
     if test and reference:
         parts.append(f"{test} versus {reference}")
     elif (contrast or {}).get("name"):
-        parts.append(str(contrast["name"]))
+        parts.append(str(cast(dict, contrast)["name"]))
     significance = predicate.get("significance")
     parts.append(describe_cutoff(significance) if significance else "no significance cutoff stated")
     parts.append({"up": "up", "down": "down"}.get(predicate.get("direction"), "either direction"))

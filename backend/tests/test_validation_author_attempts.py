@@ -381,4 +381,5 @@ async def test_executor_adopts_the_dispatched_operation_without_charging_quota_t
     assert first.id == second.id
     quota.assert_awaited_once()
     adapter.launch_session.assert_awaited_once()
+    assert first.provider_metadata is not None
     assert first.provider_metadata["execution_contract"]["image"] == "test:revision"

@@ -113,6 +113,7 @@ def test_a_technical_group_spanning_two_conditions_is_rejected_and_the_design_ho
     ]
     _, status, reason = design_from_mapping(_DESIGN, mapping, contrast_index=0)
     assert status == "unsupported"
+    assert reason is not None
     assert "spans" in reason
 
 
@@ -125,6 +126,7 @@ def test_several_biological_samples_of_one_unit_in_one_arm_are_not_collapsed_and
     ]
     _, status, reason = design_from_mapping(_DESIGN, mapping, contrast_index=0)
     assert status == "unsupported"
+    assert reason is not None
     assert "one unit" in reason
 
 
@@ -165,6 +167,7 @@ def test_a_unit_confounded_with_the_condition_is_caught_after_the_rewrite():
     ]
     _, status, reason = design_from_mapping(design, mapping, contrast_index=0)
     assert status == "pairing_lost"
+    assert reason is not None
     assert "pair" in reason
 
 
@@ -206,6 +209,7 @@ def test_a_pick_matching_several_columns_is_a_duplicate_never_added_under_one_pa
     ]
     _, status, reason = rewrite_design_to_columns(design, associations, contrast_index=0)
     assert status == "duplicate"
+    assert reason is not None
     assert "GSM1" in reason and "s1a" in reason and "s1b" in reason
 
 

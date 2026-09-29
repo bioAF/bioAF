@@ -190,6 +190,7 @@ def test_a_claim_about_one_named_sample_never_binds_to_a_mean_over_all_samples()
     ok, status, reason = binding_match("peak_count", _facts(scope="one_sample"))
     assert not ok
     assert status == "unavailable"
+    assert reason is not None
     assert "one" in reason and "mean" in reason
 
 
@@ -201,6 +202,7 @@ def test_a_consensus_count_never_binds_to_a_per_sample_metric():
 def test_an_unstated_aggregation_leaves_the_qc_check_unresolved():
     ok, status, reason = binding_match("peak_count", _facts(aggregation="not_stated"))
     assert not ok and status == "unresolved"
+    assert reason is not None
     assert "does not state" in reason
 
 
@@ -211,6 +213,7 @@ def test_a_mean_over_every_sample_binds():
 def test_a_fraction_over_another_denominator_never_binds():
     ok, status, reason = binding_match("reads_mapped_genome", _facts(denominator="mapped_reads"))
     assert not ok and status == "unavailable"
+    assert reason is not None
     assert "denominator" in reason
 
 

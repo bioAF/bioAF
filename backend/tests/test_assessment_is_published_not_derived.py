@@ -92,6 +92,7 @@ class TestTheProductionPathPublishesIt:
         study.state = "acquiring_processed"
         await session.flush()
         await record_evidence_assessment(session, study, reason="first")
+        assert study.evidence_json is not None
         first = study.evidence_json["rubric_assessment"]["at"]
         await record_evidence_assessment(session, study, reason="again")
         assert study.evidence_json["rubric_assessment"]["at"] == first
@@ -154,6 +155,7 @@ class TestTheSnapshotFollowsTheAssessmentItCites:
         from app.services.validation_assessment import publish_assessment
 
         await publish_assessment(session, study, reason="first")
+        assert study.evidence_json is not None
         before = study.evidence_json["scorecard_record"]["evidence_score"]["score"]
         study.evidence_json = {
             **study.evidence_json,

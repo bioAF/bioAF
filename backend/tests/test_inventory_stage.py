@@ -143,6 +143,7 @@ class TestTheInventoryCall:
         assert client.calls[0]["max_tokens"] == 8000
         assert result.inventory["status"] == "established"
         cycle = current_cycle(study.evidence_json, "inventory_stage")
+        assert cycle is not None
         assert cycle["budget"]["call"] == "inventory"
         assert cycle["budget"]["max_tokens"] == 8000
 
@@ -150,7 +151,9 @@ class TestTheInventoryCall:
     async def test_each_attempt_records_its_usage(self):
         client = _Client(ModelAnswer(_answer(_findings()), output_tokens=1234, stop_reason="end_turn"))
         study, _ = await _run(client)
-        (attempt,) = current_cycle(study.evidence_json, "inventory_stage")["attempts"]
+        cycle = current_cycle(study.evidence_json, "inventory_stage")
+        assert cycle is not None
+        (attempt,) = cycle["attempts"]
         assert (attempt["output_tokens"], attempt["stop_reason"]) == (1234, "end_turn")
         assert attempt["elapsed_seconds"] is not None
 
@@ -182,7 +185,9 @@ class TestRecovery:
         assert "a sentence nowhere in the paper" in second
         assert "its quote is not in the paper's text" in second
         assert result.inventory["status"] == "established"
-        attempts = current_cycle(study.evidence_json, "inventory_stage")["attempts"]
+        cycle = current_cycle(study.evidence_json, "inventory_stage")
+        assert cycle is not None
+        attempts = cycle["attempts"]
         assert attempts[0]["outcome"] == "rejected" and attempts[0]["problems"]
 
     @pytest.mark.asyncio

@@ -5,6 +5,8 @@ through the owning study. The extractor calls create_plan + add_comparison_targe
 the result views read via get_plan.
 """
 
+from typing import cast
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -787,7 +789,7 @@ class ReproductionPlanService:
                     f"The paper's result table cannot be read yet: {cutoffs['refusal']}. State the comparison's "
                     "significance cutoff in the differential design, then confirm the table again.",
                 )
-        applied = normalizer_arguments(recorded_cutoffs(cutoffs))
+        applied = cast(dict, normalizer_arguments(recorded_cutoffs(cutoffs)))
         lfc, padj = applied["lfc_threshold"], applied["padj_threshold"]
 
         def _normalize(cmap: dict | None):

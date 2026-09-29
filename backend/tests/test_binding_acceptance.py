@@ -121,11 +121,13 @@ class TestGroffsSexComparisonTable:
         await consistency.run_pending(session, study, plan, fetcher=_refuse)
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         sex = records[targets[0].id]
+        assert sex.outcome_json is not None
         assert sex.state == queue.DONE and sex.outcome_json["binding"]["status"] == "established"
         for target in targets[1:]:
             record = records[target.id]
             assert record.state == queue.UNRESOLVED and record.terminal_reason == queue.BINDING
             assert (record.outcome_json or {}).get("outcome") != "disagree"
+            assert record.outcome_json is not None
             assert "XX vs XY WE" in record.outcome_json["reason"]
 
 
@@ -288,6 +290,7 @@ class TestASingleTable:
         fetch = _Fetcher({_BASE + "GSE999001_results.txt.gz": _table("log2FoldChange(treated/control)", 3)})
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         (record,) = await queue.records_for(session, study.id)
+        assert record.outcome_json is not None
         assert record.state == queue.DONE and record.outcome_json["outcome"] == "agree"
         assert record.outcome_json["binding"]["evidence"][0]["kind"] == "columns"
         # The binding names the exact bytes it was made from.
@@ -308,6 +311,7 @@ class TestASingleTable:
         await consistency.run_pending(session, study, plan, fetcher=_refuse)
         (record,) = await queue.records_for(session, study.id)
         assert record.state == queue.UNRESOLVED and record.terminal_reason == queue.BINDING
+        assert record.outcome_json is not None
         assert "infected vs mock" in record.outcome_json["reason"]
 
 
@@ -335,6 +339,7 @@ class TestAPooledTable:
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         records = {r.comparison_target_id: r for r in await queue.records_for(session, study.id)}
         ko, dko = records[targets[0].id], records[targets[1].id]
+        assert ko.outcome_json is not None and dko.outcome_json is not None
         assert (ko.outcome_json["outcome"], ko.outcome_json["rows_passing"]) == ("agree", 2)
         assert (dko.outcome_json["outcome"], dko.outcome_json["rows_passing"]) == ("agree", 1)
         assert ko.outcome_json["columns"]["lfc"] == "KO_vs_WT_log2FC"
@@ -376,6 +381,7 @@ class TestOldEvidenceCannotBypassTheBinding:
         await consistency.run_pending(session, study, plan, fetcher=_refuse)
         (record,) = await queue.records_for(session, study.id)
         assert record.state == queue.UNRESOLVED
+        assert record.outcome_json is not None
         assert record.outcome_json["outcome"] != "disagree"
         assert record.outcome_json["superseded"]["outcome"] == "disagree"
 

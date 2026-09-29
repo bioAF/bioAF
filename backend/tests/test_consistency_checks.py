@@ -8,6 +8,7 @@ the check, saying so.
 """
 
 import gzip
+from typing import cast
 
 import pytest
 
@@ -141,6 +142,7 @@ class TestEveryClaimWithAnIdentifiedTable:
         assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: "disagree"}
         assert sorted(fetch.urls) == sorted([_BASE + _TABLE_A, _BASE + _TABLE_B])
         up, down = (next(r for r in records if r.comparison_target_id == t.id) for t in targets[:2])
+        assert up.outcome_json is not None and down.outcome_json is not None
         assert (up.outcome_json["rows_passing"], down.outcome_json["rows_passing"]) == (3, 2)
 
     @pytest.mark.asyncio
@@ -162,6 +164,7 @@ class TestEveryClaimWithAnIdentifiedTable:
             await consistency.run_pending(session, study, plan, fetcher=fetch)
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
         assert _outcomes(records) == {targets[0].id: "agree", targets[1].id: "agree", targets[2].id: "unresolved"}
+        assert failed.outcome_json is not None
         assert "could not be retrieved" in failed.outcome_json["reason"]
 
     @pytest.mark.asyncio
@@ -183,6 +186,7 @@ class TestTheLimitsOnChecksBeforeApproval:
         await consistency.run_pending(session, study, plan, fetcher=fetch, limits={"total_bytes": len(blob) + 1})
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
         over = next(r for r in records if r.comparison_target_id == targets[2].id)
+        assert over.outcome_json is not None
         assert over.outcome_json["reason"] == "exceeds bioAF's limit for checks run before approval"
 
     @pytest.mark.asyncio
@@ -192,7 +196,9 @@ class TestTheLimitsOnChecksBeforeApproval:
         fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch, limits={"decompressed_bytes": 10})
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
-        assert {r.outcome_json["reason"] for r in records} == {"exceeds bioAF's limit for checks run before approval"}
+        assert {cast(dict, r.outcome_json)["reason"] for r in records} == {
+            "exceeds bioAF's limit for checks run before approval"
+        }
 
     @pytest.mark.asyncio
     async def test_execution_time(self, session, admin_user):
@@ -201,7 +207,9 @@ class TestTheLimitsOnChecksBeforeApproval:
         fetch = _Fetcher({_BASE + _TABLE_A: _table(3, 2), _BASE + _TABLE_B: _table(4, 1, day=7)})
         await consistency.run_pending(session, study, plan, fetcher=fetch, limits={"seconds": 0.0})
         records = await queue.records_for(session, study.id, kind=queue.AUTHOR_RESULTS)
-        assert {r.outcome_json["reason"] for r in records} == {"exceeds bioAF's limit for checks run before approval"}
+        assert {cast(dict, r.outcome_json)["reason"] for r in records} == {
+            "exceeds bioAF's limit for checks run before approval"
+        }
         assert fetch.urls == []
 
     def test_model_spend(self):
@@ -303,6 +311,7 @@ class TestAResultsSupplement:
         fetch = _Fetcher({})
         await consistency.run_pending(session, study, plan, fetcher=fetch)
         first = next(r for r in await queue.records_for(session, study.id) if r.comparison_target_id == targets[0].id)
+        assert first.outcome_json is not None
         assert (first.state, first.outcome_json["outcome"]) == ("done", "agree")
         assert fetch.urls == []
 

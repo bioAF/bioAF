@@ -13,6 +13,8 @@ set-size claim with the fewest cutoffs, which is the set the others were refined
 
 from __future__ import annotations
 
+from typing import cast
+
 _KINDS = {
     "padj": "padj",
     "fdr": "padj",
@@ -422,7 +424,7 @@ def resolve_analysis_thresholds(claim: dict | None, design: dict | None, contras
         }
     legacy = (claim or {}).get("thresholds") or {}
     if legacy.get("padj") is not None and legacy.get("log2fc") is not None:
-        significance, effect = _legacy_pair(legacy)
+        significance, effect = cast(tuple[dict, dict], _legacy_pair(legacy))
         significance["value"], effect["value"] = float(significance["value"]), float(effect["value"])
         return {
             "significance": significance,
