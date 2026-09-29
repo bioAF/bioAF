@@ -1,4 +1,5 @@
 import logging
+from typing import cast
 from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, or_, select, text
@@ -179,7 +180,7 @@ class FileService:
             text("SELECT file_id, sample_id FROM sample_files WHERE file_id = ANY(:ids)").bindparams(ids=file_ids)
         )
         result: dict[int, list[int]] = {fid: [] for fid in file_ids}
-        for file_id, sample_id in rows.all():
+        for file_id, sample_id in cast("list[tuple[int, int]]", rows.all()):
             result[file_id].append(sample_id)
         return result
 
@@ -212,7 +213,7 @@ class FileService:
         ).all()
         file_sample_ids: dict[int, list[int]] = {fid: [] for fid in file_ids}
         all_sample_ids: set[int] = set()
-        for fid, sid in sample_link_rows:
+        for fid, sid in cast("list[tuple[int, int]]", sample_link_rows):
             file_sample_ids[fid].append(sid)
             all_sample_ids.add(sid)
 

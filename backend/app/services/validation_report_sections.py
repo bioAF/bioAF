@@ -15,6 +15,8 @@ The words are the ones the owner approved in the mock.
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 EXCLUDED_LABEL = "Not scored: technical prerequisites and descriptive checks"
 NO_EXPERIMENT_LABEL = "Not linked to an experiment"
 
@@ -30,7 +32,7 @@ def _unit(key: str, count: int, singular: str, plural: str) -> dict:
 def units(card: dict, *, claims: list[dict], applicability: dict | None) -> list[dict]:
     """What the scorecard counts, each in its own unit: findings are never counted as checks."""
     if (applicability or {}).get("status") == "not_applicable":
-        outside = sum(1 for e in applicability.get("experiments") or [] if not e.get("supported"))
+        outside = sum(1 for e in cast(dict, applicability).get("experiments") or [] if not e.get("supported"))
         return [
             _unit(
                 "experiments_outside_methods",
@@ -326,7 +328,7 @@ _ERROR_REASONS = ("error", "persistence_failed")
 def _diagnostics(summary: dict, checks: list[dict], issues: list[dict]) -> dict:
     from app.services.validation_check_queue import activity_of
 
-    rows = [
+    rows: list[dict[str, Any]] = [
         {
             "check_id": c.get("check_id"),
             "kind": c.get("kind"),

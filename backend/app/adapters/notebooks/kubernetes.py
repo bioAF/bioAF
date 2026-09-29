@@ -14,6 +14,7 @@ import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from kubernetes import client
 
@@ -999,7 +1000,7 @@ class KubernetesNotebookProvider(NotebookProvider):
         if annotations:
             metadata["annotations"] = annotations
 
-        pod_manifest = {
+        pod_manifest: dict[str, Any] = {
             "apiVersion": "v1",
             "kind": "Pod",
             "metadata": metadata,

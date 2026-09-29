@@ -245,6 +245,7 @@ async def test_the_plan_and_each_claim_carry_their_experiment(session, admin_use
         .all()
     )
     assert [t.reported_experiment_id for t in targets] == ["e1", "e2"]
+    assert plan.differential_design_json is not None
     assert plan.differential_design_json["contrasts"][0]["reported_experiment_id"] == "e2"
 
 

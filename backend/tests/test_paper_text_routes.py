@@ -141,6 +141,7 @@ class TestAManuallySuppliedTextCarriesNoSupplementManifest:
 
         found = PaperText(text="t", source=source, supplements=[])
         assert found.supplements_established is False
+        assert found.supplement_limitation is not None
         assert "does not" in found.supplement_limitation
 
     def test_the_record_carries_it_so_no_reader_treats_an_empty_list_as_an_absence(self):

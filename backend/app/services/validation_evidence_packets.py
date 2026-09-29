@@ -466,7 +466,7 @@ def packet_for(
     if selector is None:
         # No selector declared: supply the article's text in document order rather than nothing, and
         # say that the selection was not scoped.
-        kept = passages[:MAX_PACKET_PASSAGES]
+        kept: list[dict] = passages[:MAX_PACKET_PASSAGES]
         rest = passages[MAX_PACKET_PASSAGES:]
         coverage = _coverage(leaf, passages, kept, 0, rest, rest, [], None)
         expansion = rest[:MAX_EXPANSION_PASSAGES]
@@ -549,7 +549,7 @@ def packet_for(
     by_section_only = not any(row[1] for row in ranked) and bool(ranked)
     spare = [row for row in ranked if not row[2]] if candidates else []
 
-    kept: list[dict] = []
+    kept = []
     deferred: list[dict] = []
     spent = 0
     # A row can CARRY another passage's sentence: a design record quotes the legend it read its

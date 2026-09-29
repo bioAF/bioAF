@@ -11,6 +11,8 @@ integer counts, and the bioinformaticians said plainly that a TPM table is a thi
 handed. GSE274331's is one: 37,248 rows, six samples, every column summing to exactly 1e6.
 """
 
+from typing import Any
+
 import pytest
 import pytest_asyncio
 
@@ -20,7 +22,7 @@ from app.models.validation_study import ValidationStudy
 from app.services.reproduction_plan_service import ReproductionPlanService
 from app.services.validation_level3_service import resolve_level3_from_deposit, template_for_value_type
 
-_DESIGN = {
+_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
@@ -170,6 +172,8 @@ async def test_the_deposit_bundle_has_the_same_shape_as_the_pipeline_one(session
 async def test_the_bundle_names_the_deposited_file_and_the_method(session, deposit_study, admin_user):
     plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
     decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+    assert decision.inputs is not None
+    assert deposit_study.evidence_json is not None
     assert decision.inputs["input_file_ids"] == [deposit_study.evidence_json["deposit"]["files"][0]["file_id"]]
     assert decision.inputs["input_files"] == ["GSE274331_TPMs.xlsx"]
     # Recorded so a divergence can be attributed to the METHOD: a limma-trend result compared against
@@ -181,6 +185,7 @@ async def test_the_bundle_names_the_deposited_file_and_the_method(session, depos
 async def test_the_arms_reach_the_template_as_matrix_columns(session, deposit_study, admin_user):
     plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
     decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+    assert decision.inputs is not None
     p = decision.inputs["parameters"]
     assert p["test_samples"] == "H2AS40-KD_1,H2AS40-KD_2,H2AS40-KD_3"
     assert p["reference_samples"] == "Control-KD_1,Control-KD_2,Control-KD_3"
@@ -194,6 +199,7 @@ async def test_the_matrix_id_column_is_passed_through(session, deposit_study, ad
     `id_column` is a property of an nf-core output and cannot speak for a deposit."""
     plan = await ReproductionPlanService.get_plan(session, deposit_study.id, admin_user.organization_id)
     decision = await resolve_level3_from_deposit(session, deposit_study, plan)
+    assert decision.inputs is not None
     assert decision.inputs["parameters"]["id_column"] == ""
 
 
@@ -289,6 +295,7 @@ async def test_the_inspection_step_builds_the_level3_bundle(session, admin_user,
     await ValidationDriverService._handle_inspecting_deposit(session, study, storage_adapter=_S())
 
     assert study.state == "reproducing", study.evidence_json.get("deposit_failed")
+    assert study.evidence_json is not None
     assert "level3" in study.evidence_json, study.evidence_json.get("level3_skipped")
     level3 = study.evidence_json["level3"]
     assert level3["method"] == "limma_trend"

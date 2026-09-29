@@ -115,6 +115,7 @@ class TestCompatibility:
         level3 = {**_LEVEL3, "thresholded_at": {"significance": {"kind": "padj", "value": 0.05}}}
         ok, reason = compatible_with(level3, _predicate(kind="pvalue", value=0.01))
         assert ok is False
+        assert reason is not None
         assert "already filtered" in reason
 
 

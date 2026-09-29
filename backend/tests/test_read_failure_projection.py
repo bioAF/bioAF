@@ -11,6 +11,8 @@ issue and no claims), and every surface renders a matched study as a failed read
 A study carrying explicit extraction provenance is judged by it, never by its old issues.
 """
 
+from typing import Any
+
 import pytest
 import pytest_asyncio
 
@@ -29,7 +31,7 @@ _ABSENCE_BLOCKERS = [
 ]
 
 # Shaped like study 42: classified missing_data on a failed read, with an unresolved inventory.
-_STUDY_42 = {
+_STUDY_42: dict[str, Any] = {
     "study": {"state": "classified", "classification": "missing_data"},
     "evidence": {
         "precompute_checks": {},

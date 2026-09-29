@@ -31,6 +31,7 @@ is honoured: nothing here changes the finding inventory.
 from __future__ import annotations
 
 import uuid
+from typing import cast
 from datetime import datetime, timezone
 
 from app.services import validation_check_queue as queue
@@ -351,7 +352,7 @@ async def preview_recovery(session, study) -> dict:
                 "kind": "restate_outcome",
                 "label": "Restate the outcome under bioAF's applicability rules",
                 "detail": f"The study is classified {restate['from']} because no sequencing accession or supported "
-                f"workflow was found. {found['statement']} {found.get('limitation') or ''} It is restated as "
+                f"workflow was found. {cast(dict, found)['statement']} {cast(dict, found).get('limitation') or ''} It is restated as "
                 f"{restate['to']}; the classification {restate['from']} and its reason are kept in the study's "
                 "history.",
             }

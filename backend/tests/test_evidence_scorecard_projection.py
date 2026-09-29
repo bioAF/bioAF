@@ -294,6 +294,7 @@ class TestTheReproductionStatementSaysOnlyWhatIsEstablished:
             claims=[],
             attempt={"status": "attempted", "executed": ["analysis pipeline run"], "acquired": []},
         )
+        assert card is not None
         assert card["reproduction"]["attempted"] is True
         assert "analysis pipeline run" in card["reproduction"]["label"]
 

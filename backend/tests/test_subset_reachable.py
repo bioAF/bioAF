@@ -61,6 +61,7 @@ def _table_text() -> str:
 class TestTheParentClaimStillFindsItsOwnSentence:
     def test_the_194_claim_is_established_by_the_sentence_that_cites_the_table(self):
         found = list_evidence(_TABLE, _predicate(194))
+        assert found is not None
         assert found["text"].startswith("We identified 194 significantly differentially expressed genes")
         assert found.get("refinement") is None
 
@@ -74,12 +75,14 @@ class TestTheRefinementIsLinkedToTheListItRefines:
 
     def test_the_link_names_the_parent_it_refines(self):
         found = list_evidence(_TABLE, _predicate(88))
+        assert found is not None
         assert "We identified 194" in found["refinement"]["parent_text"]
         assert 194 in found["refinement"]["parent_counts"]
 
     def test_the_refinements_sentence_need_not_cite_the_table(self):
         """The plan's rule: bound the link to the passage that cites the table, not to the sentence."""
         found = list_evidence(_TABLE, _predicate(88))
+        assert found is not None
         assert "Supplemental File" not in found["text"]
 
     def test_a_count_stated_with_no_refinement_between_them_is_not_linked(self):

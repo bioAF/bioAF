@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ TEMPLATES_DIR = Path(__file__).parent.parent.parent.parent / "scripts" / "notebo
 # scripts dir above only exists in a source checkout, not in the deployed container.
 PACKAGE_TEMPLATES_DIR = Path(__file__).parent / "notebook_templates"
 
-BUILTIN_TEMPLATES = [
+BUILTIN_TEMPLATES: list[dict[str, Any]] = [
     {
         "name": "QC & Filtering",
         "description": "Quality control metrics, filtering, and visualization for scRNA-seq data",

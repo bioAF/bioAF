@@ -15,6 +15,8 @@ table, and the `act`/`con` filename convention from GSE157174, which the model s
 when step 2 was run against that deposit on the demo.
 """
 
+from typing import Any
+
 import pytest
 
 from app.services.deposit_metadata_association import (
@@ -177,7 +179,7 @@ def test_a_column_with_no_metadata_anywhere_is_still_returned_unresolved():
 
 # ---- rewriting the design onto the matrix's columns ----
 
-_DESIGN = {
+_DESIGN: dict[str, Any] = {
     "selected_contrast": {"contrast_index": 0, "decided_by": "only_contrast"},
     "contrasts": [
         {
@@ -240,6 +242,7 @@ def test_an_empty_arm_is_a_mismatch_even_when_the_other_arm_resolves():
     ]
     _, status, reason = rewrite_design_to_columns(_DESIGN, associations, contrast_index=0)
     assert status == "mismatch"
+    assert reason is not None
     assert "H2AS40-KD" in reason
 
 
@@ -326,6 +329,7 @@ async def test_the_design_is_rewritten_onto_the_matrix_during_inspection(session
         session, study_with_design, storage_adapter=_FakeStorage({"s3://x/m.tsv": _MATRIX})
     )
     plan = await ReproductionPlanService.get_plan(session, study_with_design.id, admin_user.organization_id)
+    assert plan.differential_design_json is not None
     c = plan.differential_design_json["contrasts"][0]
     assert c["test_samples"] == ["H2AS40-KD_1", "H2AS40-KD_2"]
     assert c["reference_samples"] == ["Control-KD_1", "Control-KD_2"]
@@ -379,6 +383,7 @@ async def test_a_matrix_whose_columns_match_no_arm_holds(session, admin_user):
     )
     # change_7.4 sections 1.1 and 1.4: an empty arm is never retried; it concludes before compute.
     assert study.state == "classified"
+    assert study.evidence_json is not None
     assert "arm" in study.evidence_json["deposit_failed"]["reason"].lower()
 
 
@@ -536,4 +541,5 @@ async def test_the_parameter_builder_receives_the_carried_pairing(session, admin
     )
 
     assert study.state == "reproducing", study.evidence_json.get("deposit_failed")
+    assert study.evidence_json is not None
     assert study.evidence_json["level3"]["parameters"]["block_labels"] == "d1,d2,d1,d2"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from app.services.validation_report_summary import ISSUE_OUTCOME_LABELS, LIMITATION_LABELS, ROLE_LABELS
 
@@ -1996,7 +1996,7 @@ def _append_each_claim(parts: list[str], summary: dict[str, Any]) -> None:
             count = result.get("count") or {}
             lines.append(
                 f"- {result.get('tier')}: {result.get('verdict') or 'no concordance'}"
-                f"{'; ' + count.get('label') + ': ' + count.get('words') if count.get('words') else ''}"
+                f"{'; ' + cast(str, count.get('label')) + ': ' + cast(str, count.get('words')) if count.get('words') else ''}"
             )
         parts.extend(lines)
         parts.append("")

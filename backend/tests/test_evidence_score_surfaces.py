@@ -56,6 +56,7 @@ class TestTheListCellSaysWhatTheReportSays:
 
         card = _summary()["evidence_score"]
         compact = compact_evidence_score(card)
+        assert compact is not None
         assert compact["headline"] == card["headline"]
         assert compact["parts"] == card["parts"]
         assert compact["counts_label"] == card["counts_label"]
@@ -67,6 +68,7 @@ class TestTheListCellSaysWhatTheReportSays:
         from app.services.validation_rubric_v3 import compact_evidence_score
 
         compact = compact_evidence_score(_summary()["evidence_score"])
+        assert compact is not None
         assert {p["key"] for p in compact["parts"]} == {"verified", "untested", "negative"}
         assert "scope" not in compact
 
@@ -124,6 +126,7 @@ class TestTheScoreIsPersistedWithItsProvenance:
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
         await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
+        assert record is not None
         evidence_score = record["evidence_score"]
         assert evidence_score["rubric_version"] == 3
         assert evidence_score["exact"]["verified"]
@@ -142,6 +145,7 @@ class TestTheScoreIsPersistedWithItsProvenance:
         await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
         report = await report_summary_for(session, restored.study, restored.study.organization_id)
+        assert record is not None
         assert record["evidence_score"]["headline"] == report["evidence_score"]["headline"]
 
     @pytest.mark.asyncio
@@ -154,5 +158,6 @@ class TestTheScoreIsPersistedWithItsProvenance:
         restored = await restore(session, 55, organization_id=admin_user.organization_id, user_id=admin_user.id)
         await replay_publish(session, restored)
         record = await compute_scorecard_record(session, restored.study)
+        assert record is not None
         assert record["rubric_version"] != 3
         assert record["evidence_score"]["rubric_version"] == 3

@@ -310,7 +310,7 @@ def bind(
 
     # plan_8_2 section 3.1: a confirmation of a table's columns alone does not say which contrast it reports.
     if confirmation and confirmation.get("reports_contrast", True):
-        evidence = [
+        evidence: list[dict] = [
             {
                 "kind": "confirmation",
                 "confirmed_by": confirmation.get("confirmed_by"),
@@ -336,7 +336,7 @@ def bind(
         any(names_arms(col, c) for col in header) or any(names_arms(p["text"], c) for p in naming) for c in others
     )
 
-    evidence: list[dict] = []
+    evidence = []
     selector = None
     if columns:
         evidence.append({"kind": "columns", "columns": columns})

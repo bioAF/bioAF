@@ -11,6 +11,8 @@
 - No workflow check runs outside an approved set.
 """
 
+from typing import cast
+
 import pytest
 
 from app.services import validation_check_queue as queue
@@ -52,7 +54,8 @@ class TestTheRecord:
         await queue.finish(session, a, state=queue.DONE, outcome={"outcome": "agree"})
         await queue.finish(session, b, state=queue.DONE, outcome={"outcome": "disagree"})
         records = {
-            r.comparison_target_id: r.outcome_json["outcome"] for r in await queue.records_for(session, study.id)
+            r.comparison_target_id: cast(dict, r.outcome_json)["outcome"]
+            for r in await queue.records_for(session, study.id)
         }
         assert records == {targets[0].id: "agree", targets[1].id: "disagree"}
 
@@ -70,6 +73,7 @@ class TestTheRecord:
             _deps(input={"source": "other.txt", "checksum": None}),
         )
         assert (changed.revision, changed.state, changed.outcome_json) == (2, "pending", None)
+        assert changed.history_json is not None
         (previous,) = changed.history_json
         assert previous["revision"] == 1
         assert previous["outcome"] == {"outcome": "agree"}
@@ -100,6 +104,7 @@ class TestAttemptsAndRestart:
         await queue.start(session, record)
         await queue.finish(session, record, state=queue.DONE, outcome={"outcome": "agree"})
         assert [a["outcome"] for a in record.attempts_json] == ["unresolved", "done"]
+        assert record.attempts_json is not None
         assert record.attempts_json[0]["error"] == "404"
         assert all(a["started_at"] and a["finished_at"] for a in record.attempts_json)
 
@@ -110,6 +115,7 @@ class TestAttemptsAndRestart:
         await queue.start(session, record)
         await queue.reconcile(session, study.id, execution_state=lambda ref: None)
         assert record.state == "pending"
+        assert record.attempts_json is not None
         assert record.attempts_json[-1]["outcome"] == "interrupted"
 
     @pytest.mark.asyncio
@@ -122,6 +128,7 @@ class TestAttemptsAndRestart:
         await queue.start(session, record, execution_ref="run:42")
         await queue.reconcile(session, study.id, execution_state=lambda ref: "running" if ref == "run:42" else None)
         assert record.state == "running"
+        assert record.attempts_json is not None
         assert record.attempts_json[-1]["execution_ref"] == "run:42"
 
 
@@ -159,6 +166,7 @@ class TestWorkflowExecution:
         second = await queue.execute(session, record, launch=launch)
         assert first == second == "run:1"
         assert launches == [1]
+        assert record.attempts_json is not None
         assert queue.launch_key("k1", "appr-1") == record.attempts_json[-1]["launch_key"]
 
     @pytest.mark.asyncio
@@ -180,4 +188,5 @@ class TestWorkflowExecution:
         assert await queue.execute(session, a, launch=launch) == "run:7"
         assert await queue.execute(session, b, launch=launch) == "run:7"
         assert launches == [1]
+        assert b.attempts_json is not None
         assert b.attempts_json[-1]["shared_with"] == a.check_id

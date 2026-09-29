@@ -573,7 +573,7 @@ async def _identified_ground_truth(
     significance = predicate.get("significance")
     if not isinstance(significance, dict):
         return None, None, "the selected claim's predicate states no significance cutoff to read the authors' table at"
-    effect = predicate.get("effect") if isinstance(predicate.get("effect"), dict) else {"kind": "none"}
+    effect: dict = predicate.get("effect") if isinstance(predicate.get("effect"), dict) else {"kind": "none"}
     storage = storage_adapter or get_storage_adapter()
     try:
         text = await storage.read_text(table["storage_uri"])

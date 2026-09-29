@@ -595,6 +595,7 @@ class TestTheGroffSpecificsAreRepresented:
 
         study = await _run(session, admin_user, "deposit", "driver")
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        assert plan.differential_design_json is not None
         assert plan.differential_design_json["contrasts"][0]["thresholds"] == {"padj": 0.05, "log2fc": None}
 
     @pytest.mark.asyncio

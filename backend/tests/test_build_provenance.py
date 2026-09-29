@@ -237,4 +237,5 @@ class TestTheEvidenceForAFailedParseSurvives:
             )
         )
         issue = decision.as_issue(impact="degraded")
+        assert issue is not None
         assert "stack trace" not in issue["message"]

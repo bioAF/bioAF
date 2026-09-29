@@ -147,14 +147,18 @@ class TestTheParametersBioafEmits:
     @pytest.mark.asyncio
     async def test_they_name_the_identifier_column_and_its_index(self, session, study, admin_user):
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
-        parameters = (await resolve_level3_from_deposit(session, study, plan)).inputs["parameters"]
+        resolved = await resolve_level3_from_deposit(session, study, plan)
+        assert resolved.inputs is not None
+        parameters = resolved.inputs["parameters"]
         assert parameters["id_column"] == "ENSG"
         assert parameters["id_column_index"] == 3
 
     @pytest.mark.asyncio
     async def test_no_annotation_column_reaches_either_arm(self, session, study, admin_user):
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
-        parameters = (await resolve_level3_from_deposit(session, study, plan)).inputs["parameters"]
+        resolved = await resolve_level3_from_deposit(session, study, plan)
+        assert resolved.inputs is not None
+        parameters = resolved.inputs["parameters"]
         arms = parameters["test_samples"].split(",") + parameters["reference_samples"].split(",")
         assert "GeneType" not in arms
         assert "GeneSymbol" not in arms
@@ -164,7 +168,9 @@ class TestTheParametersBioafEmits:
     @pytest.mark.asyncio
     async def test_applied_to_the_real_file_they_select_gene_ids_and_integer_counts(self, session, study, admin_user):
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
-        parameters = (await resolve_level3_from_deposit(session, study, plan)).inputs["parameters"]
+        resolved = await resolve_level3_from_deposit(session, study, plan)
+        assert resolved.inputs is not None
+        parameters = resolved.inputs["parameters"]
         ids, counts = _select(_matrix(), parameters)
         assert all(i.startswith("ENSG") for i in ids)
         assert len(ids) == 12

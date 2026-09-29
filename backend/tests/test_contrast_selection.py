@@ -74,6 +74,7 @@ class TestTheCall:
         out = await cs.select_contrast(
             _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_C(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] == 2
         assert out["model"] == "m"
         assert out["decided_by"] == "model"
@@ -89,6 +90,7 @@ class TestTheCall:
         out = await cs.select_contrast(
             [_CONTRASTS[0]], pipeline_key="nf-core/rnaseq", assay="RNA-seq", client=_Boom(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] == 0
         assert out["decided_by"] == "only_contrast"
 
@@ -175,6 +177,7 @@ async def test_the_plan_records_the_contrast_this_run_reproduces(session, admin_
     await session.commit()
 
     design = plan.differential_design_json
+    assert design is not None
     assert design["selected_contrast"]["contrast_index"] == 1
     assert design["selected_contrast"]["decided_by"] == "model"
     assert design["selected_contrast"]["reason"]
@@ -206,6 +209,7 @@ async def test_a_run_matching_no_contrast_records_that_too(session, admin_user, 
     )
     await session.commit()
 
+    assert plan.differential_design_json is not None
     sel = plan.differential_design_json["selected_contrast"]
     assert sel["contrast_index"] is None
     assert "no contrast" in sel["reason"]
@@ -313,6 +317,7 @@ class TestEditingTheDesignKeepsTheAttribution:
             },
             selected_contrast_index=1,
         )
+        assert plan.differential_design_json is not None
         sel = plan.differential_design_json["selected_contrast"]
         assert sel["decided_by"] == "model"
         assert sel["model"] == "claude-opus-4-8"
@@ -337,6 +342,7 @@ class TestEditingTheDesignKeepsTheAttribution:
             },
             selected_contrast_index=0,
         )
+        assert plan.differential_design_json is not None
         sel = plan.differential_design_json["selected_contrast"]
         assert sel["decided_by"] == "human"
         assert sel["contrast_index"] == 0
@@ -364,6 +370,7 @@ class TestEditingTheDesignKeepsTheAttribution:
                 "thresholds": {"log2fc": 1.0, "padj": 0.05},
             },
         )
+        assert plan.differential_design_json is not None
         sel = plan.differential_design_json["selected_contrast"]
         assert sel["contrast_index"] == 0
         assert sel["decided_by"] == "human"
@@ -392,6 +399,7 @@ class TestEditingTheDesignKeepsTheAttribution:
             },
             selected_contrast_index=1,
         )
+        assert plan.differential_design_json is not None
         sel = plan.differential_design_json["selected_contrast"]
         assert sel["decided_by"] == "human"
         assert sel["contrast_index"] == 0
@@ -419,6 +427,7 @@ class TestEditingTheDesignKeepsTheAttribution:
             },
             selected_contrast_index=1,
         )
+        assert plan.differential_design_json is not None
         assert plan.differential_design_json["contrasts"][0]["assay"] == "ChIP-seq"
 
     @pytest.mark.asyncio
@@ -451,6 +460,7 @@ class TestEverySelectedContrastIsChecked:
         out = await cs.select_contrast(
             _RNA_ONLY, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_NeverAsk(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] is None
         assert out["outcome"] == "no_compatible_contrast"
         assert "nf-core/chipseq" in out["reason"]
@@ -461,6 +471,7 @@ class TestEverySelectedContrastIsChecked:
         out = await cs.select_contrast(
             both, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_NeverAsk(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] is None
         assert out["outcome"] == "no_compatible_contrast"
 
@@ -477,6 +488,7 @@ class TestEverySelectedContrastIsChecked:
             [{"name": "KO vs WT"}], pipeline_key="nf-core/rnaseq", assay="RNA-seq", client=_C(), model="m", api_key=None
         )
         assert asked
+        assert out is not None
         assert out["contrast_index"] == 0
         assert out["decided_by"] == "model"
 
@@ -489,6 +501,7 @@ class TestEverySelectedContrastIsChecked:
         out = await cs.select_contrast(
             [{"name": "KO vs WT"}], pipeline_key="nf-core/rnaseq", assay="RNA-seq", client=_C(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] is None
         assert out["outcome"] == "no_compatible_contrast"
         assert out["reason"] == "not measured on this run's assay"
@@ -502,6 +515,7 @@ class TestEverySelectedContrastIsChecked:
         out = await cs.select_contrast(
             _CONTRASTS, pipeline_key="nf-core/chipseq", assay="ChIP-seq", client=_C(), model="m", api_key=None
         )
+        assert out is not None
         assert out["contrast_index"] is None
         assert out["outcome"] == "no_compatible_contrast"
 
@@ -516,6 +530,7 @@ class TestEverySelectedContrastIsChecked:
             api_key=None,
             ask=False,
         )
+        assert out is not None
         assert out["outcome"] == "no_compatible_contrast"
 
     @pytest.mark.asyncio
@@ -570,6 +585,7 @@ class TestNothingDownstreamPicksByPosition:
     def test_no_selection_record_selects_nothing(self):
         index, reason = cs.selected_contrast_for({"contrasts": self._TWO}, pipeline_key="nf-core/chipseq")
         assert index is None
+        assert reason is not None
         assert "none was selected" in reason
 
     def test_a_null_selection_selects_nothing_with_the_selector_s_reason(self):
@@ -580,6 +596,7 @@ class TestNothingDownstreamPicksByPosition:
         design = {"contrasts": self._TWO, "selected_contrast": {"contrast_index": 0}}
         index, reason = cs.selected_contrast_for(design, pipeline_key="nf-core/chipseq")
         assert index is None
+        assert reason is not None
         assert "RNA" in reason
 
     def test_an_index_outside_the_list_selects_nothing(self):

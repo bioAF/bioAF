@@ -468,4 +468,5 @@ async def test_a_deposit_of_only_unfiltered_matrices_holds_with_the_reason(sessi
         session, study, fetcher=_bytes_fetcher({}), storage_adapter=_FakeStorage()
     )
     assert study.state == "acquiring_processed"
+    assert study.evidence_json is not None
     assert "cell-calling" in study.evidence_json["deposit_failed"]["reason"]

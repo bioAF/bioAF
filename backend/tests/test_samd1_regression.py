@@ -18,6 +18,7 @@ an accurate cause rather than a retry.
 import json
 import pathlib
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -36,7 +37,7 @@ _P_001 = [{"kind": "pvalue", "operator": "<", "value": 0.01}]
 
 # What a correct reading of the paper returns. The assay words, arms and cutoffs are the paper's; the
 # threshold kind is `pvalue`, which the binding vocabulary could not say before this change.
-_CORRECT_EXTRACTION = {
+_CORRECT_EXTRACTION: dict[str, Any] = {
     "accessions": ["GSE144396"],
     "sample_structure": {"organism": "Mus musculus"},
     "method": {"assay": "ChIP-seq and bulk RNA-seq", "tools": ["DESeq2", "MACS2"], "reference_build": "mm9"},
@@ -317,6 +318,7 @@ class TestStudy37ReplayedOnTheCurrentBuild:
 
         evidence = study.evidence_json
         assert listed == []
+        assert evidence is not None
         assert evidence["deposit_failed"]["cause"] == "no_compatible_contrast"
         assert "acquisition_retry_at" not in evidence
         assert "could not reach" not in (study.failure_reason or "")
@@ -449,6 +451,7 @@ class TestCorrectStructuredInputSurvivesTheRealCode:
         # named in the refusal.
         assert "day 7" not in evidence["deposit_failed"]["reason"]
         plan = await ReproductionPlanService.get_plan(session, study.id, admin_user.organization_id)
+        assert plan.differential_design_json is not None
         assert plan.differential_design_json["selected_contrast"]["contrast_index"] == 0
         _no_default_anywhere(plan.differential_design_json)
 

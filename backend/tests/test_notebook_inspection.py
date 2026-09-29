@@ -25,28 +25,36 @@ _ARCHIVE = (pathlib.Path(__file__).parent / "fixtures" / "granulosa" / "repo_at_
 class TestWhatANotebookIs:
     def test_its_declared_language_is_read_from_its_kernel(self):
         found = read_notebook(_NOTEBOOK)
+        assert found is not None
         assert found["language"] == "python"
         assert found["kernel"]
 
     def test_the_code_cells_are_kept_in_document_order(self):
-        cells = read_notebook(_NOTEBOOK)["cells"]
+        found = read_notebook(_NOTEBOOK)
+        assert found is not None
+        cells = found["cells"]
         assert cells
         assert [c["order"] for c in cells] == sorted(c["order"] for c in cells)
 
     def test_a_cell_keeps_where_it_is(self):
-        cell = read_notebook(_NOTEBOOK)["cells"][0]
+        found = read_notebook(_NOTEBOOK)
+        assert found is not None
+        cell = found["cells"][0]
         assert cell["id"].startswith("cell ")
         assert cell["line"] >= 1
 
     def test_markdown_is_not_source(self):
         found = read_notebook(_NOTEBOOK)
+        assert found is not None
         assert all("import" not in (m or "") or True for m in found["markdown"])
         assert not any(
             c["code"].startswith("#") and "# " == c["code"][:2] and len(c["code"]) < 3 for c in found["cells"]
         )
 
     def test_saved_outputs_are_not_source(self):
-        text = read_notebook(_NOTEBOOK)["text"]
+        found = read_notebook(_NOTEBOOK)
+        assert found is not None
+        text = found["text"]
         assert "output_type" not in text
         assert "execute_result" not in text
 
@@ -64,6 +72,7 @@ class TestWhatANotebookIs:
             }
         ).encode()
         found = read_notebook(notebook)
+        assert found is not None
         assert found["magics"], "the magics are named"
         assert "%matplotlib" not in found["text"], "and are not handed to a Python parser as source"
         assert "import scanpy as sc" in found["text"]
@@ -82,7 +91,9 @@ class TestWhatANotebookIs:
                 "nbformat": 4,
             }
         ).encode()
-        assert "SystemExit" in read_notebook(notebook)["text"]
+        found = read_notebook(notebook)
+        assert found is not None
+        assert "SystemExit" in found["text"]
 
 
 class TestANotebookReachesTheCodeInspection:

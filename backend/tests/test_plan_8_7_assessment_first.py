@@ -65,9 +65,7 @@ class TestItStopsBeforeSpendingAnything:
         study.state = "plan_ready"
         await session.flush()
         approved = []
-        monkeypatch.setattr(
-            ValidationStudyService, "approve_plan", classmethod(lambda *a, **k: approved.append(k) or None)
-        )
+        monkeypatch.setattr(ValidationStudyService, "approve_plan", classmethod(lambda *a, **k: approved.append(k)))
         assessed = []
 
         async def _conclude(session, study, reason, **kw):

@@ -213,6 +213,7 @@ async def test_choosing_another_contrast_at_the_gate_revises_the_selection_and_i
     plan = await ReproductionPlanService.set_differential_design(
         session, study.id, admin_user.organization_id, admin_user.id, edited, selected_contrast_index=1
     )
+    assert plan.analysis_selection_json is not None
     current = plan.analysis_selection_json["current"]
     assert (current["revision"], current["claim_index"], current["contrast_index"]) == (2, 1, 1)
     assert current["decided_by"] == "human"
@@ -233,6 +234,7 @@ async def test_saving_the_selected_contrast_again_is_not_a_new_revision(session,
     plan = await ReproductionPlanService.set_differential_design(
         session, study.id, admin_user.organization_id, admin_user.id, edited, selected_contrast_index=0
     )
+    assert plan.analysis_selection_json is not None
     assert plan.analysis_selection_json["current"]["revision"] == 1
     assert study.evidence_json["level3"] == {"from": "revision 1"}
 
@@ -280,6 +282,7 @@ async def test_a_resumed_ambiguous_legacy_plan_waits_for_a_renewed_selection(ses
     study = await _classified_legacy_study(session, admin_user)
     study = await ValidationStudyService.resume_study(session, study.id, admin_user.organization_id, admin_user.id)
     assert study.state == "plan_ready"
+    assert study.evidence_json is not None
     assert study.evidence_json["awaiting_renewed_selection"]
     assert is_advancing(study) is False
 
@@ -295,7 +298,9 @@ async def test_a_resumed_ambiguous_legacy_plan_waits_for_a_renewed_selection(ses
     plan = await ReproductionPlanService.set_differential_design(
         session, study.id, admin_user.organization_id, admin_user.id, edited, selected_contrast_index=0
     )
+    assert plan.analysis_selection_json is not None
     assert plan.analysis_selection_json["current"]["decided_by"] == "human"
+    assert study.evidence_json is not None
     assert "awaiting_renewed_selection" not in study.evidence_json
 
 

@@ -1170,6 +1170,7 @@ class TestBindingFailureIsNamed:
                 _decision(1, None, "no decision", 0.0, declined=False),
             ]
         )
+        assert blocker is not None
         assert "could not map" in blocker
 
 

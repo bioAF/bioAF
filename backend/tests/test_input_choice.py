@@ -96,6 +96,7 @@ def test_one_matrix_whose_columns_resolve_both_arms_exactly_is_chosen_without_a_
         {"filename": "GSE1_normalized.txt.gz", "header": ["gene", "a", "b"], "rows": []},
     ]
     choice = deterministic_choice(previews, contrast=contrast, sample_records=_RECORDS)
+    assert choice is not None
     assert choice["primary_matrix"] == "GSE1_counts.txt.gz"
     arms = {row["column"]: row["arm"] for row in choice["mapping"]}
     assert arms == {"GSM1": "reference", "GSM2": "reference", "GSM3": "test", "GSM4": "test"}
@@ -272,6 +273,7 @@ async def test_the_model_proposes_the_file_the_mapping_and_the_authors_table_tog
     assert choice["decided_by"] == "model"
     # The decision saw the claim, the predicate, the sample records and the previews.
     for seen in ("257 genes were up", "P < 0.01", "clone: Cl16", "KO Cl5 repl1", "log2FoldChange"):
+        assert client.payload is not None
         assert seen in client.payload
     assert len(choice["previews"]) <= PREVIEW_FILES
 

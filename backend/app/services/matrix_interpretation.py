@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import math
 import re
+from typing import cast
 
 INTERPRETATION_VERSION = 1
 
@@ -350,9 +351,9 @@ def interpret_matrix(
 
     ids = cells[feature_index]
     seen: dict[str, int] = {}
-    for value in ids:
-        if value != "":
-            seen[value] = seen.get(value, 0) + 1
+    for identifier in ids:
+        if identifier != "":
+            seen[identifier] = seen.get(identifier, 0) + 1
     duplicates = sorted(v for v, n in seen.items() if n > 1)
     blanks = sum(1 for v in ids if v == "")
 
@@ -367,7 +368,7 @@ def interpret_matrix(
         total = 0.0
         observations = 0
         for r, raw in enumerate(cells[i]):
-            kind, value = _cell(raw)
+            kind, value = cast("tuple[str, float]", _cell(raw))
             if kind == CELL_MISSING:
                 missing += 1
                 continue

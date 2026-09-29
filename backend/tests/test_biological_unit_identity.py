@@ -84,6 +84,7 @@ class TestAGenericUnitTypeIsNotAnIdentity:
         design = {"contrasts": [{**_contrast(), "test_samples": [], "reference_samples": []}]}
         rewritten, status, reason = design_from_mapping(design, _saved_proposal(), contrast_index=0)
         assert status == "unresolved_identity"
+        assert reason is not None
         assert "which culture" in reason or "identity" in reason
         assert "technical replicates" not in reason
 
@@ -126,6 +127,7 @@ class TestWhatAnAccessionEstablishes:
         }
         rewritten, status, reason = design_from_mapping(design, mapping, contrast_index=0)
         assert status == "pairing_lost"
+        assert reason is not None
         assert "paired" in reason
 
 

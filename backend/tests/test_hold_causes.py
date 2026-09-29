@@ -13,6 +13,7 @@ reached the record, whether it was retried, and the limitation it concluded with
 import gzip
 import json
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -47,7 +48,7 @@ _UNPLACEABLE_LISTING = """<html><body>
 <a href="GSE1_supplement_B.txt.gz">GSE1_supplement_B.txt.gz</a>
 </body></html>"""
 
-_DESIGN = {
+_DESIGN: dict[str, Any] = {
     "contrasts": [
         {
             "name": "KO vs WT",
@@ -75,6 +76,7 @@ def _bytes_fetcher(pages: dict | None = None, *, raise_for=None):
             raise raise_for
         if url not in (pages or {}):
             raise _status_error(404, url)
+        assert pages is not None
         return pages[url]
 
     return fetch
@@ -558,6 +560,7 @@ class TestAResumedStudyReDerivesItsCause:
             session, study.id, admin_user.organization_id, admin_user.id
         )
 
+        assert resumed.evidence_json is not None
         assert "deposit_unusable" not in resumed.evidence_json
         assert "deposit_failed" not in resumed.evidence_json
         assert "deposit_selection" not in resumed.evidence_json

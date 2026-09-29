@@ -10,6 +10,8 @@ complete, what that would be worth, and which prerequisites are still open. Rank
 result, and a claim that names more genes does not outrank one that finishes a finding.
 """
 
+from typing import Any
+
 import pytest
 
 from app.services.validation_coverage import (
@@ -401,7 +403,7 @@ class TestAReselectionRebuildsEverythingThatDependsOnTheChoice:
 
     # Two experiments that share nothing a run cares about: a sequencing assay with a workflow and a
     # reference, and a protein assay bioAF cannot execute.
-    _EXPERIMENTS = [
+    _EXPERIMENTS: list[dict[str, Any]] = [
         {
             "id": "e1",
             "assay": "bulk RNA-seq",
@@ -410,7 +412,7 @@ class TestAReselectionRebuildsEverythingThatDependsOnTheChoice:
         },
         {"id": "e2", "assay": "western blotting", "workflow": None, "reference": {}},
     ]
-    _CONTRASTS = [
+    _CONTRASTS: list[dict[str, Any]] = [
         {
             "name": "stiff vs soft (RNA)",
             "reported_experiment_id": "e1",

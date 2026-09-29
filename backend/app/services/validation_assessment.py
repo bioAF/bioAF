@@ -574,7 +574,7 @@ def _accessibility_from(answer: dict | None) -> dict:
     return {"accessible": answer.get("accessible"), "accessible_reason": answer.get("reason")}
 
 
-async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) -> None:
+async def reconcile_plan(session: AsyncSession, study, supplements: list[dict]) -> dict:
     """Re-interpret the plan against what the supplements turned out to hold. Never raises."""
     from app.services.validation_reconciliation import not_performed, reconcile
 

@@ -54,16 +54,19 @@ def _source(outcome, table="t.txt", version_status=None, **extra):
 class TestEachClaimsStatus:
     def test_an_independent_discrepancy_governs_over_an_agreeing_table_and_the_agreement_is_a_concern(self):
         governed = govern_claim(0, [_independent(DISCREPANCY)], [_source("agree")])
+        assert governed is not None
         assert (governed["status"], governed["depth"]) == (DISCREPANCY, INDEPENDENT)
         assert any("the authors' table agrees with the paper" in c["text"] for c in governed["concerns"])
 
     def test_an_independent_success_with_a_failed_consistency_check_stays_supported_with_the_concern(self):
         governed = govern_claim(0, [_independent(SUPPORTED)], [_source("disagree")])
+        assert governed is not None
         assert (governed["status"], governed["depth"]) == (SUPPORTED, INDEPENDENT)
         assert any(c["text"] == "the paper's text disagrees with its own table" for c in governed["concerns"])
 
     def test_conflicting_comparable_independent_assessments_leave_the_claim_inconclusive(self):
         governed = govern_claim(0, [_independent(SUPPORTED), _independent(DISCREPANCY)], [])
+        assert governed is not None
         assert governed["status"] == INCONCLUSIVE
         assert governed["reason"] == "independent assessments disagree; not reconciled"
 
@@ -73,6 +76,7 @@ class TestEachClaimsStatus:
             [_source("disagree", "b.txt"), _source("agree", "a.txt")],
         ):
             governed = govern_claim(0, [], sources)
+            assert governed is not None
             assert governed["status"] == INCONCLUSIVE
             assert governed["reason"] == "author-result sources disagree; not reconciled"
             assert governed["depth"] is None
@@ -82,6 +86,7 @@ class TestEachClaimsStatus:
         governed = govern_claim(
             0, [], [_source("disagree", "original.txt", "superseded"), _source("agree", "corrected.txt", "corrected")]
         )
+        assert governed is not None
         assert (governed["status"], governed["depth"]) == (SUPPORTED, CONSISTENCY)
         authority = governed["authority"]
         assert authority["governing"] == ["corrected.txt"]
@@ -90,11 +95,13 @@ class TestEachClaimsStatus:
 
     def test_an_independent_assessment_governs_despite_conflicting_sources_and_the_conflict_is_a_concern(self):
         governed = govern_claim(0, [_independent(SUPPORTED)], [_source("agree", "a.txt"), _source("disagree", "b.txt")])
+        assert governed is not None
         assert (governed["status"], governed["depth"]) == (SUPPORTED, INDEPENDENT)
         assert any(c["text"] == "author-result sources disagree; not reconciled" for c in governed["concerns"])
 
     def test_consistency_governs_at_consistency_depth_without_an_independent_assessment(self):
         governed = govern_claim(0, [], [_source("agree")])
+        assert governed is not None
         assert (governed["status"], governed["depth"], governed["method"]) == (SUPPORTED, CONSISTENCY, "author_results")
 
     def test_an_unresolved_source_is_not_an_assessment(self):

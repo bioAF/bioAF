@@ -67,6 +67,7 @@ class TestTheExplanationComesFromEvidence:
 
     def test_the_refusal_names_the_real_obstacle(self):
         reason = _route_unavailable_reason("pipeline", _EGA_CAPS)
+        assert reason is not None
         assert "controlled" in reason.lower()
         assert "EGAS00001003667" in reason or "EGA" in reason
 

@@ -66,6 +66,7 @@ class TestTheIdentityExistsBeforeTheDispatch:
         study = await _study(session, admin_user)
         await ValidationDriverService._launch_fetchngs(session, study)
         record = own.operation_of(study, "data_acquisition")
+        assert record is not None
         assert record["status"] == own.OP_RUNNING
         assert record["external_id"] == study.data_run_id
 
@@ -95,7 +96,9 @@ class TestARestartAdoptsRatherThanRelaunches:
         await ValidationDriverService._launch_fetchngs(session, study)
 
         assert spy.calls == []
-        assert own.operation_of(study, "data_acquisition")["adopted_by"] == "driver"
+        adopted = own.operation_of(study, "data_acquisition")
+        assert adopted is not None
+        assert adopted["adopted_by"] == "driver"
 
     @pytest.mark.asyncio
     async def test_an_assisted_organization_is_asked_first(self, session, admin_user, monkeypatch):
@@ -172,5 +175,6 @@ class TestOneSiblingPerAuthorization:
         await session.flush()
         sibling = await ValidationStudyService._spawn_sibling(session, study, admin_user.id)
         assert sibling.id != study.id
+        assert sibling.evidence_json is not None
         assert sibling.evidence_json["route"] == "pipeline"
         assert sibling.state == "acquiring_data"

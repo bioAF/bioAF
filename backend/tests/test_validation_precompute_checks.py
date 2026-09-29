@@ -460,6 +460,7 @@ class TestTheReadGivesEveryConsumerWhatItKnows:
             session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
         )
         await ValidationDriverService.read_and_plan(session, study, text, admin_user.organization_id, admin_user.id)
+        assert study.evidence_json is not None
         check = study.evidence_json["precompute_checks"]["sample_data_matches_paper"]
         assert "no deposited files were listed" not in check["detail"]
         assert "EGAS00001003667" in check["detail"]
@@ -475,6 +476,7 @@ class TestTheReadGivesEveryConsumerWhatItKnows:
             session, admin_user.organization_id, admin_user.id, source_doi="10.1101/gr.252981.119"
         )
         await ValidationDriverService.read_and_plan(session, study, text, admin_user.organization_id, admin_user.id)
+        assert study.evidence_json is not None
         passages = study.evidence_json["paper_passages"]
         assert "three TE biopsies were excluded" in passages["claims"][0]["passage"]
         assert any("excluded for failing to pass quality control" in s for s in passages["statements"])

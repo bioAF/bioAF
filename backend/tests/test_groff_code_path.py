@@ -46,7 +46,7 @@ class TestTheDocumentIsReadBackIntoItsChunks:
         provenance = inspected["sources"][0]["provenance"]
         assert provenance["container"] == "AllRCode.docx"
         assert provenance["sha256"]
-        assert "word-processed" in provenance["extracted"]
+        assert provenance["extracted"] == "r markdown chunks"
 
 
 class TestWhatTheCodeSectionEstablishesForThisPaper:

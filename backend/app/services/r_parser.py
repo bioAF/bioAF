@@ -21,6 +21,7 @@ Its refusals are graded, because a parser is also capable of being wrong:
 from __future__ import annotations
 
 import re
+from typing import Any
 
 PARSER = "bioAF R parser"
 PARSER_VERSION = 1
@@ -616,7 +617,7 @@ def read_r(source: str) -> dict:
     ``runs`` is whether the source does work when it is run, rather than only defining functions.
     ``dynamic`` is set where a package is named by a variable, which no reading of the text can resolve.
     """
-    found = {
+    found: dict[str, Any] = {
         "packages": [],
         "namespaced": [],
         "sourced": [],
