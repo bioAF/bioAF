@@ -165,5 +165,7 @@ class TestSharingAPassageIsWorthReadingNotDeciding:
 
     def test_relatedness_is_shared_evidence_or_a_shared_named_scope(self):
         assert related(_verified(["p1"]), _failed(["p1"], scope="x")) is True
-        assert related(_verified(["p1"], scope="the GO enrichment step"), _failed(["p9"], scope="the GO enrichment step"))
+        assert related(
+            _verified(["p1"], scope="the GO enrichment step"), _failed(["p9"], scope="the GO enrichment step")
+        )
         assert related(_verified(["p1"]), _failed(["p9"], scope="x")) is False

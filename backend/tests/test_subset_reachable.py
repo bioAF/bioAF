@@ -279,4 +279,6 @@ class TestTheReportSaysWhichReadingIsUnresolved:
         of one that does not exist."""
         from app.services.validation_report_summary import _consistency_row
 
-        assert _consistency_row({"outcome": "unresolved", "reason": "the table has no header"})["filter_semantics"] is None
+        assert (
+            _consistency_row({"outcome": "unresolved", "reason": "the table has no header"})["filter_semantics"] is None
+        )

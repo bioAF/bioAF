@@ -214,7 +214,14 @@ class TestTheDisplayedNumbersStillAddUp:
         from app.services.validation_rubric_v3 import display
 
         leaves = [
-            {"id": "a", "criterion": "C1", "section": "C", "obligation": "A", "unit": None, "weight": Fraction(9999, 100)},
+            {
+                "id": "a",
+                "criterion": "C1",
+                "section": "C",
+                "obligation": "A",
+                "unit": None,
+                "weight": Fraction(9999, 100),
+            },
             {"id": "b", "criterion": "C1", "section": "C", "obligation": "B", "unit": None, "weight": Fraction(1, 100)},
         ]
         shown = display(score(leaves, {"a": {"outcome": VERIFIED}}))

@@ -207,23 +207,17 @@ class TestASectionExpandsIntoItsCriteria:
         assert row["verified"] == 1.5 and row["failed"] == 1.5
 
     def test_each_obligation_states_what_it_required_and_what_was_found(self):
-        obligation = next(
-            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A"
-        )
+        obligation = next(o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A")
         assert obligation["statement"]
         assert obligation["rationale"]
 
     def test_an_open_obligation_carries_its_next_action(self):
-        obligation = next(
-            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S3.B"
-        )
+        obligation = next(o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S3.B")
         assert obligation["outcome"] == "undetermined"
         assert obligation["next_action"]
 
     def test_how_an_obligation_was_assessed_is_labelled(self):
-        obligation = next(
-            o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A"
-        )
+        obligation = next(o for r in self._section("S")["criteria"] for o in r["obligations"] if o["leaf"] == "S1.A")
         assert obligation["method"] == "measurement"
         assert obligation["method_label"] == "Measured"
 
@@ -240,18 +234,21 @@ class TestASectionExpandsIntoItsCriteria:
         }
         card = evidence_card(profile=default_profile(), leaves=allocate(default_profile()), assessed=assessed)
         obligation = next(
-            o
-            for s in card["sections"]
-            for r in s["criteria"]
-            for o in r["obligations"]
-            if o["leaf"] == "E1.B"
+            o for s in card["sections"] for r in s["criteria"] for o in r["obligations"] if o["leaf"] == "E1.B"
         )
         assert obligation["method_label"] == "Reviewed by a model"
 
     def test_a_human_assisted_judgment_is_labelled_distinctly(self):
         from app.services.validation_rubric_v3 import allocate, default_profile, evidence_card
 
-        assessed = {"S5.B": {"outcome": "verified", "rationale": "a person recorded the units", "scope": "4 columns", "method": "human_assisted"}}
+        assessed = {
+            "S5.B": {
+                "outcome": "verified",
+                "rationale": "a person recorded the units",
+                "scope": "4 columns",
+                "method": "human_assisted",
+            }
+        }
         card = evidence_card(profile=default_profile(), leaves=allocate(default_profile()), assessed=assessed)
         obligation = next(
             o for s in card["sections"] for r in s["criteria"] for o in r["obligations"] if o["leaf"] == "S5.B"
@@ -275,9 +272,7 @@ class TestTheReproductionStatementSaysOnlyWhatIsEstablished:
 
     def test_a_deposits_contents_never_become_a_reason_nothing_ran(self):
         evidence = {
-            "capabilities": {
-                "raw_data": {"value": "yes", "evidence": "EGA lists 108 fastq.gz files for this dataset"}
-            }
+            "capabilities": {"raw_data": {"value": "yes", "evidence": "EGA lists 108 fastq.gz files for this dataset"}}
         }
         card = _summary(evidence=evidence)["evidence_score"]
         assert "fastq" not in card["reproduction"]["label"]
@@ -361,10 +356,7 @@ class TestASectionsNumbersAreShownTheWayTheHeadlineIs:
     }
 
     def _sections(self):
-        targets = [
-            {"id": n, "claim_text": f"claim {n}", "contrast_index": 0, "claimed_value": n}
-            for n in range(1, 8)
-        ]
+        targets = [{"id": n, "claim_text": f"claim {n}", "contrast_index": 0, "claimed_value": n} for n in range(1, 8)]
         plan = {**_PLAN, "finding_inventory": self._INVENTORY}
         card = _summary(plan=plan, targets=targets)["evidence_score"]
         return {s["section"]: s for s in card["sections"]}

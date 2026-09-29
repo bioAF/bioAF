@@ -304,31 +304,31 @@ async def _contract() -> dict:
     return _without_times(
         json.loads(
             json.dumps(
-            {
-                "enums": enum_labels(),
-                "outside_methods": outside_methods,
-                "scorecard_checks_under_way": under_way,
-                "scorecard_samd1_v2": samd1_v2,
-                "stage2_selection": stage2,
-                "groff_failed": groff,
-                "study_34_legacy": legacy,
-                "attempted_no_verdict": attempted,
-                "mapping_unresolved": mapping_unresolved,
-                "reference_unavailable": reference_unavailable,
-                "scorecard_scored": scored_example(),
-                "scorecard_long": long_example(),
-                "scorecard_groff": groff_scored,
-                "scorecard_samd1": samd1,
-                "scorecard_not_established": not_established,
-                "scorecard_not_applicable": not_applicable,
-                "scorecard_in_progress": in_progress,
-                "scorecard_provisional": provisional,
-                "scorecard_pending": pending,
-                "scorecard_inventory_failed": inventory_failed,
-                "scorecard_score_pending": score_pending,
-                "failed_read_legacy": failed_read_legacy,
-                "failed_read": failed_read,
-            }
+                {
+                    "enums": enum_labels(),
+                    "outside_methods": outside_methods,
+                    "scorecard_checks_under_way": under_way,
+                    "scorecard_samd1_v2": samd1_v2,
+                    "stage2_selection": stage2,
+                    "groff_failed": groff,
+                    "study_34_legacy": legacy,
+                    "attempted_no_verdict": attempted,
+                    "mapping_unresolved": mapping_unresolved,
+                    "reference_unavailable": reference_unavailable,
+                    "scorecard_scored": scored_example(),
+                    "scorecard_long": long_example(),
+                    "scorecard_groff": groff_scored,
+                    "scorecard_samd1": samd1,
+                    "scorecard_not_established": not_established,
+                    "scorecard_not_applicable": not_applicable,
+                    "scorecard_in_progress": in_progress,
+                    "scorecard_provisional": provisional,
+                    "scorecard_pending": pending,
+                    "scorecard_inventory_failed": inventory_failed,
+                    "scorecard_score_pending": score_pending,
+                    "failed_read_legacy": failed_read_legacy,
+                    "failed_read": failed_read,
+                }
             )
         )
     )

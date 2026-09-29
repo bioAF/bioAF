@@ -60,7 +60,9 @@ class TestWhatDoesNot:
         """Groff's code is a .docx. Extracting compilable source from a word-processed document, with
         its file boundaries, is not something bioAF does, and guessing would make up a file that was
         never supplied."""
-        found = inspect_code([_supplement("AllRCode_Review.docx")], bytes_for={"AllRCode_Review.docx": b"PK\x03\x04junk"})
+        found = inspect_code(
+            [_supplement("AllRCode_Review.docx")], bytes_for={"AllRCode_Review.docx": b"PK\x03\x04junk"}
+        )
         assert found["sources"] == []
         (row,) = found["unreadable"]
         assert row["path"] == "AllRCode_Review.docx"

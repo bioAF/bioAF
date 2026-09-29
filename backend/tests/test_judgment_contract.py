@@ -80,7 +80,9 @@ class TestTheAnswerIsCheckedAgainstWhatWasSupplied:
     def test_a_grounded_unmet_judgment_fails_it_with_its_impact(self):
         found = judgment_from(
             "E1.B",
-            self._answer(outcome="unmet", rationale="no fixation time is stated anywhere", impact="it cannot be repeated"),
+            self._answer(
+                outcome="unmet", rationale="no fixation time is stated anywhere", impact="it cannot be repeated"
+            ),
             passages=_PASSAGES,
         )
         assert found["outcome"] == FAILED

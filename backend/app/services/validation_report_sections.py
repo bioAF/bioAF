@@ -163,7 +163,11 @@ def _findings(card: dict, claims: list[dict], experiments: list[dict], applicabi
         summary = " ".join(p for p in (applicability.get("limitation"), applicability.get("statement")) if p)
     elif card.get("total_count") is None:
         # The scorecard above says why; the section does not repeat it.
-        summary = "The findings are being established." if card.get("status") == "pending" else "The findings are not established."
+        summary = (
+            "The findings are being established."
+            if card.get("status") == "pending"
+            else "The findings are not established."
+        )
     else:
         total, assessed = card["total_count"], card.get("assessed_count") or 0
         summary = f"{_n(total, 'finding')} scored, {assessed} assessed."

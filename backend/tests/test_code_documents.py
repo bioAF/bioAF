@@ -65,7 +65,7 @@ class TestTheChunksAreKeptAsChunks:
         assert len(documents[0]["chunks"]) == 2
 
     def test_a_chunk_that_never_closes_is_recorded_rather_than_swallowed(self):
-        documents = rmarkdown_documents('```{r open}\nx <- 1\n')
+        documents = rmarkdown_documents("```{r open}\nx <- 1\n")
         chunk = documents[0]["chunks"][0]
         assert chunk["unterminated"] is True
         assert chunk["code"] == "x <- 1"

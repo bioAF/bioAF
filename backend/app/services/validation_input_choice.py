@@ -460,7 +460,7 @@ def validate_mapping(
                 found = condition_match(wanted, record["record"], sample_records)
                 if found["status"] == CONTRADICTED:
                     reasons.append(
-                        f"column {column} is put in the {arm} arm, whose condition is \"{wanted}\", and the "
+                        f'column {column} is put in the {arm} arm, whose condition is "{wanted}", and the '
                         f'{found["attribute"]} its sample record states is "{found["stated"]}"'
                     )
                 elif found["status"] == ATTRIBUTE_UNRESOLVED:
@@ -468,7 +468,7 @@ def validate_mapping(
                         f"column {column} is put in the {arm} arm, and bioAF cannot establish that its sample "
                         f'record states the arm\'s condition ("{wanted}"): '
                         + (
-                            f'it states no {found["attribute"]}'
+                            f"it states no {found['attribute']}"
                             if found["attribute"]
                             else "no attribute its records state carries that condition"
                         )

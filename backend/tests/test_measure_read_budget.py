@@ -43,9 +43,7 @@ class TestTheRecord:
         assert record["chosen_budget"] == 16000
 
     def test_the_budget_never_exceeds_the_models_maximum(self):
-        record = measure.record_from(
-            budget.EXTRACTION, [_row("a", 15000)], model="gpt-4o", fingerprint="f", date="d"
-        )
+        record = measure.record_from(budget.EXTRACTION, [_row("a", 15000)], model="gpt-4o", fingerprint="f", date="d")
         assert record["chosen_budget"] == budget.model_output_limit("gpt-4o")
 
     def test_a_cut_off_answer_sets_nothing(self):
@@ -68,9 +66,7 @@ _INVENTORY = (
     '```json\n{"findings": [{"description": "d", "claim_indices": [0], "importance": "primary", '
     '"rationale": "r", "quote": "q"}]}\n```'
 )
-_BINDING = (
-    '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "no metric measures it"}]}\n```'
-)
+_BINDING = '```json\n{"bindings": [{"claim_index": 0, "bound_key": null, "reason": "no metric measures it"}]}\n```'
 
 
 class _Client:
