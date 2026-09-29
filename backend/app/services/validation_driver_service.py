@@ -253,6 +253,10 @@ def _driver_owns(study: "ValidationStudy") -> bool:
     `reading` when its worker stopped mid-read (a live worker holds the claim), and the next tick resumes
     its cycle without granting another attempt.
     """
+    if study.state not in ("cancelled", "error") and ((study.evidence_json or {}).get("code_followup") or {}).get(
+        "pending"
+    ):
+        return True
     if study.state in _ACTIVE_BACK_HALF_STATES or study.state in _RESUMABLE_READ_STATES:
         return True
     return study.state in _SELF_DRIVING_FRONT_HALF_STATES and study.intended_route is not None
@@ -1339,6 +1343,10 @@ class ValidationDriverService:
                 await session.execute(
                     select(ValidationStudy.id).where(
                         or_(
+                            and_(
+                                ValidationStudy.evidence_json["code_followup"]["pending"].astext == "true",
+                                ValidationStudy.state.not_in(("cancelled", "error")),
+                            ),
                             ValidationStudy.state.in_(_ACTIVE_BACK_HALF_STATES),
                             ValidationStudy.state.in_(_RESUMABLE_READ_STATES),
                             # Self-driving front half: the route was chosen at the button, so the read
@@ -1389,8 +1397,27 @@ class ValidationDriverService:
         # existed.
         record_stage(study, study.state)
 
+        if ((study.evidence_json or {}).get("code_followup") or {}).get("pending"):
+            from app.services.validation_code_followup import advance_code_followups
+            from app.services.validation_assessment import active_plan, publish_assessment
+            from app.services.validation_report_summary import plan_projection
+
+            plan = await active_plan(session, study)
+            before = (study.evidence_json or {}).get("code_followup") or {}
+            settled_before = sum(r.get("status") == "settled" for r in before.get("followups") or [])
+            advanced = await advance_code_followups(
+                session, study, plan=plan_projection(plan) if plan else {}, claim=claim
+            )
+            if sum(r.get("status") == "settled" for r in advanced.get("followups") or []) > settled_before:
+                from app.services.validation_assessment import refresh_after_execution
+
+                await refresh_after_execution(session, study)
+            await publish_assessment(session, study, reason="an author-code attempt advanced")
+            if study.state == "classified":
+                return True
+
         if study.state in _ASSESSMENT_STATES and not (study.evidence_json or {}).get("assessment"):
-            await run_assessment(session, study)
+            await run_assessment(session, study, claim=claim)
             return True
 
         handlers = {
@@ -1411,7 +1438,7 @@ class ValidationDriverService:
             return False
         # The steps that take this tick's claim: the read races two writers, and the two launches
         # dispatch external work that a database fence cannot recall.
-        if study.state in ("requested", "reading", "acquiring_data", "setup"):
+        if study.state in ("requested", "reading", "acquiring_data", "setup", "reproducing"):
             advanced = await handler(session, study, claim=claim)
         else:
             advanced = await handler(session, study)
@@ -2885,7 +2912,7 @@ class ValidationDriverService:
         return True
 
     @staticmethod
-    async def _handle_reproducing(session: AsyncSession, study: ValidationStudy) -> bool:
+    async def _handle_reproducing(session: AsyncSession, study: ValidationStudy, *, claim=None) -> bool:
         """C3 (ADR-069): reproduce the paper's finding and score concordance (E6).
 
         Launch the headless differential-analysis notebook (G1) that reproduces the finding from the
@@ -2894,6 +2921,38 @@ class ValidationDriverService:
         straight through to comparing (Level-2 only)."""
         evidence = dict(study.evidence_json or {})
         level3 = evidence.get("level3")
+        followup = evidence.get("code_followup") or {}
+        if followup.get("version") == 1 and followup.get("followups"):
+            from app.services.validation_assessment import schedule_code_followup
+            from app.services.validation_check_queue import fingerprint
+            from app.services.validation_decision_budgets import AssessmentBudget
+
+            # Acquired inputs arrive after documentary assessment. Rebind once to these inputs,
+            # retaining the earlier bounded invocation as evidence and avoiding the legacy arm.
+            input_revision = fingerprint(level3 or {})
+            if not followup.get("pending") and followup.get("input_revision") != input_revision:
+
+                async def checkpoint(record):
+                    study.evidence_json = {**(study.evidence_json or {}), "assessment_budget": record}
+                    await session.commit()
+
+                budget = AssessmentBudget(saved=evidence.get("assessment_budget"), checkpoint=checkpoint)
+                with budget.activate():
+                    refreshed = await schedule_code_followup(session, study, claim=claim)
+                refreshed["input_revision"] = input_revision
+                study.evidence_json = {
+                    **(study.evidence_json or {}),
+                    "code_followup": refreshed,
+                    "assessment_budget": budget.record(),
+                }
+                await session.flush()
+                return True
+            if followup.get("pending"):
+                return False
+            await ValidationStudyService.transition(
+                session, study.id, study.organization_id, study.requested_by_user_id, "comparing"
+            )
+            return True
         # plan_7 step 18: a study bioAF could not wire a template for is exactly the study the
         # generated arm exists for, so the early return to `comparing` cannot come before the
         # ladder. Study 26 is the shape: a confirmed finding, no route from bioAF's own wiring to

@@ -626,6 +626,10 @@ export interface ReportArea {
 
 /** One published implementation, its revision, and the attempt or the prerequisite that blocks it. */
 export interface CodeFollowup {
+  status?: "running" | "settled" | "blocked";
+  session_id?: number;
+  operation_id?: string;
+  outcome?: { status: string; reproduced?: boolean; reason?: string };
   unit: string;
   paths?: string[];
   language?: string | null;

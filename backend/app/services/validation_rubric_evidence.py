@@ -178,6 +178,9 @@ def _code_by_unit(evidence: dict, definitions: dict) -> dict[str, dict]:
         own = [s for s in sources if str(s.get("path") or "") in paths]
         if not own:
             continue
+        from app.services.validation_code_followup import current_execution
+
+        execution = current_execution(inspection, unit_id, own)
         found[unit_id] = assess_code(
             sources=own,
             manifests=(inspection or {}).get("manifests"),
@@ -185,7 +188,7 @@ def _code_by_unit(evidence: dict, definitions: dict) -> dict[str, dict]:
             # ONE unit's recorded run. plan_8_7 section 3: "running one script does not establish that
             # all supplied code works", so a run recorded against the study as a whole is not evidence
             # about this implementation, and C1.B/C2.B stay open for a unit nothing ran.
-            execution=((inspection or {}).get("execution_by_unit") or {}).get(unit_id),
+            execution=execution,
         )
     return found
 
@@ -194,7 +197,15 @@ def _judgments_of(evidence: dict) -> dict:
     held = evidence.get("rubric_judgments")
     judgments = (held or {}).get("judgments") if isinstance(held, dict) else None
     return (
-        {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict)} if isinstance(judgments, dict) else {}
+        {leaf: j for leaf, j in (judgments or {}).items() if isinstance(j, dict) and _current_sample_judgment(leaf, j)}
+        if isinstance(judgments, dict)
+        else {}
+    )
+
+
+def _current_sample_judgment(leaf: str, judgment: dict) -> bool:
+    return str(leaf).partition("#")[0] not in ("S1.B", "S4.B") or (
+        judgment.get("outcome") == UNDETERMINED or bool(judgment.get("sample_scope"))
     )
 
 
@@ -213,6 +224,8 @@ def _with_judgments(assessed: dict, evidence: dict) -> dict:
     merged = dict(assessed)
     for leaf_id, judgment in judgments.items():
         if not isinstance(judgment, dict) or judgment.get("outcome") not in (VERIFIED, FAILED, UNDETERMINED):
+            continue
+        if not _current_sample_judgment(leaf_id, judgment):
             continue
         settled = merged.get(leaf_id) or {}
         if settled.get("outcome") in (VERIFIED, FAILED):
@@ -239,11 +252,20 @@ def _code(evidence: dict) -> dict:
     inspection = evidence.get("code_inspection") or {}
     if not isinstance(inspection, dict):
         return {}
+    sources = inspection.get("sources") or []
+    execution = inspection.get("execution")
+    if execution and execution.get("load"):
+        # This paper-wide record was produced by the package checker, including before it recorded scope.
+        execution = {**execution, "load": {**execution["load"], "scope": "dependency_environment_only"}}
+    if len(sources) == 1 and inspection.get("execution_by_unit"):
+        from app.services.validation_code_followup import current_execution
+
+        execution = current_execution(inspection, f"code:{sources[0].get('path')}", sources)
     return assess_code(
-        sources=inspection.get("sources"),
+        sources=sources,
         manifests=inspection.get("manifests"),
         defects=inspection.get("reviews"),
-        execution=inspection.get("execution"),
+        execution=execution,
     )
 
 
@@ -324,23 +346,12 @@ def _species_agreement(named: list[str], evidence: dict) -> dict:
                 scope=scope,
                 next_action="record the organism the paper states, with its quote",
             )
-        missing = [organism for organism in named if _norm_organism(organism) not in declared]
-        if missing:
-            disagreeing = sorted({sample.get("accession") or "" for _, sample in pairs} - {""})[:4]
-            return _finding(
-                FAILED,
-                f"the paper states {', '.join(sorted(set(missing)))} and the deposit's sample records state "
-                f"{', '.join(sorted(declared.values()))}" + (f" ({', '.join(disagreeing)})" if disagreeing else ""),
-                scope=scope,
-                impact=(
-                    "an analysis against the paper's stated organism would align the wrong species and answer "
-                    "confidently about it"
-                ),
-            )
-        return _finding(
-            VERIFIED,
-            f"the deposit's own sample records state {', '.join(sorted(set(named)))} for the samples the paper uses",
+        return _open(
+            f"the paper states {', '.join(sorted(set(named)))}; the held records state "
+            f"{', '.join(sorted(declared.values()))}. Their biological identity and membership in each "
+            "experiment require the cited sample comparison",
             scope=scope,
+            next_action="assess organism identity and experiment membership from the paper and sample records",
         )
     limitations = record_limitations(evidence)
     if limitations:
@@ -505,29 +516,11 @@ def _reconciled_counts(experiments: list[dict], plan: dict, evidence: dict, stat
             scope=scope,
             next_action="read the paper's samples section again",
         )
-    per_experiment = [c for c in (e.get("sample_count") for e in experiments) if isinstance(c, int) and c > 0]
-    deposits = {str(deposit.get("accession") or "") for deposit, _s in pairs}
-    if len(per_experiment) > 1 and len(deposits) < len(per_experiment):
-        return _open(
-            f"the paper states a count for each of {len(per_experiment)} experiments and the records bioAF "
-            f"holds are {len(deposits)} deposit(s); a whole-series count is not an experiment's count",
-            scope=scope,
-            next_action="establish which deposited samples belong to each reported experiment",
-        )
-    held = len(pairs)
-    expected = stated[0]
-    if held == expected:
-        return _finding(
-            VERIFIED,
-            f"the {held} sample records bioAF holds reconcile to the {expected} the paper states",
-            scope=scope,
-        )
-    return _finding(
-        FAILED,
-        f"the paper states {expected} sample(s) and the deposit holds {held} record(s) for the same set",
+    return _open(
+        f"the paper states counts {', '.join(map(str, stated))} and bioAF holds {len(pairs)} deposit records; "
+        "a whole-series count is not an experiment's count without a cited membership mapping",
         scope=scope,
-        impact="one of the two is not describing the set that was analysed, so a count taken from either is unsafe",
-        evidence={"stated": expected, "held": held, "deposits": sorted(deposits)},
+        next_action="establish which deposited samples belong to each reported experiment and which units were counted",
     )
 
 

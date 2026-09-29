@@ -96,7 +96,7 @@ class TestRequestingOne:
         study = await _study(session, admin_user)
         await request_environment_check(session, study, user_id=admin_user.id)
         held = study.evidence_json["code_inspection"]["environment_check"]
-        assert held["establishes"] == ["C1.B", "C2.B"]
+        assert held["establishes"] == ["C2.B"]
         assert held["language"] == "r"
         assert held["at"]
 
@@ -127,7 +127,7 @@ class TestSettlingOne:
         code arm uses. A stub that invented `output_log` hid that for an entire build.
         """
         held = SimpleNamespace(id=77, status=status, failure_message=None)
-        self._transcript = transcript
+        self._transcript = ("BIOAF_SANDBOX_READY\n" + transcript) if transcript else ""
 
         async def _get(session_, session_id):
             return held
@@ -145,7 +145,7 @@ class TestSettlingOne:
         )
 
     @pytest.mark.asyncio
-    async def test_a_clean_run_verifies_both_obligations_on_the_score(self, session, admin_user, monkeypatch):
+    async def test_a_clean_dependency_run_does_not_verify_author_invocation(self, session, admin_user, monkeypatch):
         _patch(monkeypatch)
         study = await _study(session, admin_user)
         await request_environment_check(session, study, user_id=admin_user.id)
@@ -165,7 +165,7 @@ class TestSettlingOne:
         from app.services.validation_code_checks import assess_code
 
         assessed = assess_code(sources=_SOURCES, execution=execution)
-        assert assessed["C1.B"]["outcome"] == "verified"
+        assert assessed["C1.B"]["outcome"] == "undetermined"
         assert assessed["C2.B"]["outcome"] == "verified"
 
     @pytest.mark.asyncio
@@ -180,7 +180,9 @@ class TestSettlingOne:
         monkeypatch.setattr("app.services.notebook_execution_service.NotebookExecutionService.poll_execution", _poll)
         monkeypatch.setattr(
             "app.services.validation_environment_check._compute_session",
-            self._session("failed", "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 failed: not installed\n", exit_code=1),
+            self._session(
+                "failed", "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 failed: not installed\n", exit_code=1
+            ),
         )
         await settle_environment_check(session, study)
         execution = study.evidence_json["code_inspection"]["execution"]
@@ -249,7 +251,7 @@ class TestTheControlAPersonUses:
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["environment_check"]["establishes"] == ["C1.B", "C2.B"]
+        assert response.json()["environment_check"]["establishes"] == ["C2.B"]
 
     @pytest.mark.asyncio
     async def test_an_install_with_no_isolated_identity_says_so_rather_than_failing_obscurely(
@@ -281,9 +283,7 @@ class TestAskingAgainSettlesRatherThanDuplicates:
         )
 
     @pytest.mark.asyncio
-    async def test_a_check_already_running_is_polled_rather_than_launched_again(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_a_check_already_running_is_polled_rather_than_launched_again(self, session, admin_user, monkeypatch):
         launches = []
 
         async def _execute(session_, **kw):
@@ -313,13 +313,11 @@ class TestAskingAgainSettlesRatherThanDuplicates:
         assert again["status"] == "running"
 
     @pytest.mark.asyncio
-    async def test_asking_again_after_it_finished_lands_what_it_established(
-        self, session, admin_user, monkeypatch
-    ):
+    async def test_asking_again_after_it_finished_lands_what_it_established(self, session, admin_user, monkeypatch):
         _patch(monkeypatch)
         study = await _study(session, admin_user)
         await request_environment_check(session, study, user_id=admin_user.id)
-        self._transcript = "BIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"
+        self._transcript = "BIOAF_SANDBOX_READY\nBIOAF_INSTALL renv.lock ok\nBIOAF_LOAD DESeq2 ok\nBIOAF_RESOLVE ok\n"
         held = SimpleNamespace(id=77, status="completed", failure_message=None)
 
         async def _get(session_, session_id):

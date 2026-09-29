@@ -19,6 +19,15 @@ beforeEach(() => {
 
 const REASON = "analysis run failed";
 
+test("leads with the saved account cause and a useful action", () => {
+  render(<RetryNotice studyId={11} failureReason="Extraction failed" accountFailure="The credit balance is used up."
+    onChanged={jest.fn()} />);
+  expect(screen.getByText(/account needs attention/i)).toBeInTheDocument();
+  expect(screen.getByText(/credit balance is used up/i)).toBeInTheDocument();
+  expect(screen.getByText(/before retrying/i)).toBeInTheDocument();
+  expect(screen.queryByText("Extraction failed")).not.toBeInTheDocument();
+});
+
 test("says what failed, in the words the study recorded", () => {
   render(<RetryNotice studyId={11} failureReason={REASON} onChanged={jest.fn()} />);
   expect(screen.getByText(/analysis run failed/i)).toBeInTheDocument();

@@ -75,6 +75,8 @@ function ReproductionDepth({ area }: { area: ReportArea }) {
   if (!depth) return null;
   const line = !depth.attempted
     ? `No reproduction of this paper's results has been attempted${depth.reason ? `: ${depth.reason}` : "."}`
+    : !depth.performed
+      ? "Execution was attempted; no comparison with the paper's results has been established."
     : depth.unresolved
       ? "A comparison ran and did not resolve, so bioAF has established neither agreement nor disagreement."
       : depth.agreed
@@ -100,8 +102,8 @@ function ReproductionDepth({ area }: { area: ReportArea }) {
 }
 
 const FOLLOWUP_LABEL: Record<CodeFollowup["action"], string> = {
-  attempt_reproduction: "Reproduction scheduled",
-  attempt_bounded_check: "Bounded build and load",
+  attempt_reproduction: "Reproduction required",
+  attempt_bounded_check: "Author-code invocation required",
   needs_authorization: "Not run: needs authorisation",
   blocked: "Blocked",
 };
@@ -125,10 +127,15 @@ function CodeFollowupRows({ area }: { area: ReportArea }) {
             <p className="text-sm text-gray-800">
               <span className="font-mono text-xs">{(row.paths ?? [row.unit]).join(", ")}</span>
               {" - "}
-              {FOLLOWUP_LABEL[row.action]}
+              {row.status === "running" && row.session_id ? "Author code running"
+                : row.status === "settled" ? (row.outcome?.reproduced ? "Results reproduced" : "Attempt completed")
+                : row.status === "blocked" ? "Blocked" : FOLLOWUP_LABEL[row.action]}
               {row.attempted ? " (attempted)" : ""}
             </p>
             <p className="text-xs text-gray-600">{row.reason}</p>
+            {row.status === "settled" && !row.outcome?.reproduced && (
+              <p className="text-xs text-gray-600">Agreement with the paper&apos;s results has not been established.</p>
+            )}
             {row.next_action && <p className="text-xs text-gray-600">What would settle it: {row.next_action}</p>}
             {row.source?.commit_sha && (
               <p className="text-xs text-gray-500">

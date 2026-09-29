@@ -59,6 +59,17 @@ test("the headline says reproduction was not attempted", async () => {
   await waitFor(() => expect(screen.getByText("Reproduction not attempted")).toBeInTheDocument());
 });
 
+test("an account blocker and recovery action appear before the report", async () => {
+  mockGet.mockResolvedValue({ ...study(), state: "error", issues: [
+    { outcome: "account", message: "The provider credit balance is used up." },
+  ] });
+  render(<ValidationStudyPage />);
+  const notice = await screen.findByText("The language model account needs attention");
+  const report = screen.getByText("What bioAF established about this paper");
+  expect(notice.compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByText(/before retrying/)).toBeInTheDocument();
+});
+
 test("the comparison section says comparisons were not performed, and why (item 9)", async () => {
   render(<ValidationStudyPage />);
   await waitFor(() => expect(screen.getByText("Comparisons not performed")).toBeInTheDocument());

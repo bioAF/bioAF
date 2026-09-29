@@ -57,8 +57,8 @@ class TestOnePieceOfFollowUpPerImplementation:
             "reported_experiments": [{"id": "e1", "assay": "bulk RNA-seq", "description": "differential expression"}]
         }
         row = code_followup(evidence=_evidence(), plan=plan, route="deposit")["followups"][0]
-        assert "bulk RNA-seq" in row["claimed_analysis"]
-        assert row["inputs"]["processed_available"] is True
+        assert "not yet established" in row["claimed_analysis"]
+        assert row["inputs"]["processed_available"] is False
 
     def test_a_paper_that_published_no_code_has_no_follow_up_and_says_so(self):
         found = code_followup(evidence={"code_resolution": {"outcome": "code_absent"}}, plan={}, route="deposit")
@@ -67,9 +67,9 @@ class TestOnePieceOfFollowUpPerImplementation:
 
 
 class TestWhatTheFollowUpAsksFor:
-    def test_compatible_inputs_a_runtime_and_authorization_schedule_the_reproduction(self):
+    def test_paper_wide_availability_without_a_binding_requests_a_bounded_invocation(self):
         row = code_followup(evidence=_evidence(), plan={}, route="deposit")["followups"][0]
-        assert row["action"] == ATTEMPT_REPRODUCTION
+        assert row["action"] == ATTEMPT_BOUNDED
 
     def test_no_compatible_inputs_still_attempts_the_bounded_run(self):
         """ "If full reproduction is blocked, attempt a supported bounded build/load and representative
@@ -104,12 +104,14 @@ class TestOneScriptDoesNotSpeakForTheOthers:
     def test_a_supported_and_an_unsupported_implementation_reach_different_actions(self):
         found = code_followup(evidence=_evidence(sources=[_PY, _JULIA]), plan={}, route="deposit")
         actions = {row["unit"]: row["action"] for row in found["followups"]}
-        assert actions["code:analysis.py"] == ATTEMPT_REPRODUCTION
+        assert actions["code:analysis.py"] == ATTEMPT_BOUNDED
         assert actions["code:sim.jl"] == BLOCKED
 
     def test_a_completed_attempt_on_one_unit_leaves_the_other_outstanding(self):
         evidence = _evidence(sources=[_PY, _R])
-        evidence["code_inspection"]["execution_by_unit"] = {"code:analysis.py": {"load": {"status": "succeeded"}}}
+        evidence["code_inspection"]["execution_by_unit"] = {
+            "code:analysis.py": {"invocation": {"status": "succeeded", "invoked": True}}
+        }
         found = code_followup(evidence=evidence, plan={}, route="deposit")
         done = {row["unit"]: row["attempted"] for row in found["followups"]}
         assert done["code:analysis.py"] is True

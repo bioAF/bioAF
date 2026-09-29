@@ -24,7 +24,9 @@ _R = {"path": "analysis.R", "language": "r", "text": "library(DESeq2)\nprint(1)\
 
 class TestTheRequestAPersonApproves:
     def test_it_names_what_would_run_and_under_what_limits(self):
-        request = environment_check_request(sources=[_PY], manifests=[{"path": "requirements.txt", "text": "numpy==1.26.4\n"}])
+        request = environment_check_request(
+            sources=[_PY], manifests=[{"path": "requirements.txt", "text": "numpy==1.26.4\n"}]
+        )
         assert request["language"] == "python"
         assert request["files"] == ["analysis.py", "requirements.txt"]
         # plan_8_7 stage 3: the two phases declare the network each one needs, because they differ.
@@ -37,7 +39,7 @@ class TestTheRequestAPersonApproves:
 
     def test_it_says_what_each_obligation_would_establish(self):
         request = environment_check_request(sources=[_PY], manifests=[])
-        assert set(request["establishes"]) == {"C1.B", "C2.B"}
+        assert set(request["establishes"]) == {"C2.B"}
 
     def test_an_r_analysis_asks_for_an_r_runtime(self):
         request = environment_check_request(sources=[_R], manifests=[{"path": "renv.lock", "text": "{}"}])
@@ -80,10 +82,8 @@ class TestWhereItsResultLands:
                 "dependency_resolution": {"status": "succeeded", "ref": "run-1"},
             },
         )
-        assessed = assess_code(
-            sources=[_PY], execution=evidence["code_inspection"]["execution"]
-        )
-        assert assessed["C1.B"]["outcome"] == "verified"
+        assessed = assess_code(sources=[_PY], execution=evidence["code_inspection"]["execution"])
+        assert assessed["C1.B"]["outcome"] == "undetermined"
         assert assessed["C2.B"]["outcome"] == "verified"
 
     def test_a_failed_load_is_a_named_failure_with_its_reason(self):
@@ -92,11 +92,13 @@ class TestWhereItsResultLands:
         evidence = {"code_inspection": {"sources": [_PY]}}
         record_environment_check(
             evidence,
-            result={"load": {"status": "failed", "reason": "numpy 1.26.4 is not available for this runtime", "ref": "r2"}},
+            result={
+                "load": {"status": "failed", "reason": "numpy 1.26.4 is not available for this runtime", "ref": "r2"}
+            },
         )
         found = assess_code(sources=[_PY], execution=evidence["code_inspection"]["execution"])["C1.B"]
-        assert found["outcome"] == "failed"
-        assert "numpy" in found["rationale"]
+        assert found["outcome"] == "undetermined"
+        assert "numpy" in evidence["code_inspection"]["execution"]["load"]["reason"]
 
     def test_an_earlier_review_is_not_discarded_when_a_run_is_recorded(self):
         evidence = {"code_inspection": {"sources": [_PY], "reviews": [{"kind": "fitness", "established": True}]}}

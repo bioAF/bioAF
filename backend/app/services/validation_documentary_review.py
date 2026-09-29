@@ -41,6 +41,8 @@ logger = logging.getLogger("bioaf.validation_documentary_review")
 # the rubric is measured, or needs a run. C5 is here because "does this operation suit this input"
 # is a judgment about documented behaviour; C1 to C4 are read by a parser and never asked.
 JUDGED_LEAVES = (
+    "S1.B",
+    "S4.B",
     "S2.A",
     "S2.B",
     "S5.A",
@@ -73,7 +75,7 @@ JUDGED_LEAVES = (
 #
 # 3: what exempts a negative from coverage is what it SHOWED, not how it read, and the reconciliation
 # pass compares scopes rather than citation sets alone.
-REVIEW_VERSION = 3
+REVIEW_VERSION = 4
 
 
 # plan_8_6 section 11: one initial call plus one recovery, per obligation per evidence revision. The
@@ -609,6 +611,22 @@ async def review_documents(
     They cost no call and are reconciled with the new ones, because one changed source reruns the
     obligations that depend on it and not a paper's whole review.
     """
+    from app.services.validation_decision_budgets import ACTIVE_ASSESSMENT, AssessmentBudget
+
+    budget = ACTIVE_ASSESSMENT.get()
+    if budget is None:
+        with AssessmentBudget(max_requests=MAX_REQUESTS).activate():
+            return await review_documents(
+                passages=passages,
+                packets=packets,
+                client=client,
+                model=model,
+                api_key=api_key,
+                leaves=leaves,
+                on_failure=on_failure,
+                settled=settled,
+                units=units,
+            )
     accepted: dict[str, dict] = {}
     settled = {leaf: j for leaf, j in (settled or {}).items() if isinstance(j, dict)}
     failures: list[dict] = []
@@ -639,15 +657,15 @@ async def review_documents(
             accepted[leaf] = _untested(reason, coverage)
             asked["skipped_without_evidence"] += 1
             continue
-        if asked["requests"] >= MAX_REQUESTS:
-            accepted[leaf] = _untested(
-                f"the assessment's model budget of {MAX_REQUESTS} documentary requests was spent before this "
-                "obligation was asked",
-                coverage,
+        if budget.blocker or budget.requests >= budget.max_requests:
+            reason = (budget.blocker or {}).get("reason") or "the assessment's shared model request budget was spent"
+            accepted[leaf] = _untested(reason, coverage)
+            failures.append(
+                {"leaf": leaf, "reason": reason, "outcome": (budget.blocker or {}).get("outcome", "budget_exhausted")}
             )
             asked["budget_exhausted"] = asked.get("budget_exhausted", 0) + 1
             continue
-        asked["requests"] += 1
+        before_request = budget.requests
         unit = (units or {}).get(str(leaf).partition("#")[2])
         judged, failure, spent = await _ask(
             leaf,
@@ -659,18 +677,26 @@ async def review_documents(
             on_failure=on_failure,
             unit=unit,
         )
+        asked["requests"] += budget.requests - before_request
         if failure is not None:
             failures.append(failure)
         if judged is None:
             accepted[leaf] = _untested("this obligation could not be asked with the evidence supplied", coverage)
             continue
         expansion = packet.get("expansion") or []
-        if judged["outcome"] == UNDETERMINED and expansion and not judged.get("conflict") and spent < ATTEMPTS_PER_LEAF:
+        if (
+            judged["outcome"] == UNDETERMINED
+            and expansion
+            and not judged.get("conflict")
+            and spent < ATTEMPTS_PER_LEAF
+            and not budget.blocker
+            and budget.requests < budget.max_requests
+        ):
             # ONE targeted expansion, on the allowance the first call did not spend: the passages the
             # first packet's budget or ranking left out, added once (section 3 item 3). An obligation
             # whose recovery already went on correcting a malformed answer is not asked a third time.
             widened = rows + expansion
-            asked["requests"] += 1
+            before_request = budget.requests
             asked["expansions"] += 1
             again, failure, _ = await _ask(
                 leaf,
@@ -686,6 +712,7 @@ async def review_documents(
                 on_failure=on_failure,
                 recovery=False,
             )
+            asked["requests"] += budget.requests - before_request
             if failure is not None:
                 failures.append(failure)
             if again is not None:

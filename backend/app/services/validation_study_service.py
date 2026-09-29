@@ -227,6 +227,14 @@ class ValidationStudyService:
                 f"Only a study in 'error' can be retried; this one is in '{study.state}'.",
             )
 
+        evidence = dict(study.evidence_json or {})
+        budget = evidence.get("assessment_budget") or {}
+        if (budget.get("blocker") or {}).get("outcome") in ("account", "unreachable"):
+            # A deliberate retry can recheck repaired credentials or credit; it cannot replenish spend limits.
+            evidence["assessment_budget"] = {**budget, "blocker": None}
+            evidence.pop("assessment", None)
+            study.evidence_json = evidence
+
         # plan_8_1 section 1.3: a study whose read failed is read again. Nothing else it holds came
         # from a read, so there is no later point to resume at.
         if await failed_read_of(session, study) is not None:

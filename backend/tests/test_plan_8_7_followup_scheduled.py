@@ -8,9 +8,26 @@ whose existing authorization covers the attempt without another route-selection 
 """
 
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from app.services.validation_assessment import schedule_code_followup
 from app.services.validation_study_service import ValidationStudyService
+
+
+@pytest.fixture(autouse=True)
+def isolated_executor(monkeypatch):
+    identity = SimpleNamespace(bucket="isolated", prefix_for=lambda study_id: f"studies/{study_id}")
+    storage = SimpleNamespace(build_uri=lambda bucket, path: f"gs://{bucket}/{path}", write_bytes=AsyncMock())
+    monkeypatch.setattr("app.services.untrusted_execution.untrusted_identity", AsyncMock(return_value=identity))
+    monkeypatch.setattr("app.adapters.registry.get_storage_adapter", lambda: storage)
+    compute = SimpleNamespace(id=1, status="running", provider_metadata={})
+    monkeypatch.setattr("app.services.validation_environment_check._compute_session", AsyncMock(return_value=compute))
+    monkeypatch.setattr(
+        "app.services.notebook_execution_service.NotebookExecutionService.poll_execution",
+        AsyncMock(return_value=compute),
+    )
+
 
 _PY = {"path": "analysis.py", "language": "python", "text": "import numpy\nprint(numpy.mean([1]))\n"}
 _JULIA = {"path": "sim.jl", "language": "julia", "text": "println(1)"}
@@ -46,7 +63,7 @@ class TestTheFollowUpIsRecordedByTheAssessment:
         study = await _study(session, admin_user, route="assessment")
         launched = []
         monkeypatch.setattr(
-            "app.services.validation_environment_check.request_environment_check",
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code",
             _record(launched),
         )
         found = await schedule_code_followup(session, study)
@@ -59,18 +76,19 @@ class TestTheFollowUpIsRecordedByTheAssessment:
         study = await _study(session, admin_user, route="deposit", processed="no")
         launched = []
         monkeypatch.setattr(
-            "app.services.validation_environment_check.request_environment_check",
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code",
             _record(launched),
         )
         found = await schedule_code_followup(session, study)
-        assert launched == [study.id]
-        assert found["scheduled"] == ["bounded_check"]
+        assert len(launched) == 1
+        assert found["scheduled"] == [found["followups"][0]["operation_id"]]
+        assert found["followups"][0]["session_id"] == 1
 
     async def test_a_blocked_runtime_publishes_its_cause_and_launches_nothing(self, session, admin_user, monkeypatch):
         study = await _study(session, admin_user, route="deposit", sources=[_JULIA])
         launched = []
         monkeypatch.setattr(
-            "app.services.validation_environment_check.request_environment_check",
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code",
             _record(launched),
         )
         found = await schedule_code_followup(session, study)
@@ -83,10 +101,12 @@ class TestTheFollowUpIsRecordedByTheAssessment:
 
         study = await _study(session, admin_user, route="deposit", processed="no")
 
-        async def _refuse(session, study, *, user_id):
+        async def _refuse(session, **kwargs):
             raise EnvironmentCheckRefused("this install has no isolated identity for untrusted code")
 
-        monkeypatch.setattr("app.services.validation_environment_check.request_environment_check", _refuse)
+        monkeypatch.setattr(
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code", _refuse
+        )
         found = await schedule_code_followup(session, study)
         assert "isolated identity" in found["blocked"][0]["reason"]
         assert found["followups"], "the documentary follow-up survives a refused execution"
@@ -95,18 +115,20 @@ class TestTheFollowUpIsRecordedByTheAssessment:
         study = await _study(session, admin_user, route="deposit", processed="no")
         launched = []
         monkeypatch.setattr(
-            "app.services.validation_environment_check.request_environment_check",
+            "app.services.notebook_execution_service.NotebookExecutionService.execute_fetched_code",
             _record(launched),
         )
         await schedule_code_followup(session, study)
         await schedule_code_followup(session, study)
-        assert launched == [study.id]
+        assert len(launched) == 1
 
 
 def _record(launched):
-    async def _launch(session, study, *, user_id):
-        launched.append(study.id)
-        return {"status": "running", "session_id": 1}
+    async def _launch(session, **kwargs):
+        launched.append(kwargs)
+        assert kwargs["entry_point"] == "analysis.py"
+        assert kwargs["operation_key"]
+        return SimpleNamespace(id=1, status="running", provider_metadata={})
 
     return _launch
 
@@ -118,7 +140,7 @@ async def test_the_assessment_stage_records_the_follow_up(session, admin_user, m
     study = await _study(session, admin_user, route="assessment")
     called = []
 
-    async def _schedule(session, study):
+    async def _schedule(session, study, *, claim=None):
         called.append(study.id)
         return {"followups": []}
 

@@ -36,7 +36,7 @@ from fractions import Fraction
 # assessor instead of being awarded by a regex, the packets stopped treating keyword absence as
 # irrelevance, and the obligations are allocated and assessed over the analysis units bioAF
 # established. Every one of those changes what an accepted outcome means.
-CHECKER_VERSION = 3
+CHECKER_VERSION = 4
 
 # What the checks actually read. Evidence outside this cannot change an outcome, so it cannot
 # invalidate one either: a re-fetched artifact must not cost every study a fresh set of judgments.

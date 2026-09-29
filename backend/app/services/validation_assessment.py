@@ -691,7 +691,41 @@ def refresh_checks(study, plan) -> None:
         study.evidence_json = evidence
 
 
-async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
+async def run_assessment(session: AsyncSession, study, *, fetcher=None, claim=None) -> dict:
+    """Run all assessment stages under one durable provider allowance, including recovery."""
+    from app.services.validation_decision_budgets import AssessmentBudget
+
+    async def checkpoint(record):
+        from app.services.validation_ownership import assert_held
+
+        await assert_held(session, claim)
+        study.evidence_json = {**(study.evidence_json or {}), "assessment_budget": record}
+        await session.commit()
+
+    budget = AssessmentBudget(saved=(study.evidence_json or {}).get("assessment_budget"), checkpoint=checkpoint)
+    try:
+        with budget.activate():
+            result = await _run_assessment(session, study, fetcher=fetcher, claim=claim)
+    finally:
+        evidence = dict(study.evidence_json or {})
+        record = budget.record()
+        evidence["assessment_budget"] = record
+        if evidence.get("assessment"):
+            evidence["assessment"] = {
+                **evidence["assessment"],
+                "budget": record,
+                "measured": {
+                    **(evidence["assessment"].get("measured") or {}),
+                    "model_requests": record["requests"],
+                    "evidence_chars": record["input_characters"],
+                },
+            }
+        study.evidence_json = evidence
+        await session.flush()
+    return evidence.get("assessment") or result
+
+
+async def _run_assessment(session: AsyncSession, study, *, fetcher=None, claim=None) -> dict:
     """The public assessment stage. Never raises; always produces a record.
 
     Runs on every authorized study on both routes, after authorization and before the final
@@ -737,6 +771,11 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     # nothing is executed, and the run-only obligations keep every approval prerequisite they had.
     await refresh_code_inspection(session, study, allowance=allowance)
     evidence = dict(study.evidence_json or {})
+    from app.services.validation_code_inspection import normalize_sources
+
+    inspection = dict(evidence.get("code_inspection") or {})
+    inspection["sources"] = normalize_sources(inspection.get("sources"))
+    evidence["code_inspection"] = inspection
     evidence["transfer_allowance"] = allowance.record()
     study.evidence_json = evidence
     await session.flush()
@@ -815,7 +854,7 @@ async def run_assessment(session: AsyncSession, study, *, fetcher=None) -> dict:
     )
     # plan_8_7 section 3: what attempting this paper's published code requires, per implementation, and
     # the bounded check where the study's own authorization already covers it.
-    await schedule_code_followup(session, study)
+    await schedule_code_followup(session, study, claim=claim)
     # plan_8_7 stage 2: whether the result supports each stated conclusion, in the design, uncertainty
     # and population actually examined. It runs here, before any execution, because an inference can be
     # assessed from the paper's own evidence and a missing run is bioAF's limitation rather than a
@@ -862,6 +901,7 @@ async def refresh_report_synthesis(session: AsyncSession, study, *, client=None,
     """
     from app.services.validation_report_areas import assessment_summary
     from app.services.validation_report_synthesis import synthesize
+    from app.services.validation_check_queue import fingerprint
 
     evidence = dict(study.evidence_json or {})
     held_assessment = evidence.get("rubric_assessment") if isinstance(evidence.get("rubric_assessment"), dict) else None
@@ -869,6 +909,7 @@ async def refresh_report_synthesis(session: AsyncSession, study, *, client=None,
         {
             "assessment": held_assessment,
             "interpretation_review": evidence.get("interpretation_review"),
+            "code_followup": evidence.get("code_followup"),
             "comparisons": {},
             "attempt": {},
         }
@@ -877,6 +918,7 @@ async def refresh_report_synthesis(session: AsyncSession, study, *, client=None,
         "revision": summary.get("assessment_revision"),
         "checker": summary.get("checker_version"),
         "model": model,
+        "content": fingerprint(summary),
     }
     held = evidence.get("report_synthesis") if isinstance(evidence.get("report_synthesis"), dict) else None
     if held is not None and held.get("inputs") == identity:
@@ -885,12 +927,37 @@ async def refresh_report_synthesis(session: AsyncSession, study, *, client=None,
         written = await synthesize(summary=summary, client=client, model=model or "", api_key=api_key)
     except Exception as exc:  # noqa: BLE001 - a summary cannot fail the assessment it leads
         logger.warning("study %s: the report synthesis could not run: %s", study.id, exc)
-        return held or {}
+        written = {"reason": str(exc)}
     record = {**written, "inputs": identity}
     evidence["report_synthesis"] = record
     study.evidence_json = evidence
     await session.flush()
     return record
+
+
+async def refresh_after_execution(session, study):
+    """New execution evidence invalidates interpretation and prose while retaining the assessment allowance."""
+    from app.services.validation_decision_budgets import AssessmentBudget
+
+    async def checkpoint(record):
+        study.evidence_json = {**(study.evidence_json or {}), "assessment_budget": record}
+        await session.commit()
+
+    cfg = await llm_provider_config_service.get_for_feature(
+        session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+    )
+    kwargs = {
+        "client": get_client(cfg.provider) if cfg else None,
+        "model": cfg.model if cfg else None,
+        "api_key": cfg.api_key if cfg else None,
+    }
+    budget = AssessmentBudget(saved=(study.evidence_json or {}).get("assessment_budget"), checkpoint=checkpoint)
+    with budget.activate():
+        await refresh_interpretation_review(session, study, **kwargs)
+        await publish_assessment(session, study, reason="an author-code attempt settled")
+        await refresh_report_synthesis(session, study, **kwargs)
+    study.evidence_json = {**(study.evidence_json or {}), "assessment_budget": budget.record()}
+    await session.flush()
 
 
 def _measured(evidence: dict, reviewed: dict | None, *, seconds: float, interpreted: dict | None = None) -> dict:
@@ -1022,7 +1089,7 @@ async def refresh_documentary_review(session: AsyncSession, study, *, client=Non
         "units_revision": scope["revision"],
     }
     held = evidence.get("rubric_judgments") if isinstance(evidence.get("rubric_judgments"), dict) else None
-    if held is not None and held.get("inputs") == identity:
+    if held is not None and held.get("inputs") == identity and not held.get("failures") and not held.get("reason"):
         return held
     # plan_8_6 section 11, and the owner's review 2026-09-21: "One fingerprint covers every packet.
     # Any change invokes the full documentary review again." An obligation whose packet, model and
@@ -1067,65 +1134,61 @@ def _leaves_for(scope: dict) -> tuple[str, ...]:
     return tuple(found)
 
 
-async def schedule_code_followup(session: AsyncSession, study) -> dict:
-    """plan_8_7 section 3: record what attempting this paper's published code requires, and start it.
+async def schedule_code_followup(session: AsyncSession, study, *, claim=None) -> dict:
+    """Record each required author attempt and dispatch through the existing isolated executor."""
+    from app.services.validation_code_followup import advance_code_followups, bind_execution_inputs, code_followup
+    from app.services.validation_report_summary import plan_projection
+    from app.services.validation_check_queue import fingerprint
 
-    "A user must not need to discover an advanced toggle to trigger work already covered by their
-    authorization." So the normal assessment produces the follow-up and launches what the study's own
-    authorization already covers. An assessment-only study spends nothing and names what would
-    authorize the attempt; a study whose route authorizes execution gets the bounded build and load
-    with no further route question.
-
-    Never raises. A refused execution is recorded beside the documentary follow-up, which survives it:
-    "If all execution is blocked, publish its cause and preserve the documentary report."
-    """
-    from app.services.validation_code_followup import ATTEMPT_BOUNDED, ATTEMPT_REPRODUCTION, code_followup
-    from app.services.validation_environment_check import EnvironmentCheckRefused, request_environment_check
-
-    evidence = dict(study.evidence_json or {})
     plan = await active_plan(session, study)
-    plan_dict = {}
-    if plan is not None:
-        from app.services.validation_report_summary import plan_projection
-
-        plan_dict = plan_projection(plan)
-    found = code_followup(evidence=evidence, plan=plan_dict, route=getattr(study, "intended_route", None))
-    scheduled: list[str] = []
-    blocked: list[dict] = []
-    # The bounded check is the one this stage can start on its own: it builds the declared environment,
-    # loads the implementation and checks the interfaces, under the isolated identity and its approval.
-    # A full reproduction runs on acquired inputs and belongs to the execution half that already owns
-    # the authors-code arm, so it is scheduled there and recorded as required here.
-    held = ((evidence.get("code_inspection") or {}).get("environment_check") or {}).get("status")
-    wants_bounded = any(row["action"] == ATTEMPT_BOUNDED for row in found["followups"])
-    # plan_8_7 section 3: "Deduplicate attempts by existing source/input/environment/operation
-    # identities and reuse valid results." The identity is what the follow-up is ABOUT: the same
-    # implementations, at the same revisions, asking for the same thing. A second assessment over
-    # unchanged evidence launches nothing.
-    identity = [
-        {"unit": row["unit"], "digest": row["source"]["digest"], "action": row["action"]} for row in found["followups"]
-    ]
-    before = evidence.get("code_followup") if isinstance(evidence.get("code_followup"), dict) else {}
-    already = (before or {}).get("identity") == identity and "bounded_check" in ((before or {}).get("scheduled") or [])
-    if wants_bounded and not already and held not in ("running", "settled", "inconclusive"):
-        try:
-            await request_environment_check(session, study, user_id=study.requested_by_user_id)
-            scheduled.append("bounded_check")
-        except EnvironmentCheckRefused as refusal:
-            blocked.append({"action": ATTEMPT_BOUNDED, "reason": str(refusal)})
-        except Exception as exc:  # noqa: BLE001 - a refused execution cannot fail the assessment
-            logger.warning("study %s: the bounded author-code check could not be started: %s", study.id, exc)
-            blocked.append({"action": ATTEMPT_BOUNDED, "reason": str(exc)})
-    if any(row["action"] == ATTEMPT_REPRODUCTION for row in found["followups"]):
-        scheduled.append("reproduction")
-    if already:
-        scheduled.append("bounded_check")
-    record = {**found, "identity": identity, "scheduled": scheduled, "blocked": blocked, "at": _now_iso()}
+    plan_dict = plan_projection(plan) if plan is not None else {}
+    cfg = await llm_provider_config_service.get_for_feature(
+        session, study.organization_id, FEATURE_LITERATURE_VALIDATION
+    )
+    await bind_execution_inputs(
+        session,
+        study,
+        plan_dict,
+        client=get_client(cfg.provider) if cfg else None,
+        model=cfg.model if cfg else None,
+        api_key=cfg.api_key if cfg else None,
+    )
     evidence = dict(study.evidence_json or {})
-    evidence["code_followup"] = record
+    found = code_followup(evidence=evidence, plan=plan_dict, route=getattr(study, "intended_route", None))
+    found["version"] = 1
+    prior = {r["unit"]: r for r in (evidence.get("code_followup") or {}).get("followups") or []}
+    for row in found["followups"]:
+        identity = fingerprint({"source": row["source"], "binding": row.get("binding"), "action": row["action"]})
+        before = prior.get(row["unit"], {})
+        if before.get("identity") == identity and before.get("status") != "blocked":
+            row.update(
+                {
+                    k: before[k]
+                    for k in (
+                        "status",
+                        "session_id",
+                        "operation_id",
+                        "operation_key",
+                        "entry_point",
+                        "effective",
+                        "outcome",
+                        "reason",
+                        "transcript",
+                        "outputs",
+                        "attempted",
+                    )
+                    if k in before
+                }
+            )
+        elif before.get("operation_id"):
+            row["history"] = [*(before.get("history") or []), {k: v for k, v in before.items() if k != "history"}]
+        if before.get("identity") == identity and before.get("history"):
+            row["history"] = before["history"]
+        row["identity"] = identity
+    evidence["code_followup"] = found
     study.evidence_json = evidence
     await session.flush()
-    return record
+    return await advance_code_followups(session, study, plan=plan_dict, claim=claim)
 
 
 async def refresh_interpretation_review(session: AsyncSession, study, *, client=None, model=None, api_key=None) -> dict:
@@ -1140,20 +1203,26 @@ async def refresh_interpretation_review(session: AsyncSession, study, *, client=
     raises: a provider failure leaves the conclusions unresolved with what would settle them, and
     everything else the assessment established stands.
     """
-    from app.services.validation_interpretation_review import review_interpretations
+    from app.services.validation_interpretation_review import REVIEW_VERSION, _SYSTEM, review_interpretations
+    from app.services.validation_check_queue import fingerprint
 
     evidence = dict(study.evidence_json or {})
     conclusions = await _stated_conclusions(session, study)
     context = _interpretation_context(evidence)
     comparisons = _completed_comparisons(evidence)
     identity = {
-        "conclusions": [c["id"] for c in conclusions],
-        "context": [c["id"] for c in context],
-        "comparisons": [c.get("id") for c in comparisons],
+        "content": fingerprint({"conclusions": conclusions, "context": context, "comparisons": comparisons}),
+        "review_version": REVIEW_VERSION,
+        "prompt": fingerprint(_SYSTEM),
         "model": model,
     }
     held = evidence.get("interpretation_review") if isinstance(evidence.get("interpretation_review"), dict) else None
-    if held is not None and held.get("inputs") == identity:
+    if (
+        held is not None
+        and held.get("inputs") == identity
+        and not held.get("reason")
+        and not any(r.get("failure_outcome") for r in (held.get("reviews") or {}).values())
+    ):
         return held
     try:
         reviewed = await review_interpretations(
@@ -1166,7 +1235,8 @@ async def refresh_interpretation_review(session: AsyncSession, study, *, client=
         )
     except Exception as exc:  # noqa: BLE001 - a review cannot fail the stage that earned the rest
         logger.warning("study %s: the interpretation review could not run: %s", study.id, exc)
-        return held or {"reviews": {}, "reason": str(exc)}
+        # A review of changed evidence cannot fall back to the old scientific conclusion.
+        reviewed = {"reviews": {}, "reason": str(exc)}
     record = {**reviewed, "inputs": identity}
     evidence["interpretation_review"] = record
     study.evidence_json = evidence
@@ -1264,9 +1334,21 @@ def _completed_comparisons(evidence: dict) -> list[dict]:
                 "metric": row.get("metric") or row.get("metric_key"),
                 "paper": row.get("paper_value", row.get("claimed_value")),
                 "ours": row.get("our_value", row.get("computed_value")),
-                "agrees": row.get("agrees"),
+                "agrees": row.get("agrees", row.get("within_tolerance")),
             }
         )
+    for row in (evidence.get("code_followup") or {}).get("followups") or []:
+        for i, result in enumerate((row.get("outcome") or {}).get("comparisons") or []):
+            found.append(
+                {
+                    "id": f"author:{row.get('operation_id')}:{i}",
+                    "method": "authors_code",
+                    "metric": result.get("metric_key"),
+                    "paper": result.get("claimed_value"),
+                    "ours": result.get("computed_value"),
+                    "agrees": result.get("within_tolerance"),
+                }
+            )
     return found
 
 
@@ -1319,10 +1401,12 @@ def _unchanged_judgments(held: dict | None, fingerprints: dict[str, str], model:
         return {}
     before = inputs.get("fingerprints") if isinstance(inputs.get("fingerprints"), dict) else {}
     judgments = held.get("judgments") if isinstance(held.get("judgments"), dict) else {}
+    failed_leaves = {f.get("leaf") for f in held.get("failures") or [] if isinstance(f, dict)}
     return {
         leaf: judgment
         for leaf, judgment in judgments.items()
         if isinstance(judgment, dict)
+        and leaf not in failed_leaves
         and before.get(leaf)
         and before.get(leaf) == fingerprints.get(leaf)
         and not judgment.get("same_finding_as")

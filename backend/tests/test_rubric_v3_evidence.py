@@ -127,7 +127,11 @@ class TestWhatIsEstablishedAndWhatIsMerelyHeld:
                     **_EXPERIMENTS[0],
                     "reference": {
                         "assembly": {"stated": "hg19", "resolved": "GRCh37"},
-                        "annotation": {"stated": None, "resolved": "Ensembl 87", "assumption": "bioAF's pinned release"},
+                        "annotation": {
+                            "stated": None,
+                            "resolved": "Ensembl 87",
+                            "assumption": "bioAF's pinned release",
+                        },
                     },
                 }
             ],
@@ -183,8 +187,7 @@ class TestTheAuthorsResultsEarnTheirOwnPoints:
 
     def _claims(self, *outcomes):
         return [
-            {"index": index, "consistency": {"outcome": outcome} if outcome else None}
-            for index, outcome in outcomes
+            {"index": index, "consistency": {"outcome": outcome} if outcome else None} for index, outcome in outcomes
         ]
 
     def test_an_agreeing_comparison_verifies_its_allocated_result_leaf(self):
@@ -248,8 +251,11 @@ class TestWhatIsNotImplementedIsDeclaredRatherThanGuessed:
             }
         }
         assessed = _assess(evidence=evidence)
-        assert all(assessed.get(f"C{n}.{o}", {}).get("outcome", UNDETERMINED) == UNDETERMINED
-                   for n in range(1, 6) for o in "AB")
+        assert all(
+            assessed.get(f"C{n}.{o}", {}).get("outcome", UNDETERMINED) == UNDETERMINED
+            for n in range(1, 6)
+            for o in "AB"
+        )
 
 
 def _result_allocation(inventory):
@@ -539,21 +545,21 @@ class TestSpeciesAgreementIsMeasuredAgainstTheRecordsThemselves:
     no organism" about a deposit nobody opened is a statement bioAF has no evidence for.
     """
 
-    def test_records_declaring_the_organism_the_paper_states_verify_it(self):
+    def test_matching_labels_still_require_experiment_membership(self):
         assessed = _assess(evidence=_records("Homo sapiens", "Homo sapiens"))
-        assert assessed["S1.B"]["outcome"] == VERIFIED
+        assert assessed["S1.B"]["outcome"] == UNDETERMINED
         assert "GSE1" in assessed["S1.B"]["scope"]
 
-    def test_records_declaring_a_different_organism_fail_it_and_name_the_samples(self):
+    def test_different_labels_require_a_scoped_biological_comparison(self):
         assessed = _assess(evidence=_records("Mus musculus", "Mus musculus"))
-        assert assessed["S1.B"]["outcome"] == FAILED
+        assert assessed["S1.B"]["outcome"] == UNDETERMINED
         assert "Mus musculus" in assessed["S1.B"]["rationale"]
-        assert assessed["S1.B"]["impact"]
+        assert assessed["S1.B"]["next_action"]
 
-    def test_a_deposit_holding_two_species_still_agrees_where_it_holds_the_papers(self):
+    def test_a_deposit_holding_two_species_requires_a_scoped_comparison(self):
         """A xenograft or a spike-in deposits two organisms, and the paper names the one it analysed."""
         assessed = _assess(evidence=_records("Homo sapiens", "Mus musculus"))
-        assert assessed["S1.B"]["outcome"] == VERIFIED
+        assert assessed["S1.B"]["outcome"] == UNDETERMINED
 
     def test_a_deposit_bioaf_never_opened_leaves_it_untested_and_names_the_limitation(self):
         limitation = {"accession": "EGAS1", "reason": "bioAF reads per-sample records from GEO only"}
@@ -571,7 +577,7 @@ class TestSpeciesAgreementIsMeasuredAgainstTheRecordsThemselves:
             **_records("Mus musculus"),
             "precompute_checks": {"species_matches": {"verdict": "ok", "detail": "an older run agreed"}},
         }
-        assert _assess(evidence=evidence)["S1.B"]["outcome"] == FAILED
+        assert _assess(evidence=evidence)["S1.B"]["outcome"] == UNDETERMINED
 
 
 def _sample(accession, **fields):
@@ -654,18 +660,18 @@ class TestTheMaterialTheSamplesCameFrom:
 class TestTheSamplesAreCountedAgainstTheRecords:
     """S4.B: the held records reconciled to the counts the paper states, per experiment."""
 
-    def test_records_that_match_the_stated_count_verify_it(self):
+    def test_equal_counts_do_not_establish_the_same_population(self):
         evidence = _deposit(*[_sample(f"GSM{i}") for i in range(1, 55)])
         assessed = _assess(evidence=evidence)
-        assert assessed["S4.B"]["outcome"] == VERIFIED
+        assert assessed["S4.B"]["outcome"] == UNDETERMINED
         assert "54" in assessed["S4.B"]["rationale"]
 
-    def test_records_that_contradict_the_stated_count_fail_it_with_both_numbers(self):
+    def test_different_counts_need_membership_before_claiming_a_mismatch(self):
         evidence = _deposit(*[_sample(f"GSM{i}") for i in range(1, 9)])
         assessed = _assess(evidence=evidence)
-        assert assessed["S4.B"]["outcome"] == FAILED
+        assert assessed["S4.B"]["outcome"] == UNDETERMINED
         assert "8" in assessed["S4.B"]["rationale"] and "54" in assessed["S4.B"]["rationale"]
-        assert assessed["S4.B"]["impact"]
+        assert assessed["S4.B"]["next_action"]
 
     def test_a_series_wide_count_is_not_substituted_for_an_experiments_count(self):
         """Section 3.2: a whole-series count is not an experiment's count. Where the paper states a
@@ -781,16 +787,20 @@ class TestAJudgmentSettlesWhatNoMeasurementCould:
         assert assessed["M3.A"]["next_action"]
         assert not assessed["M3.A"].get("capability_limit"), "bioAF implements this check now"
 
-    def test_a_judgment_never_overwrites_a_measurement_that_settled(self):
+    def test_a_legacy_sample_judgment_without_membership_is_not_reused(self):
         evidence = {
             **_records("Mus musculus"),
             "rubric_judgments": {
                 "judgments": {
-                    "S1.B": {"outcome": VERIFIED, "rationale": "the assessor thought it agreed", "method": "model_assisted"}
+                    "S1.B": {
+                        "outcome": VERIFIED,
+                        "rationale": "the assessor thought it agreed",
+                        "method": "model_assisted",
+                    }
                 }
             },
         }
-        assert _assess(evidence=evidence)["S1.B"]["outcome"] == FAILED
+        assert _assess(evidence=evidence)["S1.B"]["outcome"] == UNDETERMINED
 
     def test_a_judged_failure_carries_its_impact(self):
         assessed = _assess(evidence=self._judged("E2.B", FAILED, impact="the comparison has no control"))
@@ -833,5 +843,5 @@ class TestWhatCompletionOfTheDocumentaryRubricMeans:
         request = environment_check_request(
             sources=[{"path": "a.R", "language": "r", "text": "library(DESeq2)\n"}], manifests=[]
         )
-        assert set(request["establishes"]) == {"C1.B", "C2.B"}
+        assert set(request["establishes"]) == {"C2.B"}
         assert request["approval"]["required"] is True

@@ -51,7 +51,7 @@ ARG RSTUDIO_DEB=rstudio-server-2024.04.2-764-amd64.deb
 # harfbuzz/fribidi (tidyverse graphics via ragg and textshaping), and HDF5 for
 # .h5 / .h5ad I/O. The base image is Ubuntu 22.04 (jammy).
 RUN apt-get update && apt-get install -y --no-install-recommends \\
-    libhdf5-dev libcurl4-openssl-dev libssl-dev libxml2-dev \\
+    bubblewrap libhdf5-dev libcurl4-openssl-dev libssl-dev libxml2-dev \\
     libglpk-dev libopenblas-dev libgsl-dev libgeos-dev libfftw3-dev cmake \\
     libcairo2-dev libxt-dev libfontconfig1-dev \\
     libharfbuzz-dev libfribidi-dev \\

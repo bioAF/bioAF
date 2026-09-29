@@ -54,7 +54,10 @@ async def request_with_retry(send: Callable[[], Awaitable[httpx.Response]], *, w
     caller is told, so an exhausted 429 is still ``rate_limit``.
     """
     last_exc: httpx.HTTPError | None = None
+    from app.services.validation_decision_budgets import reserve_transport_retry
+
     for attempt in range(MAX_ATTEMPTS):
+        await reserve_transport_retry(attempt)
         try:
             resp = await send()
         except httpx.HTTPError as exc:
@@ -64,7 +67,13 @@ async def request_with_retry(send: Callable[[], Awaitable[httpx.Response]], *, w
             logger.warning("%s transport failure (attempt %d), retrying: %s", what, attempt + 1, exc)
             await asyncio.sleep(_BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS) - 1)])
             continue
-        if not is_retryable(resp.status_code) or attempt == MAX_ATTEMPTS - 1:
+        from app.services.llm_provider_clients import account_fact
+
+        if (
+            account_fact(resp.status_code, resp.text)
+            or not is_retryable(resp.status_code)
+            or attempt == MAX_ATTEMPTS - 1
+        ):
             return resp
         logger.warning("%s returned %d (attempt %d), retrying", what, resp.status_code, attempt + 1)
         await asyncio.sleep(_BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS) - 1)])

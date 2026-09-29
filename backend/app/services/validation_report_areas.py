@@ -147,11 +147,30 @@ def _reproduction(projection: dict) -> dict:
     comparisons = projection.get("comparisons") if isinstance(projection.get("comparisons"), dict) else {}
     attempt = projection.get("attempt") if isinstance(projection.get("attempt"), dict) else {}
     measured = [m for m in projection.get("measured") or [] if isinstance(m, dict)]
+    authors = [
+        r
+        for r in (projection.get("code_followup") or {}).get("followups") or []
+        if (r.get("outcome") or {}).get("invoked") and r.get("action") == "attempt_reproduction"
+    ]
+    measured = measured + [
+        {
+            "metric": c.get("metric_key"),
+            "paper_value": c.get("claimed_value"),
+            "our_value": c.get("computed_value"),
+            "agrees": c.get("within_tolerance"),
+            "method": "authors_code",
+            "operation_id": r.get("operation_id"),
+        }
+        for r in authors
+        for c in r["outcome"].get("comparisons") or []
+    ]
     agreed = bool(measured) and all(m.get("agrees") is True for m in measured)
-    unresolved = any(m.get("agrees") is None for m in measured)
+    unresolved = any(m.get("agrees") is None for m in measured) or any(
+        not r["outcome"].get("comparisons") for r in authors
+    )
     return {
-        "attempted": bool(attempt.get("attempted")),
-        "performed": bool((comparisons or {}).get("performed")),
+        "attempted": bool(attempt.get("attempted") or authors),
+        "performed": bool((comparisons or {}).get("performed") or measured),
         "label": (comparisons or {}).get("label"),
         "reason": (comparisons or {}).get("reason"),
         "comparisons": measured,
@@ -204,6 +223,8 @@ def areas_for(projection: dict) -> list[dict]:
         if area["key"] == "results":
             # Reproduction depth is separate from the documentary account of the results (section 6).
             entry["reproduction"] = _reproduction(projection)
+            if entry["reproduction"]["attempted"] and not any(rows.values()):
+                entry["summary"] = "An execution was attempted; its result and comparison are recorded below."
         if area["key"] == "data":
             entry["resources"] = [r for r in projection.get("resources") or [] if isinstance(r, dict)]
         if area["key"] == "code":
