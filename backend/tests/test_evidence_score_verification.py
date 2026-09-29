@@ -28,7 +28,10 @@ _PLAN = {
             "assay": "bulk RNA-seq",
             "organism": "Homo sapiens",
             "workflow": "nf-core/rnaseq",
-            "reference": {"assembly": {"stated": "hg38", "resolved": "GRCh38"}, "annotation": {"stated": "v44", "resolved": "v44"}},
+            "reference": {
+                "assembly": {"stated": "hg38", "resolved": "GRCh38"},
+                "annotation": {"stated": "v44", "resolved": "v44"},
+            },
         }
     ],
     "differential_design": {
@@ -101,7 +104,11 @@ class TestIsolation:
         assert _card(evidence=evidence)["failed"] == 0
 
     def test_one_failure_leaves_every_other_established_obligation_standing(self):
-        verified_without = {k for k, v in assess_evidence(plan=_PLAN, evidence={}, claims=[], inventory=None).items() if v["outcome"] == VERIFIED}
+        verified_without = {
+            k
+            for k, v in assess_evidence(plan=_PLAN, evidence={}, claims=[], inventory=None).items()
+            if v["outcome"] == VERIFIED
+        }
         with_failure = assess_evidence(
             plan=_PLAN,
             evidence={"precompute_checks": {"species_matches": {"verdict": "mismatch", "detail": "Mus musculus"}}},
@@ -114,7 +121,10 @@ class TestIsolation:
 class TestScope:
     def test_listing_a_finding_twice_creates_no_extra_points(self):
         doubled = {"findings": [*_INVENTORY["findings"], *_INVENTORY["findings"]]}
-        assert _card(inventory=doubled)["sections"]["R"]["maximum"] == _card(inventory=_INVENTORY)["sections"]["R"]["maximum"]
+        assert (
+            _card(inventory=doubled)["sections"]["R"]["maximum"]
+            == _card(inventory=_INVENTORY)["sections"]["R"]["maximum"]
+        )
 
     def test_one_script_cannot_establish_a_claim_about_all_of_them(self):
         """Section 3.2: an obligation spanning several analysis units splits its weight across them, so
@@ -127,7 +137,11 @@ class TestScope:
     def test_more_files_never_create_more_available_points(self):
         one = allocate(default_profile(), units={"C1.A": ["a"]})
         many = allocate(default_profile(), units={"C1.A": ["a", "b", "c", "d"]})
-        assert sum((leaf["weight"] for leaf in one), Fraction(0)) == sum((leaf["weight"] for leaf in many), Fraction(0)) == 100
+        assert (
+            sum((leaf["weight"] for leaf in one), Fraction(0))
+            == sum((leaf["weight"] for leaf in many), Fraction(0))
+            == 100
+        )
 
     def test_an_unestablished_result_scope_reserves_its_points_and_scores_the_rest(self):
         card = _card(inventory={"status": "pending"})
@@ -168,11 +182,7 @@ class TestRuntime:
         from app.services.validation_code_checks import assess_code
 
         marker = tmp_path / "ran"
-        source = (
-            "import pathlib\n"
-            f"pathlib.Path({str(marker)!r}).write_text('ran')\n"
-            "raise SystemExit(1)\n"
-        )
+        source = f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\nraise SystemExit(1)\n"
         found = assess_code(sources=[{"path": "danger.py", "language": "python", "text": source}], manifests=[])
         assert found["C1.A"]["outcome"] == VERIFIED
         assert not marker.exists()
@@ -219,7 +229,10 @@ class TestSupersededEvidenceIsNotCurrentCredit:
 
     def test_a_comparison_pending_re_evaluation_earns_nothing(self):
         claims = [
-            {"index": 0, "consistency": {"outcome": "pending_re_evaluation", "superseded": {"label": "an earlier binding"}}},
+            {
+                "index": 0,
+                "consistency": {"outcome": "pending_re_evaluation", "superseded": {"label": "an earlier binding"}},
+            },
             {"index": 1, "consistency": {"outcome": "agree"}},
         ]
         assessed = assess_evidence(plan=_PLAN, evidence={}, claims=claims, inventory=_INVENTORY)

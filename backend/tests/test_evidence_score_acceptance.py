@@ -39,9 +39,7 @@ class TestGroffEarnsPointsWithoutCompletingAFinding:
         assert card["status"] == "assessed"
 
     @pytest.mark.asyncio
-    async def test_no_scientific_finding_was_completed_and_the_card_never_says_one_was(
-        self, session, admin_user
-    ):
+    async def test_no_scientific_finding_was_completed_and_the_card_never_says_one_was(self, session, admin_user):
         report = await replay_report(session, await _restored(session, admin_user, 55))
         card = report["evidence_score"]
         assert card["reproduction"]["attempted"] is False
@@ -132,9 +130,7 @@ class TestTheSamd1PaperCreditsWhatWasCheckedAndNoMore:
 class TestTheCardIsAlwaysInternallyConsistent:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("study_id", [55, 56, 57])
-    async def test_the_sections_add_to_the_whole_and_the_whole_adds_to_one_hundred(
-        self, session, admin_user, study_id
-    ):
+    async def test_the_sections_add_to_the_whole_and_the_whole_adds_to_one_hundred(self, session, admin_user, study_id):
         card = (await replay_report(session, await _restored(session, admin_user, study_id)))["evidence_score"]
         assert sum(s["maximum"] for s in card["sections"]) == 100
         for section in card["sections"]:

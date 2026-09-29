@@ -79,7 +79,9 @@ class TestWhatOneAssessmentHolds:
 
 class TestTheCardIsAProjectionOfWhatWasStored:
     def test_the_card_comes_from_the_stored_outcomes_and_nothing_else(self):
-        card = card_from(_built(), reproduction={"attempted": False, "label": "Independent reproduction: not attempted"})
+        card = card_from(
+            _built(), reproduction={"attempted": False, "label": "Independent reproduction: not attempted"}
+        )
         assert card["score"] + card["failed"] + card["undetermined"] == 100
         assert card["score"] > 0
 

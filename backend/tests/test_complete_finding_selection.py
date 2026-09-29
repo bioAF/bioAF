@@ -411,7 +411,11 @@ class TestAReselectionRebuildsEverythingThatDependsOnTheChoice:
         {"id": "e2", "assay": "western blotting", "workflow": None, "reference": {}},
     ]
     _CONTRASTS = [
-        {"name": "stiff vs soft (RNA)", "reported_experiment_id": "e1", "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}]},
+        {
+            "name": "stiff vs soft (RNA)",
+            "reported_experiment_id": "e1",
+            "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}],
+        },
         {"name": "stiff vs soft (protein)", "reported_experiment_id": "e2"},
     ]
     _TARGETS = [

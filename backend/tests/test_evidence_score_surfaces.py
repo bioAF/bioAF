@@ -16,7 +16,10 @@ _PLAN = {
             "assay": "bulk RNA-seq",
             "organism": "Homo sapiens",
             "workflow": "nf-core/rnaseq",
-            "reference": {"assembly": {"stated": "hg19", "resolved": "GRCh37"}, "annotation": {"stated": "GENCODE v19", "resolved": "GENCODE v19"}},
+            "reference": {
+                "assembly": {"stated": "hg19", "resolved": "GRCh37"},
+                "annotation": {"stated": "GENCODE v19", "resolved": "GENCODE v19"},
+            },
         }
     ],
     "differential_design": {

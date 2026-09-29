@@ -88,7 +88,7 @@ class TestAWorkflowIsNotSupportOnItsOwn:
         assert _support(found, "e1") == SUPPORTED
 
     def test_an_assay_matched_only_by_a_word_describing_its_family_is_unresolved_not_supported(self):
-        """"RNA-seq" names a family; nf-core/rnaseq is its answer of last resort, not an established
+        """ "RNA-seq" names a family; nf-core/rnaseq is its answer of last resort, not an established
         measurement type and analysis contract."""
         found = _found(_plan([{"id": "e1", "assay": "RNA-seq", "workflow": "nf-core/rnaseq"}]), [])
         assert _support(found, "e1") == UNRESOLVED_INTERPRETATION
@@ -228,11 +228,18 @@ class TestAnUnknownDepositListingIsNotAnImplementedAdapter:
             "reported_experiment_id": experiment["id"],
             "cutoffs": [{"kind": "padj", "operator": "<", "value": 0.05}],
         }
-        contrast = {"name": "a vs b", "reported_experiment_id": experiment["id"], "test_condition": "a", "reference_condition": "b"}
+        contrast = {
+            "name": "a vs b",
+            "reported_experiment_id": experiment["id"],
+            "test_condition": "a",
+            "reference_condition": "b",
+        }
         checks = evaluate_checks(
             target,
             experiment=experiment,
-            resources=[{"identifier": "GSE1", "type": "sequencing_data", "reported_experiment_ids": [experiment["id"]]}],
+            resources=[
+                {"identifier": "GSE1", "type": "sequencing_data", "reported_experiment_ids": [experiment["id"]]}
+            ],
             deposits=[],
             supplements=[],
             contrast=contrast,

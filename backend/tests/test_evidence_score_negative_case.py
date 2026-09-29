@@ -82,9 +82,7 @@ def _card():
     from app.services.validation_report_summary import evidence_scorecard
     from app.services.validation_rubric_assessment import build_assessment
 
-    assessment = build_assessment(
-        plan=_PLAN, evidence=_EVIDENCE, claims=_CLAIMS, inventory=_PLAN["finding_inventory"]
-    )
+    assessment = build_assessment(plan=_PLAN, evidence=_EVIDENCE, claims=_CLAIMS, inventory=_PLAN["finding_inventory"])
     return evidence_scorecard(
         study={"state": "classified", "classification": "discrepancy"},
         evidence={**_EVIDENCE, "rubric_assessment": assessment},
@@ -117,9 +115,7 @@ class TestTheNegativePointsAreRealAndNamed:
         keeps its credit and the reference the paper states keeps its own."""
         from app.services.validation_rubric_evidence import assess_evidence
 
-        assessed = assess_evidence(
-            plan=_PLAN, evidence=_EVIDENCE, claims=_CLAIMS, inventory=_PLAN["finding_inventory"]
-        )
+        assessed = assess_evidence(plan=_PLAN, evidence=_EVIDENCE, claims=_CLAIMS, inventory=_PLAN["finding_inventory"])
         assert assessed["R1.F1.1"]["outcome"] == VERIFIED
         assert assessed["M2.A"]["outcome"] == VERIFIED
         assert assessed["R1.F1.0"]["outcome"] == FAILED

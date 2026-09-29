@@ -340,8 +340,8 @@ async def test_an_unresolved_mapping_holds_keeps_the_input_and_resume_re_enters_
     assert evidence["deposit_failed"]["cause"] == "sample_mapping_unresolved"
     assert "clone: c99" in evidence["deposit_failed"]["reason"]
     assert (
-            evidence["input_choice"]["mapping"][3]["evidence"][0]["quote"] == "GSM99 | KO_c99 | clone: c99"
-        )  # the proposal is kept
+        evidence["input_choice"]["mapping"][3]["evidence"][0]["quote"] == "GSM99 | KO_c99 | clone: c99"
+    )  # the proposal is kept
     assert "acquisition_retry_at" not in evidence
 
     downloads = []
