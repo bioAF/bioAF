@@ -104,7 +104,7 @@ STUB
     export BIOAF_TTY="$TEST_DIR/no-such-terminal"
     run bash -c 'source "$1"; attach_terminal' _ "$HELPER"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"Terminal"* ]]
+    [[ "$output" == *"Terminal"* ]] || false
 }
 
 @test "after attach_terminal, prompts read the terminal, not the piped script" {
@@ -132,7 +132,7 @@ STUB
     chmod +x "$STUBS_DIR/curl"
     run bash -c 'source "$1"; ensure_homebrew' _ "$HELPER"
     [ "$status" -eq 0 ]
-    ! grep -q '^curl' "$CALL_LOG"
+    ! grep -q '^curl' "$CALL_LOG" || false
 }
 
 @test "ensure_homebrew puts an installed but unlisted brew on PATH without reinstalling" {
@@ -141,8 +141,8 @@ STUB
     chmod +x "$STUBS_DIR/curl"
     run bash -c 'source "$1"; ensure_homebrew && command -v brew' _ "$HELPER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"$BREW_PREFIX/bin/brew"* ]]
-    ! grep -q '^curl' "$CALL_LOG"
+    [[ "$output" == *"$BREW_PREFIX/bin/brew"* ]] || false
+    ! grep -q '^curl' "$CALL_LOG" || false
 }
 
 @test "ensure_homebrew installs Homebrew and brew is usable in the same process" {
@@ -162,7 +162,7 @@ STUB
     echo "RETURN" > "$BIOAF_TTY"
     run bash -c 'source "$1"; attach_terminal; ensure_homebrew && command -v brew' _ "$HELPER" <<< "next-script-line"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"$BREW_PREFIX/bin/brew"* ]]
+    [[ "$output" == *"$BREW_PREFIX/bin/brew"* ]] || false
     grep -q 'Homebrew/install' "$CALL_LOG"
     [ "$(cat "$TEST_DIR/installer_stdin")" = "RETURN" ]
 }
@@ -188,7 +188,7 @@ STUB
     chmod +x "$STUBS_DIR/curl"
     run bash -c 'source "$1"; ensure_homebrew' _ "$HELPER"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"Homebrew"* ]]
+    [[ "$output" == *"Homebrew"* ]] || false
 }
 
 # ---------------------------------------------------------------------------
@@ -252,7 +252,7 @@ STUB
     export GCLOUD_DEFAULT_PY=3.9.6
     run bash -c 'source "$1"; use_cask_python_for_gcloud && echo "py=$CLOUDSDK_PYTHON"' _ "$HELPER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"py=$TEST_DIR/opt/python@3.12/bin/python3.12"* ]]
+    [[ "$output" == *"py=$TEST_DIR/opt/python@3.12/bin/python3.12"* ]] || false
 }
 
 @test "use_cask_python_for_gcloud fails when gcloud does not run on the cask's Python" {
@@ -271,7 +271,7 @@ STUB
     export GCLOUD_DEFAULT_PY=3.12.1
     run bash -c 'source "$1"; ensure_gcloud_python && echo "py=${CLOUDSDK_PYTHON:-unset}"' _ "$HELPER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"py=unset"* ]]
+    [[ "$output" == *"py=unset"* ]] || false
 }
 
 @test "ensure_gcloud_python moves an unsupported Python to the cask's Python on macOS" {
@@ -285,7 +285,7 @@ STUB
     chmod +x "$STUBS_DIR/uname"
     run bash -c 'source "$1"; ensure_gcloud_python && echo "py=$CLOUDSDK_PYTHON"' _ "$HELPER"
     [ "$status" -eq 0 ]
-    [[ "$output" == *"py=$TEST_DIR/opt/python@3.12/bin/python3.12"* ]]
+    [[ "$output" == *"py=$TEST_DIR/opt/python@3.12/bin/python3.12"* ]] || false
 }
 
 @test "ensure_gcloud_python fails clearly when it cannot fix an unsupported Python" {
@@ -295,6 +295,6 @@ STUB
     chmod +x "$STUBS_DIR/uname"
     run bash -c 'source "$1"; ensure_gcloud_python' _ "$HELPER"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"3.9"* ]]
-    [[ "$output" == *"3.10"* ]]
+    [[ "$output" == *"3.9"* ]] || false
+    [[ "$output" == *"3.10"* ]] || false
 }
