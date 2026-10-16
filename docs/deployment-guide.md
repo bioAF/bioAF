@@ -20,7 +20,8 @@ curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | b
 
 The script walks you through:
 
-1. Installing the gcloud CLI (if not present)
+1. Installing the gcloud CLI (if not present). On a Mac it installs it with
+   Homebrew, installing Homebrew first if needed; that asks for your Mac password.
 2. Authenticating with Google Cloud
 3. Selecting your GCP project
 4. Enabling required APIs (Compute, Storage, IAM)
@@ -51,7 +52,8 @@ curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-aws.sh | b
 
 The script walks you through:
 
-1. Installing the AWS CLI v2 (if not present)
+1. Installing the AWS CLI v2 (if not present). On a Mac it installs it with
+   Homebrew, installing Homebrew first if needed; that asks for your Mac password.
 2. Verifying your AWS credentials (`aws sts get-caller-identity`)
 3. Selecting a region
 4. Creating an EC2 key pair for SSH (private key saved locally)
