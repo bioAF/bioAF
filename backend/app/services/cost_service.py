@@ -4,6 +4,7 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,7 +146,7 @@ class CostService:
             .group_by(CostRecord.record_date)
             .order_by(CostRecord.record_date)
         )
-        records = [{"date": str(row[0]), "amount": row[1]} for row in result.all()]
+        records: list[dict[str, Any]] = [{"date": str(row[0]), "amount": row[1]} for row in result.all()]
         total = sum(r["amount"] for r in records) if records else Decimal("0")
         return records, total
 

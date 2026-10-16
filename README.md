@@ -60,7 +60,8 @@ curl -fsSL https://raw.githubusercontent.com/bioAF/bioAF/main/install-gcp.sh | b
 ```
 
 The script sets up gcloud, creates a VM with Docker, and walks you through
-the process. Once the VM is ready, SSH in and run:
+the process. Run it in the Terminal app. On a Mac with nothing installed, it
+installs Homebrew first, which asks for your Mac password. Once the VM is ready, SSH in and run:
 
 ```bash
 git clone https://github.com/bioAF/bioAF.git
