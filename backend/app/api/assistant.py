@@ -8,7 +8,9 @@ spend action (launch_run) launches a real PipelineRun. The plan-then-confirm gat
 boundary, and the confirm UI warns when an action will spend compute.
 """
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -234,7 +236,7 @@ async def list_conversations(
                 created_at=conv.created_at,
                 updated_at=conv.updated_at,
             )
-            for conv, _last, cnt in rows
+            for conv, _last, cnt in cast("Sequence[tuple[AssistantConversation, datetime | None, int | None]]", rows)
         ],
     )
 

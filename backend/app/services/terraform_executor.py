@@ -23,7 +23,8 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, AsyncIterator
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, AsyncIterator, cast
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1167,7 +1168,7 @@ class TerraformExecutor:
         active_rows = result.fetchall()
 
         runs_to_fail: list[tuple[int, str | None]] = []
-        for run_id, module_name, started_at in active_rows:
+        for run_id, module_name, started_at in cast("Sequence[tuple[int, str | None, datetime]]", active_rows):
             process = _active_processes.get(run_id)
 
             if process is not None and process.returncode is None:
