@@ -21,11 +21,17 @@
 #
 # What this script does NOT do:
 #   - Store any passwords or credentials
-#   - Modify your local machine beyond installing gcloud (if needed)
+#   - Modify your local machine beyond installing gcloud (if needed); on
+#     macOS that means Homebrew too, added to your shell profile
 #   - Install bioAF itself (that happens on the VM)
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+
+# Read the whole script before running any of it. Under `curl ... | bash`
+# bash reads this script from stdin, and attach_terminal (below) points
+# stdin at the terminal instead. The matching brace is at the end of the file.
+{
 
 # ---------------------------------------------------------------------------
 # CLI flags (parsed before any output so --verbose disables log redirect)
@@ -81,6 +87,28 @@ else
     eval "$output_helper_payload"
 fi
 io_init
+
+# ---------------------------------------------------------------------------
+# Laptop prerequisites (terminal input, Homebrew, gcloud's Python). Same
+# local-or-HTTPS loading as the output helper.
+# ---------------------------------------------------------------------------
+PREREQS_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/local_prereqs.sh"
+PREREQS_HELPER_URL="https://raw.githubusercontent.com/bioAF/bioAF/main/installer/local_prereqs.sh"
+if [ -f "$PREREQS_HELPER_LOCAL" ]; then
+    # shellcheck source=installer/local_prereqs.sh
+    source "$PREREQS_HELPER_LOCAL"
+else
+    prereqs_helper_payload="$(curl -fsSL "$PREREQS_HELPER_URL" 2>/dev/null || true)"
+    if [ -z "$prereqs_helper_payload" ]; then
+        printf 'Could not load the prerequisites helper from %s\n' "$PREREQS_HELPER_URL" >&2
+        printf 'Re-run with the bioAF repo cloned locally, or check your network.\n' >&2
+        exit 1
+    fi
+    eval "$prereqs_helper_payload"
+fi
+# Prompts and interactive commands (sudo, gcloud auth login, ssh) all read
+# from the terminal from here on.
+attach_terminal || exit 1
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -194,7 +222,8 @@ echo ""
 echo "This script will set up the Google Cloud infrastructure needed"
 echo "to run bioAF. Here is what it will do:"
 echo ""
-echo "  1. Verify or install the Google Cloud CLI (gcloud)"
+echo "  1. Verify or install the Google Cloud CLI (gcloud), and on a Mac,"
+echo "     Homebrew to install it with"
 echo "  2. Authenticate your Google account"
 echo "  3. Select your GCP project"
 echo "  4. Enable required GCP APIs"
@@ -223,16 +252,11 @@ else
     echo ""
     yellow "  gcloud CLI is not installed."
     echo ""
-    echo "  Google provides an installer for your platform."
-    echo "  Visit: https://cloud.google.com/sdk/docs/install"
+    echo "  On a Mac this installs it with Homebrew, installing Homebrew first if"
+    echo "  needed. On Linux it runs Google's installer."
+    echo "  Details: https://cloud.google.com/sdk/docs/install"
     echo ""
-    echo "  On macOS with Homebrew:"
-    dim "    brew install --cask google-cloud-sdk"
-    echo ""
-    echo "  On Linux:"
-    dim "    curl https://sdk.cloud.google.com | bash"
-    echo ""
-    read -rp "  Install gcloud now? (runs Google's installer) [Y/n] " install_gcloud
+    read -rp "  Install gcloud now? [Y/n] " install_gcloud
     if [ "$install_gcloud" = "n" ] || [ "$install_gcloud" = "N" ]; then
         echo ""
         echo "  Install gcloud manually, then re-run this script."
@@ -242,19 +266,20 @@ else
     os="$(uname -s)"
     case "$os" in
         Darwin)
-            if command -v brew &>/dev/null; then
-                echo "  Installing via Homebrew..."
-                brew install --cask google-cloud-sdk
-            else
-                echo "  Running Google's installer..."
-                curl https://sdk.cloud.google.com | bash
-                exec -l "$SHELL"
-            fi
+            ensure_homebrew || exit 1
+            echo "  Installing gcloud via Homebrew..."
+            brew install --cask "$GCLOUD_CASK"
+            # Run gcloud on the Python its cask depends on, not whatever
+            # python3 is first on PATH (Apple's is too old on some Macs).
+            use_cask_python_for_gcloud || exit 1
             ;;
         Linux)
             echo "  Running Google's installer..."
-            curl https://sdk.cloud.google.com | bash
-            exec -l "$SHELL"
+            gcloud_installer="$(curl -fsSL https://sdk.cloud.google.com)"
+            # Fixed install dir so this process can put it on PATH and carry
+            # on, instead of asking the user to open a new shell.
+            bash -c "$gcloud_installer" gcloud-installer --install-dir="$HOME"
+            export PATH="$HOME/google-cloud-sdk/bin:$PATH"
             ;;
         *)
             red "  Unsupported OS: $os"
@@ -396,6 +421,9 @@ do_gcloud_update() {
 echo ""
 bold "Step 1b: gcloud version check"
 
+# An existing gcloud may run on an old system Python.
+ensure_gcloud_python || exit 1
+
 if gcloud_has_updates; then
     yellow "  A newer version of gcloud is available."
     echo "  Current: $(gcloud version 2>/dev/null | head -1)"
@@ -420,7 +448,7 @@ if gcloud_has_updates; then
             if [ "$rc" = "2" ]; then
                 yellow "  gcloud is managed by an external package manager."
                 echo "  Update with one of:"
-                echo "    brew upgrade --cask google-cloud-cli"
+                echo "    brew upgrade --cask gcloud-cli"
                 echo "    sudo apt-get update && sudo apt-get install --only-upgrade google-cloud-cli"
                 echo "    sudo snap refresh google-cloud-cli"
                 echo ""
@@ -700,6 +728,7 @@ fi
 # Wait for an SA to be globally visible to IAM before granting roles. Newly
 # created SAs can take 5-30 seconds to propagate; until then,
 # `add-iam-policy-binding` returns "Service account ... does not exist".
+# shellcheck disable=SC2329 # called below; the { } script wrapper hides that
 wait_for_sa() {
     local sa_email="$1"
     local attempts=20
@@ -725,6 +754,7 @@ wait_for_sa() {
 # checks the SA endpoint, but the project IAM endpoint can lag behind it
 # by several seconds, so even a successful wait can be followed by a
 # rejected add-iam-policy-binding. Sleep 5s and retry up to twice.
+# shellcheck disable=SC2329 # called below; the { } script wrapper hides that
 retry_iam() {
     local attempts=3
     local delay=5
@@ -1227,3 +1257,5 @@ dim "  The setup wizard will detect the VM's attached identity and skip the"
 dim "  key-upload step. Pre-populated values come from the prefill file."
 
 io_finish
+exit
+}

@@ -1,3 +1,6 @@
+from collections.abc import Sequence
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -250,7 +253,7 @@ async def file_stats(
 
     artifacts: dict[str, int] = {}
     uploaded: dict[str, int] = {}
-    for source, ftype, cnt in rows:
+    for source, ftype, cnt in cast("Sequence[tuple[str, str, int]]", rows):
         bucket = artifacts if source == "artifacts" else uploaded
         bucket[ftype] = cnt
 

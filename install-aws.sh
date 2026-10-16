@@ -16,7 +16,8 @@
 #   ./install-aws.sh [--region us-east-1] [--ssh-cidr 0.0.0.0/0] [--verbose]
 #
 # What this script does:
-#   1. Checks for (or installs) the AWS CLI v2
+#   1. Checks for (or installs) the AWS CLI v2; on macOS it installs it with
+#      Homebrew, installing Homebrew first (added to your shell profile)
 #   2. Verifies your AWS credentials (aws sts get-caller-identity)
 #   3. Selects a region
 #   4. Creates an EC2 key pair for SSH (saves the private key locally)
@@ -33,6 +34,11 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+
+# Read the whole script before running any of it. Under `curl ... | bash`
+# bash reads this script from stdin, and attach_terminal (below) points
+# stdin at the terminal instead. The matching brace is at the end of the file.
+{
 
 # ---------------------------------------------------------------------------
 # CLI flags (parsed before any output so --verbose disables log redirect)
@@ -100,6 +106,28 @@ fi
 io_init
 
 # ---------------------------------------------------------------------------
+# Laptop prerequisites (terminal input, Homebrew). Same local-or-HTTPS
+# loading as the output helper.
+# ---------------------------------------------------------------------------
+PREREQS_HELPER_LOCAL="$(dirname "${BASH_SOURCE[0]:-$0}")/installer/local_prereqs.sh"
+PREREQS_HELPER_URL="https://raw.githubusercontent.com/bioAF/bioAF/main/installer/local_prereqs.sh"
+if [ -f "$PREREQS_HELPER_LOCAL" ]; then
+    # shellcheck source=installer/local_prereqs.sh
+    source "$PREREQS_HELPER_LOCAL"
+else
+    prereqs_helper_payload="$(curl -fsSL "$PREREQS_HELPER_URL" 2>/dev/null || true)"
+    if [ -z "$prereqs_helper_payload" ]; then
+        printf 'Could not load the prerequisites helper from %s\n' "$PREREQS_HELPER_URL" >&2
+        printf 'Re-run with the bioAF repo cloned locally, or check your network.\n' >&2
+        exit 1
+    fi
+    eval "$prereqs_helper_payload"
+fi
+# Prompts and interactive commands (sudo, ssh) all read from the terminal
+# from here on.
+attach_terminal || exit 1
+
+# ---------------------------------------------------------------------------
 # Defaults. The AWS analogs of install-gcp.sh's VM_NAME / MACHINE_TYPE / etc.
 # ---------------------------------------------------------------------------
 VM_NAME="bioaf"
@@ -138,9 +166,10 @@ if command -v aws &>/dev/null; then
     step "AWS CLI present ($(aws --version 2>&1 | awk '{print $1}'))" -- true
 else
     yellow "  The AWS CLI v2 is not installed."
-    if [ "$(uname -s)" = "Darwin" ] && command -v brew &>/dev/null; then
-        read -rp "  Install it now with Homebrew? [Y/n] " ans
+    if [ "$(uname -s)" = "Darwin" ]; then
+        read -rp "  Install it now with Homebrew (installing Homebrew first if needed)? [Y/n] " ans
         if [ "$ans" != "n" ] && [ "$ans" != "N" ]; then
+            ensure_homebrew || exit 1
             step "Install awscli via Homebrew" -- brew install awscli
         fi
     fi
@@ -737,3 +766,5 @@ dim "  The setup wizard reads the VM's instance profile for credentials, so ther
 dim "  is no key to upload. Pre-populated values come from the prefill file."
 
 io_finish
+exit
+}
