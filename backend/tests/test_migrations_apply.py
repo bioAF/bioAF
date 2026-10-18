@@ -14,6 +14,7 @@ applies but disagrees with the models, fails here instead of in production.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -109,6 +110,8 @@ async def migrated_schema(worker_id):
 
         def _upgrade(sync_conn):
             cfg.attributes["connection"] = sync_conn
+            # Leave pytest's logging alone; see test_running_migrations_leaves_test_logging_alone.
+            cfg.attributes["skip_logging_config"] = True
             command.upgrade(cfg, "head")
 
         await conn.run_sync(_upgrade)
@@ -224,3 +227,32 @@ async def test_known_drift_list_has_no_stale_entries(migrated_schema):
 
     stale = sorted(KNOWN_DRIFT - observed)
     assert stale == [], "KNOWN_DRIFT lists drift that no longer exists; remove:\n" + "\n".join(f"  {k}" for k in stale)
+
+
+# Created at import, so it exists before the fixture runs the migration chain.
+_APP_LOGGER = logging.getLogger("bioaf.migration_logging_probe")
+
+
+@pytest.fixture
+def root_capture_handler():
+    """A handler on the root logger before the upgrade, standing in for caplog's."""
+    handler = logging.NullHandler()
+    logging.getLogger().addHandler(handler)
+    yield handler
+    logging.getLogger().removeHandler(handler)
+
+
+@pytest.mark.skipif(
+    os.environ.get("BIOAF_SKIP_MIGRATION_TESTS") == "1",
+    reason="explicitly disabled",
+)
+@pytest.mark.asyncio
+async def test_running_migrations_leaves_test_logging_alone(root_capture_handler, migrated_schema):
+    """env.py's fileConfig must not run inside the suite.
+
+    It disables every logger created before it and replaces the root handlers,
+    so any later test asserting on a `bioaf.*` log line saw nothing and failed
+    depending on which xdist worker it shared with this file.
+    """
+    assert not _APP_LOGGER.disabled
+    assert root_capture_handler in logging.getLogger().handlers

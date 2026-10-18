@@ -54,7 +54,7 @@ test("an unconfigured comp_bio sees the comp_bio default widgets", async () => {
     expect(screen.getByTestId("widget-running-jobs")).toBeInTheDocument();
   });
   expect(screen.getByTestId("widget-queue-depth")).toBeInTheDocument();
-  // cost_budget is an admin default, not a comp_bio default
+  // cost_budget is not a comp_bio default
   expect(screen.queryByTestId("widget-cost-budget")).not.toBeInTheDocument();
 });
 
