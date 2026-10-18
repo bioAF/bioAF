@@ -6,7 +6,7 @@
  * reported the mismatch with their invoice as a bug. The gate keeps the number
  * off screen until a real one exists.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { BillingDashboardGate } from "./BillingDashboardGate";
 
@@ -75,6 +75,33 @@ test("the Pending info icon explains the 24-hour wait", async () => {
   expect(dialog).toHaveTextContent(/24 hours/);
   await userEvent.click(screen.getByRole("button", { name: "Close" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+// Creating the dataset does not enable export in Google Cloud, and nothing
+// flips `configured` on its own: only Check Status in the Cost Center does.
+// So Pending must point there, or a user waits on it forever.
+test("Pending links to the Cost Center to finish setup", async () => {
+  mockGet.mockResolvedValueOnce({ configured: false, dataset_id: "billing_export" });
+  renderGate();
+  await waitFor(() => expect(screen.getByText("Pending")).toBeInTheDocument());
+  expect(screen.getByRole("link", { name: "Finish setup in Cost Center" })).toHaveAttribute(
+    "href",
+    "/infrastructure/cost-center",
+  );
+});
+
+test("the Pending dialog says setup is not finished until Check Status confirms it", async () => {
+  mockGet.mockResolvedValueOnce({ configured: false, dataset_id: "billing_export" });
+  renderGate();
+  await userEvent.click(await screen.findByRole("button", { name: /why is this pending/i }));
+  const dialog = await screen.findByRole("dialog");
+  expect(dialog).toHaveTextContent(/enabled? billing export/i);
+  expect(dialog).toHaveTextContent(/Check Status/);
+  expect(dialog).not.toHaveTextContent(/is set up/i);
+  expect(within(dialog).getByRole("link", { name: "Open Cost Center" })).toHaveAttribute(
+    "href",
+    "/infrastructure/cost-center",
+  );
 });
 
 test("set up: shows the cost widget", async () => {

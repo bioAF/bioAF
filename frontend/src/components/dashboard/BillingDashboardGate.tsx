@@ -20,7 +20,11 @@ interface BillingExportStatus {
  * dashboard that estimate read as real spend, and users reported the gap
  * against their invoice as a bug. So the widget shows no number at all until
  * the export is verified: "Please enable the billing dashboard" before setup,
- * "Pending" once the dataset exists but no data has arrived yet.
+ * "Pending" once the dataset exists but the export has not been verified.
+ *
+ * Pending never resolves by itself. Creating the dataset does not enable the
+ * export in Google Cloud, and `configured` turns true only when Check Status in
+ * the Cost Center finds the export table. So Pending always links there.
  *
  * The children mount only once configured, so their cost request is never
  * made against estimated data.
@@ -88,18 +92,37 @@ export function BillingDashboardGate({
                 />
               </svg>
             </button>
+            <Link
+              href="/infrastructure/cost-center"
+              className="ml-auto text-xs text-bioaf-600 hover:underline"
+            >
+              Finish setup in Cost Center
+            </Link>
           </div>
         )}
         <Modal
           open={explainOpen}
-          title="Billing data is on its way"
+          title="Billing dashboard setup is pending"
           size="sm"
           onClose={() => setExplainOpen(false)}
         >
-          <p className="text-sm text-gray-600">
-            The billing dashboard is set up. Google Cloud can take up to 24 hours to deliver the
-            first billing data, and costs will appear here once it arrives.
-          </p>
+          <div className="space-y-2 text-sm text-gray-600">
+            <p>
+              The billing dataset has been created, but costs only appear here once setup is
+              finished. Make sure you have enabled billing export to that dataset in the Google
+              Cloud Console, then click Check Status in the Cost Center.
+            </p>
+            <p>
+              Google Cloud can take up to 24 hours to deliver the first billing data. If Check
+              Status finds none yet, try again later.
+            </p>
+            <Link
+              href="/infrastructure/cost-center"
+              className="inline-block text-bioaf-600 hover:underline"
+            >
+              Open Cost Center
+            </Link>
+          </div>
         </Modal>
       </Card>
     </div>
