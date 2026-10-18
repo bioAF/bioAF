@@ -147,7 +147,7 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     description: "This month's spend against the monthly budget.",
     component: CostBudgetWidget,
     permissions: [["cost_center", "view"]],
-    defaultForRoles: ["admin"],
+    defaultForRoles: [],
   },
   {
     key: "cost_trend",
@@ -155,7 +155,7 @@ export const WIDGETS: readonly WidgetDefinition[] = [
     description: "Daily cloud spend over the last 30 days.",
     component: CostTrendWidget,
     permissions: [["cost_center", "view"]],
-    defaultForRoles: ["admin"],
+    defaultForRoles: [],
   },
   {
     key: "infra_health",

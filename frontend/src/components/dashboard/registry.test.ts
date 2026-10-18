@@ -21,10 +21,13 @@ describe("widget registry", () => {
     expect(keys).not.toContain("cost_budget");
   });
 
-  test("admin defaults include cost and infra", () => {
+  test("admin defaults include infra but not the cost widgets", () => {
+    // Cost widgets need the billing dashboard set up first; an admin adds them
+    // from the picker rather than landing on "Please enable" by default.
     const keys = defaultLayoutForRole("admin");
-    expect(keys).toContain("cost_budget");
     expect(keys).toContain("infra_health");
+    expect(keys).not.toContain("cost_budget");
+    expect(keys).not.toContain("cost_trend");
   });
 
   test("bench defaults include experiments status", () => {
