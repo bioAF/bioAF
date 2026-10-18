@@ -13,8 +13,31 @@ jest.mock("@/lib/api", () => ({ api: { get: jest.fn(), getWithRetry: jest.fn() }
 
 import { api } from "@/lib/api";
 const mockGet = api.getWithRetry as jest.Mock;
+const mockStatus = api.get as jest.Mock;
 
-beforeEach(() => mockGet.mockReset());
+beforeEach(() => {
+  mockGet.mockReset();
+  // The trend renders only once the billing dashboard is set up.
+  mockStatus.mockReset();
+  mockStatus.mockResolvedValue({ configured: true, dataset_id: "billing_export" });
+});
+
+test("before the billing dashboard is set up, shows no trend and never asks for one", async () => {
+  mockStatus.mockResolvedValue({ configured: false, dataset_id: "" });
+  render(<CostTrendWidget />);
+  await waitFor(() =>
+    expect(screen.getByText("Please enable the billing dashboard")).toBeInTheDocument(),
+  );
+  expect(screen.getByTestId("widget-cost-trend")).toHaveTextContent("Cost / spend trend");
+  expect(mockGet).not.toHaveBeenCalled();
+});
+
+test("while billing data is pending, shows Pending and never asks for a trend", async () => {
+  mockStatus.mockResolvedValue({ configured: false, dataset_id: "billing_export" });
+  render(<CostTrendWidget />);
+  await waitFor(() => expect(screen.getByText("Pending")).toBeInTheDocument());
+  expect(mockGet).not.toHaveBeenCalled();
+});
 
 test("renders the total and a bar per day", async () => {
   mockGet.mockResolvedValueOnce({

@@ -105,6 +105,11 @@ describe("Dashboard Widgets", () => {
   });
 
   describe("CostBudgetWidget", () => {
+    beforeEach(() => {
+      // The widget asks for spend only once the billing dashboard is set up.
+      mockApiGet.mockResolvedValueOnce({ configured: true, dataset_id: "billing_export" });
+    });
+
     it("calls the correct endpoint", async () => {
       mockApiGet.mockResolvedValueOnce({
         current_month_spend: 500,

@@ -84,7 +84,7 @@ export function BillingSetupModal({ onComplete, onClose, datasetExists, consoleU
   };
 
   return (
-    <Modal open title="Set Up Billing Export" onClose={onClose}>
+    <Modal open title="Set Up Billing Dashboard" onClose={onClose}>
 
         {/* Intro */}
         {step === "intro" && (

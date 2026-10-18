@@ -4,6 +4,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { BillingDashboardGate } from "@/components/dashboard/BillingDashboardGate";
 
 interface ComponentCost {
   component: string;
@@ -72,6 +73,14 @@ function formatCurrency(value: number | string, currency: string): string {
 }
 
 export function CostBudgetWidget() {
+  return (
+    <BillingDashboardGate title="Cost vs. Budget" testId="widget-cost-budget">
+      <CostBudget />
+    </BillingDashboardGate>
+  );
+}
+
+function CostBudget() {
   const { data, loading, error, retry } = useWidgetData<CostData>(
     async () => {
       const res = await api.getWithRetry<CostSummaryResponse>("/api/costs/summary");

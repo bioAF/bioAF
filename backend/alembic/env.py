@@ -53,8 +53,9 @@ from app.models import (  # noqa: F401
 # Alembic Config object
 config = context.config
 
-# Set up logging from the config file
-if config.config_file_name is not None:
+# Set up logging from the config file, unless the caller owns logging already
+# (the test suite: fileConfig would disable every logger created before it).
+if config.config_file_name is not None and not config.attributes.get("skip_logging_config"):
     fileConfig(config.config_file_name)
 
 # Set the SQLAlchemy URL from app settings

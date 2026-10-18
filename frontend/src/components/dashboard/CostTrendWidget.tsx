@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { useWidgetData } from "@/hooks/useWidgetData";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
+import { BillingDashboardGate } from "@/components/dashboard/BillingDashboardGate";
 
 interface DailyCost {
   date: string;
@@ -71,6 +72,14 @@ function tooltipPosition(index: number, count: number): React.CSSProperties {
 }
 
 export function CostTrendWidget() {
+  return (
+    <BillingDashboardGate title="Cost / spend trend" testId="widget-cost-trend">
+      <CostTrend />
+    </BillingDashboardGate>
+  );
+}
+
+function CostTrend() {
   const { data, loading, error, retry } = useWidgetData(
     async () => {
       const res = await api.getWithRetry<CostHistory>(`/api/costs/history?start_date=${dateStr(29)}&end_date=${dateStr(0)}`,);

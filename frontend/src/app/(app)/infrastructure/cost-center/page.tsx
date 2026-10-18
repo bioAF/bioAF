@@ -191,7 +191,7 @@ export default function InfraCostCenterPage() {
             onClick={() => setShowBillingSetupModal(true)}
             className="px-3 py-1.5 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700 whitespace-nowrap"
           >
-            Set Up Billing Export
+            Set Up Billing Dashboard
           </button>
         </div>
       )}
@@ -221,7 +221,7 @@ export default function InfraCostCenterPage() {
             onClick={() => setShowTeardownConfirm(true)}
             className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium hover:bg-red-100"
           >
-            Teardown Billing Export
+            Teardown Billing Dashboard
           </button>
         </div>
       )}
@@ -232,7 +232,7 @@ export default function InfraCostCenterPage() {
             onClick={() => setShowTeardownConfirm(true)}
             className="px-3 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded text-xs font-medium hover:bg-red-100"
           >
-            Teardown Billing Export
+            Teardown Billing Dashboard
           </button>
         </div>
       )}
@@ -263,7 +263,7 @@ export default function InfraCostCenterPage() {
 
       <Modal
         open={showTeardownConfirm}
-        title="Teardown Billing Export"
+        title="Teardown Billing Dashboard"
         onClose={() => setShowTeardownConfirm(false)}
         size="sm"
         footer={
@@ -294,7 +294,7 @@ export default function InfraCostCenterPage() {
 
       {showTeardownModal && (
         <TerraformProgressModal
-          title="Teardown Billing Export"
+          title="Teardown Billing Dashboard"
           sseUrl="/api/v1/infrastructure/billing-export/teardown"
           mode="teardown"
           onComplete={() => {
