@@ -14,7 +14,8 @@ export type LiteratureSourceName =
   | "pubmed"
   | "biorxiv"
   | "europepmc"
-  | "semanticscholar";
+  | "semanticscholar"
+  | "openalex";
 export type ReadingStatusValue = "unread" | "reading" | "read";
 export type SearchStatus =
   | "queued"
