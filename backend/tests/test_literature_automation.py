@@ -121,12 +121,13 @@ def _patch_sources(monkeypatch, records: list[PaperRecord]):
     async def empty_search(query, max_results, api_key):
         return []
 
-    from app.services.literature.sources import biorxiv, europepmc, pubmed, semanticscholar
+    from app.services.literature.sources import biorxiv, europepmc, openalex, pubmed, semanticscholar
 
     monkeypatch.setattr(pubmed, "search", fake_search)
     monkeypatch.setattr(biorxiv, "search", empty_search)
     monkeypatch.setattr(europepmc, "search", empty_search)
     monkeypatch.setattr(semanticscholar, "search", empty_search)
+    monkeypatch.setattr(openalex, "search", empty_search)
 
 
 class _FakeLlmClient:
