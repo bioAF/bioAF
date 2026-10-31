@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.api.literature._common import _serialize_paper
 from app.database import get_session
-from app.models.literature import ALL_PROVENANCES, ALL_SCOPES
+from app.models.literature import ALL_PROVENANCES, ALL_SCOPES, LiteraturePaper
 from app.schemas.literature import (
     BulkAddToLibraryRequest,
     BulkAddToLibraryResponse,
@@ -274,7 +274,33 @@ async def upload_pdf_to_paper_endpoint(
         raise HTTPException(503, _NO_LITERATURE_STORAGE)
 
     extracted = upload_service.synchronous_extract_basic(pdf_bytes)
-    effective_doi = paper.doi or extracted.get("doi")
+    await _attach_pdf(
+        session,
+        paper=paper,
+        pdf_bytes=pdf_bytes,
+        pdf_doi=extracted.get("doi"),
+        org_id=org_id,
+        user_id=user_id,
+        confirm_merge=confirm_merge,
+    )
+    await session.refresh(paper)
+    response.status_code = 200
+    return await _serialize_paper(session, paper, user_id)
+
+
+async def _attach_pdf(
+    session: AsyncSession,
+    *,
+    paper: LiteraturePaper,
+    pdf_bytes: bytes,
+    pdf_doi: str | None,
+    org_id: int,
+    user_id: int,
+    confirm_merge: bool,
+) -> None:
+    """Store a PDF on a paper and queue its extraction. ``pdf_doi`` backfills a
+    paper without one; a DOI held by another paper is a 409 unless confirm_merge."""
+    effective_doi = paper.doi or pdf_doi
 
     if effective_doi:
         conflict = await paper_service.find_duplicate(
@@ -299,10 +325,8 @@ async def upload_pdf_to_paper_endpoint(
             await paper_service.merge_papers(session, survivor=paper, duplicate=conflict, user_id=user_id)
 
     # Backfill the DOI on the target if it lacked one.
-    if not paper.doi and extracted.get("doi"):
-        await paper_service.update_paper_metadata(
-            session, paper=paper, user_id=user_id, fields={"doi": extracted["doi"]}
-        )
+    if not paper.doi and pdf_doi:
+        await paper_service.update_paper_metadata(session, paper=paper, user_id=user_id, fields={"doi": pdf_doi})
 
     uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
     if uri:
@@ -311,9 +335,6 @@ async def upload_pdf_to_paper_endpoint(
     await session.commit()
 
     await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
-    await session.refresh(paper)
-    response.status_code = 200
-    return await _serialize_paper(session, paper, user_id)
 
 
 @router.get("/papers/{paper_id}/pdf")
