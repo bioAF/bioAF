@@ -47,6 +47,7 @@ const OPEN_ACCESS_FAILURES: Record<number, string> = {
   404: "No openly downloadable copy was found.",
   409: "The copy found may belong to a different paper, so it was not attached. Upload the PDF yourself instead.",
   502: "OpenAlex could not be reached right now. Try again later.",
+  503: "The PDF could not be saved, so it was not attached. Try again later.",
   504: "Looking for an open-access copy took too long. Try again later.",
 };
 
@@ -194,17 +195,24 @@ export default function PaperDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paperId]);
 
-  // Loaded apart from the paper so an OpenAlex outage only empties its own card.
+  // Loaded apart from the paper so an OpenAlex outage only empties its own card. A response
+  // for a paper the user has since left is ignored.
   useEffect(() => {
+    let current = true;
     setContext(null);
     setContextFailed(false);
     Promise.resolve()
       .then(() => literature.openAlexContext(paperId))
-      .then(setContext)
+      .then((c) => {
+        if (current) setContext(c);
+      })
       .catch((e) => {
         logError(`loading OpenAlex context for paper ${paperId}`, e);
-        setContextFailed(true);
+        if (current) setContextFailed(true);
       });
+    return () => {
+      current = false;
+    };
   }, [paperId]);
 
   async function submitComment() {
