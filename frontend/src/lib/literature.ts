@@ -59,6 +59,10 @@ export interface Paper {
   has_full_text: boolean;
   extraction_status: string;
   extraction_error: string | null;
+  full_text_version: string | null;
+  full_text_source: string | null;
+  full_text_source_url: string | null;
+  full_text_acquired_at: string | null;
   comment_count: number;
   reading_status: ReadingStatusValue | null;
   dismissed: boolean;
@@ -66,6 +70,34 @@ export interface Paper {
   associations: Association[];
   created_at: string;
   updated_at: string;
+}
+
+export interface OpenAccessLocation {
+  pdf_url: string | null;
+  landing_page_url: string | null;
+  version: string | null;
+  license: string | null;
+  host: string | null;
+}
+
+/** Research context read live from OpenAlex. Null means unknown, never false or zero. */
+export interface OpenAlexContext {
+  available: boolean;
+  openalex_id: string | null;
+  is_retracted: boolean | null;
+  cited_by_count: number | null;
+  counts_by_year: { year: number; cited_by_count: number }[];
+  oa_locations: OpenAccessLocation[];
+}
+
+const OPEN_ACCESS_VERSION_LABELS: Record<string, string> = {
+  publishedVersion: "Published version",
+  acceptedVersion: "Accepted version",
+  submittedVersion: "Submitted version",
+};
+
+export function openAccessVersionLabel(version: string | null): string {
+  return (version && OPEN_ACCESS_VERSION_LABELS[version]) || "Version not stated";
 }
 
 export interface DoiConflict {
@@ -317,6 +349,10 @@ export const literature = {
   listPapers: (filters: PaperFilters = {}) =>
     api.get<PaperListResponse>(`/api/literature/papers${buildQuery(filters)}`),
   getPaper: (id: number) => api.get<Paper>(`/api/literature/papers/${id}`),
+  openAlexContext: (id: number) =>
+    api.get<OpenAlexContext>(`/api/literature/papers/${id}/openalex`),
+  fetchOpenAccess: (id: number) =>
+    api.post<Paper>(`/api/literature/papers/${id}/fetch-open-access`),
   createPaper: (body: {
     title: string;
     authors: Author[];
