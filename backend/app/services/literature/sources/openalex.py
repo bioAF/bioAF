@@ -59,6 +59,35 @@ async def _works(params: dict, api_key: str | None, select: str = _SELECT) -> li
         return r.json().get("results", [])
 
 
+def work_context(item: dict) -> dict:
+    """Research context for one work. Unknown status and counts stay None, never False or 0.
+    Only locations OpenAlex marks open access are listed, one per distinct URL."""
+    seen: set[str] = set()
+    oa_locations = []
+    for loc in item.get("locations") or []:
+        url = loc.get("pdf_url") or loc.get("landing_page_url")
+        if loc.get("is_oa") is not True or not url or url in seen:
+            continue
+        seen.add(url)
+        oa_locations.append(
+            {
+                "pdf_url": loc.get("pdf_url"),
+                "landing_page_url": loc.get("landing_page_url"),
+                "version": loc.get("version"),
+                "license": loc.get("license"),
+                "host": (loc.get("source") or {}).get("display_name"),
+            }
+        )
+    return {
+        "available": True,
+        "openalex_id": _strip_prefix(item.get("id"), "https://openalex.org/"),
+        "is_retracted": item.get("is_retracted"),
+        "cited_by_count": item.get("cited_by_count"),
+        "counts_by_year": sorted(item.get("counts_by_year") or [], key=lambda c: c["year"]),
+        "oa_locations": oa_locations,
+    }
+
+
 def _strip_prefix(value: str | None, prefix: str) -> str | None:
     return (value or "").removeprefix(prefix).strip() or None
 

@@ -146,3 +146,80 @@ async def test_search_keeps_the_small_field_selection():
         await get_adapter("openalex").search("x", 5, None)
 
     assert "counts_by_year" not in route.calls.last.request.url.params["select"]
+
+
+_CONTEXT_WORK = {
+    "id": "https://openalex.org/W2741809807",
+    "is_retracted": True,
+    "cited_by_count": 42,
+    "counts_by_year": [{"year": 2024, "cited_by_count": 30}, {"year": 2023, "cited_by_count": 12}],
+    "locations": [
+        {
+            "is_oa": True,
+            "pdf_url": "https://peerj.com/articles/4375.pdf",
+            "landing_page_url": "https://peerj.com/articles/4375",
+            "version": "publishedVersion",
+            "license": "cc-by",
+            "source": {"display_name": "PeerJ"},
+        },
+        {
+            "is_oa": True,
+            "pdf_url": "https://peerj.com/articles/4375.pdf",
+            "landing_page_url": "https://doi.org/10.7717/peerj.4375",
+            "version": "publishedVersion",
+            "license": "cc-by",
+            "source": {"display_name": "Crossref"},
+        },
+        {
+            "is_oa": True,
+            "pdf_url": None,
+            "landing_page_url": "https://europepmc.org/article/MED/29456894",
+            "version": None,
+            "license": None,
+            "source": None,
+        },
+        {"is_oa": False, "pdf_url": "https://paywalled.example/x.pdf", "version": "publishedVersion"},
+    ],
+}
+
+
+def test_work_context_reports_status_counts_and_open_copies():
+    from app.services.literature.sources.openalex import work_context
+
+    ctx = work_context(_CONTEXT_WORK)
+
+    assert ctx["available"] is True
+    assert ctx["openalex_id"] == "W2741809807"
+    assert ctx["is_retracted"] is True
+    assert ctx["cited_by_count"] == 42
+    assert ctx["counts_by_year"] == [{"year": 2023, "cited_by_count": 12}, {"year": 2024, "cited_by_count": 30}]
+    assert ctx["oa_locations"] == [
+        {
+            "pdf_url": "https://peerj.com/articles/4375.pdf",
+            "landing_page_url": "https://peerj.com/articles/4375",
+            "version": "publishedVersion",
+            "license": "cc-by",
+            "host": "PeerJ",
+        },
+        {
+            "pdf_url": None,
+            "landing_page_url": "https://europepmc.org/article/MED/29456894",
+            "version": None,
+            "license": None,
+            "host": None,
+        },
+    ]
+
+
+def test_work_context_keeps_unknown_distinct_from_false_and_zero():
+    from app.services.literature.sources.openalex import work_context
+
+    unknown = work_context({"id": "https://openalex.org/W1"})
+    assert unknown["is_retracted"] is None
+    assert unknown["cited_by_count"] is None
+    assert unknown["counts_by_year"] == []
+    assert unknown["oa_locations"] == []
+
+    known = work_context({"id": "https://openalex.org/W1", "is_retracted": False, "cited_by_count": 0})
+    assert known["is_retracted"] is False
+    assert known["cited_by_count"] == 0
