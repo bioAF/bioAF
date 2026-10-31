@@ -223,3 +223,27 @@ def test_work_context_keeps_unknown_distinct_from_false_and_zero():
     known = work_context({"id": "https://openalex.org/W1", "is_retracted": False, "cited_by_count": 0})
     assert known["is_retracted"] is False
     assert known["cited_by_count"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["cites:W2741809807", "cited_by:W2741809807"])
+async def test_citation_queries_become_openalex_filters(query):
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works").respond(json={"results": []})
+        await get_adapter("openalex").search(query, 5, None)
+
+    params = route.calls.last.request.url.params
+    assert params["filter"] == query
+    assert "search" not in params
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["tgf-beta fibrosis", "cites:12345", "cites:W12 and more", "cited_by:"])
+async def test_other_queries_stay_keyword_searches(query):
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works").respond(json={"results": []})
+        await get_adapter("openalex").search(query, 5, None)
+
+    params = route.calls.last.request.url.params
+    assert params["search"] == query
+    assert "filter" not in params

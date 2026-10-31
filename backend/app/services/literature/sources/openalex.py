@@ -7,6 +7,7 @@ travels in the Authorization header so it never appears in a logged URL.
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import httpx
@@ -21,6 +22,7 @@ _SELECT = (
     "id,display_name,doi,ids,publication_date,relevance_score,authorships,"
     "primary_location,best_oa_location,abstract_inverted_index"
 )
+_CITATION_QUERY_RE = re.compile(r"(cites|cited_by):W\d+")
 _CONTEXT_SELECT = "id,is_retracted,cited_by_count,counts_by_year,locations,best_oa_location"
 
 
@@ -30,7 +32,10 @@ def get_rate_limit(has_api_key: bool) -> RateLimit:
 
 
 async def search(query: str, max_results: int, api_key: str | None) -> list[PaperRecord]:
-    items = await _works({"search": query, "per_page": str(min(max_results, 200))}, api_key)
+    # "cites:W123" (works citing W123) and "cited_by:W123" (works W123 references)
+    # are OpenAlex citation filters; anything else is a keyword search.
+    mode = "filter" if _CITATION_QUERY_RE.fullmatch(query) else "search"
+    items = await _works({mode: query, "per_page": str(min(max_results, 200))}, api_key)
     return [_parse_result(item) for item in items]
 
 
