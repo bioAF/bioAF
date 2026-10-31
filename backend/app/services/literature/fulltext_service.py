@@ -14,8 +14,10 @@ fall back to a pasted-in body. Network egress lives only here.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from xml.etree import ElementTree as ET
 
@@ -123,6 +125,12 @@ class FullTextFetchService:
 _VERSION_PREFERENCE = ("publishedVersion", "acceptedVersion", "submittedVersion")
 MAX_OPEN_ACCESS_ATTEMPTS = 3
 
+# PDF parsing is synchronous PyMuPDF work; it runs on this pool so it never holds the event loop.
+# The pool bounds concurrent parses. A caller that times out stops waiting and a queued parse is
+# dropped, but a parse already running finishes in its thread and its result is discarded.
+MAX_CONCURRENT_PDF_PARSES = 2
+_parse_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PDF_PARSES, thread_name_prefix="oa-pdf-parse")
+
 
 @dataclass
 class OpenAccessPdf:
@@ -160,8 +168,28 @@ async def fetch_open_access_pdf(oa_locations: list[dict]) -> OpenAccessPdf | Non
             continue
         if not pdf_bytes.startswith(b"%PDF"):
             continue
-        extracted = upload_service.synchronous_extract_basic(pdf_bytes)
+        extracted = await asyncio.get_running_loop().run_in_executor(
+            _parse_pool, upload_service.synchronous_extract_basic, pdf_bytes
+        )
         if not extracted.get("page_count"):
             continue
         return OpenAccessPdf(pdf_bytes=pdf_bytes, extracted=extracted, location=loc)
     return None
+
+
+def copy_identity_problem(extracted: dict, expected_doi: str | None) -> str | None:
+    """Why an acquired copy cannot be trusted as the paper with ``expected_doi``, or None.
+
+    Only DOIs printed on the copy's first page count as its own; later pages carry references,
+    so a paper that cites this one names its DOI there. A first page naming other DOIs is
+    ``identity_mismatch``; one naming this DOI alongside others is ``identity_unconfirmed``. A
+    first page with no DOI is not evidence against the copy, which OpenAlex lists for this work."""
+    from app.services.literature.extraction import find_dois
+
+    first_page = (extracted.get("full_text") or "").split("\n\n[Page 2]\n", 1)[0]
+    dois = find_dois(first_page)
+    if not expected_doi or not dois:
+        return None
+    if expected_doi not in dois:
+        return "identity_mismatch"
+    return "identity_unconfirmed" if len(dois) > 1 else None

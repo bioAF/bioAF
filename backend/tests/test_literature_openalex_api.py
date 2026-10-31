@@ -414,3 +414,159 @@ async def test_fetch_refuses_internal_addresses_with_the_real_downloader(
 
     assert r.status_code == 404
     assert scheduled == []
+
+
+# --- Identity evidence: only DOIs printed on the first page belong to the copy ---
+
+
+def _pdf(*pages: str) -> bytes:
+    pytest.importorskip("fitz")
+    import fitz  # type: ignore
+
+    doc = fitz.open()
+    for text in pages:
+        doc.new_page().insert_text((72, 72), text)
+    out = doc.tobytes()
+    doc.close()
+    return out
+
+
+async def _unchanged(client, token, pid):
+    after = (await client.get(f"/api/literature/papers/{pid}", headers={"Authorization": f"Bearer {token}"})).json()
+    assert after["has_pdf"] is False
+    assert after["full_text_source"] is None
+    assert after["extraction_status"] != "pending"
+
+
+@pytest.mark.asyncio
+async def test_fetch_rejects_a_paper_that_cites_this_one(client, admin_token, fake_literature_bucket, oa):  # noqa: F811
+    pid = await _paper(client, admin_token, doi="10.5555/paper-a")
+    oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/b.pdf")]}
+    oa["bodies"] = {"https://w.example/b.pdf": _pdf("doi:10.5555/paper-b\nPaper B", "References\n1. doi:10.5555/paper-a")}
+
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "identity_mismatch"
+    await _unchanged(client, admin_token, pid)
+    assert oa["scheduled"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_does_not_attach_a_copy_with_several_first_page_dois(
+    client,
+    admin_token,
+    fake_literature_bucket,  # noqa: F811
+    oa,
+):
+    pid = await _paper(client, admin_token, doi="10.5555/paper-a")
+    oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/b.pdf")]}
+    oa["bodies"] = {"https://w.example/b.pdf": _pdf("doi:10.5555/paper-b\nAs shown in doi:10.5555/paper-a")}
+
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "identity_unconfirmed"
+    await _unchanged(client, admin_token, pid)
+    assert oa["scheduled"] == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_attaches_a_copy_with_no_doi_on_its_first_page(client, admin_token, fake_literature_bucket, oa):  # noqa: F811
+    pid = await _paper(client, admin_token, doi="10.5555/paper-a")
+    oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/a.pdf")]}
+    oa["bodies"] = {"https://w.example/a.pdf": _pdf("Paper A, accepted manuscript", "References\n1. doi:10.5555/other")}
+
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 200, r.text
+    assert r.json()["full_text_source"] == "openalex"
+    assert oa["scheduled"] == [pid]
+
+
+# --- Storage: an acquired copy is attached only once it is saved ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replacing", [False, True])
+async def test_fetch_storage_failure_changes_nothing(
+    client,
+    admin_token,
+    session,
+    fake_literature_bucket,  # noqa: F811
+    oa,
+    monkeypatch,
+    replacing,
+):
+    from app.models.literature import LiteraturePaper
+    from app.services.literature import upload_service
+
+    pid = await _paper(client, admin_token, pmid="123")
+    paper = await session.get(LiteraturePaper, pid)
+    if replacing:
+        paper.gcs_pdf_uri = "gs://bioaf-literature-test/papers/old.pdf"
+        paper.full_text_version = "submittedVersion"
+        paper.full_text_source = "openalex"
+        paper.extraction_status = "complete"
+    prior = {k: getattr(paper, k) for k in ("gcs_pdf_uri", "full_text_version", "full_text_source", "extraction_status")}
+    await session.commit()
+
+    async def failed_write(_session, *, paper_id, pdf_bytes):
+        return None
+
+    monkeypatch.setattr(upload_service, "upload_pdf_to_gcs", failed_write)
+    oa["work"] = {
+        "id": "https://openalex.org/W1",
+        "doi": f"https://doi.org/{_OWN_DOI}",
+        "locations": [_loc("https://w.example/x.pdf")],
+    }
+    oa["bodies"] = {"https://w.example/x.pdf": _build_test_pdf()}
+
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 503
+    assert r.json()["detail"] == "The PDF could not be saved, so it was not attached. Try again later."
+    session.expire_all()
+    paper = await session.get(LiteraturePaper, pid)
+    assert {k: getattr(paper, k) for k in prior} == prior
+    assert paper.doi is None
+    assert oa["scheduled"] == []
+
+
+# --- Parsing runs off the event loop ---
+
+
+@pytest.mark.asyncio
+async def test_fetch_parse_overrunning_the_budget_is_a_504_and_attaches_nothing(
+    client,
+    admin_token,
+    fake_literature_bucket,  # noqa: F811
+    oa,
+    monkeypatch,
+):
+    import asyncio
+    import time
+
+    from app.api.literature import papers
+    from app.services.literature import upload_service
+
+    real_extract = upload_service.synchronous_extract_basic
+
+    def slow_extract(pdf_bytes):
+        time.sleep(0.5)
+        return real_extract(pdf_bytes)
+
+    monkeypatch.setattr(upload_service, "synchronous_extract_basic", slow_extract)
+    monkeypatch.setattr(papers, "_OPEN_ACCESS_BUDGET_SECONDS", 0.1)
+    pid = await _paper(client, admin_token, doi=_OWN_DOI)
+    oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/x.pdf")]}
+    oa["bodies"] = {"https://w.example/x.pdf": _build_test_pdf()}
+
+    started = time.monotonic()
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 504
+    assert time.monotonic() - started < 0.4
+    await asyncio.sleep(0.6)  # let the abandoned parse finish
+    await _unchanged(client, admin_token, pid)
+    assert oa["scheduled"] == []

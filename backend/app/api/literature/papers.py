@@ -51,6 +51,7 @@ router = APIRouter()
 
 _OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
 _NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
+_PDF_NOT_SAVED = "The PDF could not be saved, so it was not attached. Try again later."
 _OPEN_ACCESS_TIMEOUT = "Looking for an open-access copy took too long. Try again later."
 # Bounds the whole OpenAlex lookup plus every download attempt, redirects included.
 _OPEN_ACCESS_BUDGET_SECONDS = 60
@@ -306,10 +307,12 @@ async def _attach_pdf(
     user_id: int,
     confirm_merge: bool,
     provenance: dict | None = None,
+    require_storage: bool = False,
 ) -> None:
     """Store a PDF on a paper and queue its extraction. ``pdf_doi`` backfills a
     paper without one; a DOI held by another paper is a 409 unless confirm_merge.
-    ``provenance`` records an acquired copy's origin; None (a manual upload) clears it."""
+    ``provenance`` records an acquired copy's origin; None (a manual upload) clears it.
+    With ``require_storage``, a failed write is a 503 that rolls back every change."""
     effective_doi = paper.doi or pdf_doi
 
     if effective_doi:
@@ -341,6 +344,9 @@ async def _attach_pdf(
     uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
     if uri:
         paper.gcs_pdf_uri = uri
+    elif require_storage:
+        await session.rollback()
+        raise HTTPException(503, _PDF_NOT_SAVED)
     paper_service.set_full_text_provenance(paper, provenance)
     await upload_service.mark_extraction_pending(session, paper=paper, user_id=user_id)
     await session.commit()
@@ -384,15 +390,13 @@ async def fetch_open_access_endpoint(
         raise HTTPException(404, _NO_OPEN_ACCESS_COPY)
 
     expected_doi = (paper.doi or openalex.work_doi(work) or "").lower() or None
-    copy_doi = copy.extracted.get("doi")
-    copy_text = (copy.extracted.get("full_text") or "").lower()
-    if expected_doi and copy_doi and copy_doi != expected_doi and expected_doi not in copy_text:
+    problem = fulltext_service.copy_identity_problem(copy.extracted, expected_doi)
+    if problem:
         raise HTTPException(
             409,
             detail={
-                "error": "identity_mismatch",
-                "doi": copy_doi,
-                "message": "The copy found appears to be a different paper. Upload the PDF yourself instead.",
+                "error": problem,
+                "message": "The copy found may be a different paper. Upload the PDF yourself instead.",
             },
         )
 
@@ -404,6 +408,7 @@ async def fetch_open_access_endpoint(
         org_id=org_id,
         user_id=user_id,
         confirm_merge=False,
+        require_storage=True,
         provenance={
             "full_text_version": copy.location.get("version"),
             "full_text_source": openalex.name,
