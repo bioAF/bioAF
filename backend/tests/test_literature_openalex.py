@@ -100,3 +100,49 @@ async def test_fetch_by_doi_returns_the_matching_work_or_none():
 
         respx.get(f"{_BASE}/works").respond(json={"results": []})
         assert await get_adapter("openalex").fetch_by_doi("10.1/none", None) is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_work_looks_up_by_doi_with_context_fields():
+    from app.services.literature.sources import openalex
+
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works").respond(json={"results": [{"id": "https://openalex.org/W1"}]})
+        work = await openalex.fetch_work(doi="10.1/abc", pmid="123", api_key=None)
+
+    assert work == {"id": "https://openalex.org/W1"}
+    params = route.calls.last.request.url.params
+    assert params["filter"] == "doi:10.1/abc"
+    selected = set(params["select"].split(","))
+    assert {"id", "is_retracted", "cited_by_count", "counts_by_year", "locations"} <= selected
+
+
+@pytest.mark.asyncio
+async def test_fetch_work_falls_back_to_pmid():
+    from app.services.literature.sources import openalex
+
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works").respond(json={"results": []})
+        assert await openalex.fetch_work(doi=None, pmid="29456894", api_key=None) is None
+
+    assert route.calls.last.request.url.params["filter"] == "pmid:29456894"
+
+
+@pytest.mark.asyncio
+async def test_fetch_work_without_an_identifier_makes_no_request():
+    from app.services.literature.sources import openalex
+
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works")
+        assert await openalex.fetch_work(doi=None, pmid=None, api_key=None) is None
+
+    assert not route.called
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_the_small_field_selection():
+    with respx.mock:
+        route = respx.get(f"{_BASE}/works").respond(json={"results": []})
+        await get_adapter("openalex").search("x", 5, None)
+
+    assert "counts_by_year" not in route.calls.last.request.url.params["select"]

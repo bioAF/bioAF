@@ -21,6 +21,7 @@ _SELECT = (
     "id,display_name,doi,ids,publication_date,relevance_score,authorships,"
     "primary_location,best_oa_location,abstract_inverted_index"
 )
+_CONTEXT_SELECT = "id,is_retracted,cited_by_count,counts_by_year,locations,best_oa_location"
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
@@ -29,20 +30,33 @@ def get_rate_limit(has_api_key: bool) -> RateLimit:
 
 
 async def search(query: str, max_results: int, api_key: str | None) -> list[PaperRecord]:
-    return await _works({"search": query, "per_page": str(min(max_results, 200))}, api_key)
+    items = await _works({"search": query, "per_page": str(min(max_results, 200))}, api_key)
+    return [_parse_result(item) for item in items]
 
 
 async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None:
-    results = await _works({"filter": f"doi:{doi}", "per_page": "1"}, api_key)
-    return results[0] if results else None
+    items = await _works({"filter": f"doi:{doi}", "per_page": "1"}, api_key)
+    return _parse_result(items[0]) if items else None
 
 
-async def _works(params: dict, api_key: str | None) -> list[PaperRecord]:
+async def fetch_work(*, doi: str | None, pmid: str | None, api_key: str | None) -> dict | None:
+    """The raw OpenAlex work for a paper, by DOI, else PMID, with the context fields."""
+    if doi:
+        id_filter = f"doi:{doi}"
+    elif pmid:
+        id_filter = f"pmid:{pmid}"
+    else:
+        return None
+    items = await _works({"filter": id_filter, "per_page": "1"}, api_key, select=_CONTEXT_SELECT)
+    return items[0] if items else None
+
+
+async def _works(params: dict, api_key: str | None, select: str = _SELECT) -> list[dict]:
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        r = await client.get(f"{_BASE}/works", params={**params, "select": _SELECT}, headers=headers)
+        r = await client.get(f"{_BASE}/works", params={**params, "select": select}, headers=headers)
         r.raise_for_status()
-        return [_parse_result(item) for item in r.json().get("results", [])]
+        return r.json().get("results", [])
 
 
 def _strip_prefix(value: str | None, prefix: str) -> str | None:
