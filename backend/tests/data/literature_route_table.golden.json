@@ -337,6 +337,30 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "name": "fetch_open_access_endpoint",
+    "path": "/api/literature/papers/{paper_id}/fetch-open-access",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "name": "get_openalex_context_endpoint",
+    "path": "/api/literature/papers/{paper_id}/openalex",
+    "response_model": "OpenAlexContextResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
       "GET"
     ],
     "name": "download_pdf_endpoint",

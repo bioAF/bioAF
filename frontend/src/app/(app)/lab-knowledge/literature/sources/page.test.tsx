@@ -66,3 +66,11 @@ test("collects the API key in a styled password dialog, never a native prompt()"
   );
   promptSpy.mockRestore();
 });
+
+test("names the OpenAlex source", async () => {
+  mockList.mockResolvedValue({
+    items: [{ source: "openalex", enabled: true, has_api_key: false, rate_limit_override: null }],
+  });
+  render(<LiteratureSourcesPage />);
+  expect(await screen.findByText("OpenAlex")).toBeInTheDocument();
+});

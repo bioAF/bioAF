@@ -47,8 +47,9 @@ SOURCE_PUBMED = "pubmed"
 SOURCE_BIORXIV = "biorxiv"
 SOURCE_EUROPEPMC = "europepmc"
 SOURCE_SEMANTICSCHOLAR = "semanticscholar"
+SOURCE_OPENALEX = "openalex"
 SOURCE_UPLOAD = "upload"
-EXTERNAL_SOURCES = (SOURCE_PUBMED, SOURCE_BIORXIV, SOURCE_EUROPEPMC, SOURCE_SEMANTICSCHOLAR)
+EXTERNAL_SOURCES = (SOURCE_PUBMED, SOURCE_BIORXIV, SOURCE_EUROPEPMC, SOURCE_SEMANTICSCHOLAR, SOURCE_OPENALEX)
 ALL_SOURCES = (*EXTERNAL_SOURCES, SOURCE_UPLOAD)
 
 READING_UNREAD = "unread"
@@ -116,6 +117,11 @@ class LiteraturePaper(Base):
         String(16), nullable=False, default=EXTRACTION_NONE, server_default=EXTRACTION_NONE
     )
     extraction_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where an automatically acquired PDF came from; null for manual uploads.
+    full_text_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    full_text_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    full_text_source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    full_text_acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     provenance: Mapped[str] = mapped_column(String(32), nullable=False)
     added_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)

@@ -6,6 +6,11 @@ organization, so cross-org access is impossible by construction.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from datetime import UTC, datetime
+
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.api.literature._common import _serialize_paper
 from app.database import get_session
-from app.models.literature import ALL_PROVENANCES, ALL_SCOPES
+from app.models.literature import ALL_PROVENANCES, ALL_SCOPES, LiteraturePaper
 from app.schemas.literature import (
     BulkAddToLibraryRequest,
     BulkAddToLibraryResponse,
@@ -22,15 +27,35 @@ from app.schemas.literature import (
     CreatePaperRequest,
     DismissalRequest,
     DismissalResponse,
+    OpenAlexContextResponse,
     PaperListResponse,
     PaperResponse,
     RecommendationNotePayload,
     UpdatePaperRequest,
 )
-from app.services.literature import association_service, dismissal_service, paper_service, storage, upload_service
+from app.services.literature import (
+    association_service,
+    dismissal_service,
+    fulltext_service,
+    paper_service,
+    search_service,
+    storage,
+    upload_service,
+)
 from app.services.literature.paper_service import DuplicatePaper, PaperNotFound
+from app.services.literature.sources import openalex
+
+logger = logging.getLogger("bioaf.literature.papers")
 
 router = APIRouter()
+
+_OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
+_NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
+_PDF_NOT_SAVED = "The PDF could not be saved, so it was not attached. Try again later."
+_PDF_PARSER_BUSY = "bioAF is busy reading other PDFs. Try again in a minute."
+_OPEN_ACCESS_TIMEOUT = "Looking for an open-access copy took too long. Try again later."
+# Bounds the whole OpenAlex lookup plus every download attempt, redirects included.
+_OPEN_ACCESS_BUDGET_SECONDS = 60
 
 # Shown when a PDF upload is attempted before the org's Literature GCS bucket
 # exists. The upload is rejected rather than silently stored nowhere.
@@ -177,6 +202,7 @@ async def upload_paper_pdf_endpoint(
         uri = await upload_service.upload_pdf_to_gcs(session, paper_id=existing.id, pdf_bytes=pdf_bytes)
         if uri:
             existing.gcs_pdf_uri = uri
+        paper_service.set_full_text_provenance(existing, None)
         await paper_service.add_to_library(session, paper=existing, user_id=user_id)
         await upload_service.mark_extraction_pending(session, paper=existing, user_id=user_id)
         await session.commit()
@@ -258,7 +284,37 @@ async def upload_pdf_to_paper_endpoint(
         raise HTTPException(503, _NO_LITERATURE_STORAGE)
 
     extracted = upload_service.synchronous_extract_basic(pdf_bytes)
-    effective_doi = paper.doi or extracted.get("doi")
+    await _attach_pdf(
+        session,
+        paper=paper,
+        pdf_bytes=pdf_bytes,
+        pdf_doi=extracted.get("doi"),
+        org_id=org_id,
+        user_id=user_id,
+        confirm_merge=confirm_merge,
+    )
+    await session.refresh(paper)
+    response.status_code = 200
+    return await _serialize_paper(session, paper, user_id)
+
+
+async def _attach_pdf(
+    session: AsyncSession,
+    *,
+    paper: LiteraturePaper,
+    pdf_bytes: bytes,
+    pdf_doi: str | None,
+    org_id: int,
+    user_id: int,
+    confirm_merge: bool,
+    provenance: dict | None = None,
+    require_storage: bool = False,
+) -> None:
+    """Store a PDF on a paper and queue its extraction. ``pdf_doi`` backfills a
+    paper without one; a DOI held by another paper is a 409 unless confirm_merge.
+    ``provenance`` records an acquired copy's origin; None (a manual upload) clears it.
+    With ``require_storage``, a failed write is a 503 that rolls back every change."""
+    effective_doi = paper.doi or pdf_doi
 
     if effective_doi:
         conflict = await paper_service.find_duplicate(
@@ -283,20 +339,87 @@ async def upload_pdf_to_paper_endpoint(
             await paper_service.merge_papers(session, survivor=paper, duplicate=conflict, user_id=user_id)
 
     # Backfill the DOI on the target if it lacked one.
-    if not paper.doi and extracted.get("doi"):
-        await paper_service.update_paper_metadata(
-            session, paper=paper, user_id=user_id, fields={"doi": extracted["doi"]}
-        )
+    if not paper.doi and pdf_doi:
+        await paper_service.update_paper_metadata(session, paper=paper, user_id=user_id, fields={"doi": pdf_doi})
 
     uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
     if uri:
         paper.gcs_pdf_uri = uri
+    elif require_storage:
+        await session.rollback()
+        raise HTTPException(503, _PDF_NOT_SAVED)
+    paper_service.set_full_text_provenance(paper, provenance)
     await upload_service.mark_extraction_pending(session, paper=paper, user_id=user_id)
     await session.commit()
 
     await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
+
+
+@router.post("/papers/{paper_id}/fetch-open-access", response_model=PaperResponse)
+async def fetch_open_access_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Find an open-access copy of the paper through OpenAlex and attach it.
+
+    Candidate URLs come only from OpenAlex, never from the client. The paper's
+    DOI (else the DOI of the OpenAlex record matched by PMID) is the identity
+    the copy must carry; a copy of a different paper is a 409, and a DOI held by
+    another library paper is a 409 that never merges automatically."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    if not await storage.get_literature_bucket(session):
+        raise HTTPException(503, _NO_LITERATURE_STORAGE)
+
+    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    try:
+        async with asyncio.timeout(_OPEN_ACCESS_BUDGET_SECONDS):
+            work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+            locations = openalex.work_context(work)["oa_locations"] if work else []
+            copy = await fulltext_service.fetch_open_access_pdf(locations)
+    except TimeoutError:
+        raise HTTPException(504, _OPEN_ACCESS_TIMEOUT)
+    except fulltext_service.PdfParserBusy:
+        raise HTTPException(429, _PDF_PARSER_BUSY)
+    except (httpx.HTTPError, ValueError):
+        logger.warning("OpenAlex lookup failed for paper %s", paper_id, exc_info=True)
+        raise HTTPException(502, _OPENALEX_UNREACHABLE)
+    if copy is None:
+        raise HTTPException(404, _NO_OPEN_ACCESS_COPY)
+
+    expected_doi = (paper.doi or openalex.work_doi(work) or "").lower() or None
+    problem = fulltext_service.copy_identity_problem(copy.extracted, expected_doi)
+    if problem:
+        raise HTTPException(
+            409,
+            detail={
+                "error": problem,
+                "message": "The copy found may be a different paper. Upload the PDF yourself instead.",
+            },
+        )
+
+    await _attach_pdf(
+        session,
+        paper=paper,
+        pdf_bytes=copy.pdf_bytes,
+        pdf_doi=expected_doi,
+        org_id=org_id,
+        user_id=user_id,
+        confirm_merge=False,
+        require_storage=True,
+        provenance={
+            "full_text_version": copy.location.get("version"),
+            "full_text_source": openalex.name,
+            "full_text_source_url": copy.location["pdf_url"],
+            "full_text_acquired_at": datetime.now(UTC),
+        },
+    )
     await session.refresh(paper)
-    response.status_code = 200
     return await _serialize_paper(session, paper, user_id)
 
 
@@ -377,6 +500,28 @@ async def get_paper_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     return await _serialize_paper(session, paper, int(current_user["sub"]))
+
+
+@router.get("/papers/{paper_id}/openalex", response_model=OpenAlexContextResponse)
+async def get_openalex_context_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    try:
+        work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+    except (httpx.HTTPError, ValueError):
+        logger.warning("OpenAlex context lookup failed for paper %s", paper_id, exc_info=True)
+        raise HTTPException(502, _OPENALEX_UNREACHABLE)
+    if work is None:
+        return OpenAlexContextResponse(available=False)
+    return OpenAlexContextResponse(**openalex.work_context(work))
 
 
 @router.get(

@@ -15,6 +15,7 @@ const SOURCE_LABELS: Record<LiteratureSourceName, string> = {
   biorxiv: "bioRxiv",
   europepmc: "Europe PMC",
   semanticscholar: "Semantic Scholar",
+  openalex: "OpenAlex",
 };
 
 export default function LiteratureSourcesPage() {

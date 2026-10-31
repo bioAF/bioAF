@@ -15,7 +15,7 @@ from app.services.literature.sources import PaperRecord
 
 
 @pytest.mark.asyncio
-async def test_list_sources_returns_seeded_four(client, admin_token, admin_user, session):
+async def test_list_sources_returns_seeded_sources(client, admin_token, admin_user, session):
     from app.services.bootstrap_literature import seed_literature_sources
 
     await seed_literature_sources(session, admin_user.organization_id)
@@ -25,7 +25,7 @@ async def test_list_sources_returns_seeded_four(client, admin_token, admin_user,
     assert resp.status_code == 200
     items = resp.json()["items"]
     sources = {i["source"] for i in items}
-    assert sources == {"pubmed", "biorxiv", "europepmc", "semanticscholar"}
+    assert sources == {"pubmed", "biorxiv", "europepmc", "semanticscholar", "openalex"}
     for item in items:
         assert item["enabled"] is True
         assert item["has_api_key"] is False
@@ -220,12 +220,13 @@ async def test_search_failed_status_when_all_sources_fail(client, admin_token, a
     async def boom(query, max_results, api_key):
         raise RuntimeError("simulated outage")
 
-    from app.services.literature.sources import biorxiv, europepmc, pubmed, semanticscholar
+    from app.services.literature.sources import biorxiv, europepmc, openalex, pubmed, semanticscholar
 
     monkeypatch.setattr(pubmed, "search", boom)
     monkeypatch.setattr(biorxiv, "search", boom)
     monkeypatch.setattr(europepmc, "search", boom)
     monkeypatch.setattr(semanticscholar, "search", boom)
+    monkeypatch.setattr(openalex, "search", boom)
 
     headers = {"Authorization": f"Bearer {admin_token}"}
     submit = await client.post(
