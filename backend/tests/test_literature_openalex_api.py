@@ -548,20 +548,15 @@ async def test_fetch_parse_overrunning_the_budget_is_a_504_and_attaches_nothing(
     oa,
     monkeypatch,
 ):
-    import asyncio
     import time
 
     from app.api.literature import papers
-    from app.services.literature import upload_service
+    from app.services.literature import fulltext_service
 
-    real_extract = upload_service.synchronous_extract_basic
-
-    def slow_extract(pdf_bytes):
-        time.sleep(0.5)
-        return real_extract(pdf_bytes)
-
-    monkeypatch.setattr(upload_service, "synchronous_extract_basic", slow_extract)
-    monkeypatch.setattr(papers, "_OPEN_ACCESS_BUDGET_SECONDS", 0.1)
+    monkeypatch.setattr(
+        fulltext_service, "_PARSE_WORKER_ARGS", ("-c", "import sys, time; sys.stdin.buffer.read(); time.sleep(30)")
+    )
+    monkeypatch.setattr(papers, "_OPEN_ACCESS_BUDGET_SECONDS", 0.5)
     pid = await _paper(client, admin_token, doi=_OWN_DOI)
     oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/x.pdf")]}
     oa["bodies"] = {"https://w.example/x.pdf": _build_test_pdf()}
@@ -570,7 +565,24 @@ async def test_fetch_parse_overrunning_the_budget_is_a_504_and_attaches_nothing(
     r = await _fetch(client, admin_token, pid)
 
     assert r.status_code == 504
-    assert time.monotonic() - started < 0.4
-    await asyncio.sleep(0.6)  # let the abandoned parse finish
+    assert time.monotonic() - started < 2
+    await _unchanged(client, admin_token, pid)
+    assert oa["scheduled"] == []
+    assert fulltext_service._parses_running == 0
+
+
+@pytest.mark.asyncio
+async def test_fetch_when_parsing_is_at_capacity_is_a_429(client, admin_token, fake_literature_bucket, oa, monkeypatch):  # noqa: F811
+    from app.services.literature import fulltext_service
+
+    monkeypatch.setattr(fulltext_service, "_parses_running", fulltext_service.MAX_CONCURRENT_PDF_PARSES)
+    pid = await _paper(client, admin_token, doi=_OWN_DOI)
+    oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/x.pdf")]}
+    oa["bodies"] = {"https://w.example/x.pdf": _build_test_pdf()}
+
+    r = await _fetch(client, admin_token, pid)
+
+    assert r.status_code == 429
+    assert r.json()["detail"] == "bioAF is busy reading other PDFs. Try again in a minute."
     await _unchanged(client, admin_token, pid)
     assert oa["scheduled"] == []

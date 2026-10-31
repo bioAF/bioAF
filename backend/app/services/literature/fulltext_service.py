@@ -15,10 +15,12 @@ fall back to a pasted-in body. Network egress lives only here.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import httpx
@@ -125,11 +127,52 @@ class FullTextFetchService:
 _VERSION_PREFERENCE = ("publishedVersion", "acceptedVersion", "submittedVersion")
 MAX_OPEN_ACCESS_ATTEMPTS = 3
 
-# PDF parsing is synchronous PyMuPDF work; it runs on this pool so it never holds the event loop.
-# The pool bounds concurrent parses. A caller that times out stops waiting and a queued parse is
-# dropped, but a parse already running finishes in its thread and its result is discarded.
+# PyMuPDF does not support multithreaded use, so each acquired copy is parsed in its own
+# process, which is killed if the caller stops waiting (a deadline or a cancelled request). At
+# most MAX_CONCURRENT_PDF_PARSES run at once; a parse beyond that is refused, never queued.
 MAX_CONCURRENT_PDF_PARSES = 2
-_parse_pool = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_PDF_PARSES, thread_name_prefix="oa-pdf-parse")
+_PARSE_WORKER_ARGS: tuple[str, ...] = ("-m", "app.services.literature.pdf_parse_worker")
+_BACKEND_ROOT = Path(__file__).resolve().parents[3]
+_parses_running = 0
+
+
+class PdfParseError(Exception):
+    """The parse worker failed; the copy is unusable."""
+
+
+class PdfParserBusy(Exception):
+    """MAX_CONCURRENT_PDF_PARSES parses are already running."""
+
+
+async def parse_pdf(pdf_bytes: bytes) -> dict:
+    """Extracted metadata for a PDF (extraction.extract_pdf_metadata), parsed in a worker process."""
+    global _parses_running
+    if _parses_running >= MAX_CONCURRENT_PDF_PARSES:
+        raise PdfParserBusy
+    _parses_running += 1
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *_PARSE_WORKER_ARGS,
+            cwd=_BACKEND_ROOT,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            out, err = await proc.communicate(pdf_bytes)
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await asyncio.shield(proc.wait())
+    finally:
+        _parses_running -= 1
+    if proc.returncode != 0:
+        raise PdfParseError(f"exit {proc.returncode}: {err.decode(errors='replace')[-500:]}")
+    try:
+        return json.loads(out)
+    except ValueError as exc:
+        raise PdfParseError(f"unreadable worker output: {exc}") from exc
 
 
 @dataclass
@@ -144,10 +187,10 @@ async def fetch_open_access_pdf(oa_locations: list[dict]) -> OpenAccessPdf | Non
 
     Tries at most MAX_OPEN_ACCESS_ATTEMPTS distinct PDF URLs, best version first, through the
     SSRF-guarded lab-document downloader. A copy counts only if it is a PDF that parses; publishers
-    often answer a PDF link with an HTML landing page. The caller bounds the total time."""
+    often answer a PDF link with an HTML landing page. The caller bounds the total time.
+    Raises PdfParserBusy when parsing is at capacity."""
     from app.exceptions import ValidationError
     from app.services.lab_document_upload_service import LabDocumentUploadService
-    from app.services.literature import upload_service
 
     def rank(loc: dict) -> int:
         version = loc.get("version")
@@ -168,9 +211,11 @@ async def fetch_open_access_pdf(oa_locations: list[dict]) -> OpenAccessPdf | Non
             continue
         if not pdf_bytes.startswith(b"%PDF"):
             continue
-        extracted = await asyncio.get_running_loop().run_in_executor(
-            _parse_pool, upload_service.synchronous_extract_basic, pdf_bytes
-        )
+        try:
+            extracted = await parse_pdf(pdf_bytes)
+        except PdfParseError as exc:
+            logger.warning("Open-access copy %s could not be parsed: %s", loc["pdf_url"], exc)
+            continue
         if not extracted.get("page_count"):
             continue
         return OpenAccessPdf(pdf_bytes=pdf_bytes, extracted=extracted, location=loc)

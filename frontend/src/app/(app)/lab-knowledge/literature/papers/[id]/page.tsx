@@ -46,6 +46,7 @@ const PaperPdfViewer = dynamic(
 const OPEN_ACCESS_FAILURES: Record<number, string> = {
   404: "No openly downloadable copy was found.",
   409: "The copy found may belong to a different paper, so it was not attached. Upload the PDF yourself instead.",
+  429: "bioAF is busy reading other PDFs. Try again in a minute.",
   502: "OpenAlex could not be reached right now. Try again later.",
   503: "The PDF could not be saved, so it was not attached. Try again later.",
   504: "Looking for an open-access copy took too long. Try again later.",

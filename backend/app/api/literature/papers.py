@@ -52,6 +52,7 @@ router = APIRouter()
 _OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
 _NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
 _PDF_NOT_SAVED = "The PDF could not be saved, so it was not attached. Try again later."
+_PDF_PARSER_BUSY = "bioAF is busy reading other PDFs. Try again in a minute."
 _OPEN_ACCESS_TIMEOUT = "Looking for an open-access copy took too long. Try again later."
 # Bounds the whole OpenAlex lookup plus every download attempt, redirects included.
 _OPEN_ACCESS_BUDGET_SECONDS = 60
@@ -383,6 +384,8 @@ async def fetch_open_access_endpoint(
             copy = await fulltext_service.fetch_open_access_pdf(locations)
     except TimeoutError:
         raise HTTPException(504, _OPEN_ACCESS_TIMEOUT)
+    except fulltext_service.PdfParserBusy:
+        raise HTTPException(429, _PDF_PARSER_BUSY)
     except (httpx.HTTPError, ValueError):
         logger.warning("OpenAlex lookup failed for paper %s", paper_id, exc_info=True)
         raise HTTPException(502, _OPENALEX_UNREACHABLE)

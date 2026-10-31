@@ -156,3 +156,15 @@ test("a copy that could not be saved says so plainly", async () => {
     await screen.findByText("The PDF could not be saved, so it was not attached. Try again later."),
   ).toBeInTheDocument();
 });
+
+test("parsing at capacity says to try again shortly", async () => {
+  openAlexContext.mockResolvedValue(context(1, 1));
+  (literature.fetchOpenAccess as jest.Mock).mockRejectedValue(
+    Object.assign(new Error("Too Many Requests"), { status: 429 }),
+  );
+  render(<PaperDetailPage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Get open-access copy" }));
+
+  expect(await screen.findByText("bioAF is busy reading other PDFs. Try again in a minute.")).toBeInTheDocument();
+});
