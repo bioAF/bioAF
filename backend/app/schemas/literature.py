@@ -48,6 +48,10 @@ class PaperResponse(BaseModel):
     has_full_text: bool
     extraction_status: str
     extraction_error: str | None
+    full_text_version: str | None = None
+    full_text_source: str | None = None
+    full_text_source_url: str | None = None
+    full_text_acquired_at: datetime | None = None
     comment_count: int
     reading_status: str | None
     dismissed: bool

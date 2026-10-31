@@ -193,6 +193,7 @@ async def upload_paper_pdf_endpoint(
         uri = await upload_service.upload_pdf_to_gcs(session, paper_id=existing.id, pdf_bytes=pdf_bytes)
         if uri:
             existing.gcs_pdf_uri = uri
+        paper_service.set_full_text_provenance(existing, None)
         await paper_service.add_to_library(session, paper=existing, user_id=user_id)
         await upload_service.mark_extraction_pending(session, paper=existing, user_id=user_id)
         await session.commit()
@@ -297,9 +298,11 @@ async def _attach_pdf(
     org_id: int,
     user_id: int,
     confirm_merge: bool,
+    provenance: dict | None = None,
 ) -> None:
     """Store a PDF on a paper and queue its extraction. ``pdf_doi`` backfills a
-    paper without one; a DOI held by another paper is a 409 unless confirm_merge."""
+    paper without one; a DOI held by another paper is a 409 unless confirm_merge.
+    ``provenance`` records an acquired copy's origin; None (a manual upload) clears it."""
     effective_doi = paper.doi or pdf_doi
 
     if effective_doi:
@@ -331,6 +334,7 @@ async def _attach_pdf(
     uri = await upload_service.upload_pdf_to_gcs(session, paper_id=paper.id, pdf_bytes=pdf_bytes)
     if uri:
         paper.gcs_pdf_uri = uri
+    paper_service.set_full_text_provenance(paper, provenance)
     await upload_service.mark_extraction_pending(session, paper=paper, user_id=user_id)
     await session.commit()
 
