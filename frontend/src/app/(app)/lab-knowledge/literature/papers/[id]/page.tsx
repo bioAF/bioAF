@@ -12,6 +12,7 @@ import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { statusLabel } from "@/lib/statusStyles";
 import dynamic from "next/dynamic";
 import { AssociatePaperModal } from "@/components/literature/AssociatePaperModal";
+import { ResearchContextCard } from "@/components/literature/ResearchContextCard";
 import { ValidatePaperButton } from "@/components/validation/ValidatePaperButton";
 import { Button } from "@/components/ui/Button";
 import {
@@ -20,9 +21,11 @@ import {
   DoiConflictError,
   formatAssociation,
   literature,
+  openAccessVersionLabel,
   uploadPdfToPaper,
   type Comment,
   type DoiConflict,
+  type OpenAlexContext,
   type Paper,
   type ReadingStatusValue,
   type RecommendationNote,
@@ -39,6 +42,13 @@ const PaperPdfViewer = dynamic(
   () => import("@/components/literature/PaperPdfViewer").then((m) => m.PaperPdfViewer),
   { ssr: false, loading: () => <LoadingSpinner label="Loading the PDF viewer" /> },
 );
+
+const OPEN_ACCESS_FAILURES: Record<number, string> = {
+  404: "No openly downloadable copy was found.",
+  409: "The copy found may belong to a different paper, so it was not attached. Upload the PDF yourself instead.",
+  502: "OpenAlex could not be reached right now. Try again later.",
+  504: "Looking for an open-access copy took too long. Try again later.",
+};
 
 export default function PaperDetailPage() {
   const params = useParams<{ id: string }>();
@@ -74,6 +84,9 @@ export default function PaperDetailPage() {
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [pendingPdf, setPendingPdf] = useState<File | null>(null);
   const [conflict, setConflict] = useState<DoiConflict | null>(null);
+  const [context, setContext] = useState<OpenAlexContext | null>(null);
+  const [contextFailed, setContextFailed] = useState(false);
+  const [fetchingCopy, setFetchingCopy] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -147,6 +160,24 @@ export default function PaperDetailPage() {
     }
   }
 
+  async function fetchOpenAccessCopy() {
+    if (fetchingCopy) return;
+    setFetchingCopy(true);
+    setPdfError(null);
+    try {
+      await literature.fetchOpenAccess(paperId);
+      refresh();
+    } catch (e) {
+      logError(`fetching an open-access copy of paper ${paperId}`, e);
+      setPdfError(
+        OPEN_ACCESS_FAILURES[(e as { status?: number } | null)?.status ?? 0] ??
+          "The open-access copy could not be fetched. Try again later.",
+      );
+    } finally {
+      setFetchingCopy(false);
+    }
+  }
+
   function onPdfSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -161,6 +192,19 @@ export default function PaperDetailPage() {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperId]);
+
+  // Loaded apart from the paper so an OpenAlex outage only empties its own card.
+  useEffect(() => {
+    setContext(null);
+    setContextFailed(false);
+    Promise.resolve()
+      .then(() => literature.openAlexContext(paperId))
+      .then(setContext)
+      .catch((e) => {
+        logError(`loading OpenAlex context for paper ${paperId}`, e);
+        setContextFailed(true);
+      });
   }, [paperId]);
 
   async function submitComment() {
@@ -524,9 +568,22 @@ export default function PaperDetailPage() {
                     aria-label={paper.has_pdf ? "Replace PDF" : "Upload full paper"}
                   />
                 </label>
+                {!paper.has_pdf && context?.oa_locations.some((l) => l.pdf_url) && (
+                  <div className="mt-2">
+                    <Button size="sm" variant="secondary" onClick={fetchOpenAccessCopy} disabled={fetchingCopy}>
+                      {fetchingCopy ? "Getting open-access copy..." : "Get open-access copy"}
+                    </Button>
+                  </div>
+                )}
                 {paper.has_pdf && (
                   <p className="text-xs text-gray-500 mt-2">
                     The current PDF is shown in the viewer on the left.
+                  </p>
+                )}
+                {paper.has_pdf && paper.full_text_source && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {openAccessVersionLabel(paper.full_text_version)}, via{" "}
+                    {paper.full_text_source === "openalex" ? "OpenAlex" : paper.full_text_source}
                   </p>
                 )}
                 {pdfError && (
@@ -534,6 +591,8 @@ export default function PaperDetailPage() {
                 )}
               </div>
             )}
+
+            <ResearchContextCard context={context} failed={contextFailed} canSearch={canComment} />
 
             <div className="bg-white rounded shadow p-4">
               <h3 className="font-semibold mb-2">Metadata</h3>
