@@ -57,6 +57,30 @@ class PaperResponse(BaseModel):
     updated_at: datetime
 
 
+class CitationYearPayload(BaseModel):
+    year: int
+    cited_by_count: int
+
+
+class OpenAccessLocationPayload(BaseModel):
+    pdf_url: str | None
+    landing_page_url: str | None
+    version: str | None
+    license: str | None
+    host: str | None
+
+
+class OpenAlexContextResponse(BaseModel):
+    """Research context for a paper, read live from OpenAlex. Null means unknown."""
+
+    available: bool
+    openalex_id: str | None = None
+    is_retracted: bool | None = None
+    cited_by_count: int | None = None
+    counts_by_year: list[CitationYearPayload] = []
+    oa_locations: list[OpenAccessLocationPayload] = []
+
+
 class RecommendationNotePayload(BaseModel):
     review_run_id: int
     experiment_id: int

@@ -6,6 +6,9 @@ organization, so cross-org access is impossible by construction.
 
 from __future__ import annotations
 
+import logging
+
+import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,15 +25,28 @@ from app.schemas.literature import (
     CreatePaperRequest,
     DismissalRequest,
     DismissalResponse,
+    OpenAlexContextResponse,
     PaperListResponse,
     PaperResponse,
     RecommendationNotePayload,
     UpdatePaperRequest,
 )
-from app.services.literature import association_service, dismissal_service, paper_service, storage, upload_service
+from app.services.literature import (
+    association_service,
+    dismissal_service,
+    paper_service,
+    search_service,
+    storage,
+    upload_service,
+)
 from app.services.literature.paper_service import DuplicatePaper, PaperNotFound
+from app.services.literature.sources import openalex
+
+logger = logging.getLogger("bioaf.literature.papers")
 
 router = APIRouter()
+
+_OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
 
 # Shown when a PDF upload is attempted before the org's Literature GCS bucket
 # exists. The upload is rejected rather than silently stored nowhere.
@@ -377,6 +393,28 @@ async def get_paper_endpoint(
     except PaperNotFound:
         raise HTTPException(404, "paper not found")
     return await _serialize_paper(session, paper, int(current_user["sub"]))
+
+
+@router.get("/papers/{paper_id}/openalex", response_model=OpenAlexContextResponse)
+async def get_openalex_context_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    try:
+        work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+    except (httpx.HTTPError, ValueError):
+        logger.warning("OpenAlex context lookup failed for paper %s", paper_id, exc_info=True)
+        raise HTTPException(502, _OPENALEX_UNREACHABLE)
+    if work is None:
+        return OpenAlexContextResponse(available=False)
+    return OpenAlexContextResponse(**openalex.work_context(work))
 
 
 @router.get(
