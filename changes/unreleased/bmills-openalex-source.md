@@ -19,6 +19,9 @@
   bioAF downloads the best openly available PDF that OpenAlex lists (published
   version first, at most three tries within one minute), attaches it, and
   extracts its text so literature reviews can use the full paper. The card then
-  shows which version was attached. A copy that appears to be a different
-  paper, or whose DOI belongs to another paper in the library, is not attached
-  and is never merged automatically.
+  shows which version was attached. Only a DOI printed on the copy's first page
+  counts as its own, so a paper that merely cites this one is not mistaken for
+  it. A copy that appears to be a different paper, whose first page names
+  several DOIs, or whose DOI belongs to another paper in the library, is not
+  attached and is never merged automatically. A copy that could not be saved
+  is not attached, and the paper is left as it was.
