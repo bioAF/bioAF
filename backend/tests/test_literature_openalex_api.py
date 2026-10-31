@@ -442,7 +442,9 @@ async def _unchanged(client, token, pid):
 async def test_fetch_rejects_a_paper_that_cites_this_one(client, admin_token, fake_literature_bucket, oa):  # noqa: F811
     pid = await _paper(client, admin_token, doi="10.5555/paper-a")
     oa["work"] = {"id": "https://openalex.org/W1", "locations": [_loc("https://w.example/b.pdf")]}
-    oa["bodies"] = {"https://w.example/b.pdf": _pdf("doi:10.5555/paper-b\nPaper B", "References\n1. doi:10.5555/paper-a")}
+    oa["bodies"] = {
+        "https://w.example/b.pdf": _pdf("doi:10.5555/paper-b\nPaper B", "References\n1. doi:10.5555/paper-a")
+    }
 
     r = await _fetch(client, admin_token, pid)
 
@@ -508,7 +510,9 @@ async def test_fetch_storage_failure_changes_nothing(
         paper.full_text_version = "submittedVersion"
         paper.full_text_source = "openalex"
         paper.extraction_status = "complete"
-    prior = {k: getattr(paper, k) for k in ("gcs_pdf_uri", "full_text_version", "full_text_source", "extraction_status")}
+    prior = {
+        k: getattr(paper, k) for k in ("gcs_pdf_uri", "full_text_version", "full_text_source", "extraction_status")
+    }
     await session.commit()
 
     async def failed_write(_session, *, paper_id, pdf_bytes):
