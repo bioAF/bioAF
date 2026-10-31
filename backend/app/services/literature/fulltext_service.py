@@ -117,3 +117,51 @@ class FullTextFetchService:
         if not text:
             return None
         return FullTextResult(text=text, source="europepmc", external_id=ext_id)
+
+
+# Most authoritative copy first; a location with no stated version is tried last.
+_VERSION_PREFERENCE = ("publishedVersion", "acceptedVersion", "submittedVersion")
+MAX_OPEN_ACCESS_ATTEMPTS = 3
+
+
+@dataclass
+class OpenAccessPdf:
+    pdf_bytes: bytes
+    extracted: dict
+    location: dict  # the OpenAlex open-access location the copy came from
+
+
+async def fetch_open_access_pdf(oa_locations: list[dict]) -> OpenAccessPdf | None:
+    """Download the best usable PDF among open-access locations, or None.
+
+    Tries at most MAX_OPEN_ACCESS_ATTEMPTS distinct PDF URLs, best version first, through the
+    SSRF-guarded lab-document downloader. A copy counts only if it is a PDF that parses; publishers
+    often answer a PDF link with an HTML landing page. The caller bounds the total time."""
+    from app.exceptions import ValidationError
+    from app.services.lab_document_upload_service import LabDocumentUploadService
+    from app.services.literature import upload_service
+
+    def rank(loc: dict) -> int:
+        version = loc.get("version")
+        return _VERSION_PREFERENCE.index(version) if version in _VERSION_PREFERENCE else len(_VERSION_PREFERENCE)
+
+    urls: list[str] = []
+    candidates = []
+    for loc in sorted((loc for loc in oa_locations if loc.get("pdf_url")), key=rank):
+        if loc["pdf_url"] not in urls:
+            urls.append(loc["pdf_url"])
+            candidates.append(loc)
+
+    for loc in candidates[:MAX_OPEN_ACCESS_ATTEMPTS]:
+        try:
+            pdf_bytes, _, _ = await LabDocumentUploadService._fetch_url(loc["pdf_url"])
+        except ValidationError as exc:
+            logger.info("Open-access copy %s not usable: %s", loc["pdf_url"], exc)
+            continue
+        if not pdf_bytes.startswith(b"%PDF"):
+            continue
+        extracted = upload_service.synchronous_extract_basic(pdf_bytes)
+        if not extracted.get("page_count"):
+            continue
+        return OpenAccessPdf(pdf_bytes=pdf_bytes, extracted=extracted, location=loc)
+    return None

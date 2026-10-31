@@ -23,7 +23,7 @@ _SELECT = (
     "primary_location,best_oa_location,abstract_inverted_index"
 )
 _CITATION_QUERY_RE = re.compile(r"(cites|cited_by):W\d+")
-_CONTEXT_SELECT = "id,is_retracted,cited_by_count,counts_by_year,locations,best_oa_location"
+_CONTEXT_SELECT = "id,doi,is_retracted,cited_by_count,counts_by_year,locations,best_oa_location"
 
 
 def get_rate_limit(has_api_key: bool) -> RateLimit:
@@ -93,6 +93,12 @@ def work_context(item: dict) -> dict:
     }
 
 
+def work_doi(item: dict) -> str | None:
+    """The work's bare, lowercased DOI, or None."""
+    doi = _strip_prefix(item.get("doi"), "https://doi.org/")
+    return doi.lower() if doi else None
+
+
 def _strip_prefix(value: str | None, prefix: str) -> str | None:
     return (value or "").removeprefix(prefix).strip() or None
 
@@ -112,7 +118,6 @@ def _parse_result(item: dict) -> PaperRecord:
             pub_date = date.fromisoformat(item["publication_date"])
         except ValueError:
             pub_date = None
-    doi = _strip_prefix(item.get("doi"), "https://doi.org/")
     venue = (item.get("primary_location") or {}).get("source") or {}
     pdf_url = (item.get("best_oa_location") or {}).get("pdf_url")
     authors = [
@@ -124,7 +129,7 @@ def _parse_result(item: dict) -> PaperRecord:
         source=name,
         title=sanitize_source_text(item.get("display_name")) or "",
         authors=authors,
-        doi=doi.lower() if doi else None,
+        doi=work_doi(item),
         pmid=_strip_prefix((item.get("ids") or {}).get("pmid"), "https://pubmed.ncbi.nlm.nih.gov/"),
         journal=sanitize_source_text(venue.get("display_name")),
         publication_date=pub_date,

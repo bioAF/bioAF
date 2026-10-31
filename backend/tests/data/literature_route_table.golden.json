@@ -337,6 +337,18 @@
   },
   {
     "methods": [
+      "POST"
+    ],
+    "name": "fetch_open_access_endpoint",
+    "path": "/api/literature/papers/{paper_id}/fetch-open-access",
+    "response_model": "PaperResponse",
+    "status_code": null,
+    "tags": [
+      "literature"
+    ]
+  },
+  {
+    "methods": [
       "GET"
     ],
     "name": "get_openalex_context_endpoint",

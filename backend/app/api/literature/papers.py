@@ -6,7 +6,9 @@ organization, so cross-org access is impossible by construction.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -34,6 +36,7 @@ from app.schemas.literature import (
 from app.services.literature import (
     association_service,
     dismissal_service,
+    fulltext_service,
     paper_service,
     search_service,
     storage,
@@ -47,6 +50,10 @@ logger = logging.getLogger("bioaf.literature.papers")
 router = APIRouter()
 
 _OPENALEX_UNREACHABLE = "OpenAlex could not be reached right now."
+_NO_OPEN_ACCESS_COPY = "No openly downloadable copy was found."
+_OPEN_ACCESS_TIMEOUT = "Looking for an open-access copy took too long. Try again later."
+# Bounds the whole OpenAlex lookup plus every download attempt, redirects included.
+_OPEN_ACCESS_BUDGET_SECONDS = 60
 
 # Shown when a PDF upload is attempted before the org's Literature GCS bucket
 # exists. The upload is rejected rather than silently stored nowhere.
@@ -339,6 +346,73 @@ async def _attach_pdf(
     await session.commit()
 
     await upload_service.schedule_extraction(paper_id=paper.id, pdf_bytes=pdf_bytes, user_id=user_id)
+
+
+@router.post("/papers/{paper_id}/fetch-open-access", response_model=PaperResponse)
+async def fetch_open_access_endpoint(
+    paper_id: int,
+    current_user: dict = require_permission("literature", "upload"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Find an open-access copy of the paper through OpenAlex and attach it.
+
+    Candidate URLs come only from OpenAlex, never from the client. The paper's
+    DOI (else the DOI of the OpenAlex record matched by PMID) is the identity
+    the copy must carry; a copy of a different paper is a 409, and a DOI held by
+    another library paper is a 409 that never merges automatically."""
+    org_id = int(current_user["org_id"])
+    user_id = int(current_user["sub"])
+    try:
+        paper = await paper_service.get_paper(session, org_id, paper_id)
+    except PaperNotFound:
+        raise HTTPException(404, "paper not found")
+    if not await storage.get_literature_bucket(session):
+        raise HTTPException(503, _NO_LITERATURE_STORAGE)
+
+    api_keys = await search_service._load_api_keys(session, org_id, [openalex.name])
+    try:
+        async with asyncio.timeout(_OPEN_ACCESS_BUDGET_SECONDS):
+            work = await openalex.fetch_work(doi=paper.doi, pmid=paper.pmid, api_key=api_keys[openalex.name])
+            locations = openalex.work_context(work)["oa_locations"] if work else []
+            copy = await fulltext_service.fetch_open_access_pdf(locations)
+    except TimeoutError:
+        raise HTTPException(504, _OPEN_ACCESS_TIMEOUT)
+    except (httpx.HTTPError, ValueError):
+        logger.warning("OpenAlex lookup failed for paper %s", paper_id, exc_info=True)
+        raise HTTPException(502, _OPENALEX_UNREACHABLE)
+    if copy is None:
+        raise HTTPException(404, _NO_OPEN_ACCESS_COPY)
+
+    expected_doi = (paper.doi or openalex.work_doi(work) or "").lower() or None
+    copy_doi = copy.extracted.get("doi")
+    copy_text = (copy.extracted.get("full_text") or "").lower()
+    if expected_doi and copy_doi and copy_doi != expected_doi and expected_doi not in copy_text:
+        raise HTTPException(
+            409,
+            detail={
+                "error": "identity_mismatch",
+                "doi": copy_doi,
+                "message": "The copy found appears to be a different paper. Upload the PDF yourself instead.",
+            },
+        )
+
+    await _attach_pdf(
+        session,
+        paper=paper,
+        pdf_bytes=copy.pdf_bytes,
+        pdf_doi=expected_doi,
+        org_id=org_id,
+        user_id=user_id,
+        confirm_merge=False,
+        provenance={
+            "full_text_version": copy.location.get("version"),
+            "full_text_source": openalex.name,
+            "full_text_source_url": copy.location["pdf_url"],
+            "full_text_acquired_at": datetime.now(UTC),
+        },
+    )
+    await session.refresh(paper)
+    return await _serialize_paper(session, paper, user_id)
 
 
 @router.get("/papers/{paper_id}/pdf")
