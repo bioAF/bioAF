@@ -7,7 +7,7 @@ from datetime import date
 
 import httpx
 
-from app.services.literature.sources import PaperRecord, RateLimit, sanitize_source_text
+from app.services.literature.sources import PaperRecord, RateLimit, author_from_full_name, sanitize_source_text
 
 logger = logging.getLogger("bioaf.literature.semanticscholar")
 
@@ -72,16 +72,7 @@ def _parse_result(item: dict) -> PaperRecord:
     pmid = ext.get("PubMed") or None
     pdf = item.get("openAccessPdf") or {}
     pdf_url = pdf.get("url") if isinstance(pdf, dict) else None
-    authors: list[dict] = []
-    for au in item.get("authors", []) or []:
-        full = (au.get("name") or "").strip()
-        if not full:
-            continue
-        if " " in full:
-            tokens = full.split()
-            authors.append({"given": " ".join(tokens[:-1]), "family": tokens[-1]})
-        else:
-            authors.append({"given": "", "family": full})
+    authors = [a for au in item.get("authors", []) or [] if (a := author_from_full_name(au.get("name")))]
     return PaperRecord(
         source=name,
         title=title,

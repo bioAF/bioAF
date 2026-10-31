@@ -48,6 +48,10 @@ class PaperResponse(BaseModel):
     has_full_text: bool
     extraction_status: str
     extraction_error: str | None
+    full_text_version: str | None = None
+    full_text_source: str | None = None
+    full_text_source_url: str | None = None
+    full_text_acquired_at: datetime | None = None
     comment_count: int
     reading_status: str | None
     dismissed: bool
@@ -55,6 +59,30 @@ class PaperResponse(BaseModel):
     associations: list[AssociationPayload]
     created_at: datetime
     updated_at: datetime
+
+
+class CitationYearPayload(BaseModel):
+    year: int
+    cited_by_count: int
+
+
+class OpenAccessLocationPayload(BaseModel):
+    pdf_url: str | None
+    landing_page_url: str | None
+    version: str | None
+    license: str | None
+    host: str | None
+
+
+class OpenAlexContextResponse(BaseModel):
+    """Research context for a paper, read live from OpenAlex. Null means unknown."""
+
+    available: bool
+    openalex_id: str | None = None
+    is_retracted: bool | None = None
+    cited_by_count: int | None = None
+    counts_by_year: list[CitationYearPayload] = []
+    oa_locations: list[OpenAccessLocationPayload] = []
 
 
 class RecommendationNotePayload(BaseModel):

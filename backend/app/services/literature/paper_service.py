@@ -262,6 +262,15 @@ async def update_paper_metadata(
     return paper
 
 
+FULL_TEXT_PROVENANCE_FIELDS = ("full_text_version", "full_text_source", "full_text_source_url", "full_text_acquired_at")
+
+
+def set_full_text_provenance(paper: LiteraturePaper, provenance: dict | None) -> None:
+    """Record where the paper's stored PDF came from, or clear it (None) for a manual upload."""
+    for field in FULL_TEXT_PROVENANCE_FIELDS:
+        setattr(paper, field, (provenance or {}).get(field))
+
+
 async def delete_paper(
     session: AsyncSession,
     *,
@@ -293,6 +302,7 @@ async def delete_paper(
     paper.has_full_text = False
     paper.extraction_status = EXTRACTION_NONE
     paper.extraction_error = None
+    set_full_text_provenance(paper, None)
     await session.flush()
 
     await dismissal_service.dismiss(

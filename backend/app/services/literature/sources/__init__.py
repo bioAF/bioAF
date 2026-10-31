@@ -2,7 +2,7 @@
 
 Each adapter implements the same interface:
 
-    name: str  # one of pubmed, biorxiv, europepmc, semanticscholar
+    name: str  # one of pubmed, biorxiv, europepmc, semanticscholar, openalex
     async def search(query: str, max_results: int, api_key: str | None) -> list[PaperRecord]
     async def fetch_by_doi(doi: str, api_key: str | None) -> PaperRecord | None
     def get_rate_limit(has_api_key: bool) -> RateLimit
@@ -45,6 +45,15 @@ def sanitize_source_text(value: str | None) -> str | None:
     # Collapse runs of whitespace introduced by removed tags.
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned or None
+
+
+def author_from_full_name(full: str | None) -> dict | None:
+    """Split a single display-name string into the {given, family} author shape.
+    The last token is the family name. Returns None for a blank name."""
+    tokens = (full or "").split()
+    if not tokens:
+        return None
+    return {"given": " ".join(tokens[:-1]), "family": tokens[-1]}
 
 
 @dataclass(frozen=True)
@@ -90,6 +99,7 @@ class LiteratureSource(Protocol):
 from app.services.literature.sources import (  # noqa: E402
     biorxiv,
     europepmc,
+    openalex,
     pubmed,
     semanticscholar,
 )
@@ -99,6 +109,7 @@ ADAPTERS = {
     biorxiv.name: biorxiv,
     europepmc.name: europepmc,
     semanticscholar.name: semanticscholar,
+    openalex.name: openalex,
 }
 
 

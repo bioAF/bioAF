@@ -32,6 +32,11 @@ def find_doi(text: str) -> str | None:
     return _normalize_doi(m.group(0))
 
 
+def find_dois(text: str) -> list[str]:
+    """Every distinct DOI in the text, in order of first appearance."""
+    return list(dict.fromkeys(_normalize_doi(m.group(0)) for m in _DOI_RE.finditer(text or "")))
+
+
 def parse_authors(pdf_authors: str | None) -> list[dict]:
     """Convert a free-form 'Doe, John; Smith, Jane' string into ordered author
     dicts. PyMuPDF's metadata['author'] field is unstructured, so we accept
