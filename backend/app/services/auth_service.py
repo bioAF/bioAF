@@ -9,6 +9,11 @@ from app.config import settings
 from app.exceptions import ValidationError
 
 
+# The purpose claim on a content token. Signed with the session key, so the auth
+# middleware must refuse it wherever a session is expected.
+CONTENT_TOKEN_PURPOSE = "content_access"
+
+
 class AuthService:
     @staticmethod
     def hash_password(password: str) -> str:

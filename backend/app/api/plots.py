@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.content_access import plot_for_content
 from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session
 from app.schemas.experiment import UserSummary
@@ -134,12 +135,7 @@ async def get_thumbnail_content(
     session: AsyncSession = Depends(get_session),
 ):
     """Serve thumbnail PNG bytes for inline display in <img> tags."""
-    current_user = request.state.current_user
-    org_id = int(current_user["org_id"])
-
-    plot = await PlotArchiveService.get_plot(session, org_id, plot_id)
-    if not plot:
-        raise HTTPException(404, "Plot not found")
+    plot = await plot_for_content(session, request, plot_id)
     if not plot.thumbnail_gcs_uri:
         raise HTTPException(404, "No thumbnail available")
 

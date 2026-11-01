@@ -65,8 +65,9 @@ DECLARED_ROUTES = {
     ("GET", "/api/components"),
 }
 
-# Not yet decided. This set only ever shrinks.
-UNDECIDED_ROUTES = {
+# No dependency can gate these: their URLs go in <img> tags and carry a token with
+# no role. app/api/content_access.py decides, at token issue and on bearer calls.
+CONTENT_ROUTES = {
     ("POST", "/api/content-tokens"),
     ("GET", "/api/files/{file_id}/content"),
     ("GET", "/api/plots/{plot_id}/thumbnail/content"),
@@ -173,7 +174,7 @@ def _route_gates() -> dict[tuple[str, str], set[tuple[str, str]] | None]:
 
 
 GATES = _route_gates()
-UNGATED_BY_DECISION = PUBLIC_ROUTES | SELF_SERVICE_ROUTES | DECLARED_ROUTES | UNDECIDED_ROUTES
+UNGATED_BY_DECISION = PUBLIC_ROUTES | SELF_SERVICE_ROUTES | DECLARED_ROUTES | CONTENT_ROUTES
 
 
 def test_the_route_table_was_actually_walked():
@@ -192,7 +193,7 @@ def test_no_decision_outlives_its_route_or_contradicts_a_gate():
 
 
 def test_decision_sets_do_not_overlap():
-    sets = [PUBLIC_ROUTES, SELF_SERVICE_ROUTES, DECLARED_ROUTES, UNDECIDED_ROUTES]
+    sets = [PUBLIC_ROUTES, SELF_SERVICE_ROUTES, DECLARED_ROUTES, CONTENT_ROUTES]
     assert sum(len(s) for s in sets) == len(UNGATED_BY_DECISION)
 
 

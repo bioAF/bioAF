@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.content_access import file_for_content
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.exceptions import DomainError
@@ -406,16 +407,11 @@ async def file_content(
 ):
     """Serve file bytes directly (same-origin proxy for cross-origin GCS content).
 
-    Accepts either a Bearer session JWT (Authorization header) or a
-    short-lived content token (query param). Content tokens carry org_id
-    but no user identity.
+    Accepts either a Bearer credential (authorized here) or a short-lived
+    content token in the query string (authorized when it was issued). Content
+    tokens carry org_id but no user identity.
     """
-    current_user = request.state.current_user
-    org_id = int(current_user["org_id"])
-
-    file = await FileService.get_file(session, file_id, org_id)
-    if not file:
-        raise HTTPException(404, "File not found")
+    file = await file_for_content(session, request, file_id)
     if file.storage_deleted:
         raise HTTPException(410, "File storage has been deleted")
 
