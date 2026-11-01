@@ -798,3 +798,13 @@ async def test_project_provenance_does_not_expand_with_the_timeline(client, admi
     assert response.status_code == 200
     snapshot_nodes = [n for n in response.json()["nodes"] if n["type"] == "snapshot"]
     assert {n["label"] for n in snapshot_nodes} == {"project only", "dual"}
+
+
+@pytest.mark.asyncio
+async def test_the_project_list_needs_projects_view(client, session, admin_user, own_records):
+    org_id = admin_user.organization_id
+    allowed = await _custom_role_headers(session, org_id, "p-allow@test.com", [("projects", "view")])
+    denied = await _custom_role_headers(session, org_id, "p-deny@test.com", [("experiments", "view")])
+    response = await client.get("/api/projects", headers=allowed)
+    assert [p["id"] for p in response.json()["projects"]] == [own_records.project.id]
+    assert (await client.get("/api/projects", headers=denied)).status_code == 403
