@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
-import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { clickableRow } from "@/lib/a11y";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
@@ -39,10 +39,10 @@ export default function DataReferenceDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
-  const user = getCurrentUser();
-  const isAdmin = user?.role_name === "admin";
-  const isCompBio = user?.role_name === "comp_bio";
-  const canDeprecate = isAdmin || isCompBio;
+  const { canAccess } = usePermissions();
+  const canUpload = canAccess("references", "upload");
+  const canDeprecate = canAccess("pipelines", "create");
+  const canApproveDeprecation = canAccess("infrastructure", "configure");
 
   const toast = useToast();
   const [reference, setReference] = useState<ReferenceDatasetDetail | null>(null);
@@ -286,23 +286,25 @@ export default function DataReferenceDetailPage() {
         <span className="capitalize">{reference.category}</span>
         <span>&middot;</span>
         <span className="capitalize">{reference.scope}</span>
-        {canDeprecate && (
+        {(canUpload || canDeprecate) && (
           <div className="ml-auto flex gap-2">
-            <button
-              onClick={() => {
-                const params = new URLSearchParams({
-                  mode: "upload",
-                  name: reference.name,
-                  category: reference.category,
-                  scope: reference.scope,
-                });
-                router.push(`/data/references/add?${params}`);
-              }}
-              className="bg-bioaf-50 text-bioaf-700 border border-bioaf-200 px-3 py-1.5 rounded-md text-sm hover:bg-bioaf-100 transition-colors"
-            >
-              Upload new version
-            </button>
-            {reference.status === "active" && (
+            {canUpload && (
+              <button
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    mode: "upload",
+                    name: reference.name,
+                    category: reference.category,
+                    scope: reference.scope,
+                  });
+                  router.push(`/data/references/add?${params}`);
+                }}
+                className="bg-bioaf-50 text-bioaf-700 border border-bioaf-200 px-3 py-1.5 rounded-md text-sm hover:bg-bioaf-100 transition-colors"
+              >
+                Upload new version
+              </button>
+            )}
+            {canDeprecate && reference.status === "active" && (
               <button
                 onClick={openDeprecateModal}
                 className="bg-red-50 text-red-700 border border-red-200 px-3 py-1.5 rounded-md text-sm hover:bg-red-100 transition-colors"
@@ -319,7 +321,8 @@ export default function DataReferenceDetailPage() {
           <div className="flex items-center justify-between">
             <p className="text-blue-800 font-medium">Import in progress</p>
             <div className="flex gap-2">
-              {importStatus &&
+              {canUpload &&
+                importStatus &&
                 (importStatus.status === "finalizing" || importStatus.status === "active") && (
                   <button
                     type="button"
@@ -330,14 +333,16 @@ export default function DataReferenceDetailPage() {
                     {finalizing ? "Finalizing..." : "Finalize import"}
                   </button>
                 )}
-              <button
-                type="button"
-                onClick={handleCancelOrDelete}
-                disabled={cancelling}
-                className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-50 disabled:opacity-50"
-              >
-                {cancelling ? "Cancelling..." : "Cancel import"}
-              </button>
+              {canUpload && (
+                <button
+                  type="button"
+                  onClick={handleCancelOrDelete}
+                  disabled={cancelling}
+                  className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-50 disabled:opacity-50"
+                >
+                  {cancelling ? "Cancelling..." : "Cancel import"}
+                </button>
+              )}
             </div>
           </div>
           {importStatus && (
@@ -370,14 +375,16 @@ export default function DataReferenceDetailPage() {
               <p className="text-red-700 text-sm mt-1">{reference.deprecation_note}</p>
             )}
           </div>
-          <button
-            type="button"
-            onClick={handleCancelOrDelete}
-            disabled={cancelling}
-            className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-100 disabled:opacity-50 shrink-0"
-          >
-            {cancelling ? "Deleting..." : "Delete"}
-          </button>
+          {canUpload && (
+            <button
+              type="button"
+              onClick={handleCancelOrDelete}
+              disabled={cancelling}
+              className="px-3 py-1.5 border border-red-300 text-red-700 rounded-md text-sm hover:bg-red-100 disabled:opacity-50 shrink-0"
+            >
+              {cancelling ? "Deleting..." : "Delete"}
+            </button>
+          )}
         </div>
       )}
 
@@ -409,7 +416,7 @@ export default function DataReferenceDetailPage() {
               <p className="text-yellow-700 text-sm mt-1">{reference.deprecation_note}</p>
             )}
           </div>
-          {isAdmin && (
+          {canApproveDeprecation && (
             <button
               onClick={handleApproveDeprecation}
               className="bg-yellow-600 text-white px-4 py-2 rounded-md text-sm hover:bg-yellow-700 transition-colors"

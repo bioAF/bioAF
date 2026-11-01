@@ -13,7 +13,7 @@ import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportP
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
-import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { Button } from "@/components/ui/Button";
@@ -65,8 +65,10 @@ export default function ProjectDetailPage() {
 
   const [showProjectExport, setShowProjectExport] = useState(false);
 
-  const user = getCurrentUser();
-  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  const { canAccess } = usePermissions();
+  const canAddSamples = canAccess("projects", "create");
+  const canRemoveSamples = canAccess("projects", "delete");
+  const canExport = canAccess("files", "download");
 
   useEffect(() => {
     loadProject();
@@ -223,7 +225,7 @@ export default function ProjectDetailPage() {
             )}
             <StatusBadge status={project.status || "active"} />
             <div className="ml-auto">
-              {canModify && (
+              {canExport && (
                 <button
                   onClick={() => setShowProjectExport(true)}
                   className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
@@ -311,7 +313,7 @@ export default function ProjectDetailPage() {
         {/* Samples Tab */}
         {activeTab === "samples" && (
           <div>
-            {canModify && (
+            {canAddSamples && (
               <div className="mb-4">
                 <Button
                   onClick={openSamplePicker}>
@@ -339,7 +341,7 @@ export default function ProjectDetailPage() {
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added By</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
-                          {canModify && (
+                          {canRemoveSamples && (
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"></th>
                           )}
                         </tr>
@@ -359,7 +361,7 @@ export default function ProjectDetailPage() {
                             <td className="px-6 py-4 text-sm text-gray-500">
                               {s.added_at ? new Date(s.added_at).toLocaleDateString() : NOT_SET}
                             </td>
-                            {canModify && (
+                            {canRemoveSamples && (
                               <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   onClick={() => handleRemoveSample(s.sample_id)}
@@ -396,7 +398,7 @@ export default function ProjectDetailPage() {
               { label: "Notes", value: viewingSample.notes },
             ]}
             actions={
-              canModify ? (
+              canRemoveSamples ? (
                 <button
                   onClick={() => { handleRemoveSample(viewingSample.sample_id); setViewingSample(null); }}
                   className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
