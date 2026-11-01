@@ -223,7 +223,7 @@ async def reconcile_stuck_files(
 
 @router.get("/stats")
 async def file_stats(
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Return file counts grouped by source (artifacts vs uploaded) and file type."""
@@ -231,7 +231,6 @@ async def file_stats(
 
     from app.models.file import File
 
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     is_artifact = case(
@@ -271,7 +270,7 @@ async def file_stats(
 
 @router.get("", response_model=FileListResponse)
 async def list_files(
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     file_type: str | None = None,
     experiment_id: int | None = None,
     project_id: int | None = None,
@@ -282,7 +281,6 @@ async def list_files(
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     files, total = await FileService.list_files(
@@ -343,10 +341,9 @@ async def data_search(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     file = await FileService.get_file(session, file_id, org_id)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -27,10 +27,9 @@ def _template_response(t) -> TemplateResponse:
 
 @router.get("")
 async def list_templates(
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
     templates = await TemplateService.list_templates(session, org_id)
     return [_template_response(t) for t in templates]
@@ -55,10 +54,9 @@ async def create_template(
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
     template_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     template = await TemplateService.get_template(session, template_id, org_id)

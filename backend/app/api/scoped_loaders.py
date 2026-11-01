@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.experiment import Experiment
 from app.models.role import Role
 from app.models.sample import Sample
+from app.models.sample_batch import SampleBatch
 from app.models.user import User
 
 
@@ -54,3 +55,13 @@ async def owned_sample_ids(session: AsyncSession, sample_ids: Iterable[int], org
 async def require_owned_sample(session: AsyncSession, sample_id: int, org_id: int) -> None:
     if not await owned_sample_ids(session, [sample_id], org_id):
         raise HTTPException(404, "Sample not found")
+
+
+async def require_owned_sample_batch(session: AsyncSession, batch_id: int, org_id: int) -> None:
+    result = await session.execute(
+        select(SampleBatch.id)
+        .join(Experiment, Experiment.id == SampleBatch.experiment_id)
+        .where(SampleBatch.id == batch_id, Experiment.organization_id == org_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Sample batch not found")
