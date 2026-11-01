@@ -1045,3 +1045,67 @@ async def test_project_detail_keeps_same_organization_cross_project_samples(
     response = await client.get(f"/api/projects/{own_records.project.id}", headers=admin_headers)
     external_ids = {s["external_id"] for group in response.json()["samples"] for s in group["samples"]}
     assert external_ids == {"own-sample", "elsewhere"}
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/health/live", "/api/health/ready", "/api/bootstrap/status"],
+)
+@pytest.mark.asyncio
+async def test_deliberate_public_routes_answer_with_no_credentials(client, path):
+    assert (await client.get(path)).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/api/users", "/api/experiments", "/api/samples/1", "/api/projects", "/api/snapshots", "/api/health/status"],
+)
+@pytest.mark.asyncio
+async def test_protected_routes_refuse_no_credentials(client, path):
+    assert (await client.get(path)).status_code == 401
+
+
+@pytest.mark.parametrize("status", ["deactivated", "locked"])
+@pytest.mark.asyncio
+async def test_a_key_stops_working_when_its_service_account_does(client, session, admin_user, own_records, status):
+    headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["samples:view"])
+    url = f"/api/samples/{own_records.sample.id}"
+    assert (await client.get(url, headers=headers)).status_code == 200
+
+    account = await session.scalar(select(User).where(User.is_service_account.is_(True)))
+    account.status = status
+    await session.commit()
+    assert (await client.get(url, headers=headers)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_deactivated_user_cannot_refresh_a_session(client, session, viewer_user, viewer_token):
+    viewer_user.status = "deactivated"
+    await session.commit()
+    response = await client.post("/api/auth/refresh", headers={"Authorization": f"Bearer {viewer_token}"})
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("scopes,expected", [(["experiments:view"], 200), (["projects:view"], 403)])
+@pytest.mark.asyncio
+async def test_a_custom_role_key_needs_both_the_grant_and_the_scope(
+    client, session, admin_user, own_records, scopes, expected
+):
+    role = await role_service.create_role(
+        session,
+        admin_user.organization_id,
+        "both-grants",
+        permissions=[("experiments", "view"), ("projects", "view")],
+    )
+    await session.commit()
+    role_service.invalidate_cache()
+    headers = await _api_key_headers(session, admin_user, role.id, scopes)
+    assert (await client.get("/api/experiments", headers=headers)).status_code == expected
+
+
+@pytest.mark.asyncio
+async def test_a_scope_without_the_role_grant_is_not_enough(client, session, admin_user, viewer_user):
+    headers = await _api_key_headers(session, admin_user, viewer_user.role_id, ["samples:edit"])
+    response = await client.post("/api/samples/bulk/delete", headers=headers, json={"sample_ids": []})
+    assert response.status_code == 403
+    assert response.json()["detail"] == "role_missing"
