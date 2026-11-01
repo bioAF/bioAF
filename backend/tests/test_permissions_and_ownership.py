@@ -11,6 +11,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.models.api_key import ApiKey
+from app.models.audit_log import AuditLog
 from app.models.experiment import Experiment
 from app.models.organization import Organization
 from app.models.project import Project
@@ -459,3 +461,59 @@ async def test_a_foreign_batch_answers_404(client, session, admin_headers, forei
     await session.refresh(foreign_records.sequencing_batch)
     assert foreign_records.sample_batch.name == "foreign-batch"
     assert foreign_records.sequencing_batch.name == "fs"
+
+
+async def _audit_rows(session, entity_type: str, entity_id: int) -> list[AuditLog]:
+    result = await session.execute(
+        select(AuditLog).where(AuditLog.entity_type == entity_type, AuditLog.entity_id == entity_id)
+    )
+    return list(result.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_a_write_through_an_api_key_is_attributed_to_the_key(client, session, admin_user, own_records):
+    headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["samples:edit"])
+    key_result = await session.execute(select(ApiKey).where(ApiKey.created_by_user_id == admin_user.id))
+    key = key_result.scalar_one()
+
+    response = await client.patch(f"/api/samples/{own_records.sample.id}", headers=headers, json={"organism": "mouse"})
+    assert response.status_code == 200
+
+    [row] = await _audit_rows(session, "sample", own_records.sample.id)
+    assert row.api_key_id == key.id
+    assert row.user_id == key.service_account_user_id
+
+
+@pytest.mark.asyncio
+async def test_a_write_through_a_session_has_no_key_attribution(
+    client, session, admin_headers, admin_user, own_records
+):
+    response = await client.patch(
+        f"/api/samples/{own_records.sample.id}", headers=admin_headers, json={"organism": "mouse"}
+    )
+    assert response.status_code == 200
+
+    [row] = await _audit_rows(session, "sample", own_records.sample.id)
+    assert row.api_key_id is None
+    assert row.user_id == admin_user.id
+
+
+@pytest.mark.asyncio
+async def test_key_attribution_does_not_outlive_the_request(client, session, admin_headers, admin_user, own_records):
+    """A session request right after a key request must not inherit the key."""
+    key_headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["samples:edit"])
+    url = f"/api/samples/{own_records.sample.id}"
+    assert (await client.patch(url, headers=key_headers, json={"organism": "mouse"})).status_code == 200
+    assert (await client.patch(url, headers=admin_headers, json={"organism": "rat"})).status_code == 200
+
+    rows = await _audit_rows(session, "sample", own_records.sample.id)
+    latest = max(rows, key=lambda row: row.id)
+    assert latest.api_key_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_denied_key_leaves_no_audit_trail(client, session, admin_user, own_records):
+    headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["samples:view"])
+    url = f"/api/samples/{own_records.sample.id}"
+    assert (await client.patch(url, headers=headers, json={"organism": "mouse"})).status_code == 403
+    assert await _audit_rows(session, "sample", own_records.sample.id) == []

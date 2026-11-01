@@ -6,6 +6,7 @@ from starlette.responses import JSONResponse
 
 from app.services.auth_service import AuthService
 from app.services.api_key_service import KEY_PREFIX as API_KEY_PREFIX
+from app.services.audit_service import current_api_key_id
 
 # Endpoints that don't require authentication
 PUBLIC_PATHS = {
@@ -147,7 +148,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "scopes": list(key.scopes or []),
                 "api_key_id": key.id,
             }
-            return await call_next(request)
+            attribution = current_api_key_id.set(key.id)
+            try:
+                return await call_next(request)
+            finally:
+                current_api_key_id.reset(attribution)
 
         try:
             payload = AuthService.validate_token(token)
