@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.component import (
     ComponentListResponse,
@@ -11,16 +12,8 @@ from app.schemas.component import (
 )
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.component_service import COMPONENT_CATALOG, ComponentService
-from app.services import role_service
 
 router = APIRouter(prefix="/api/components", tags=["components"])
-
-
-async def _require_admin(request: Request, session: AsyncSession) -> dict:
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return current_user
 
 
 def _build_response(key: str, state) -> ComponentStateResponse:
@@ -42,7 +35,7 @@ def _build_response(key: str, state) -> ComponentStateResponse:
 @router.post("/select-batch", response_model=ComponentSelectBatchResponse)
 async def select_batch(
     body: ComponentSelectBatchRequest,
-    request: Request,
+    current_user: dict = require_permission("infrastructure", "configure"),
     session: AsyncSession = Depends(get_session),
 ):
     """Queue a set of components for the post-deploy orchestrator.
@@ -56,8 +49,6 @@ async def select_batch(
     belong to the active compute_stack, fails the whole batch and no rows
     are written.
     """
-    await _require_admin(request, session)
-
     keys = list(dict.fromkeys(body.keys))  # de-dup while preserving order
 
     compute_stack = await PlatformConfigService.get(session, "compute_stack") or "kubernetes"
