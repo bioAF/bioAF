@@ -723,3 +723,78 @@ async def test_a_snapshot_linked_only_to_a_foreign_experiment_gives_no_project_p
     await session.commit()
     headers = await _custom_role_headers(session, admin_user.organization_id, "stale@test.com", [("projects", "view")])
     assert (await client.get(f"/api/snapshots/{stale.id}", headers=headers)).status_code == 403
+
+
+async def _project_snapshot_view(client, headers, project_id: int) -> tuple[set[int], int, int]:
+    """(timeline IDs, list count, detail count) for one project."""
+    timeline = await client.get(f"/api/snapshots?project_id={project_id}", headers=headers)
+    listing = await client.get("/api/projects", headers=headers)
+    detail = await client.get(f"/api/projects/{project_id}", headers=headers)
+    listed = next(p for p in listing.json()["projects"] if p["id"] == project_id)
+    return {s["id"] for s in timeline.json()["snapshots"]}, listed["snapshot_count"], detail.json()["snapshot_count"]
+
+
+@pytest.mark.asyncio
+async def test_project_timeline_and_both_counts_include_nested_snapshots(client, admin_headers, own_records, snapshots):
+    ids, list_count, detail_count = await _project_snapshot_view(client, admin_headers, own_records.project.id)
+    assert ids == {snapshots.project_only.id, snapshots.dual.id, snapshots.nested.id}
+    assert list_count == detail_count == 3
+
+
+@pytest.mark.asyncio
+async def test_a_dual_linked_snapshot_counts_once(client, admin_headers, own_records, snapshots):
+    ids, list_count, detail_count = await _project_snapshot_view(client, admin_headers, own_records.project.id)
+    assert len(ids) == list_count == detail_count
+
+
+@pytest.mark.asyncio
+async def test_a_cross_project_snapshot_appears_on_both_projects(
+    client, session, admin_headers, admin_user, own_records
+):
+    org_id = admin_user.organization_id
+    other = Project(organization_id=org_id, name="Other", code="OTH", owner_user_id=admin_user.id)
+    session.add(other)
+    await session.flush()
+    cross = _snapshot(org_id, admin_user.id, "cross", project_id=other.id, experiment_id=own_records.experiment.id)
+    session.add(cross)
+    await session.commit()
+
+    for project_id in (other.id, own_records.project.id):
+        ids, list_count, detail_count = await _project_snapshot_view(client, admin_headers, project_id)
+        assert ids == {cross.id}
+        assert list_count == detail_count == 1
+
+
+@pytest.mark.asyncio
+async def test_project_counts_ignore_foreign_associations(
+    client, session, admin_headers, own_records, foreign, foreign_records
+):
+    """Neither a foreign snapshot naming our project, nor one on an experiment
+    that points at our project from outside, is ours to count."""
+    foreign_records.experiment.project_id = own_records.project.id
+    session.add_all(
+        [
+            _snapshot(foreign.org.id, foreign.user.id, "direct", project_id=own_records.project.id),
+            _snapshot(foreign.org.id, foreign.user.id, "nested", experiment_id=foreign_records.experiment.id),
+        ]
+    )
+    await session.commit()
+
+    ids, list_count, detail_count = await _project_snapshot_view(client, admin_headers, own_records.project.id)
+    assert ids == set()
+    assert list_count == detail_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_project_with_no_snapshots_counts_zero(client, admin_headers, own_records):
+    ids, list_count, detail_count = await _project_snapshot_view(client, admin_headers, own_records.project.id)
+    assert ids == set()
+    assert list_count == detail_count == 0
+
+
+@pytest.mark.asyncio
+async def test_project_provenance_does_not_expand_with_the_timeline(client, admin_headers, own_records, snapshots):
+    response = await client.get(f"/api/projects/{own_records.project.id}/provenance", headers=admin_headers)
+    assert response.status_code == 200
+    snapshot_nodes = [n for n in response.json()["nodes"] if n["type"] == "snapshot"]
+    assert {n["label"] for n in snapshot_nodes} == {"project only", "dual"}

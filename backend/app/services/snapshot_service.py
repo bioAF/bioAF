@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, exists, false, or_, select
+from sqlalchemy import ColumnElement, exists, false, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -151,7 +151,18 @@ class SnapshotService:
         if experiment_id is not None:
             stmt = stmt.where(AnalysisSnapshot.experiment_id == experiment_id)
         if project_id is not None:
-            stmt = stmt.where(AnalysisSnapshot.project_id == project_id)
+            # A project's timeline includes its experiments' snapshots. Membership
+            # through project_samples is deliberately not a link here.
+            stmt = stmt.where(
+                or_(
+                    AnalysisSnapshot.project_id == project_id,
+                    exists().where(
+                        Experiment.id == AnalysisSnapshot.experiment_id,
+                        Experiment.organization_id == org_id,
+                        Experiment.project_id == project_id,
+                    ),
+                )
+            )
         if user_id is not None:
             stmt = stmt.where(AnalysisSnapshot.user_id == user_id)
         if notebook_session_id is not None:
@@ -172,6 +183,31 @@ class SnapshotService:
             .where(AnalysisSnapshot.id == snapshot_id, AnalysisSnapshot.organization_id == org_id)
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def counts_by_project(session: AsyncSession, org_id: int, project_ids: list[int]) -> dict[int, int]:
+        """How many snapshots each project's timeline shows. The union keeps one
+        row per (project, snapshot), so a snapshot linked both ways counts once."""
+        direct = select(
+            AnalysisSnapshot.project_id.label("project_id"), AnalysisSnapshot.id.label("snapshot_id")
+        ).where(
+            AnalysisSnapshot.organization_id == org_id,
+            AnalysisSnapshot.project_id.in_(project_ids),
+        )
+        nested = (
+            select(Experiment.project_id.label("project_id"), AnalysisSnapshot.id.label("snapshot_id"))
+            .join(Experiment, Experiment.id == AnalysisSnapshot.experiment_id)
+            .where(
+                AnalysisSnapshot.organization_id == org_id,
+                Experiment.organization_id == org_id,
+                Experiment.project_id.in_(project_ids),
+            )
+        )
+        links = union(direct, nested).subquery()
+        result = await session.execute(
+            select(links.c.project_id, func.count(links.c.snapshot_id)).group_by(links.c.project_id)
+        )
+        return {project_id: count for project_id, count in result.all()}
 
     @staticmethod
     async def reachable_ids(

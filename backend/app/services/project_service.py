@@ -3,7 +3,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
@@ -12,6 +11,7 @@ from app.models.sample import Sample
 from app.schemas.project import ProjectCreate, ProjectSamplesAdd, ProjectUpdate
 from app.services.audit_service import log_action
 from app.services.code_service import CodeService
+from app.services.snapshot_service import SnapshotService
 
 
 class ProjectService:
@@ -137,12 +137,7 @@ class ProjectService:
             )
             run_counts = dict(run_result.all())
 
-            snap_result = await session.execute(
-                select(AnalysisSnapshot.project_id, func.count(AnalysisSnapshot.id))
-                .where(AnalysisSnapshot.project_id.in_(project_ids))
-                .group_by(AnalysisSnapshot.project_id)
-            )
-            snap_counts = dict(snap_result.all())
+            snap_counts = await SnapshotService.counts_by_project(session, org_id, project_ids)
 
         projects = []
         for project, experiment_count, sample_count in rows:
@@ -291,10 +286,8 @@ class ProjectService:
         # Counts
         sample_count = len(all_sample_ids)
         experiment_count = len(groups)
-        snap_result = await session.execute(
-            select(func.count(AnalysisSnapshot.id)).where(AnalysisSnapshot.project_id == project_id)
-        )
-        snapshot_count = snap_result.scalar() or 0
+        snap_counts = await SnapshotService.counts_by_project(session, org_id, [project_id])
+        snapshot_count = snap_counts.get(project_id, 0)
 
         return {
             "id": project.id,
