@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -72,14 +72,13 @@ async def upload_document(
 
 @router.get("", response_model=DocumentSearchResponse)
 async def list_documents(
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     query: str | None = None,
     experiment_id: int | None = None,
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     docs, total = await DocumentService.search_documents(
@@ -96,10 +95,9 @@ async def list_documents(
 @router.get("/{document_id}", response_model=DocumentResponse)
 async def get_document(
     document_id: int,
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     doc = await DocumentService.get_document(session, document_id, org_id)
@@ -111,10 +109,9 @@ async def get_document(
 @router.get("/{document_id}/download")
 async def download_document(
     document_id: int,
-    request: Request,
+    current_user: dict = require_permission("files", "download"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     doc = await DocumentService.get_document(session, document_id, org_id)

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import require_permission
 from app.database import get_session
 
 logger = logging.getLogger("bioaf.health")
@@ -27,7 +28,10 @@ async def readiness(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/status")
-async def system_status(session: AsyncSession = Depends(get_session)):
+async def system_status(
+    current_user: dict = require_permission("infrastructure", "view"),
+    session: AsyncSession = Depends(get_session),
+):
     checks = {}
 
     # Database check
@@ -47,7 +51,7 @@ async def system_status(session: AsyncSession = Depends(get_session)):
 
 
 @router.get("/services")
-async def service_health():
+async def service_health(current_user: dict = require_permission("infrastructure", "view")):
     """Return per-service health based on request success rates over the last 5 minutes.
 
     Services with >75% success are healthy, 50-74% are degraded,

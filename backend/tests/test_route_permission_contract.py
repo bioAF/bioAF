@@ -15,6 +15,7 @@ from app.middleware.auth_middleware import PUBLIC_PATHS
 VIEW_EXPERIMENTS = {("experiments", "view")}
 VIEW_RESULTS = set(RESULTS_VIEW_PERMISSIONS)
 CONFIGURE_INFRASTRUCTURE = {("infrastructure", "configure")}
+VIEW_INFRASTRUCTURE = {("infrastructure", "view")}
 
 # Reachable with no session at all, or authenticated by something other than a
 # session (a setup code, an invite token, an internal token, a Slack OAuth state).
@@ -60,32 +61,18 @@ DECLARED_ROUTES = {
     ("GET", "/api/files/search"),
     ("GET", "/api/vocabularies"),
     ("GET", "/api/vocabularies/fields"),
+    ("GET", "/api/components"),
 }
 
 # Not yet decided. This set only ever shrinks.
 UNDECIDED_ROUTES = {
-    ("GET", "/api/cellxgene"),
-    ("GET", "/api/cellxgene/inspect/{file_id}"),
-    ("GET", "/api/cellxgene/publishable-files"),
-    ("GET", "/api/cellxgene/{publication_id}"),
-    ("GET", "/api/components"),
     ("POST", "/api/content-tokens"),
-    ("GET", "/api/documents"),
-    ("GET", "/api/documents/{document_id}"),
-    ("GET", "/api/documents/{document_id}/download"),
     ("GET", "/api/files/{file_id}/content"),
-    ("GET", "/api/health/services"),
-    ("GET", "/api/health/status"),
-    ("GET", "/api/plots"),
-    ("GET", "/api/plots/{plot_id}"),
-    ("GET", "/api/plots/{plot_id}/thumbnail"),
     ("GET", "/api/plots/{plot_id}/thumbnail/content"),
     ("GET", "/api/projects"),
     ("GET", "/api/snapshots"),
     ("GET", "/api/snapshots/compare"),
     ("GET", "/api/snapshots/{snapshot_id}"),
-    ("GET", "/api/storage/lifecycle"),
-    ("GET", "/api/storage/stats"),
 }
 
 EXPERIMENT_READS = {
@@ -102,6 +89,20 @@ EXPERIMENT_READS = {
 # The exact grants of routes whose gate is a decision worth pinning, because a
 # wrong resource here would still look gated.
 EXPECTED_GATES = {
+    ("GET", "/api/documents"): {("files", "view")},
+    ("GET", "/api/documents/{document_id}"): {("files", "view")},
+    ("GET", "/api/documents/{document_id}/download"): {("files", "download")},
+    ("GET", "/api/plots"): VIEW_RESULTS,
+    ("GET", "/api/plots/{plot_id}"): VIEW_RESULTS,
+    ("GET", "/api/plots/{plot_id}/thumbnail"): VIEW_RESULTS,
+    ("GET", "/api/cellxgene"): VIEW_RESULTS,
+    ("GET", "/api/cellxgene/{publication_id}"): VIEW_RESULTS,
+    ("GET", "/api/cellxgene/publishable-files"): VIEW_RESULTS,
+    ("GET", "/api/cellxgene/inspect/{file_id}"): VIEW_RESULTS,
+    ("GET", "/api/storage/stats"): VIEW_INFRASTRUCTURE,
+    ("GET", "/api/storage/lifecycle"): VIEW_INFRASTRUCTURE,
+    ("GET", "/api/health/status"): VIEW_INFRASTRUCTURE,
+    ("GET", "/api/health/services"): VIEW_INFRASTRUCTURE,
     **{route: VIEW_EXPERIMENTS for route in EXPERIMENT_READS},
     ("GET", "/api/samples/{sample_id}"): {("samples", "view")},
     ("GET", "/api/samples/{sample_id}/read-groups"): {("samples", "view")},

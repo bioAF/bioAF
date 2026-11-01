@@ -13,7 +13,9 @@ from sqlalchemy import select
 
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
+from app.models.document import Document
 from app.models.experiment import Experiment
+from app.models.file import File
 from app.models.organization import Organization
 from app.models.project import Project
 from app.models.role import Role
@@ -517,3 +519,88 @@ async def test_a_denied_key_leaves_no_audit_trail(client, session, admin_user, o
     url = f"/api/samples/{own_records.sample.id}"
     assert (await client.patch(url, headers=headers, json={"organism": "mouse"})).status_code == 403
     assert await _audit_rows(session, "sample", own_records.sample.id) == []
+
+
+@pytest_asyncio.fixture
+async def own_document(session, admin_user) -> Document:
+    file = File(
+        organization_id=admin_user.organization_id,
+        filename="protocol.pdf",
+        storage_uri="gs://bucket/protocol.pdf",
+        file_type="pdf",
+        source_type="upload",
+    )
+    session.add(file)
+    await session.flush()
+    document = Document(organization_id=admin_user.organization_id, file_id=file.id, title="Protocol")
+    session.add(document)
+    await session.commit()
+    return document
+
+
+@pytest.mark.parametrize(
+    "path,grant",
+    [
+        ("/api/documents", ("files", "view")),
+        ("/api/documents/{document}", ("files", "view")),
+        ("/api/documents/{document}/download", ("files", "download")),
+    ],
+)
+@pytest.mark.asyncio
+async def test_document_reads_follow_their_grant(client, session, admin_user, own_document, path, grant):
+    org_id = admin_user.organization_id
+    allowed = await _custom_role_headers(session, org_id, "d-allow@test.com", [grant])
+    denied = await _custom_role_headers(session, org_id, "d-deny@test.com", [("audit_log", "view")])
+    url = path.format(document=own_document.id)
+    assert (await client.get(url, headers=allowed)).status_code == 200
+    assert (await client.get(url, headers=denied)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_viewing_a_document_does_not_grant_its_download(client, session, admin_user, own_document):
+    headers = await _custom_role_headers(session, admin_user.organization_id, "view-only@test.com", [("files", "view")])
+    assert (await client.get(f"/api/documents/{own_document.id}/download", headers=headers)).status_code == 403
+
+
+@pytest.mark.parametrize("path", ["/api/plots", "/api/cellxgene", "/api/cellxgene/publishable-files"])
+@pytest.mark.parametrize("grant", [("experiments", "view"), ("pipelines", "view")])
+@pytest.mark.asyncio
+async def test_results_routes_accept_either_results_grant(client, session, admin_user, path, grant):
+    headers = await _custom_role_headers(session, admin_user.organization_id, "r@test.com", [grant])
+    assert (await client.get(path, headers=headers)).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/plots",
+        "/api/plots/1",
+        "/api/plots/1/thumbnail",
+        "/api/cellxgene",
+        "/api/cellxgene/1",
+        "/api/cellxgene/publishable-files",
+        "/api/cellxgene/inspect/1",
+    ],
+)
+@pytest.mark.asyncio
+async def test_results_routes_refuse_a_role_with_neither_grant(client, session, admin_user, path):
+    headers = await _custom_role_headers(session, admin_user.organization_id, "none@test.com", [("audit_log", "view")])
+    assert (await client.get(path, headers=headers)).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "path", ["/api/storage/stats", "/api/storage/lifecycle", "/api/health/status", "/api/health/services"]
+)
+@pytest.mark.asyncio
+async def test_platform_state_needs_infrastructure_view(client, session, admin_user, viewer_token, path):
+    org_id = admin_user.organization_id
+    allowed = await _custom_role_headers(session, org_id, "i-allow@test.com", [("infrastructure", "view")])
+    assert (await client.get(path, headers=allowed)).status_code == 200
+    viewer = {"Authorization": f"Bearer {viewer_token}"}
+    assert (await client.get(path, headers=viewer)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_viewer_can_still_list_components(client, viewer_token):
+    response = await client.get("/api/components", headers={"Authorization": f"Bearer {viewer_token}"})
+    assert response.status_code == 200

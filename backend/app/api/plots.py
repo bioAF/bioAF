@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session
 from app.schemas.experiment import UserSummary
 from app.schemas.file import FileResponse
@@ -63,7 +63,7 @@ def _plot_response(p) -> PlotArchiveResponse:
 
 @router.get("", response_model=PlotArchiveListResponse)
 async def search_plots(
-    request: Request,
+    current_user: dict = require_results_view(),
     experiment_id: int | None = None,
     pipeline_run_id: int | None = None,
     query: str | None = None,
@@ -73,7 +73,6 @@ async def search_plots(
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     plots, total = await PlotArchiveService.search_plots(
@@ -98,10 +97,9 @@ async def search_plots(
 @router.get("/{plot_id}", response_model=PlotArchiveResponse)
 async def get_plot(
     plot_id: int,
-    request: Request,
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     plot = await PlotArchiveService.get_plot(session, org_id, plot_id)
@@ -113,10 +111,9 @@ async def get_plot(
 @router.get("/{plot_id}/thumbnail")
 async def get_thumbnail(
     plot_id: int,
-    request: Request,
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     plot = await PlotArchiveService.get_plot(session, org_id, plot_id)
