@@ -17,8 +17,11 @@ from app.models.audit_log import AuditLog
 from app.models.document import Document
 from app.models.experiment import Experiment
 from app.models.file import File
+from app.models.notebook_session import ComputeSession
 from app.models.organization import Organization
+from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
+from app.models.project_sample import ProjectSample
 from app.models.role import Role
 from app.models.sample import Sample
 from app.models.sample_batch import SampleBatch
@@ -808,3 +811,237 @@ async def test_the_project_list_needs_projects_view(client, session, admin_user,
     response = await client.get("/api/projects", headers=allowed)
     assert [p["id"] for p in response.json()["projects"]] == [own_records.project.id]
     assert (await client.get("/api/projects", headers=denied)).status_code == 403
+
+
+def _snapshot_body(**links) -> dict:
+    return {"label": "new", "object_type": "anndata", **links}
+
+
+async def _snapshot_labels(session) -> list[str]:
+    result = await session.execute(select(AnalysisSnapshot.label))
+    return list(result.scalars().all())
+
+
+@pytest_asyncio.fixture
+async def foreign_references(session, foreign, foreign_records) -> SimpleNamespace:
+    """Each kind of record a new snapshot can point at, in the other Organization."""
+    file = File(organization_id=foreign.org.id, storage_uri="gs://b/f.png", filename="f.png", file_type="image")
+    notebook = ComputeSession(
+        user_id=foreign.user.id,
+        organization_id=foreign.org.id,
+        session_type="jupyter",
+        resource_profile="small",
+        cpu_cores=1,
+        memory_gb=1,
+    )
+    session.add_all([file, notebook])
+    await session.commit()
+    return SimpleNamespace(
+        experiment_id=foreign_records.experiment.id,
+        project_id=foreign_records.project.id,
+        figure_file_id=file.id,
+        checkpoint_file_id=file.id,
+        notebook_session_id=notebook.id,
+    )
+
+
+@pytest.mark.parametrize(
+    "field", ["experiment_id", "project_id", "figure_file_id", "checkpoint_file_id", "notebook_session_id"]
+)
+@pytest.mark.asyncio
+async def test_a_new_snapshot_cannot_reference_a_foreign_record(
+    client, session, admin_headers, own_records, foreign_references, field
+):
+    links = {"experiment_id": own_records.experiment.id, field: getattr(foreign_references, field)}
+    response = await client.post("/api/snapshots", headers=admin_headers, json=_snapshot_body(**links))
+    assert response.status_code == 404
+    assert await _snapshot_labels(session) == []
+
+
+@pytest.mark.asyncio
+async def test_a_new_snapshot_can_reference_its_own_records(client, session, admin_headers, admin_user, own_records):
+    org_id = admin_user.organization_id
+    file = File(organization_id=org_id, storage_uri="gs://b/o.png", filename="o.png", file_type="image")
+    notebook = ComputeSession(
+        user_id=admin_user.id,
+        organization_id=org_id,
+        session_type="jupyter",
+        resource_profile="small",
+        cpu_cores=1,
+        memory_gb=1,
+    )
+    session.add_all([file, notebook])
+    await session.commit()
+    response = await client.post(
+        "/api/snapshots",
+        headers=admin_headers,
+        json=_snapshot_body(
+            experiment_id=own_records.experiment.id,
+            project_id=own_records.project.id,
+            figure_file_id=file.id,
+            checkpoint_file_id=file.id,
+            notebook_session_id=notebook.id,
+        ),
+    )
+    assert response.status_code == 200
+    assert await _snapshot_labels(session) == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_may_name_an_experiment_outside_its_project(
+    client, session, admin_headers, admin_user, own_records
+):
+    """Decision 5c.1: cross-project work within one Organization stays allowed."""
+    other = Project(organization_id=admin_user.organization_id, name="Other", code="OTH", owner_user_id=admin_user.id)
+    session.add(other)
+    await session.commit()
+    response = await client.post(
+        "/api/snapshots",
+        headers=admin_headers,
+        json=_snapshot_body(experiment_id=own_records.experiment.id, project_id=other.id),
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_snapshot_cannot_be_starred(client, session, admin_headers, foreign, foreign_records):
+    theirs = _snapshot(foreign.org.id, foreign.user.id, "theirs", project_id=foreign_records.project.id)
+    session.add(theirs)
+    await session.commit()
+
+    assert (await client.post(f"/api/snapshots/{theirs.id}/star", headers=admin_headers)).status_code == 404
+    await session.refresh(theirs)
+    assert theirs.starred is False
+    assert await _audit_rows(session, "analysis_snapshot", theirs.id) == []
+
+
+@pytest.mark.asyncio
+async def test_an_own_snapshot_can_be_starred(client, admin_headers, snapshots):
+    response = await client.post(f"/api/snapshots/{snapshots.dual.id}/star", headers=admin_headers)
+    assert response.status_code == 200
+    assert response.json()["starred"] is True
+
+
+async def _project_names(session) -> list[str]:
+    result = await session.execute(select(Project.name).order_by(Project.name))
+    return list(result.scalars().all())
+
+
+@pytest.mark.parametrize("mixed", [False, True], ids=["all-foreign", "mixed"])
+@pytest.mark.asyncio
+async def test_a_new_project_cannot_take_foreign_samples(
+    client, session, admin_headers, own_records, foreign_records, mixed
+):
+    sample_ids = [foreign_records.sample.id] + ([own_records.sample.id] if mixed else [])
+    before = await _project_names(session)
+    response = await client.post(
+        "/api/projects", headers=admin_headers, json={"name": "Smuggler", "sample_ids": sample_ids}
+    )
+    assert response.status_code == 404
+    assert await _project_names(session) == before
+
+
+@pytest.mark.asyncio
+async def test_a_new_project_can_take_samples_across_its_own_experiments(
+    client, session, admin_headers, admin_user, own_records
+):
+    second = Experiment(organization_id=admin_user.organization_id, name="Second")
+    session.add(second)
+    await session.flush()
+    sample = Sample(experiment_id=second.id, external_id="second", status="registered")
+    session.add(sample)
+    await session.commit()
+    response = await client.post(
+        "/api/projects",
+        headers=admin_headers,
+        json={"name": "Cross", "sample_ids": [own_records.sample.id, sample.id]},
+    )
+    assert response.status_code == 200
+    assert response.json()["sample_count"] == 2
+
+
+@pytest.mark.parametrize("mixed", [False, True], ids=["all-foreign", "mixed"])
+@pytest.mark.asyncio
+async def test_a_project_cannot_add_foreign_samples(
+    client, session, admin_headers, own_records, foreign_records, mixed
+):
+    sample_ids = [foreign_records.sample.id] + ([own_records.sample.id] if mixed else [])
+    response = await client.post(
+        f"/api/projects/{own_records.project.id}/samples", headers=admin_headers, json={"sample_ids": sample_ids}
+    )
+    assert response.status_code == 404
+    rows = await session.execute(select(ProjectSample).where(ProjectSample.project_id == own_records.project.id))
+    assert rows.scalars().all() == []
+
+
+@pytest.mark.asyncio
+async def test_a_project_can_add_its_organizations_samples(client, session, admin_headers, own_records):
+    response = await client.post(
+        f"/api/projects/{own_records.project.id}/samples",
+        headers=admin_headers,
+        json={"sample_ids": [own_records.sample.id]},
+    )
+    assert response.status_code == 200
+    assert response.json()["added"] == 1
+
+
+@pytest.mark.asyncio
+async def test_project_detail_hides_previously_stored_foreign_links(
+    client, session, admin_headers, admin_user, own_records, foreign, foreign_records
+):
+    """Rows written before this boundary existed must not disclose anything."""
+    session.add(
+        ProjectSample(
+            project_id=own_records.project.id, sample_id=foreign_records.sample.id, added_by_user_id=foreign.user.id
+        )
+    )
+    linked_foreign = Experiment(organization_id=foreign.org.id, name="Linked", project_id=own_records.project.id)
+    session.add(linked_foreign)
+    await session.flush()
+    session.add(
+        Sample(experiment_id=linked_foreign.id, external_id="linked-foreign", status="registered"),
+    )
+    session.add(
+        PipelineRun(
+            organization_id=foreign.org.id,
+            pipeline_name="foreign-run",
+            pipeline_version="1",
+            experiment_id=own_records.experiment.id,
+            status="completed",
+        )
+    )
+    session.add(
+        ProjectSample(
+            project_id=own_records.project.id, sample_id=own_records.sample.id, added_by_user_id=foreign.user.id
+        )
+    )
+    await session.commit()
+
+    response = await client.get(f"/api/projects/{own_records.project.id}", headers=admin_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert {s["external_id"] for group in body["samples"] for s in group["samples"]} == {"own-sample"}
+    assert {group["experiment_name"] for group in body["samples"]} == {"Own Exp"}
+    assert [e["name"] for e in body["experiments"]] == ["Own Exp"]
+    assert body["sample_count"] == 1
+    assert body["experiment_count"] == 1
+    assert body["pipeline_runs"] == []
+    assert body["pipeline_run_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_project_detail_keeps_same_organization_cross_project_samples(
+    client, session, admin_headers, admin_user, own_records
+):
+    second = Experiment(organization_id=admin_user.organization_id, name="Elsewhere")
+    session.add(second)
+    await session.flush()
+    sample = Sample(experiment_id=second.id, external_id="elsewhere", status="registered")
+    session.add(sample)
+    await session.flush()
+    session.add(ProjectSample(project_id=own_records.project.id, sample_id=sample.id, added_by_user_id=admin_user.id))
+    await session.commit()
+
+    response = await client.get(f"/api/projects/{own_records.project.id}", headers=admin_headers)
+    external_ids = {s["external_id"] for group in response.json()["samples"] for s in group["samples"]}
+    assert external_ids == {"own-sample", "elsewhere"}

@@ -16,14 +16,23 @@ from app.services.snapshot_service import SnapshotService
 
 class ProjectService:
     @staticmethod
+    async def _require_samples_in_organization(session: AsyncSession, sample_ids: list[int], org_id: int) -> None:
+        """Refuse the whole batch before any write if one ID is missing or foreign.
+        A foreign sample answers exactly as a missing one does."""
+        result = await session.execute(
+            select(Sample.id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(Sample.id.in_(sample_ids), Experiment.organization_id == org_id)
+        )
+        missing = set(sample_ids) - {row[0] for row in result.all()}
+        if missing:
+            raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+
+    @staticmethod
     async def create_project(session: AsyncSession, org_id: int, user_id: int, data: ProjectCreate) -> Project:
         # Validate sample_ids if provided
         if data.sample_ids:
-            result = await session.execute(select(Sample.id).where(Sample.id.in_(data.sample_ids)))
-            found_ids = {row[0] for row in result.all()}
-            missing = set(data.sample_ids) - found_ids
-            if missing:
-                raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+            await ProjectService._require_samples_in_organization(session, data.sample_ids, org_id)
 
         code = await CodeService.next_project_code(session, org_id, data.name)
 
@@ -180,7 +189,7 @@ class ProjectService:
         exp_stmt = (
             select(Experiment, Sample)
             .outerjoin(Sample, Sample.experiment_id == Experiment.id)
-            .where(Experiment.project_id == project_id)
+            .where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
             .order_by(Experiment.name, Sample.external_id)
         )
         exp_result = await session.execute(exp_stmt)
@@ -191,7 +200,7 @@ class ProjectService:
             select(ProjectSample, Sample, Experiment)
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
-            .where(ProjectSample.project_id == project_id)
+            .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
             .order_by(Experiment.name, Sample.external_id)
         )
         ps_result = await session.execute(ps_stmt)
@@ -203,7 +212,9 @@ class ProjectService:
         if user_ids:
             from app.models.user import User
 
-            user_result = await session.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
+            user_result = await session.execute(
+                select(User.id, User.name).where(User.id.in_(user_ids), User.organization_id == org_id)
+            )
             user_names = dict(user_result.all())
 
         # Build groups from experiments linked via project_id
@@ -276,7 +287,7 @@ class ProjectService:
         if experiment_ids:
             run_result = await session.execute(
                 select(PipelineRun)
-                .where(PipelineRun.experiment_id.in_(experiment_ids))
+                .where(PipelineRun.experiment_id.in_(experiment_ids), PipelineRun.organization_id == org_id)
                 .order_by(PipelineRun.created_at.desc())
             )
             runs = run_result.scalars().all()
@@ -323,12 +334,9 @@ class ProjectService:
         user_id: int,
         data: ProjectSamplesAdd,
     ) -> list[ProjectSample]:
-        # Validate all sample_ids exist
-        result = await session.execute(select(Sample.id).where(Sample.id.in_(data.sample_ids)))
-        found_ids = {row[0] for row in result.all()}
-        missing = set(data.sample_ids) - found_ids
-        if missing:
-            raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+        # Validate all sample_ids exist in the project's Organization
+        org_id = await session.scalar(select(Project.organization_id).where(Project.id == project_id))
+        await ProjectService._require_samples_in_organization(session, data.sample_ids, org_id)
 
         # Check for duplicates
         existing = await session.execute(

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from fastapi import HTTPException
 from sqlalchemy import ColumnElement, exists, false, func, or_, select, union
@@ -10,6 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.experiment import Experiment
+from app.models.file import File
+from app.models.notebook_session import ComputeSession
 from app.models.project import Project
 from app.schemas.analysis_snapshot import SnapshotCreate
 from app.services.audit_service import log_action
@@ -86,15 +89,23 @@ class SnapshotService:
         if not data.experiment_id and not data.project_id:
             raise HTTPException(422, "At least one of experiment_id or project_id is required")
 
-        if data.experiment_id:
-            result = await session.execute(select(Experiment).where(Experiment.id == data.experiment_id))
-            if not result.scalar_one_or_none():
-                raise HTTPException(404, "Experiment not found")
-
-        if data.project_id:
-            result = await session.execute(select(Project).where(Project.id == data.project_id))
-            if not result.scalar_one_or_none():
-                raise HTTPException(404, "Project not found")
+        # Each reference must be this Organization's. Whether the project and the
+        # experiment match is deliberately not checked: cross-project work is
+        # allowed, so a snapshot may name an experiment outside its project.
+        references = [
+            (data.experiment_id, Experiment, "Experiment not found"),
+            (data.project_id, Project, "Project not found"),
+            (data.figure_file_id, File, "Figure file not found"),
+            (data.checkpoint_file_id, File, "Checkpoint file not found"),
+            (data.notebook_session_id, ComputeSession, "Notebook session not found"),
+        ]
+        for record_id, model, not_found in references:
+            if record_id:
+                result = await session.execute(
+                    select(model.id).where(model.id == record_id, model.organization_id == org_id)
+                )
+                if result.scalar_one_or_none() is None:
+                    raise HTTPException(404, not_found)
 
         snapshot = AnalysisSnapshot(
             organization_id=org_id,
@@ -207,7 +218,7 @@ class SnapshotService:
         result = await session.execute(
             select(links.c.project_id, func.count(links.c.snapshot_id)).group_by(links.c.project_id)
         )
-        return {project_id: count for project_id, count in result.all()}
+        return dict(cast("Sequence[tuple[int, int]]", result.all()))
 
     @staticmethod
     async def reachable_ids(
@@ -224,8 +235,14 @@ class SnapshotService:
         return set(result.scalars().all())
 
     @staticmethod
-    async def toggle_star(session: AsyncSession, snapshot_id: int, user_id: int) -> AnalysisSnapshot | None:
-        result = await session.execute(select(AnalysisSnapshot).where(AnalysisSnapshot.id == snapshot_id))
+    async def toggle_star(
+        session: AsyncSession, snapshot_id: int, org_id: int, user_id: int
+    ) -> AnalysisSnapshot | None:
+        result = await session.execute(
+            select(AnalysisSnapshot).where(
+                AnalysisSnapshot.id == snapshot_id, AnalysisSnapshot.organization_id == org_id
+            )
+        )
         snapshot = result.scalar_one_or_none()
         if not snapshot:
             return None

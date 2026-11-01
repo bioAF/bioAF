@@ -171,7 +171,7 @@ async def toggle_star(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    snapshot = await SnapshotService.toggle_star(session, snapshot_id, user_id)
+    snapshot = await SnapshotService.toggle_star(session, snapshot_id, int(current_user["org_id"]), user_id)
     if not snapshot:
         raise HTTPException(404, "Snapshot not found")
     await session.commit()
