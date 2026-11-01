@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import has_effective_permission, require_any_permission, require_permission
 from app.database import get_session
 from app.schemas.analysis_snapshot import (
     SnapshotComparison,
@@ -10,9 +10,28 @@ from app.schemas.analysis_snapshot import (
     SnapshotListResponse,
     SnapshotResponse,
 )
-from app.services.snapshot_service import SnapshotService, _derive_cluster_count
+from app.services.snapshot_service import (
+    SNAPSHOT_ACCESS_DENIED,
+    SnapshotAccess,
+    SnapshotService,
+    _derive_cluster_count,
+)
 
 router = APIRouter(prefix="/api/snapshots", tags=["snapshots"])
+
+# Either grant opens the route; which snapshots it then reaches is decided per
+# record, because a snapshot can hang off an experiment, a project, or both.
+SNAPSHOT_VIEW_PERMISSIONS: list[tuple[str, str]] = [
+    ("experiments", "view"),
+    ("projects", "view"),
+]
+
+
+async def _access_of(session: AsyncSession, user: dict) -> SnapshotAccess:
+    return SnapshotAccess(
+        experiments=await has_effective_permission(session, user, "experiments", "view"),
+        projects=await has_effective_permission(session, user, "projects", "view"),
+    )
 
 
 def _snapshot_to_response(snap) -> dict:
@@ -72,26 +91,26 @@ async def create_snapshot(
     await session.commit()
 
     # Reload with relationships
-    snapshot = await SnapshotService.get_snapshot(session, snapshot.id)
+    snapshot = await SnapshotService.get_snapshot(session, snapshot.id, org_id)
     return SnapshotResponse(**_snapshot_to_response(snapshot))
 
 
 @router.get("", response_model=SnapshotListResponse)
 async def list_snapshots(
-    request: Request,
     experiment_id: int | None = Query(None),
     project_id: int | None = Query(None),
     user_id: int | None = Query(None),
     notebook_session_id: int | None = Query(None),
     starred: bool | None = Query(None),
+    current_user: dict = require_any_permission(SNAPSHOT_VIEW_PERMISSIONS),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     snapshots = await SnapshotService.list_snapshots(
         session,
         org_id,
+        await _access_of(session, current_user),
         experiment_id=experiment_id,
         project_id=project_id,
         user_id=user_id,
@@ -104,8 +123,8 @@ async def list_snapshots(
 
 @router.get("/compare", response_model=SnapshotComparison)
 async def compare_snapshots(
-    request: Request,
     ids: str = Query(..., description="Comma-separated snapshot IDs (2-5)"),
+    current_user: dict = require_any_permission(SNAPSHOT_VIEW_PERMISSIONS),
     session: AsyncSession = Depends(get_session),
 ):
     try:
@@ -113,7 +132,9 @@ async def compare_snapshots(
     except ValueError:
         raise HTTPException(422, "ids must be comma-separated integers")
 
-    result = await SnapshotService.compare_snapshots(session, id_list)
+    result = await SnapshotService.compare_snapshots(
+        session, id_list, int(current_user["org_id"]), await _access_of(session, current_user)
+    )
 
     # Convert snapshots to detail responses
     detail_snapshots = [SnapshotDetailResponse(**_snapshot_to_detail(s)) for s in result["snapshots"]]
@@ -130,12 +151,16 @@ async def compare_snapshots(
 @router.get("/{snapshot_id}", response_model=SnapshotDetailResponse)
 async def get_snapshot(
     snapshot_id: int,
-    request: Request,
+    current_user: dict = require_any_permission(SNAPSHOT_VIEW_PERMISSIONS),
     session: AsyncSession = Depends(get_session),
 ):
-    snapshot = await SnapshotService.get_snapshot(session, snapshot_id)
+    org_id = int(current_user["org_id"])
+    snapshot = await SnapshotService.get_snapshot(session, snapshot_id, org_id)
     if not snapshot:
         raise HTTPException(404, "Snapshot not found")
+    access = await _access_of(session, current_user)
+    if not await SnapshotService.reachable_ids(session, [snapshot_id], org_id, access):
+        raise HTTPException(403, SNAPSHOT_ACCESS_DENIED)
     return SnapshotDetailResponse(**_snapshot_to_detail(snapshot))
 
 
@@ -152,5 +177,5 @@ async def toggle_star(
     await session.commit()
 
     # Reload with relationships
-    snapshot = await SnapshotService.get_snapshot(session, snapshot.id)
+    snapshot = await SnapshotService.get_snapshot(session, snapshot.id, int(current_user["org_id"]))
     return SnapshotResponse(**_snapshot_to_response(snapshot))

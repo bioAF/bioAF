@@ -16,6 +16,7 @@ VIEW_EXPERIMENTS = {("experiments", "view")}
 VIEW_RESULTS = set(RESULTS_VIEW_PERMISSIONS)
 CONFIGURE_INFRASTRUCTURE = {("infrastructure", "configure")}
 VIEW_INFRASTRUCTURE = {("infrastructure", "view")}
+VIEW_SNAPSHOTS = {("experiments", "view"), ("projects", "view")}
 
 # Reachable with no session at all, or authenticated by something other than a
 # session (a setup code, an invite token, an internal token, a Slack OAuth state).
@@ -70,9 +71,6 @@ UNDECIDED_ROUTES = {
     ("GET", "/api/files/{file_id}/content"),
     ("GET", "/api/plots/{plot_id}/thumbnail/content"),
     ("GET", "/api/projects"),
-    ("GET", "/api/snapshots"),
-    ("GET", "/api/snapshots/compare"),
-    ("GET", "/api/snapshots/{snapshot_id}"),
 }
 
 EXPERIMENT_READS = {
@@ -89,6 +87,9 @@ EXPERIMENT_READS = {
 # The exact grants of routes whose gate is a decision worth pinning, because a
 # wrong resource here would still look gated.
 EXPECTED_GATES = {
+    ("GET", "/api/snapshots"): VIEW_SNAPSHOTS,
+    ("GET", "/api/snapshots/compare"): VIEW_SNAPSHOTS,
+    ("GET", "/api/snapshots/{snapshot_id}"): VIEW_SNAPSHOTS,
     ("GET", "/api/documents"): {("files", "view")},
     ("GET", "/api/documents/{document_id}"): {("files", "view")},
     ("GET", "/api/documents/{document_id}/download"): {("files", "download")},

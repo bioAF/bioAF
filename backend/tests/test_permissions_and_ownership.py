@@ -11,6 +11,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.api_key import ApiKey
 from app.models.audit_log import AuditLog
 from app.models.document import Document
@@ -604,3 +605,121 @@ async def test_platform_state_needs_infrastructure_view(client, session, admin_u
 async def test_a_viewer_can_still_list_components(client, viewer_token):
     response = await client.get("/api/components", headers={"Authorization": f"Bearer {viewer_token}"})
     assert response.status_code == 200
+
+
+def _snapshot(org_id: int, user_id: int, label: str, **links) -> AnalysisSnapshot:
+    return AnalysisSnapshot(organization_id=org_id, user_id=user_id, label=label, object_type="anndata", **links)
+
+
+@pytest_asyncio.fixture
+async def snapshots(session, admin_user, own_records) -> SimpleNamespace:
+    """One snapshot for each way a snapshot can reach a project or experiment."""
+    org_id = admin_user.organization_id
+    loose = Experiment(organization_id=org_id, name="No project")
+    session.add(loose)
+    await session.flush()
+    records = {
+        "project_only": _snapshot(org_id, admin_user.id, "project only", project_id=own_records.project.id),
+        "experiment_only": _snapshot(org_id, admin_user.id, "experiment only", experiment_id=loose.id),
+        "dual": _snapshot(
+            org_id,
+            admin_user.id,
+            "dual",
+            project_id=own_records.project.id,
+            experiment_id=own_records.experiment.id,
+        ),
+        "nested": _snapshot(org_id, admin_user.id, "nested", experiment_id=own_records.experiment.id),
+    }
+    session.add_all(records.values())
+    await session.commit()
+    return SimpleNamespace(**records, loose=loose, records=records)
+
+
+SNAPSHOT_VISIBILITY = {
+    "projects": {"project_only", "dual", "nested"},
+    "experiments": {"experiment_only", "dual", "nested"},
+}
+
+
+@pytest.mark.parametrize("resource", sorted(SNAPSHOT_VISIBILITY))
+@pytest.mark.asyncio
+async def test_snapshot_list_shows_what_either_path_grants(client, session, admin_user, snapshots, resource):
+    headers = await _custom_role_headers(
+        session, admin_user.organization_id, f"{resource}@test.com", [(resource, "view")]
+    )
+    response = await client.get("/api/snapshots", headers=headers)
+    assert response.status_code == 200
+    expected = {snapshots.records[name].id for name in SNAPSHOT_VISIBILITY[resource]}
+    assert {s["id"] for s in response.json()["snapshots"]} == expected
+    assert response.json()["total"] == len(expected)
+
+
+@pytest.mark.parametrize("resource", sorted(SNAPSHOT_VISIBILITY))
+@pytest.mark.parametrize("name", ["project_only", "experiment_only", "dual", "nested"])
+@pytest.mark.asyncio
+async def test_snapshot_detail_matches_the_list(client, session, admin_user, snapshots, resource, name):
+    headers = await _custom_role_headers(
+        session, admin_user.organization_id, f"{resource}{name}@test.com", [(resource, "view")]
+    )
+    response = await client.get(f"/api/snapshots/{snapshots.records[name].id}", headers=headers)
+    assert response.status_code == (200 if name in SNAPSHOT_VISIBILITY[resource] else 403)
+
+
+@pytest.mark.parametrize("resource", sorted(SNAPSHOT_VISIBILITY))
+@pytest.mark.asyncio
+async def test_snapshot_compare_matches_the_list(client, session, admin_user, snapshots, resource):
+    headers = await _custom_role_headers(
+        session, admin_user.organization_id, f"compare-{resource}@test.com", [(resource, "view")]
+    )
+    allowed = ",".join(str(snapshots.records[n].id) for n in ("dual", "nested"))
+    assert (await client.get(f"/api/snapshots/compare?ids={allowed}", headers=headers)).status_code == 200
+
+    hidden = "experiment_only" if resource == "projects" else "project_only"
+    mixed = f"{snapshots.dual.id},{snapshots.records[hidden].id}"
+    assert (await client.get(f"/api/snapshots/compare?ids={mixed}", headers=headers)).status_code == 403
+
+
+@pytest.mark.parametrize("path", ["/api/snapshots", "/api/snapshots/{id}", "/api/snapshots/compare?ids={id},{id2}"])
+@pytest.mark.asyncio
+async def test_snapshots_refuse_a_role_with_neither_path(client, session, admin_user, snapshots, path):
+    headers = await _custom_role_headers(
+        session, admin_user.organization_id, "neither@test.com", [("audit_log", "view")]
+    )
+    url = path.format(id=snapshots.dual.id, id2=snapshots.nested.id)
+    assert (await client.get(url, headers=headers)).status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_key_is_narrowed_by_its_scope(client, session, admin_user, snapshots):
+    """The role holds both paths; the key's scope leaves only the project path."""
+    headers = await _api_key_headers(session, admin_user, admin_user.role_id, ["projects:view"])
+    listed = await client.get("/api/snapshots", headers=headers)
+    expected = {snapshots.records[name].id for name in SNAPSHOT_VISIBILITY["projects"]}
+    assert {s["id"] for s in listed.json()["snapshots"]} == expected
+    denied = await client.get(f"/api/snapshots/{snapshots.experiment_only.id}", headers=headers)
+    assert denied.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_snapshot_answers_404(client, session, admin_headers, foreign_records, foreign, snapshots):
+    theirs = _snapshot(foreign.org.id, foreign.user.id, "theirs", project_id=foreign_records.project.id)
+    session.add(theirs)
+    await session.commit()
+
+    assert (await client.get(f"/api/snapshots/{theirs.id}", headers=admin_headers)).status_code == 404
+    compare = await client.get(f"/api/snapshots/compare?ids={snapshots.dual.id},{theirs.id}", headers=admin_headers)
+    assert compare.status_code == 404
+    listed = await client.get("/api/snapshots", headers=admin_headers)
+    assert theirs.id not in {s["id"] for s in listed.json()["snapshots"]}
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_linked_only_to_a_foreign_experiment_gives_no_project_path(
+    client, session, admin_user, foreign_records
+):
+    """A stored link into another Organization must not open a path of its own."""
+    stale = _snapshot(admin_user.organization_id, admin_user.id, "stale", experiment_id=foreign_records.experiment.id)
+    session.add(stale)
+    await session.commit()
+    headers = await _custom_role_headers(session, admin_user.organization_id, "stale@test.com", [("projects", "view")])
+    assert (await client.get(f"/api/snapshots/{stale.id}", headers=headers)).status_code == 403
