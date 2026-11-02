@@ -72,3 +72,14 @@ test("only invited users are offered Activate", async () => {
   await screen.findByRole("button", { name: "Edit" });
   expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
 });
+
+test("Activate needs users:deactivate, the grant its route enforces", async () => {
+  canAccess.mockImplementation((resource: string, action: string) => !(resource === "users" && action === "deactivate"));
+  givenUsers([user(9, "invited@test.com", "invited")]);
+  render(<UsersPage />);
+  await openUser("invited@test.com");
+
+  await screen.findByRole("button", { name: "Edit" });
+  expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
+});
+

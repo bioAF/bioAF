@@ -321,7 +321,7 @@ function SettingsUsersPageInner() {
             Resend Invite
           </button>
         )}
-        {user.status === "invited" && (
+        {user.status === "invited" && canAccess("users", "deactivate") && (
           <button
             onClick={() => {
               setPendingAction({ type: "activate", user });
