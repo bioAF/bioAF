@@ -8,3 +8,4 @@
 - Content tokens are bound to their resource type, ID, Organization, purpose, and expiry, and can no longer be used as a session. File bytes need `files:view`, or results view for a file a plot or QC report names.
 - Audit log entries from an API-key request now name the key.
 - Project and reference actions follow exact grants instead of role names, so custom roles see what they can do. Forms that pick a project say when a role may not list projects instead of showing an empty picker.
+- Every project picker now separates a denied list from a failed one. A role that may not list projects keeps what it can still do: Associate Paper and custom pipeline launch list experiments directly, deep links still select their experiment, uploads keep experiment, sample, and global scope, and Add to Project can still create a project with `projects:create`. A failed list stays visible, with Retry where the picker is inline.
