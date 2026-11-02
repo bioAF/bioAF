@@ -1,10 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
-from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
+from app.api.scoped_loaders import owned_sample_ids, require_owned_sample
+from app.schemas.sample import (
+    SampleBulkUpdate,
+    SampleOption,
+    SampleOptionListResponse,
+    SampleQCUpdate,
+    SampleResponse,
+    SampleStatusUpdate,
+    SampleUpdate,
+)
 from app.services.read_groups import read_groups_for
 from app.services.sample_service import SampleService
 
@@ -14,6 +23,33 @@ class SampleBulkDeleteRequest(BaseModel):
 
 
 router = APIRouter(prefix="/api/samples", tags=["samples"])
+
+
+@router.get("", response_model=SampleOptionListResponse)
+async def list_organization_samples(
+    current_user: dict = require_permission("samples", "view"),
+    page: int = 1,
+    page_size: int = 100,
+    session: AsyncSession = Depends(get_session),
+):
+    rows, total = await SampleService.list_organization_samples(session, int(current_user["org_id"]), page, page_size)
+    return SampleOptionListResponse(
+        samples=[
+            SampleOption(
+                id=sample.id,
+                external_id=sample.external_id,
+                organism=sample.organism,
+                tissue_type=sample.tissue_type,
+                qc_status=sample.qc_status,
+                experiment_id=sample.experiment_id,
+                experiment_name=experiment_name,
+            )
+            for sample, experiment_name in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def _sample_response(s) -> SampleResponse:
@@ -54,10 +90,13 @@ async def bulk_update_samples(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    owned = await owned_sample_ids(session, body.sample_ids, int(current_user["org_id"]))
     updated = 0
     errors = []
     for sample_id in body.sample_ids:
-        sample = await SampleService.update_sample(session, sample_id, user_id, body.update)
+        sample = (
+            await SampleService.update_sample(session, sample_id, user_id, body.update) if sample_id in owned else None
+        )
         if not sample:
             errors.append(f"Sample {sample_id} not found")
         else:
@@ -70,9 +109,10 @@ async def bulk_update_samples(
 @router.get("/{sample_id}", response_model=SampleResponse)
 async def get_sample(
     sample_id: int,
-    request: Request,
+    current_user: dict = require_permission("samples", "view"),
     session: AsyncSession = Depends(get_session),
 ):
+    await require_owned_sample(session, sample_id, int(current_user["org_id"]))
     sample = await SampleService.get_sample(session, sample_id)
     if not sample:
         raise HTTPException(404, "Sample not found")
@@ -82,7 +122,7 @@ async def get_sample(
 @router.get("/{sample_id}/read-groups")
 async def get_sample_read_groups(
     sample_id: int,
-    request: Request,
+    current_user: dict = require_permission("samples", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """How this sample's files decompose into READ GROUPS.
@@ -97,6 +137,7 @@ async def get_sample_read_groups(
     to hang metadata on the unit itself. Everything unknown collapses to one
     group, so a sample of pre-merged FASTQs reports exactly one.
     """
+    await require_owned_sample(session, sample_id, int(current_user["org_id"]))
     sample = await SampleService.get_sample_with_files(session, sample_id)
     if not sample:
         raise HTTPException(404, "Sample not found")
@@ -111,6 +152,7 @@ async def update_sample(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_sample(session, sample_id, int(current_user["org_id"]))
     sample = await SampleService.update_sample(session, sample_id, user_id, body)
     if not sample:
         raise HTTPException(404, "Sample not found")
@@ -127,6 +169,7 @@ async def update_sample_qc(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_sample(session, sample_id, int(current_user["org_id"]))
     sample = await SampleService.update_qc_status(session, sample_id, user_id, body.qc_status, body.qc_notes)
     if not sample:
         raise HTTPException(404, "Sample not found")
@@ -143,6 +186,7 @@ async def update_sample_status(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_sample(session, sample_id, int(current_user["org_id"]))
     sample = await SampleService.update_status(session, sample_id, user_id, body.status)
     await session.commit()
     sample = await SampleService.get_sample(session, sample_id)
@@ -158,6 +202,7 @@ async def bulk_delete_samples(
     if not body.sample_ids:
         return {"deleted": 0}
     user_id = int(current_user["sub"])
-    deleted = await SampleService.delete_samples(session, body.sample_ids, user_id)
+    owned = await owned_sample_ids(session, body.sample_ids, int(current_user["org_id"]))
+    deleted = await SampleService.delete_samples(session, sorted(owned), user_id)
     await session.commit()
     return {"deleted": deleted}

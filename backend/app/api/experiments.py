@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.api.scoped_loaders import require_owned_experiment
 from app.models.experiment import Experiment
 from app.schemas.audit import AuditLogEntry, AuditLogResponse
 from app.schemas.experiment import (
@@ -79,7 +80,7 @@ def _experiment_response(exp) -> ExperimentResponse:
 
 @router.get("", response_model=ExperimentListResponse)
 async def list_experiments(
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     page: int = 1,
     page_size: int = 25,
     project_id: int | None = None,
@@ -88,7 +89,6 @@ async def list_experiments(
     search: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     experiments, total = await ExperimentService.list_experiments(
@@ -130,10 +130,9 @@ async def create_experiment(
 @router.get("/{experiment_id}", response_model=ExperimentDetailResponse)
 async def get_experiment(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     experiment = await ExperimentService.get_experiment(session, experiment_id, org_id)
@@ -253,12 +252,13 @@ async def update_experiment_status(
 @router.get("/{experiment_id}/samples")
 async def list_experiment_samples(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     sample_batch_id: int | None = None,
     qc_status: str | None = None,
     status: str | None = None,
     session: AsyncSession = Depends(get_session),
 ):
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     samples = await SampleService.list_samples(
         session, experiment_id, sample_batch_id=sample_batch_id, qc_status=qc_status, status=status
     )
@@ -306,6 +306,7 @@ async def create_sample(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     sample = await SampleService.create_sample(session, experiment_id, user_id, body)
     await session.commit()
 
@@ -350,6 +351,7 @@ async def bulk_create_samples(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     samples = await SampleService.bulk_create_samples(session, experiment_id, user_id, body.samples)
     await session.commit()
     return {"created": len(samples)}
@@ -358,7 +360,7 @@ async def bulk_create_samples(
 @router.get("/{experiment_id}/samples/csv-template")
 async def download_csv_template(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
 ):
     from fastapi.responses import Response
 
@@ -377,6 +379,7 @@ async def preview_samples_csv(
     current_user: dict = require_permission("experiments", "upload"),
     session: AsyncSession = Depends(get_session),
 ):
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     content = await file.read()
     aliases = await _experiment_column_aliases(session, experiment_id)
     return preview_sample_csv(content, aliases=aliases)
@@ -392,6 +395,7 @@ async def confirm_samples_csv(
 ):
     import json as json_mod
 
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     user_id = int(current_user["sub"])
     content = await file.read()
 
@@ -455,6 +459,7 @@ async def upload_samples_csv(
 ):
     from app.models.sample_custom_field import SampleCustomField
 
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     user_id = int(current_user["sub"])
     content = await file.read()
     aliases = await _experiment_column_aliases(session, experiment_id)
@@ -494,9 +499,10 @@ async def upload_samples_csv(
 @router.get("/{experiment_id}/sample-batches")
 async def list_experiment_sample_batches(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     batches = await SampleBatchService.list_batches(session, experiment_id)
     return [
         SampleBatchResponse(
@@ -525,6 +531,7 @@ async def create_sample_batch(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
     batch = await SampleBatchService.create_batch(session, experiment_id, user_id, body)
     await session.commit()
 
@@ -548,11 +555,13 @@ async def create_sample_batch(
 @router.get("/{experiment_id}/sequencing-batches")
 async def list_experiment_sequencing_batches(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """List sequencing batches that contain samples from this experiment."""
     from sqlalchemy import distinct, select as sa_select
+
+    await require_owned_experiment(session, experiment_id, int(current_user["org_id"]))
 
     from app.models.sample import Sample as SampleModel
     from app.models.sequencing_batch import SequencingBatch
@@ -594,12 +603,11 @@ async def list_experiment_sequencing_batches(
 @router.get("/{experiment_id}/files")
 async def list_experiment_files(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     experiment = await ExperimentService.get_experiment(session, experiment_id, org_id)
@@ -685,14 +693,14 @@ async def list_experiment_files(
 @router.get("/{experiment_id}/audit", response_model=AuditLogResponse)
 async def get_experiment_audit(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     page: int = 1,
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
+    await require_owned_experiment(session, experiment_id, org_id)
     entries, total = await ExperimentService.get_audit_trail(
         session, experiment_id, org_id, page=page, page_size=page_size
     )

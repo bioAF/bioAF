@@ -13,9 +13,11 @@ import { ProvenanceReportPanel } from "@/components/provenance/ProvenanceReportP
 import { FileBrowser } from "@/components/files/FileBrowser";
 import { LiteratureTabPanel } from "@/components/literature/LiteratureTabPanel";
 import { ProjectExportModal } from "@/components/projects/ProjectExportModal";
-import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { listAllSamples, type SampleOption } from "@/lib/experimentOptions";
+import { isPermissionDenied } from "@/lib/projectOptions";
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/shared/Modal";
 import SnapshotTimeline from "@/components/SnapshotTimeline";
@@ -50,23 +52,18 @@ export default function ProjectDetailPage() {
   const [viewingSample, setViewingSample] = useState<(ProjectSampleResponse & { experiment_name: string }) | null>(null);
   const [showSamplePicker, setShowSamplePicker] = useState(false);
   const [availableSamplesFailed, setAvailableSamplesFailed] = useState(false);
-  const [availableSamples, setAvailableSamples] = useState<Array<{
-    id: number;
-    external_id: string;
-    experiment_name: string;
-    experiment_id: number;
-    organism: string | null;
-    tissue_type: string | null;
-    qc_status: QCStatus | null;
-  }>>([]);
+  const [availableSamplesDenied, setAvailableSamplesDenied] = useState(false);
+  const [availableSamples, setAvailableSamples] = useState<SampleOption[]>([]);
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<number>>(new Set());
   const [sampleSearch, setSampleSearch] = useState("");
   const [adding, setAdding] = useState(false);
 
   const [showProjectExport, setShowProjectExport] = useState(false);
 
-  const user = getCurrentUser();
-  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  const { canAccess } = usePermissions();
+  const canAddSamples = canAccess("projects", "create");
+  const canRemoveSamples = canAccess("projects", "delete");
+  const canExport = canAccess("files", "download");
 
   useEffect(() => {
     loadProject();
@@ -104,34 +101,19 @@ export default function ProjectDetailPage() {
 
   const loadAvailableSamples = async () => {
     try {
-      const data = await api.get<{
-        experiments: Array<{
-          id: number;
-          name: string;
-          samples: Array<{
-            id: number;
-            external_id: string;
-            organism: string | null;
-            tissue_type: string | null;
-            qc_status: QCStatus | null;
-          }>;
-        }>;
-      }>("/api/datasets/browser");
-      const flat = data.experiments.flatMap((exp) =>
-        exp.samples.map((s) => ({
-          ...s,
-          experiment_name: exp.name,
-          experiment_id: exp.id,
-        }))
-      );
-      setAvailableSamples(flat);
+      setAvailableSamples(await listAllSamples());
       setAvailableSamplesFailed(false);
+      setAvailableSamplesDenied(false);
     } catch (e) {
       // "Fallback: just show the picker empty" is the defect stated as the
       // intent. An empty picker reads as "there are no samples left to add",
       // which is a claim about the user's data made from a failed request.
-      logError("loading the samples that could be added to this project", e);
       setAvailableSamples([]);
+      if (isPermissionDenied(e)) {
+        setAvailableSamplesDenied(true);
+        return;
+      }
+      logError("loading the samples that could be added to this project", e);
       setAvailableSamplesFailed(true);
     }
   };
@@ -183,7 +165,7 @@ export default function ProjectDetailPage() {
     (s) =>
       !existingSampleIds.has(s.id) &&
       (sampleSearch === "" ||
-        s.external_id.toLowerCase().includes(sampleSearch.toLowerCase()) ||
+        (s.external_id ?? "").toLowerCase().includes(sampleSearch.toLowerCase()) ||
         s.experiment_name.toLowerCase().includes(sampleSearch.toLowerCase()) ||
         (s.organism || "").toLowerCase().includes(sampleSearch.toLowerCase()))
   );
@@ -223,7 +205,7 @@ export default function ProjectDetailPage() {
             )}
             <StatusBadge status={project.status || "active"} />
             <div className="ml-auto">
-              {canModify && (
+              {canExport && (
                 <button
                   onClick={() => setShowProjectExport(true)}
                   className="bg-gray-100 text-gray-800 px-4 py-2 rounded-md text-sm hover:bg-gray-200"
@@ -311,7 +293,7 @@ export default function ProjectDetailPage() {
         {/* Samples Tab */}
         {activeTab === "samples" && (
           <div>
-            {canModify && (
+            {canAddSamples && (
               <div className="mb-4">
                 <Button
                   onClick={openSamplePicker}>
@@ -339,7 +321,7 @@ export default function ProjectDetailPage() {
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">QC</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added By</th>
                           <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Added</th>
-                          {canModify && (
+                          {canRemoveSamples && (
                             <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase"></th>
                           )}
                         </tr>
@@ -359,7 +341,7 @@ export default function ProjectDetailPage() {
                             <td className="px-6 py-4 text-sm text-gray-500">
                               {s.added_at ? new Date(s.added_at).toLocaleDateString() : NOT_SET}
                             </td>
-                            {canModify && (
+                            {canRemoveSamples && (
                               <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                                 <button
                                   onClick={() => handleRemoveSample(s.sample_id)}
@@ -396,7 +378,7 @@ export default function ProjectDetailPage() {
               { label: "Notes", value: viewingSample.notes },
             ]}
             actions={
-              canModify ? (
+              canRemoveSamples ? (
                 <button
                   onClick={() => { handleRemoveSample(viewingSample.sample_id); setViewingSample(null); }}
                   className="px-3 py-1.5 border border-red-600 text-red-600 rounded text-sm hover:bg-red-50"
@@ -555,6 +537,10 @@ export default function ProjectDetailPage() {
             >
               {loadFailureMessage("The samples you could add")}
             </p>
+          ) : availableSamplesDenied ? (
+            <p className="text-sm text-gray-500 py-8 text-center">
+              Your role does not include viewing samples, so none can be chosen here.
+            </p>
           ) : filteredAvailable.length === 0 ? (
             <p className="text-gray-500 text-center py-8">No matching samples available.</p>
           ) : (
@@ -592,7 +578,7 @@ export default function ProjectDetailPage() {
                     <td className="px-4 py-2 text-sm text-gray-500">{s.organism || NOT_SET}</td>
                     <td className="px-4 py-2 text-sm text-gray-500">{s.tissue_type || NOT_SET}</td>
                     <td className="px-4 py-2">
-                      {s.qc_status ? <SampleQCBadge status={s.qc_status} /> : NOT_SET}
+                      {s.qc_status ? <SampleQCBadge status={s.qc_status as QCStatus} /> : NOT_SET}
                     </td>
                   </tr>
                 ))}

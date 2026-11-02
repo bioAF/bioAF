@@ -1,14 +1,16 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { useCapabilities } from "@/hooks/useCapabilities";
+import { useProjectOptions } from "@/hooks/useProjectOptions";
+import { PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
+import { PickerNotice } from "@/components/shared/PickerNotice";
+import { listAllExperiments } from "@/lib/experimentOptions";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import { Card } from "@/components/ui/Card";
 import type {
-  ExperimentListResponse,
   FileResponse,
-  ProjectListResponse,
   SampleBrief,
 } from "@/lib/types";
 
@@ -48,7 +50,11 @@ export default function DataUploadPage() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const projectOptions = useProjectOptions();
+  const projects = useMemo<ProjectOption[]>(
+    () => projectOptions.projects.map((p) => ({ id: p.id, name: p.name, code: p.code ?? null })),
+    [projectOptions.projects],
+  );
   const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [samples, setSamples] = useState<SampleOption[]>([]);
 
@@ -80,27 +86,15 @@ export default function DataUploadPage() {
     return false;
   })();
 
-  // Load projects on mount
-  useEffect(() => {
-    api
-      .get<ProjectListResponse>("/api/projects?page_size=100")
-      .then((data) =>
-        setProjects(data.projects.map((p) => ({ id: p.id, name: p.name, code: p.code ?? null }))),
-      )
-      .catch(() => setProjects([]));
-  }, []);
-
   // Reload experiments when project changes
   useEffect(() => {
     setExperimentId("");
     setSampleId("");
     setSamples([]);
-    const qs = projectId ? `?project_id=${projectId}&page_size=100` : "?page_size=100";
-    api
-      .get<ExperimentListResponse>(`/api/experiments${qs}`)
-      .then((data) =>
+    listAllExperiments(projectId)
+      .then((all) =>
         setExperiments(
-          data.experiments.map((e) => ({ id: e.id, name: e.name, code: e.code ?? null, status: e.status })),
+          all.map((e) => ({ id: e.id, name: e.name, code: e.code ?? null, status: e.status })),
         ),
       )
       .catch(() => setExperiments([]));
@@ -363,7 +357,7 @@ export default function DataUploadPage() {
               className="w-full sm:w-64 px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
             >
               <option value="global">Global</option>
-              <option value="project">Project</option>
+              <option value="project" disabled={projectOptions.status === "denied"}>Project</option>
               <option value="experiment">Experiment</option>
               <option value="sample">Sample</option>
             </select>
@@ -379,7 +373,7 @@ export default function DataUploadPage() {
                 id="upload-project-select"
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
-                disabled={scope === "global"}
+                disabled={scope === "global" || projectOptions.unavailable}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-400"
               >
                 <option value="">{scope === "global" ? "N/A (global)" : "Select project"}</option>
@@ -389,6 +383,12 @@ export default function DataUploadPage() {
                   </option>
                 ))}
               </select>
+              <PickerNotice
+                status={projectOptions.status}
+                deniedMessage={PROJECTS_DENIED_MESSAGE}
+                failedWhat="Projects"
+                onRetry={projectOptions.retry}
+              />
             </div>
 
             {/* Experiment */}

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import require_permission
 from app.config import settings
 from app.database import get_session
 from app.platform.cloud_provider import get_cloud_provider
@@ -26,7 +27,6 @@ from app.services.audit_service import log_action
 from app.services.auth_service import AuthService
 from app.services.component_service import ComponentService
 from app.services.email_service import EmailService
-from app.services import role_service
 from app.services.setup_code_service import SetupCodeService
 from app.services.user_service import UserService
 
@@ -283,10 +283,11 @@ async def create_admin(body: CreateAdminRequest, request: Request, session: Asyn
 
 
 @router.post("/configure-org")
-async def configure_org(body: ConfigureOrgRequest, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
+async def configure_org(
+    body: ConfigureOrgRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
 
     org = await _get_org(session)
     if not org:
@@ -311,10 +312,10 @@ async def configure_org(body: ConfigureOrgRequest, request: Request, session: As
 
 
 @router.get("/smtp-settings", response_model=SmtpSettingsResponse)
-async def get_smtp_settings(request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
+async def get_smtp_settings(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
 
     org = await _get_org(session)
     if not org:
@@ -347,10 +348,11 @@ async def get_smtp_settings(request: Request, session: AsyncSession = Depends(ge
 
 
 @router.post("/configure-smtp")
-async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
+async def configure_smtp(
+    body: ConfigureSmtpRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
 
     org = await _get_org(session)
     if not org:
@@ -403,10 +405,11 @@ async def configure_smtp(body: ConfigureSmtpRequest, request: Request, session: 
 
 
 @router.post("/test-smtp", response_model=TestSmtpResponse)
-async def test_smtp(body: TestSmtpRequest, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
+async def test_smtp(
+    body: TestSmtpRequest,
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
 
     if not EmailService.is_configured():
         return TestSmtpResponse(status="failed", to=body.to, detail="SMTP not configured")
@@ -498,10 +501,10 @@ async def test_smtp(body: TestSmtpRequest, request: Request, session: AsyncSessi
 
 
 @router.post("/complete")
-async def complete_setup(request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "infrastructure", "configure"):
-        raise HTTPException(status_code=403, detail="You do not have permission to perform this action")
+async def complete_setup(
+    current_user: dict = require_permission("infrastructure", "configure"),
+    session: AsyncSession = Depends(get_session),
+):
 
     org = await _get_org(session)
     if not org:

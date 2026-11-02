@@ -1,6 +1,13 @@
+from contextvars import ContextVar
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.audit_log import AuditLog
+
+# The API key behind the current request, set by the auth middleware. Most writes
+# happen several service calls below the route, so a key request is attributed
+# here rather than by threading the ID through every call.
+current_api_key_id: ContextVar[int | None] = ContextVar("current_api_key_id", default=None)
 
 
 async def log_action(
@@ -19,7 +26,7 @@ async def log_action(
     transaction rolls back."""
     entry = AuditLog(
         user_id=user_id,
-        api_key_id=api_key_id,
+        api_key_id=api_key_id if api_key_id is not None else current_api_key_id.get(),
         entity_type=entity_type,
         entity_id=entity_id,
         action=action,

@@ -19,7 +19,7 @@ from app.schemas.session_credential import SessionCredentialRequest, SessionCred
 from app.services.access_log_service import AccessLogService
 from app.services.audit_service import log_action
 from app.services import role_service
-from app.services.auth_service import AuthService
+from app.services.auth_service import OLD_INVITE_PLACEHOLDER, AuthService
 from app.services.email_service import EmailService
 from app.services.session_credential_service import SessionCredentialService
 from app.services.user_service import UserService
@@ -42,7 +42,11 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
         )
         await session.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if not user or not AuthService.verify_password(body.password, user.password_hash):
+    if (
+        not user
+        or body.password == OLD_INVITE_PLACEHOLDER
+        or not AuthService.verify_password(body.password, user.password_hash)
+    ):
         await log_action(
             session,
             user_id=user.id if user else None,

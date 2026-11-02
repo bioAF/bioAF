@@ -35,6 +35,7 @@ def require_api_key_permission(resource: str, action: str):
             raise HTTPException(403, "key_scope_missing")
         return user
 
+    checker.accepted_permissions = [(resource, action)]  # type: ignore[attr-defined]
     return Depends(checker)
 
 

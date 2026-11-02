@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import require_permission
+from app.api.dependencies import require_permission, require_results_view
 from app.database import get_session
 from app.schemas.cellxgene import CellxgenePublicationResponse, CellxgenePublishableFile, CellxgenePublishRequest
 from app.schemas.experiment import UserSummary
@@ -91,11 +91,10 @@ async def unpublish_dataset(
 
 @router.get("")
 async def list_publications(
-    request: Request,
+    current_user: dict = require_results_view(),
     experiment_id: int | None = None,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     pubs = await CellxgeneService.list_publications(session, org_id, experiment_id)
@@ -104,10 +103,9 @@ async def list_publications(
 
 @router.get("/publishable-files", response_model=list[CellxgenePublishableFile])
 async def list_publishable_files(
-    request: Request,
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     files = await CellxgeneService.list_publishable_files(session, org_id)
@@ -133,7 +131,7 @@ async def list_publishable_files(
 @router.get("/inspect/{file_id}")
 async def inspect_file(
     file_id: int,
-    request: Request,
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
     """Inspect an h5ad file for cellxgene compatibility.
@@ -145,7 +143,6 @@ async def inspect_file(
     from app.models.file import File
     from app.services.h5ad_inspector import inspect_h5ad
 
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     result = await session.execute(sa_select(File).where(File.id == file_id, File.organization_id == org_id))
@@ -160,10 +157,9 @@ async def inspect_file(
 @router.get("/{publication_id}", response_model=CellxgenePublicationResponse)
 async def get_publication(
     publication_id: int,
-    request: Request,
+    current_user: dict = require_results_view(),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     pub = await CellxgeneService.get_publication(session, org_id, publication_id)

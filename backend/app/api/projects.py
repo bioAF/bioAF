@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
@@ -20,13 +20,12 @@ router = APIRouter(prefix="/api/projects", tags=["projects"])
 
 @router.get("", response_model=ProjectListResponse)
 async def list_projects(
-    request: Request,
+    current_user: dict = require_permission("projects", "view"),
     status: str | None = Query(None),
     owner_user_id: int | None = Query(None),
     search: str | None = Query(None),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     results = await ProjectService.list_projects(
@@ -71,10 +70,9 @@ async def create_project(
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
 async def get_project(
     project_id: int,
-    request: Request,
+    current_user: dict = require_permission("projects", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     detail = await ProjectService.get_project_detail(session, project_id, org_id)
@@ -165,10 +163,9 @@ async def remove_sample(
 @router.get("/{project_id}/provenance", response_model=ProvenanceDAG)
 async def get_project_provenance(
     project_id: int,
-    request: Request,
+    current_user: dict = require_permission("projects", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     project = await ProjectService.get_project(session, project_id, org_id)
