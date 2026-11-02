@@ -4,6 +4,13 @@ import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { useProjectOptions } from "@/hooks/useProjectOptions";
+import {
+  EXPERIMENTS_DENIED_MESSAGE,
+  isPermissionDenied,
+  PROJECTS_DENIED_MESSAGE,
+} from "@/lib/projectOptions";
+import { PickerNotice } from "@/components/shared/PickerNotice";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { ReferencePicker } from "@/components/references/ReferencePicker";
 import { versionChangeKind } from "@/lib/customPipelineVersions";
@@ -17,7 +24,6 @@ import type {
   ExperimentListResponse,
   FileListResponse,
   FileResponse,
-  ProjectListResponse,
 } from "@/lib/types";
 
 interface EnvVersionOption {
@@ -47,14 +53,11 @@ interface Props {
   initialExperimentId?: number | null;
 }
 
-interface ProjectOption {
-  id: number;
-  name: string;
-}
-
 interface ExperimentOption {
   id: number;
   name: string;
+  /** Carried on the launch when no project could be chosen in the picker. */
+  projectId: number | null;
 }
 
 function defaultVariableValues(
@@ -94,8 +97,13 @@ export function CustomPipelineLaunchDialog({
   const [showVersionModal, setShowVersionModal] = useState(false);
   const [expandedVersionIds, setExpandedVersionIds] = useState<Set<number>>(new Set());
 
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const projectOptions = useProjectOptions();
+  const projectsStatus = projectOptions.status;
+  const projectsUnavailable = projectOptions.unavailable;
   const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
+  const [experimentsProblem, setExperimentsProblem] = useState<"denied" | "failed" | null>(null);
+  // A deep-linked experiment can sit past the page of the unfiltered list.
+  const [linkedExperiment, setLinkedExperiment] = useState<ExperimentOption | null>(null);
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [filesFailed, setFilesFailed] = useState(false);
   const [filesReloadKey, setFilesReloadKey] = useState(0);
@@ -134,61 +142,97 @@ export function CustomPipelineLaunchDialog({
 
   // Resolve that experiment to its project, which is what the first select
   // holds. A failure is not worth reporting: the user still has both pickers,
-  // exactly as if they had opened the dialog without a deep link.
+  // exactly as if they had opened the dialog without a deep link. With no
+  // project list there is no project to hold, so the experiment is selected
+  // directly, which is why this waits to learn which case it is.
   useEffect(() => {
     const wanted = pendingExperimentId.current;
-    if (wanted == null) return;
+    if (wanted == null || projectsStatus === "loading") return;
     void (async () => {
       try {
         const experiment = await api.get<ExperimentDetail>(`/api/experiments/${wanted}`);
-        const projectOfExperiment = experiment.project?.id;
-        if (projectOfExperiment == null) pendingExperimentId.current = null;
-        else setProjectId(projectOfExperiment);
-      } catch {
-        pendingExperimentId.current = null;
-      }
-    })();
-  }, []);
-
-  // Load projects on open.
-  useEffect(() => {
-    void (async () => {
-      try {
-        const data = await api.get<ProjectListResponse>("/api/projects?page_size=100");
-        setProjects(data.projects.map((p) => ({ id: p.id, name: p.name })));
-      } catch {
-        setProjects([]);
-      }
-    })();
-  }, []);
-
-  // Load experiments when project changes, and apply a deep-linked experiment
-  // once its project's list has arrived.
-  useEffect(() => {
-    setExperimentId(null);
-    if (projectId == null) {
-      setExperiments([]);
-      return;
-    }
-    void (async () => {
-      try {
-        const data = await api.get<ExperimentListResponse>(
-          `/api/experiments?project_id=${projectId}&page_size=200`,
-        );
-        setExperiments(
-          data.experiments.map((e) => ({ id: e.id, name: e.name })),
-        );
-        const wanted = pendingExperimentId.current;
-        if (wanted != null) {
+        const projectOfExperiment = experiment.project?.id ?? null;
+        if (projectsStatus !== "loaded") {
           pendingExperimentId.current = null;
-          if (data.experiments.some((e) => e.id === wanted)) setExperimentId(wanted);
+          setLinkedExperiment({
+            id: wanted,
+            name: experiment.name,
+            projectId: projectOfExperiment,
+          });
+          setExperimentId(wanted);
+        } else if (projectOfExperiment == null) {
+          pendingExperimentId.current = null;
+        } else {
+          setProjectId(projectOfExperiment);
         }
       } catch {
         pendingExperimentId.current = null;
-        setExperiments([]);
       }
     })();
-  }, [projectId]);
+  }, [projectsStatus]);
+
+  // Load experiments when project changes, and apply a deep-linked experiment
+  // once its project's list has arrived. Project-first only works with projects
+  // to choose from: without them, every experiment is listed.
+  useEffect(() => {
+    setExperimentId(null);
+    setLinkedExperiment(null);
+    setExperimentsProblem(null);
+    if (projectId == null && !projectsUnavailable) {
+      setExperiments([]);
+      return;
+    }
+    let stale = false;
+    void (async () => {
+      try {
+        const scope = projectId != null ? `project_id=${projectId}&` : "";
+        const data = await api.get<ExperimentListResponse>(
+          `/api/experiments?${scope}page_size=200`,
+        );
+        if (stale) return;
+        setExperiments(
+          data.experiments.map((e) => ({
+            id: e.id,
+            name: e.name,
+            projectId: e.project?.id ?? null,
+          })),
+        );
+        const wanted = pendingExperimentId.current;
+        if (wanted != null && projectId != null) {
+          pendingExperimentId.current = null;
+          if (data.experiments.some((e) => e.id === wanted)) setExperimentId(wanted);
+        }
+      } catch (e) {
+        if (stale) return;
+        if (projectId != null) pendingExperimentId.current = null;
+        setExperiments([]);
+        if (isPermissionDenied(e)) {
+          setExperimentsProblem("denied");
+        } else {
+          logError("loading the experiments for a custom pipeline launch", e);
+          setExperimentsProblem("failed");
+        }
+      }
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [projectId, projectsUnavailable]);
+
+  const experimentOptions = useMemo(
+    () =>
+      linkedExperiment && !experiments.some((e) => e.id === linkedExperiment.id)
+        ? [linkedExperiment, ...experiments]
+        : experiments,
+    [experiments, linkedExperiment],
+  );
+
+  // A selection made without a project survives a retry that brings them back:
+  // it resolves to its project the same way a deep link does.
+  function retryProjects() {
+    pendingExperimentId.current = experimentId;
+    projectOptions.retry();
+  }
 
   // Load files when target changes.
   useEffect(() => {
@@ -302,7 +346,8 @@ export function CustomPipelineLaunchDialog({
 
       const body = {
         version_id: selectedVersion.id,
-        project_id: projectId,
+        project_id:
+          projectId ?? experimentOptions.find((e) => e.id === experimentId)?.projectId ?? null,
         experiment_id: experimentId,
         input_file_ids: selectedFileIds,
         variables,
@@ -393,15 +438,22 @@ export function CustomPipelineLaunchDialog({
                   onChange={(e) =>
                     setProjectId(e.target.value ? Number(e.target.value) : null)
                   }
-                  className="w-full border rounded px-3 py-2 text-sm bg-white"
+                  disabled={projectsUnavailable}
+                  className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   <option value="">All projects</option>
-                  {projects.map((p) => (
+                  {projectOptions.projects.map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
                 </select>
+                <PickerNotice
+                  status={projectsStatus}
+                  deniedMessage={PROJECTS_DENIED_MESSAGE}
+                  failedWhat="Projects"
+                  onRetry={retryProjects}
+                />
               </div>
               <div>
                 <label htmlFor="experiment-optional" className="text-xs uppercase tracking-wide text-gray-500 block mb-1">
@@ -412,18 +464,25 @@ export function CustomPipelineLaunchDialog({
                   onChange={(e) =>
                     setExperimentId(e.target.value ? Number(e.target.value) : null)
                   }
-                  disabled={projectId == null}
+                  disabled={projectId == null && !projectsUnavailable}
                   className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   <option value="">
-                    {projectId == null ? "Select a project first" : "All experiments"}
+                    {projectId == null && !projectsUnavailable
+                      ? "Select a project first"
+                      : "All experiments"}
                   </option>
-                  {experiments.map((e) => (
+                  {experimentOptions.map((e) => (
                     <option key={e.id} value={e.id}>
                       {e.name}
                     </option>
                   ))}
                 </select>
+                <PickerNotice
+                  status={experimentsProblem ?? "loaded"}
+                  deniedMessage={EXPERIMENTS_DENIED_MESSAGE}
+                  failedWhat="Experiments"
+                />
               </div>
             </div>
           </section>
