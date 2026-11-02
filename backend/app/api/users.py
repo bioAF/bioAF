@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import require_permission
+from app.api.scoped_loaders import owned_role_or_404, owned_user_or_404
 from app.database import get_session
 from app.models.audit_log import AuditLog
 from app.models.role import Role
@@ -14,22 +16,13 @@ from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
 from app.services import role_service
 from app.services.user_service import UserService
+from app.url_utils import public_base_url
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
-async def _require_user_manage(request: Request, session: AsyncSession) -> dict:
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "view"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    return current_user
-
-
-async def _require_user_edit_role(request: Request, session: AsyncSession) -> dict:
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "edit_role"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-    return current_user
+def _accept_invite_link(request: Request, invite_token: str) -> str:
+    return f"{public_base_url(request)}/accept-invite?token={invite_token}"
 
 
 async def _get_role_name(session: AsyncSession, role_id: int) -> str:
@@ -66,8 +59,10 @@ async def _user_response_with_role_name(session: AsyncSession, user: User) -> Us
 
 
 @router.get("", response_model=UserListResponse)
-async def list_users(request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = await _require_user_manage(request, session)
+async def list_users(
+    current_user: dict = require_permission("users", "view"),
+    session: AsyncSession = Depends(get_session),
+):
     org_id = int(current_user["org_id"])
     users = await UserService.list_users(session, org_id)
 
@@ -91,10 +86,15 @@ async def list_users(request: Request, session: AsyncSession = Depends(get_sessi
 
 
 @router.post("", response_model=UserResponse)
-async def invite_user(body: UserInvite, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = await _require_user_edit_role(request, session)
+async def invite_user(
+    body: UserInvite,
+    request: Request,
+    current_user: dict = require_permission("users", "edit_role"),
+    session: AsyncSession = Depends(get_session),
+):
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
+    await owned_role_or_404(session, body.role_id, org_id)
 
     existing = await UserService.get_by_email(session, body.email)
     if existing:
@@ -109,22 +109,32 @@ async def invite_user(body: UserInvite, request: Request, session: AsyncSession 
         name=body.name,
     )
 
-    invite_link = f"/api/users/accept-invite?token={invite_token}"
     from app.models.organization import Organization
 
     result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one()
-    EmailService.send_invitation(body.email, invite_link, org.name)
+    EmailService.send_invitation(body.email, _accept_invite_link(request, invite_token), org.name)
 
     await session.commit()
     return await _user_response_with_role_name(session, user)
 
 
 @router.post("/bulk-invite")
-async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = await _require_user_edit_role(request, session)
+async def bulk_invite(
+    body: BulkInvite,
+    request: Request,
+    current_user: dict = require_permission("users", "edit_role"),
+    session: AsyncSession = Depends(get_session),
+):
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
+    # Checked up front so one bad role invites nobody rather than half the list.
+    for role_id in {invite.role_id for invite in body.invites}:
+        await owned_role_or_404(session, role_id, org_id)
+
+    from app.models.organization import Organization
+
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
 
     results = []
     for invite in body.invites:
@@ -141,6 +151,7 @@ async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession 
             actor_user_id=actor_id,
             name=invite.name,
         )
+        EmailService.send_invitation(invite.email, _accept_invite_link(request, invite_token), org.name)
         results.append({"email": invite.email, "status": "invited", "user_id": user.id})
 
     await session.commit()
@@ -148,24 +159,29 @@ async def bulk_invite(body: BulkInvite, request: Request, session: AsyncSession 
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    await _require_user_manage(request, session)
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+async def get_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "view"),
+    session: AsyncSession = Depends(get_session),
+):
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
     return await _user_response_with_role_name(session, user)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
-async def update_user(user_id: int, body: UserUpdate, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = await _require_user_edit_role(request, session)
+async def update_user(
+    user_id: int,
+    body: UserUpdate,
+    current_user: dict = require_permission("users", "edit_role"),
+    session: AsyncSession = Depends(get_session),
+):
+    org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, org_id)
 
     if body.role_id and body.role_id != user.role_id:
+        await owned_role_or_404(session, body.role_id, org_id)
         if await _is_admin_role(session, user.role_id) and not await _is_admin_role(session, body.role_id):
             admin_count = await _count_active_admins(session, user.organization_id)
             if admin_count <= 1:
@@ -194,15 +210,14 @@ async def update_user(user_id: int, body: UserUpdate, request: Request, session:
 
 
 @router.post("/{user_id}/deactivate", response_model=UserResponse)
-async def deactivate_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+async def deactivate_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "deactivate"),
+    session: AsyncSession = Depends(get_session),
+):
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if user.id == actor_id:
         raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
@@ -219,15 +234,14 @@ async def deactivate_user(user_id: int, request: Request, session: AsyncSession 
 
 
 @router.post("/{user_id}/lock")
-async def lock_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+async def lock_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "deactivate"),
+    session: AsyncSession = Depends(get_session),
+):
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if user.id == actor_id:
         raise HTTPException(status_code=400, detail="Cannot lock yourself")
@@ -257,16 +271,34 @@ async def lock_user(user_id: int, request: Request, session: AsyncSession = Depe
     return await _user_response_with_role_name(session, user)
 
 
-@router.post("/{user_id}/reactivate", response_model=UserResponse)
-async def reactivate_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "deactivate"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+@router.post("/{user_id}/activate", response_model=UserResponse)
+async def activate_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "deactivate"),
+    session: AsyncSession = Depends(get_session),
+):
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
+
+    if user.status != "invited":
+        raise HTTPException(status_code=400, detail="Only invited users can be activated")
+
+    user = await UserService.activate(session, user, actor_id)
+    await session.commit()
+    await session.refresh(user)
+    return await _user_response_with_role_name(session, user)
+
+
+@router.post("/{user_id}/reactivate", response_model=UserResponse)
+async def reactivate_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "deactivate"),
+    session: AsyncSession = Depends(get_session),
+):
+    actor_id = int(current_user["sub"])
+
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if user.status != "deactivated":
         raise HTTPException(status_code=400, detail="Only deactivated users can be reactivated")
@@ -278,15 +310,14 @@ async def reactivate_user(user_id: int, request: Request, session: AsyncSession 
 
 
 @router.delete("/{user_id}")
-async def delete_user(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "delete"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+async def delete_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "delete"),
+    session: AsyncSession = Depends(get_session),
+):
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if user.status != "deactivated":
         raise HTTPException(status_code=400, detail="Only deactivated users can be deleted")
@@ -310,28 +341,27 @@ async def delete_user(user_id: int, request: Request, session: AsyncSession = De
 
 
 @router.post("/{user_id}/resend-invite")
-async def resend_invite(user_id: int, request: Request, session: AsyncSession = Depends(get_session)):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "invite"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+async def resend_invite(
+    user_id: int,
+    request: Request,
+    current_user: dict = require_permission("users", "invite"),
+    session: AsyncSession = Depends(get_session),
+):
     org_id = int(current_user["org_id"])
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if user.status != "invited":
         raise HTTPException(status_code=400, detail="Can only resend invites to users with invited status")
 
     invite_token = AuthService.generate_invite_token(user.id, user.email)
-    invite_link = f"/api/users/accept-invite?token={invite_token}"
 
     from app.models.organization import Organization
 
     result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one()
-    EmailService.send_invitation(user.email, invite_link, org.name)
+    EmailService.send_invitation(user.email, _accept_invite_link(request, invite_token), org.name)
 
     await log_action(
         session,
@@ -351,16 +381,12 @@ async def admin_reset_password(
     user_id: int,
     body: AdminResetPasswordRequest,
     request: Request,
+    current_user: dict = require_permission("users", "edit_role"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
-    if not await role_service.has_permission(session, int(current_user["role_id"]), "users", "edit_role"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
     actor_id = int(current_user["sub"])
 
-    user = await UserService.get_by_id(session, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
 
     if body.mode == "email":
         from datetime import datetime, timedelta, timezone
@@ -379,8 +405,6 @@ async def admin_reset_password(
         )
         session.add(verification)
         await session.flush()
-
-        from app.url_utils import public_base_url
 
         reset_link = f"{public_base_url(request)}/reset-password?token={token}"
         sent = EmailService.send_password_reset(user.email, code, reset_link)

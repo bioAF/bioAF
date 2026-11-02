@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -64,10 +64,9 @@ def _detail_response(batch: SequencingBatch) -> SequencingBatchDetailResponse:
 
 @router.get("", response_model=list[SequencingBatchResponse])
 async def list_sequencing_batches(
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
     result = await session.execute(
         select(SequencingBatch)
@@ -80,13 +79,13 @@ async def list_sequencing_batches(
 @router.get("/{batch_id}", response_model=SequencingBatchDetailResponse)
 async def get_sequencing_batch(
     batch_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
         select(SequencingBatch)
         .options(selectinload(SequencingBatch.manifest_entries))
-        .where(SequencingBatch.id == batch_id)
+        .where(SequencingBatch.id == batch_id, SequencingBatch.organization_id == int(current_user["org_id"]))
     )
     batch = result.scalar_one_or_none()
     if not batch:
@@ -136,7 +135,11 @@ async def update_sequencing_batch(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
-    result = await session.execute(select(SequencingBatch).where(SequencingBatch.id == batch_id))
+    result = await session.execute(
+        select(SequencingBatch).where(
+            SequencingBatch.id == batch_id, SequencingBatch.organization_id == int(current_user["org_id"])
+        )
+    )
     batch = result.scalar_one_or_none()
     if not batch:
         raise HTTPException(404, "Sequencing batch not found")

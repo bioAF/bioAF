@@ -31,6 +31,14 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ push: jest.fn() }),
 }));
 
+// Add to Project follows grants, so the fixture holds the grant it needs.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: (resource: string, action: string) => resource === "projects" && action === "create",
+    loading: false,
+  }),
+}));
+
 
 
 // Dynamic import so mocks register first

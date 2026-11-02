@@ -1,17 +1,58 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, cast
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, exists, false, func, or_, select, union
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.experiment import Experiment
+from app.models.file import File
+from app.models.notebook_session import ComputeSession
 from app.models.project import Project
 from app.schemas.analysis_snapshot import SnapshotCreate
 from app.services.audit_service import log_action
+
+
+SNAPSHOT_ACCESS_DENIED = "snapshot_access_denied"
+
+
+@dataclass(frozen=True)
+class SnapshotAccess:
+    """Which of the two paths to a snapshot this caller holds (decision 5a)."""
+
+    experiments: bool
+    projects: bool
+
+
+def _with_owned_experiment(org_id: int) -> ColumnElement[bool]:
+    return exists().where(Experiment.id == AnalysisSnapshot.experiment_id, Experiment.organization_id == org_id)
+
+
+def _in_a_project(org_id: int) -> ColumnElement[bool]:
+    """The snapshot names a project, or its experiment belongs to one. Only links
+    within the Organization count, so a stored foreign link opens no path."""
+    direct = exists().where(Project.id == AnalysisSnapshot.project_id, Project.organization_id == org_id)
+    nested = exists().where(
+        Experiment.id == AnalysisSnapshot.experiment_id,
+        Experiment.organization_id == org_id,
+        Project.id == Experiment.project_id,
+        Project.organization_id == org_id,
+    )
+    return or_(direct, nested)
+
+
+def _reachable_with(access: SnapshotAccess, org_id: int) -> ColumnElement[bool]:
+    paths: list[ColumnElement[bool]] = []
+    if access.experiments:
+        paths.append(_with_owned_experiment(org_id))
+    if access.projects:
+        paths.append(_in_a_project(org_id))
+    return or_(*paths) if paths else false()
 
 
 def _derive_cluster_count(clusterings_json: dict | None) -> int | None:
@@ -49,15 +90,23 @@ class SnapshotService:
         if not data.experiment_id and not data.project_id:
             raise HTTPException(422, "At least one of experiment_id or project_id is required")
 
-        if data.experiment_id:
-            result = await session.execute(select(Experiment).where(Experiment.id == data.experiment_id))
-            if not result.scalar_one_or_none():
-                raise HTTPException(404, "Experiment not found")
-
-        if data.project_id:
-            result = await session.execute(select(Project).where(Project.id == data.project_id))
-            if not result.scalar_one_or_none():
-                raise HTTPException(404, "Project not found")
+        # Each reference must be this Organization's. Whether the project and the
+        # experiment match is deliberately not checked: cross-project work is
+        # allowed, so a snapshot may name an experiment outside its project.
+        references = [
+            (data.experiment_id, Experiment, "Experiment not found"),
+            (data.project_id, Project, "Project not found"),
+            (data.figure_file_id, File, "Figure file not found"),
+            (data.checkpoint_file_id, File, "Checkpoint file not found"),
+            (data.notebook_session_id, ComputeSession, "Notebook session not found"),
+        ]
+        for record_id, model, not_found in references:
+            if record_id:
+                result = await session.execute(
+                    select(model.id).where(model.id == record_id, model.organization_id == org_id)
+                )
+                if result.scalar_one_or_none() is None:
+                    raise HTTPException(404, not_found)
 
         snapshot = AnalysisSnapshot(
             organization_id=org_id,
@@ -96,6 +145,7 @@ class SnapshotService:
     async def list_snapshots(
         session: AsyncSession,
         org_id: int,
+        access: SnapshotAccess,
         experiment_id: int | None = None,
         project_id: int | None = None,
         user_id: int | None = None,
@@ -106,14 +156,25 @@ class SnapshotService:
             select(AnalysisSnapshot)
             .options(selectinload(AnalysisSnapshot.user))
             .options(selectinload(AnalysisSnapshot.figure_file))
-            .where(AnalysisSnapshot.organization_id == org_id)
+            .where(AnalysisSnapshot.organization_id == org_id, _reachable_with(access, org_id))
             .order_by(AnalysisSnapshot.created_at.desc())
         )
 
         if experiment_id is not None:
             stmt = stmt.where(AnalysisSnapshot.experiment_id == experiment_id)
         if project_id is not None:
-            stmt = stmt.where(AnalysisSnapshot.project_id == project_id)
+            # A project's timeline includes its experiments' snapshots. Membership
+            # through project_samples is deliberately not a link here.
+            stmt = stmt.where(
+                or_(
+                    AnalysisSnapshot.project_id == project_id,
+                    exists().where(
+                        Experiment.id == AnalysisSnapshot.experiment_id,
+                        Experiment.organization_id == org_id,
+                        Experiment.project_id == project_id,
+                    ),
+                )
+            )
         if user_id is not None:
             stmt = stmt.where(AnalysisSnapshot.user_id == user_id)
         if notebook_session_id is not None:
@@ -125,19 +186,64 @@ class SnapshotService:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_snapshot(session: AsyncSession, snapshot_id: int) -> AnalysisSnapshot | None:
+    async def get_snapshot(session: AsyncSession, snapshot_id: int, org_id: int) -> AnalysisSnapshot | None:
         result = await session.execute(
             select(AnalysisSnapshot)
             .options(selectinload(AnalysisSnapshot.user))
             .options(selectinload(AnalysisSnapshot.figure_file))
             .options(selectinload(AnalysisSnapshot.checkpoint_file))
-            .where(AnalysisSnapshot.id == snapshot_id)
+            .where(AnalysisSnapshot.id == snapshot_id, AnalysisSnapshot.organization_id == org_id)
         )
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def toggle_star(session: AsyncSession, snapshot_id: int, user_id: int) -> AnalysisSnapshot | None:
-        result = await session.execute(select(AnalysisSnapshot).where(AnalysisSnapshot.id == snapshot_id))
+    async def counts_by_project(session: AsyncSession, org_id: int, project_ids: list[int]) -> dict[int, int]:
+        """How many snapshots each project's timeline shows. The union keeps one
+        row per (project, snapshot), so a snapshot linked both ways counts once."""
+        direct = select(
+            AnalysisSnapshot.project_id.label("project_id"), AnalysisSnapshot.id.label("snapshot_id")
+        ).where(
+            AnalysisSnapshot.organization_id == org_id,
+            AnalysisSnapshot.project_id.in_(project_ids),
+        )
+        nested = (
+            select(Experiment.project_id.label("project_id"), AnalysisSnapshot.id.label("snapshot_id"))
+            .join(Experiment, Experiment.id == AnalysisSnapshot.experiment_id)
+            .where(
+                AnalysisSnapshot.organization_id == org_id,
+                Experiment.organization_id == org_id,
+                Experiment.project_id.in_(project_ids),
+            )
+        )
+        links = union(direct, nested).subquery()
+        result = await session.execute(
+            select(links.c.project_id, func.count(links.c.snapshot_id)).group_by(links.c.project_id)
+        )
+        return dict(cast("Sequence[tuple[int, int]]", result.all()))
+
+    @staticmethod
+    async def reachable_ids(
+        session: AsyncSession, snapshot_ids: list[int], org_id: int, access: SnapshotAccess
+    ) -> set[int]:
+        """The subset of these IDs this caller may open."""
+        result = await session.execute(
+            select(AnalysisSnapshot.id).where(
+                AnalysisSnapshot.id.in_(snapshot_ids),
+                AnalysisSnapshot.organization_id == org_id,
+                _reachable_with(access, org_id),
+            )
+        )
+        return set(result.scalars().all())
+
+    @staticmethod
+    async def toggle_star(
+        session: AsyncSession, snapshot_id: int, org_id: int, user_id: int
+    ) -> AnalysisSnapshot | None:
+        result = await session.execute(
+            select(AnalysisSnapshot).where(
+                AnalysisSnapshot.id == snapshot_id, AnalysisSnapshot.organization_id == org_id
+            )
+        )
         snapshot = result.scalar_one_or_none()
         if not snapshot:
             return None
@@ -157,7 +263,7 @@ class SnapshotService:
         return snapshot
 
     @staticmethod
-    async def compare_snapshots(session: AsyncSession, ids: list[int]) -> dict:
+    async def compare_snapshots(session: AsyncSession, ids: list[int], org_id: int, access: SnapshotAccess) -> dict:
         if len(ids) < 2 or len(ids) > 5:
             raise HTTPException(422, "Must compare between 2 and 5 snapshots")
 
@@ -166,7 +272,7 @@ class SnapshotService:
             .options(selectinload(AnalysisSnapshot.user))
             .options(selectinload(AnalysisSnapshot.figure_file))
             .options(selectinload(AnalysisSnapshot.checkpoint_file))
-            .where(AnalysisSnapshot.id.in_(ids))
+            .where(AnalysisSnapshot.id.in_(ids), AnalysisSnapshot.organization_id == org_id)
         )
         snapshots = list(result.scalars().all())
 
@@ -174,6 +280,9 @@ class SnapshotService:
             found_ids = {s.id for s in snapshots}
             missing = set(ids) - found_ids
             raise HTTPException(404, f"Snapshots not found: {sorted(missing)}")
+
+        if await SnapshotService.reachable_ids(session, ids, org_id, access) != set(ids):
+            raise HTTPException(403, SNAPSHOT_ACCESS_DENIED)
 
         # Sort by created_at for consistent ordering
         snapshots.sort(key=lambda s: s.created_at)

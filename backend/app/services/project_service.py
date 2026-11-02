@@ -1,9 +1,8 @@
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.analysis_snapshot import AnalysisSnapshot
 from app.models.experiment import Experiment
 from app.models.pipeline_run import PipelineRun
 from app.models.project import Project
@@ -12,18 +11,28 @@ from app.models.sample import Sample
 from app.schemas.project import ProjectCreate, ProjectSamplesAdd, ProjectUpdate
 from app.services.audit_service import log_action
 from app.services.code_service import CodeService
+from app.services.snapshot_service import SnapshotService
 
 
 class ProjectService:
     @staticmethod
+    async def _require_samples_in_organization(session: AsyncSession, sample_ids: list[int], org_id: int) -> None:
+        """Refuse the whole batch before any write if one ID is missing or foreign.
+        A foreign sample answers exactly as a missing one does."""
+        result = await session.execute(
+            select(Sample.id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(Sample.id.in_(sample_ids), Experiment.organization_id == org_id)
+        )
+        missing = set(sample_ids) - {row[0] for row in result.all()}
+        if missing:
+            raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+
+    @staticmethod
     async def create_project(session: AsyncSession, org_id: int, user_id: int, data: ProjectCreate) -> Project:
         # Validate sample_ids if provided
         if data.sample_ids:
-            result = await session.execute(select(Sample.id).where(Sample.id.in_(data.sample_ids)))
-            found_ids = {row[0] for row in result.all()}
-            missing = set(data.sample_ids) - found_ids
-            if missing:
-                raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+            await ProjectService._require_samples_in_organization(session, data.sample_ids, org_id)
 
         code = await CodeService.next_project_code(session, org_id, data.name)
 
@@ -92,6 +101,42 @@ class ProjectService:
         return project
 
     @staticmethod
+    async def _membership_counts(
+        session: AsyncSession, org_id: int, project_ids: list[int]
+    ) -> dict[int, tuple[int, int]]:
+        """(experiments, samples) per project, by the rule project detail uses: the
+        project's own experiments and their samples, plus samples linked through
+        project_samples and the experiments they sit in. Counted once each."""
+        own = (
+            select(
+                Experiment.project_id.label("project_id"),
+                Experiment.id.label("experiment_id"),
+                Sample.id.label("sample_id"),
+            )
+            .outerjoin(Sample, Sample.experiment_id == Experiment.id)
+            .where(Experiment.project_id.in_(project_ids), Experiment.organization_id == org_id)
+        )
+        linked = (
+            select(
+                ProjectSample.project_id.label("project_id"),
+                Experiment.id.label("experiment_id"),
+                Sample.id.label("sample_id"),
+            )
+            .join(Sample, Sample.id == ProjectSample.sample_id)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(ProjectSample.project_id.in_(project_ids), Experiment.organization_id == org_id)
+        )
+        members = union_all(own, linked).subquery()
+        result = await session.execute(
+            select(
+                members.c.project_id,
+                func.count(func.distinct(members.c.experiment_id)),
+                func.count(func.distinct(members.c.sample_id)),
+            ).group_by(members.c.project_id)
+        )
+        return {row[0]: (row[1], row[2]) for row in result.tuples().all()}
+
+    @staticmethod
     async def list_projects(
         session: AsyncSession,
         org_id: int,
@@ -99,18 +144,10 @@ class ProjectService:
         owner_user_id: int | None = None,
         search: str | None = None,
     ) -> list[dict]:
-        # Count experiments and samples via the experiments table (project_id FK)
         stmt = (
-            select(
-                Project,
-                func.count(func.distinct(Experiment.id)).label("experiment_count"),
-                func.count(func.distinct(Sample.id)).label("sample_count"),
-            )
-            .outerjoin(Experiment, Experiment.project_id == Project.id)
-            .outerjoin(Sample, Sample.experiment_id == Experiment.id)
+            select(Project)
             .options(selectinload(Project.owner))
             .where(Project.organization_id == org_id)
-            .group_by(Project.id)
             .order_by(Project.created_at.desc())
         )
 
@@ -122,13 +159,15 @@ class ProjectService:
             stmt = stmt.where(Project.name.ilike(f"%{search}%"))
 
         result = await session.execute(stmt)
-        rows = result.all()
+        rows = result.scalars().all()
 
-        # Get pipeline run and snapshot counts
-        project_ids = [row[0].id for row in rows]
+        # Get experiment, sample, pipeline run, and snapshot counts
+        project_ids = [project.id for project in rows]
+        membership_counts: dict[int, tuple[int, int]] = {}
         run_counts = {}
         snap_counts = {}
         if project_ids:
+            membership_counts = await ProjectService._membership_counts(session, org_id, project_ids)
             run_result = await session.execute(
                 select(Experiment.project_id, func.count(PipelineRun.id))
                 .join(PipelineRun, PipelineRun.experiment_id == Experiment.id)
@@ -137,15 +176,11 @@ class ProjectService:
             )
             run_counts = dict(run_result.all())
 
-            snap_result = await session.execute(
-                select(AnalysisSnapshot.project_id, func.count(AnalysisSnapshot.id))
-                .where(AnalysisSnapshot.project_id.in_(project_ids))
-                .group_by(AnalysisSnapshot.project_id)
-            )
-            snap_counts = dict(snap_result.all())
+            snap_counts = await SnapshotService.counts_by_project(session, org_id, project_ids)
 
         projects = []
-        for project, experiment_count, sample_count in rows:
+        for project in rows:
+            experiment_count, sample_count = membership_counts.get(project.id, (0, 0))
             projects.append(
                 {
                     "id": project.id,
@@ -185,7 +220,7 @@ class ProjectService:
         exp_stmt = (
             select(Experiment, Sample)
             .outerjoin(Sample, Sample.experiment_id == Experiment.id)
-            .where(Experiment.project_id == project_id)
+            .where(Experiment.project_id == project_id, Experiment.organization_id == org_id)
             .order_by(Experiment.name, Sample.external_id)
         )
         exp_result = await session.execute(exp_stmt)
@@ -196,7 +231,7 @@ class ProjectService:
             select(ProjectSample, Sample, Experiment)
             .join(Sample, Sample.id == ProjectSample.sample_id)
             .join(Experiment, Experiment.id == Sample.experiment_id)
-            .where(ProjectSample.project_id == project_id)
+            .where(ProjectSample.project_id == project_id, Experiment.organization_id == org_id)
             .order_by(Experiment.name, Sample.external_id)
         )
         ps_result = await session.execute(ps_stmt)
@@ -208,7 +243,9 @@ class ProjectService:
         if user_ids:
             from app.models.user import User
 
-            user_result = await session.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
+            user_result = await session.execute(
+                select(User.id, User.name).where(User.id.in_(user_ids), User.organization_id == org_id)
+            )
             user_names = dict(user_result.all())
 
         # Build groups from experiments linked via project_id
@@ -281,7 +318,7 @@ class ProjectService:
         if experiment_ids:
             run_result = await session.execute(
                 select(PipelineRun)
-                .where(PipelineRun.experiment_id.in_(experiment_ids))
+                .where(PipelineRun.experiment_id.in_(experiment_ids), PipelineRun.organization_id == org_id)
                 .order_by(PipelineRun.created_at.desc())
             )
             runs = run_result.scalars().all()
@@ -291,10 +328,8 @@ class ProjectService:
         # Counts
         sample_count = len(all_sample_ids)
         experiment_count = len(groups)
-        snap_result = await session.execute(
-            select(func.count(AnalysisSnapshot.id)).where(AnalysisSnapshot.project_id == project_id)
-        )
-        snapshot_count = snap_result.scalar() or 0
+        snap_counts = await SnapshotService.counts_by_project(session, org_id, [project_id])
+        snapshot_count = snap_counts.get(project_id, 0)
 
         return {
             "id": project.id,
@@ -330,12 +365,9 @@ class ProjectService:
         user_id: int,
         data: ProjectSamplesAdd,
     ) -> list[ProjectSample]:
-        # Validate all sample_ids exist
-        result = await session.execute(select(Sample.id).where(Sample.id.in_(data.sample_ids)))
-        found_ids = {row[0] for row in result.all()}
-        missing = set(data.sample_ids) - found_ids
-        if missing:
-            raise HTTPException(404, f"Samples not found: {sorted(missing)}")
+        # Validate all sample_ids exist in the project's Organization
+        org_id = await session.scalar(select(Project.organization_id).where(Project.id == project_id))
+        await ProjectService._require_samples_in_organization(session, data.sample_ids, org_id)
 
         # Check for duplicates
         existing = await session.execute(

@@ -13,16 +13,16 @@ import type {
   FileListResponse,
   FileProvenance,
   ExperimentListResponse,
-  ProjectListResponse,
   SampleBrief,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 
 import { clickableRow } from "@/lib/a11y";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
 import { useConfirm } from "@/hooks/useConfirm";
-import { logError } from "@/lib/errorReporting";
+import { loadFailureMessage, logError } from "@/lib/errorReporting";
 import { Card } from "@/components/ui/Card";
 
 function formatBytes(bytes: number | null): string {
@@ -77,6 +77,7 @@ export function FileBrowser({
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [labDocHits, setLabDocHits] = useState<LabDocHit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [filterType, setFilterType] = useState("");
@@ -171,21 +172,26 @@ export function FileBrowser({
 
   const fetchMeta = useCallback(async () => {
     try {
-      const [projData, expData] = await Promise.all([
-        api.get<ProjectListResponse>("/api/projects?page_size=100"),
-        api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
-      ]);
-      setProjects(projData.projects.map((p) => ({ id: p.id, name: p.name })));
+      const expData = await api.get<ExperimentListResponse>("/api/experiments?page_size=100");
       setExperiments(expData.experiments.map((e) => ({ id: e.id, name: e.name })));
     } catch {
       // ignore
     }
   }, []);
 
+  const fetchProjects = useCallback(async () => {
+    const options = await loadProjectOptions();
+    setProjects(options.projects.map((p) => ({ id: p.id, name: p.name })));
+    setProjectsDenied(options.status === "denied");
+    if (options.status === "failed") toast.error(loadFailureMessage("Projects"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     fetchFiles();
     fetchMeta();
-  }, [fetchFiles, fetchMeta]);
+    fetchProjects();
+  }, [fetchFiles, fetchMeta, fetchProjects]);
 
   // Deep link: open a specific file's detail directly (e.g. a notification for a
   // file lands here). Fetched by id so it works regardless of the current page.
@@ -514,7 +520,9 @@ export function FileBrowser({
               setFilterExperimentId("");
               setPage(1);
             }}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm"
+            disabled={projectsDenied}
+            title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:text-gray-500"
           >
             <option value="">All projects</option>
             {projects.map((p) => (
@@ -523,6 +531,9 @@ export function FileBrowser({
               </option>
             ))}
           </select>
+        )}
+        {showProjectFilter && projectsDenied && (
+          <p className="text-xs text-gray-500 self-center">{PROJECTS_DENIED_MESSAGE}</p>
         )}
 
         {showExperimentFilter && (
@@ -1099,7 +1110,8 @@ export function FileBrowser({
                   id="fb-link-project"
                   value={linkProjectId}
                   onChange={(e) => setLinkProjectId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white"
+                  disabled={projectsDenied}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm bg-white disabled:bg-gray-50 disabled:text-gray-500"
                 >
                   <option value="">No project</option>
                   {projects.map((p) => (
@@ -1108,6 +1120,7 @@ export function FileBrowser({
                     </option>
                   ))}
                 </select>
+                {projectsDenied && <p className="mt-1 text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>}
               </div>
 
               <div>

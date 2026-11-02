@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.dependencies import require_permission
 from app.database import get_session
 from app.schemas.dataset import DatasetExperimentSummary, DatasetFilterOptions, DatasetSearchResult
 from app.schemas.experiment import UserSummary
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
 @router.get("", response_model=DatasetSearchResult)
 async def search_datasets(
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     query: str | None = None,
     organism: str | None = None,
     tissue: str | None = None,
@@ -27,7 +28,6 @@ async def search_datasets(
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     datasets, total = await DatasetService.search_datasets(
@@ -80,10 +80,9 @@ async def search_datasets(
 
 @router.get("/filter-options", response_model=DatasetFilterOptions)
 async def get_filter_options(
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
     options = await DatasetService.get_filter_options(session, org_id)
     return DatasetFilterOptions(**options)
@@ -92,10 +91,9 @@ async def get_filter_options(
 @router.get("/{experiment_id}")
 async def get_dataset_detail(
     experiment_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     detail = await DatasetService.get_dataset_detail(session, org_id, experiment_id)

@@ -4,7 +4,8 @@ import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
-import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Button } from "@/components/ui/Button";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { Modal } from "@/components/shared/Modal";
@@ -12,7 +13,6 @@ import type {
   DatasetExperimentSummary,
   DatasetSearchResult,
   Project,
-  ProjectListResponse,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -41,12 +41,16 @@ export function DatasetBrowser() {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsFailed, setProjectsFailed] = useState(false);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [newProjectName, setNewProjectName] = useState("");
   const [addingToProject, setAddingToProject] = useState(false);
 
-  const user = getCurrentUser();
-  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  // The same grant covers adding samples to a project and creating one, so a
+  // role that may not list projects can still do the second.
+  const { canAccess } = usePermissions();
+  const canAddToProject = canAccess("projects", "create");
+  const creatingProject = selectedProjectId === "new" || projectsDenied;
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
@@ -104,19 +108,18 @@ export function DatasetBrowser() {
   };
 
   const openProjectModal = async () => {
-    try {
-      const data = await api.get<ProjectListResponse>("/api/projects");
-      setProjects(data.projects);
-      setProjectsFailed(false);
-    } catch (e) {
+    const options = await loadProjectOptions("/api/projects");
+    setProjects(options.projects);
+    setProjectsDenied(options.status === "denied");
+    if (options.status === "failed") {
       // Proven on the demo: with this read failing, the dialog opened offering
       // only ["Choose a project...", "+ Create New Project"] while two real
       // projects existed. The user cannot see whether the project they want is
       // already there, so the only path forward creates a duplicate. A read
       // that failed must not arm the write behind it.
-      logError("loading the projects to add the selected datasets to", e);
-      setProjects([]);
       setProjectsFailed(true);
+    } else {
+      setProjectsFailed(false);
     }
     setShowProjectModal(true);
   };
@@ -126,7 +129,7 @@ export function DatasetBrowser() {
     try {
       let projectId: number;
 
-      if (selectedProjectId === "new") {
+      if (creatingProject) {
         const resp = await api.post<{ id: number }>("/api/projects", {
           name: newProjectName,
         });
@@ -244,7 +247,7 @@ export function DatasetBrowser() {
           <option value="genomic DNA">Genomic DNA</option>
           <option value="protein">Protein</option>
         </select>
-        {canModify && selectedExperiments.size > 0 && (
+        {canAddToProject && selectedExperiments.size > 0 && (
           <Button onClick={openProjectModal}>
             Add to Project ({selectedExperiments.size})
           </Button>
@@ -263,7 +266,7 @@ export function DatasetBrowser() {
             <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
-                  {canModify && (
+                  {canAddToProject && (
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase w-8"></th>
                   )}
                   <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
@@ -289,7 +292,7 @@ export function DatasetBrowser() {
               <tbody className="divide-y divide-hairline">
                 {datasets.map((ds) => (
                   <tr key={ds.experiment_id} className={`hover:bg-surface-muted cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
-                    {canModify && (
+                    {canAddToProject && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
@@ -384,8 +387,8 @@ export function DatasetBrowser() {
               busyLabel="Adding..."
               disabled={
                 projectsFailed ||
-                !selectedProjectId ||
-                (selectedProjectId === "new" && !newProjectName.trim())
+                (!creatingProject && !selectedProjectId) ||
+                (creatingProject && !newProjectName.trim())
               }
             >
               Add to Project
@@ -414,6 +417,8 @@ export function DatasetBrowser() {
                     Retry
                   </button>
                 </div>
+              ) : projectsDenied ? (
+                <p className="text-sm text-ink-subtle">{PROJECTS_DENIED_MESSAGE}</p>
               ) : (
                 <div>
                   <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
@@ -430,7 +435,7 @@ export function DatasetBrowser() {
                   </select>
                 </div>
               )}
-              {selectedProjectId === "new" && (
+              {creatingProject && !projectsFailed && (
                 <div>
                   <label htmlFor="new-project-name" className="block text-sm font-medium text-ink-muted mb-1">New Project Name</label>
                   <input id="new-project-name"
