@@ -7,6 +7,7 @@
 - Snapshots are authorized per record: `experiments:view` or `projects:view`, depending on what the snapshot links to. The project timeline and both project snapshot counts now include snapshots from the project's experiments.
 - Content tokens are bound to their resource type, ID, Organization, purpose, and expiry, and can no longer be used as a session. File bytes need `files:view`, or results view for a file a plot or QC report names.
 - Audit log entries from an API-key request now name the key.
-- Project and reference actions follow exact grants instead of role names, so custom roles see what they can do. Forms that pick a project say when a role may not list projects instead of showing an empty picker.
-- Every project picker now separates a denied list from a failed one. A role that may not list projects keeps what it can still do: Associate Paper and custom pipeline launch list experiments directly, deep links still select their experiment, uploads keep experiment, sample, and global scope, and Add to Project can still create a project with `projects:create`. A failed list stays visible, with Retry where the picker is inline.
-- Add to Project in the dataset browser follows `projects:create` instead of the admin and comp_bio role names, and experiment pickers on Associate Paper, custom pipeline launch, and upload now list every experiment, not just the first page.
+- Project and reference actions follow exact grants instead of role names, so custom roles see what they can do.
+- Forms that pick a project say when a role may not list projects, and keep what that role can still do: Associate Paper and custom pipeline launch list experiments without a project, deep links still select their experiment, uploads keep experiment, sample, and global scope, and Add to Project can still create a project. A list that failed to load stays visible as a failure, with Retry where the picker is inline.
+- Add to Project in the dataset browser follows `projects:create` instead of the admin and comp_bio role names.
+- Experiment pickers on Associate Paper, custom pipeline launch, and upload list every experiment instead of the first page.
