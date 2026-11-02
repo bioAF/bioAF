@@ -6,10 +6,21 @@ import type { ProjectListResponse } from "@/lib/types";
 export const PROJECTS_DENIED_MESSAGE =
   "Your role does not include viewing projects, so a project cannot be chosen here.";
 
+/** Shown in place of an experiment picker when the caller may not list experiments. */
+export const EXPERIMENTS_DENIED_MESSAGE =
+  "Your role does not include viewing experiments, so an experiment cannot be chosen here.";
+
+export const DEFAULT_PROJECTS_PATH = "/api/projects?page_size=100";
+
 export type ProjectOptions =
   | { status: "loaded"; projects: ProjectListResponse["projects"] }
   | { status: "denied"; projects: [] }
   | { status: "failed"; projects: [] };
+
+/** Duck-typed on `status`: an ApiError answer, without importing the class. */
+export function isPermissionDenied(error: unknown): boolean {
+  return (error as { status?: number })?.status === 403;
+}
 
 /**
  * The project list for a picker, kept apart from the form's other options.
@@ -19,15 +30,18 @@ export type ProjectOptions =
  * projects". Denial and failure mean different things to the user: one is
  * permanent for their role, the other is worth retrying.
  */
-export async function loadProjectOptions(path = "/api/projects?page_size=100"): Promise<ProjectOptions> {
-  try {
-    const data = await api.get<ProjectListResponse>(path);
-    return { status: "loaded", projects: data.projects };
-  } catch (error) {
-    if ((error as { status?: number })?.status === 403) {
-      return { status: "denied", projects: [] };
-    }
-    logError("loading the project list", error);
-    return { status: "failed", projects: [] };
+export function loadProjectOptions(path = DEFAULT_PROJECTS_PATH): Promise<ProjectOptions> {
+  return api.get<ProjectListResponse>(path).then(projectOptionsFrom, projectOptionsFromError);
+}
+
+export function projectOptionsFrom(data: ProjectListResponse): ProjectOptions {
+  return { status: "loaded", projects: data.projects };
+}
+
+export function projectOptionsFromError(error: unknown): ProjectOptions {
+  if (isPermissionDenied(error)) {
+    return { status: "denied", projects: [] };
   }
+  logError("loading the project list", error);
+  return { status: "failed", projects: [] };
 }
