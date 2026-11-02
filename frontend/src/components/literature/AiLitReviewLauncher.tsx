@@ -3,22 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { literature, type LitReviewRun } from "@/lib/literature";
+import { useProjectOptions } from "@/hooks/useProjectOptions";
+import { PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
+import { PickerNotice } from "@/components/shared/PickerNotice";
 import { Button } from "@/components/ui/Button";
-
-interface ProjectSummary {
-  id: number;
-  name: string;
-}
 
 interface ExperimentSummary {
   id: number;
   name: string;
   project: { id: number; name: string } | null;
-}
-
-interface ProjectListResponse {
-  projects: ProjectSummary[];
-  total: number;
 }
 
 interface ExperimentListResponse {
@@ -33,7 +26,7 @@ interface Props {
 }
 
 export function AiLitReviewLauncher({ onSubmitted }: Props) {
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const projectOptions = useProjectOptions({ path: "/api/projects?page_size=200" });
   const [experiments, setExperiments] = useState<ExperimentSummary[]>([]);
   const [projectId, setProjectId] = useState<string>("");
   const [experimentId, setExperimentId] = useState<string>("");
@@ -44,12 +37,6 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
   const cancelRef = useRef(false);
 
   useEffect(() => {
-    api
-      .get<ProjectListResponse>("/api/projects?page_size=200")
-      .then((d) =>
-        setProjects(d.projects.map((p) => ({ id: p.id, name: p.name }))),
-      )
-      .catch(() => setProjects([]));
     api
       .get<ExperimentListResponse>("/api/experiments?page_size=500")
       .then((d) =>
@@ -156,15 +143,24 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
             id="ai-lit-review-project"
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="border border-gray-300 rounded px-3 py-2 text-sm w-64"
+            disabled={projectOptions.unavailable}
+            className="border border-gray-300 rounded px-3 py-2 text-sm w-64 disabled:bg-gray-50 disabled:text-gray-400"
           >
             <option value="">All projects</option>
-            {projects.map((p) => (
+            {projectOptions.projects.map((p) => (
               <option key={p.id} value={String(p.id)}>
                 {p.name}
               </option>
             ))}
           </select>
+          <div className="w-64">
+            <PickerNotice
+              status={projectOptions.status}
+              deniedMessage={PROJECTS_DENIED_MESSAGE}
+              failedWhat="Projects"
+              onRetry={projectOptions.retry}
+            />
+          </div>
         </div>
         <div>
           <label

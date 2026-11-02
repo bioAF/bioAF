@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { ErrorState } from "@/components/shared/ErrorState";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { statusBadgeClass, statusLabel } from "@/lib/statusStyles";
 import { isAuthenticated, getCurrentUser } from "@/lib/auth";
 import { useToast } from "@/components/shared/Toast";
@@ -28,7 +29,6 @@ import {
 } from "@/lib/literature";
 import type {
   ExperimentListResponse,
-  ProjectListResponse,
 } from "@/lib/types";
 
 type StatusFlag = "active" | "dismissed" | "unread" | "reading" | "read";
@@ -65,6 +65,7 @@ export default function LiteratureLibraryPage() {
     "added",
   );
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [experiments, setExperiments] = useState<{ id: number; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -75,15 +76,11 @@ export default function LiteratureLibraryPage() {
 
   useEffect(() => {
     if (!isAuthenticated()) return;
-    api
-      .get<ProjectListResponse>("/api/projects?page_size=100")
-      .then((data) =>
-        setProjects(data.projects.map((p) => ({ id: p.id, name: p.name }))),
-      )
-      .catch((e) => {
-        logError("loading the project filter", e);
-        toast.error(loadFailureMessage("The project filter"));
-      });
+    loadProjectOptions().then((options) => {
+      setProjects(options.projects.map((p) => ({ id: p.id, name: p.name })));
+      setProjectsDenied(options.status === "denied");
+      if (options.status === "failed") toast.error(loadFailureMessage("The project filter"));
+    });
     api
       .get<ExperimentListResponse>("/api/experiments?page_size=100")
       .then((data) =>
@@ -289,7 +286,9 @@ export default function LiteratureLibraryPage() {
                 setFilterProjectId(e.target.value);
                 setFilterExperimentId("");
               }}
-              className="border border-gray-300 rounded px-3 py-2"
+              disabled={projectsDenied}
+              title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
+              className="border border-gray-300 rounded px-3 py-2 disabled:bg-gray-50 disabled:text-gray-400"
             >
               <option value="">All projects</option>
               {projects.map((p) => (
@@ -298,6 +297,9 @@ export default function LiteratureLibraryPage() {
                 </option>
               ))}
             </select>
+            {projectsDenied && (
+              <p className="mt-1 text-xs text-gray-500 max-w-xs">{PROJECTS_DENIED_MESSAGE}</p>
+            )}
           </div>
           <div>
             <label htmlFor="experiment" className="block text-xs text-gray-600 mb-1">Experiment</label>
