@@ -5,7 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_session
 from app.api.dependencies import require_permission
 from app.api.scoped_loaders import owned_sample_ids, require_owned_sample
-from app.schemas.sample import SampleBulkUpdate, SampleQCUpdate, SampleResponse, SampleStatusUpdate, SampleUpdate
+from app.schemas.sample import (
+    SampleBulkUpdate,
+    SampleOption,
+    SampleOptionListResponse,
+    SampleQCUpdate,
+    SampleResponse,
+    SampleStatusUpdate,
+    SampleUpdate,
+)
 from app.services.read_groups import read_groups_for
 from app.services.sample_service import SampleService
 
@@ -15,6 +23,33 @@ class SampleBulkDeleteRequest(BaseModel):
 
 
 router = APIRouter(prefix="/api/samples", tags=["samples"])
+
+
+@router.get("", response_model=SampleOptionListResponse)
+async def list_organization_samples(
+    current_user: dict = require_permission("samples", "view"),
+    page: int = 1,
+    page_size: int = 100,
+    session: AsyncSession = Depends(get_session),
+):
+    rows, total = await SampleService.list_organization_samples(session, int(current_user["org_id"]), page, page_size)
+    return SampleOptionListResponse(
+        samples=[
+            SampleOption(
+                id=sample.id,
+                external_id=sample.external_id,
+                organism=sample.organism,
+                tissue_type=sample.tissue_type,
+                qc_status=sample.qc_status,
+                experiment_id=sample.experiment_id,
+                experiment_name=experiment_name,
+            )
+            for sample, experiment_name in rows
+        ],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
 
 
 def _sample_response(s) -> SampleResponse:
