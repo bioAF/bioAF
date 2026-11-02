@@ -1,14 +1,16 @@
 /**
- * Add to Project picks an existing project or creates one. A role that may not
- * list projects cannot pick, but creating is a separate grant.
+ * Add to Project follows grants, not role names. A custom role with
+ * projects:create can use it; a built-in role name alone cannot. A role that may
+ * not list projects cannot pick one, but still creates one.
  */
 import { render, screen, waitFor } from "@/testing/renderWithProviders";
 import userEvent from "@testing-library/user-event";
 import { DatasetBrowser } from "./DatasetBrowser";
 
+const mockUser = jest.fn();
 jest.mock("@/lib/auth", () => ({
   isAuthenticated: () => true,
-  getCurrentUser: () => ({ role_name: "comp_bio" }),
+  getCurrentUser: () => mockUser(),
 }));
 const mockCanAccess = jest.fn();
 jest.mock("@/hooks/usePermissions", () => ({
@@ -33,6 +35,7 @@ function givenProjects(projects: () => Promise<unknown>) {
 }
 
 const denied = () => Promise.reject(Object.assign(new Error("role_missing"), { status: 403 }));
+const grants = (...held: string[]) => (resource: string, action: string) => held.includes(`${resource}:${action}`);
 
 async function openAddToProject(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("checkbox", { name: "Select Exp One" }));
@@ -45,14 +48,40 @@ const submit = () => screen.getByRole("button", { name: "Add to Project" });
 beforeEach(() => {
   mockGet.mockReset();
   mockPost.mockReset();
+  mockUser.mockReturnValue({ role_name: "lab_custom" });
   mockCanAccess.mockReset();
-  mockCanAccess.mockReturnValue(true);
+  mockCanAccess.mockImplementation(grants("projects:create", "projects:view"));
   jest.spyOn(console, "error").mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
 
-test("a 403 with create permission explains and still creates a project", async () => {
+test("a custom role with projects:create can add datasets to a project", async () => {
   const user = userEvent.setup();
+  givenProjects(() => Promise.resolve({ projects: [{ id: 2, name: "Atlas" }] }));
+  mockPost.mockResolvedValue({});
+  render(<DatasetBrowser />);
+  await openAddToProject(user);
+
+  await user.selectOptions(screen.getByLabelText("Select Project"), "2");
+  await user.click(submit());
+
+  await waitFor(() => expect(mockPost).toHaveBeenCalledWith("/api/projects/2/samples", { sample_ids: [8] }));
+});
+
+test("a built-in role name without the grant sees no controls", async () => {
+  mockUser.mockReturnValue({ role_name: "comp_bio" });
+  mockCanAccess.mockImplementation(grants("projects:view"));
+  givenProjects(() => Promise.resolve({ projects: [] }));
+  render(<DatasetBrowser />);
+
+  await screen.findByText("Exp One");
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Add to Project/ })).not.toBeInTheDocument();
+});
+
+test("a custom role that may create but not list explains and still creates", async () => {
+  const user = userEvent.setup();
+  mockCanAccess.mockImplementation(grants("projects:create"));
   givenProjects(denied);
   mockPost.mockResolvedValue({ id: 50 });
   render(<DatasetBrowser />);
@@ -69,18 +98,6 @@ test("a 403 with create permission explains and still creates a project", async 
   expect(mockPost).toHaveBeenCalledWith("/api/projects", { name: "Fresh" });
 });
 
-test("a 403 without create permission leaves nothing to submit", async () => {
-  const user = userEvent.setup();
-  givenProjects(denied);
-  mockCanAccess.mockImplementation((resource: string, action: string) => !(resource === "projects" && action === "create"));
-  render(<DatasetBrowser />);
-  await openAddToProject(user);
-
-  expect(screen.getByText(/does not include viewing projects/)).toBeInTheDocument();
-  expect(screen.queryByLabelText("New Project Name")).not.toBeInTheDocument();
-  expect(submit()).toBeDisabled();
-});
-
 test("a failure keeps its refusal, so a duplicate cannot be created", async () => {
   const user = userEvent.setup();
   givenProjects(() => Promise.reject(new Error("Backend unavailable")));
@@ -90,15 +107,6 @@ test("a failure keeps its refusal, so a duplicate cannot be created", async () =
   expect(screen.getByTestId("projects-load-failed")).toBeInTheDocument();
   expect(screen.queryByLabelText("New Project Name")).not.toBeInTheDocument();
   expect(submit()).toBeDisabled();
-});
-
-test("a loaded list still offers its projects", async () => {
-  const user = userEvent.setup();
-  givenProjects(() => Promise.resolve({ projects: [{ id: 2, name: "Atlas" }] }));
-  render(<DatasetBrowser />);
-  await openAddToProject(user);
-
-  expect(screen.getByRole("option", { name: "Atlas" })).toBeInTheDocument();
 });
 
 test("reopening after a denial that lifted returns to the picker", async () => {

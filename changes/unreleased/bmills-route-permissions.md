@@ -9,3 +9,4 @@
 - Audit log entries from an API-key request now name the key.
 - Project and reference actions follow exact grants instead of role names, so custom roles see what they can do. Forms that pick a project say when a role may not list projects instead of showing an empty picker.
 - Every project picker now separates a denied list from a failed one. A role that may not list projects keeps what it can still do: Associate Paper and custom pipeline launch list experiments directly, deep links still select their experiment, uploads keep experiment, sample, and global scope, and Add to Project can still create a project with `projects:create`. A failed list stays visible, with Retry where the picker is inline.
+- Add to Project in the dataset browser follows `projects:create` instead of the admin and comp_bio role names, and experiment pickers on Associate Paper, custom pipeline launch, and upload now list every experiment, not just the first page.

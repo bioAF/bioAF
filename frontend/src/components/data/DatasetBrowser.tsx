@@ -4,7 +4,6 @@ import { NOT_SET } from "@/lib/placeholders";
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
-import { getCurrentUser } from "@/lib/auth";
 import { usePermissions } from "@/hooks/usePermissions";
 import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Button } from "@/components/ui/Button";
@@ -47,12 +46,11 @@ export function DatasetBrowser() {
   const [newProjectName, setNewProjectName] = useState("");
   const [addingToProject, setAddingToProject] = useState(false);
 
-  const user = getCurrentUser();
-  const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  // The same grant covers adding samples to a project and creating one, so a
+  // role that may not list projects can still do the second.
   const { canAccess } = usePermissions();
-  // A role that may not list projects cannot pick one, but creating is its own grant.
-  const creatingProject =
-    selectedProjectId === "new" || (projectsDenied && canAccess("projects", "create"));
+  const canAddToProject = canAccess("projects", "create");
+  const creatingProject = selectedProjectId === "new" || projectsDenied;
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
@@ -249,7 +247,7 @@ export function DatasetBrowser() {
           <option value="genomic DNA">Genomic DNA</option>
           <option value="protein">Protein</option>
         </select>
-        {canModify && selectedExperiments.size > 0 && (
+        {canAddToProject && selectedExperiments.size > 0 && (
           <Button onClick={openProjectModal}>
             Add to Project ({selectedExperiments.size})
           </Button>
@@ -268,7 +266,7 @@ export function DatasetBrowser() {
             <table className="min-w-full divide-y divide-hairline">
               <thead className="bg-gray-50">
                 <tr>
-                  {canModify && (
+                  {canAddToProject && (
                     <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase w-8"></th>
                   )}
                   <th scope="col" className="px-4 py-3 text-left text-xs font-medium text-ink-subtle uppercase">
@@ -294,7 +292,7 @@ export function DatasetBrowser() {
               <tbody className="divide-y divide-hairline">
                 {datasets.map((ds) => (
                   <tr key={ds.experiment_id} className={`hover:bg-surface-muted cursor-pointer ${selectedExperiments.has(ds.experiment_id) ? "bg-bioaf-50" : ""}`} {...clickableRow(() => setViewingDataset(ds))}>
-                    {canModify && (
+                    {canAddToProject && (
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
