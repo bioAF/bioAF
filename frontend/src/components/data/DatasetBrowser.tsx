@@ -5,6 +5,8 @@ import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Button } from "@/components/ui/Button";
 import { DetailModal } from "@/components/shared/DetailModal";
 import { Modal } from "@/components/shared/Modal";
@@ -12,7 +14,6 @@ import type {
   DatasetExperimentSummary,
   DatasetSearchResult,
   Project,
-  ProjectListResponse,
 } from "@/lib/types";
 import { useToast } from "@/components/shared/Toast";
 import { ErrorState } from "@/components/shared/ErrorState";
@@ -41,12 +42,17 @@ export function DatasetBrowser() {
   const [showProjectModal, setShowProjectModal] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsFailed, setProjectsFailed] = useState(false);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [newProjectName, setNewProjectName] = useState("");
   const [addingToProject, setAddingToProject] = useState(false);
 
   const user = getCurrentUser();
   const canModify = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  const { canAccess } = usePermissions();
+  // A role that may not list projects cannot pick one, but creating is its own grant.
+  const creatingProject =
+    selectedProjectId === "new" || (projectsDenied && canAccess("projects", "create"));
 
   const fetchDatasets = useCallback(async () => {
     setLoading(true);
@@ -104,19 +110,18 @@ export function DatasetBrowser() {
   };
 
   const openProjectModal = async () => {
-    try {
-      const data = await api.get<ProjectListResponse>("/api/projects");
-      setProjects(data.projects);
-      setProjectsFailed(false);
-    } catch (e) {
+    const options = await loadProjectOptions("/api/projects");
+    setProjects(options.projects);
+    setProjectsDenied(options.status === "denied");
+    if (options.status === "failed") {
       // Proven on the demo: with this read failing, the dialog opened offering
       // only ["Choose a project...", "+ Create New Project"] while two real
       // projects existed. The user cannot see whether the project they want is
       // already there, so the only path forward creates a duplicate. A read
       // that failed must not arm the write behind it.
-      logError("loading the projects to add the selected datasets to", e);
-      setProjects([]);
       setProjectsFailed(true);
+    } else {
+      setProjectsFailed(false);
     }
     setShowProjectModal(true);
   };
@@ -126,7 +131,7 @@ export function DatasetBrowser() {
     try {
       let projectId: number;
 
-      if (selectedProjectId === "new") {
+      if (creatingProject) {
         const resp = await api.post<{ id: number }>("/api/projects", {
           name: newProjectName,
         });
@@ -384,8 +389,8 @@ export function DatasetBrowser() {
               busyLabel="Adding..."
               disabled={
                 projectsFailed ||
-                !selectedProjectId ||
-                (selectedProjectId === "new" && !newProjectName.trim())
+                (!creatingProject && !selectedProjectId) ||
+                (creatingProject && !newProjectName.trim())
               }
             >
               Add to Project
@@ -414,6 +419,8 @@ export function DatasetBrowser() {
                     Retry
                   </button>
                 </div>
+              ) : projectsDenied ? (
+                <p className="text-sm text-ink-subtle">{PROJECTS_DENIED_MESSAGE}</p>
               ) : (
                 <div>
                   <label htmlFor="select-project" className="block text-sm font-medium text-ink-muted mb-1">Select Project</label>
@@ -430,7 +437,7 @@ export function DatasetBrowser() {
                   </select>
                 </div>
               )}
-              {selectedProjectId === "new" && (
+              {creatingProject && !projectsFailed && (
                 <div>
                   <label htmlFor="new-project-name" className="block text-sm font-medium text-ink-muted mb-1">New Project Name</label>
                   <input id="new-project-name"
