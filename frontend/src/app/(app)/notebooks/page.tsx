@@ -26,7 +26,6 @@ import type {
   FileListResponse,
   Sample,
   Project,
-  ProjectListResponse,
 } from "@/lib/types";
 import { RESOURCE_PROFILES } from "@/lib/types";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
@@ -39,6 +38,7 @@ import { useToast } from "@/components/shared/Toast";
 import { clickableRow } from "@/lib/a11y";
 import { useDismissOnEscape } from "@/hooks/useDismissOnEscape";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
@@ -80,6 +80,7 @@ export default function NotebooksPage() {
   const [profileNotice, setProfileNotice] = useState<string>("");
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
   const [selectedExperiment, setSelectedExperiment] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
@@ -180,13 +181,10 @@ export default function NotebooksPage() {
   }
 
   async function loadProjects() {
-    try {
-      const data = await api.get<ProjectListResponse>("/api/projects?page_size=100");
-      setProjects(data.projects);
-    } catch (e) {
-      logError("loading projects", e);
-      toast.error(loadFailureMessage("Projects"));
-    }
+    const options = await loadProjectOptions();
+    setProjects(options.projects);
+    setProjectsDenied(options.status === "denied");
+    if (options.status === "failed") toast.error(loadFailureMessage("Projects"));
   }
 
   async function loadEnvironments() {
@@ -886,13 +884,17 @@ export default function NotebooksPage() {
                 aria-label="Project"
                 value={selectedProject || ""}
                 onChange={(e) => setSelectedProject(e.target.value ? Number(e.target.value) : null)}
-                className="border rounded px-3 py-2 text-sm w-full"
+                disabled={projectsDenied}
+                className="border rounded px-3 py-2 text-sm w-full disabled:bg-gray-50 disabled:text-gray-400"
               >
                 <option value="">No project</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}{p.code ? ` (${p.code})` : ""}</option>
                 ))}
               </select>
+            )}
+            {scopeType === "project" && projectsDenied && (
+              <p className="mt-1 text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>
             )}
           </div>
 

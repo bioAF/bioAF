@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.api.dependencies import require_permission
+from app.api.scoped_loaders import require_owned_sample_batch
 from app.schemas.sample_batch import SampleBatchAssignSamples, SampleBatchResponse, SampleBatchUpdate
 from app.schemas.experiment import UserSummary
 from app.services.sample_batch_service import SampleBatchService
@@ -36,9 +37,10 @@ def _batch_response(batch) -> SampleBatchResponse:
 @router.get("/{batch_id}", response_model=SampleBatchResponse)
 async def get_sample_batch(
     batch_id: int,
-    request: Request,
+    current_user: dict = require_permission("experiments", "view"),
     session: AsyncSession = Depends(get_session),
 ):
+    await require_owned_sample_batch(session, batch_id, int(current_user["org_id"]))
     batch = await SampleBatchService.get_batch(session, batch_id)
     if not batch:
         raise HTTPException(404, "Sample batch not found")
@@ -53,6 +55,7 @@ async def update_sample_batch(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_sample_batch(session, batch_id, int(current_user["org_id"]))
     batch = await SampleBatchService.update_batch(session, batch_id, user_id, body)
     if not batch:
         raise HTTPException(404, "Sample batch not found")
@@ -69,6 +72,7 @@ async def assign_samples(
     session: AsyncSession = Depends(get_session),
 ):
     user_id = int(current_user["sub"])
+    await require_owned_sample_batch(session, batch_id, int(current_user["org_id"]))
     await SampleBatchService.assign_samples_to_batch(session, batch_id, body.sample_ids, user_id)
     await session.commit()
     return {"status": "ok", "assigned": len(body.sample_ids)}

@@ -181,3 +181,20 @@ class SampleResponse(BaseModel):
     custom_fields: list[SampleCustomFieldResponse] = []
 
     model_config = {"from_attributes": True}
+
+
+class SampleOption(BaseModel):
+    id: int
+    external_id: str | None
+    organism: str | None
+    tissue_type: str | None
+    qc_status: str | None
+    experiment_id: int
+    experiment_name: str
+
+
+class SampleOptionListResponse(BaseModel):
+    samples: list[SampleOption]
+    total: int
+    page: int
+    page_size: int

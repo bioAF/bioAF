@@ -20,6 +20,14 @@ def require_beta_feature(key: str):
     return Depends(checker)
 
 
+async def has_effective_permission(session: AsyncSession, user: dict, resource: str, action: str) -> bool:
+    """True when the caller's role holds the grant and, for an API key, its scope
+    envelope does too (ADR-049). JWT callers have api_key_id=None and no envelope."""
+    if "role_id" not in user or not await role_service.has_permission(session, int(user["role_id"]), resource, action):
+        return False
+    return user.get("api_key_id") is None or f"{resource}:{action}" in (user.get("scopes") or [])
+
+
 def require_permission(resource: str, action: str):
     async def checker(request: Request, session: AsyncSession = Depends(get_session)):
         user = request.state.current_user
@@ -38,6 +46,7 @@ def require_permission(resource: str, action: str):
                 raise HTTPException(403, "key_scope_missing")
         return user
 
+    checker.accepted_permissions = [(resource, action)]  # type: ignore[attr-defined]
     return Depends(checker)
 
 
@@ -67,6 +76,7 @@ def require_any_permission(permissions: list[tuple[str, str]]):
                 raise HTTPException(403, "key_scope_missing")
         return user
 
+    checker.accepted_permissions = list(permissions)  # type: ignore[attr-defined]
     return Depends(checker)
 
 

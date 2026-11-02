@@ -21,6 +21,16 @@ jest.mock("@/lib/auth", () => ({
   getCurrentUser: () => ({ role_name: "comp_bio", sub: "1", org_id: "1" }),
 }));
 
+// The page's controls follow grants, so the fixture holds what comp_bio holds.
+jest.mock("@/hooks/usePermissions", () => ({
+  usePermissions: () => ({
+    canAccess: (resource: string, action: string) =>
+      ["references:upload", "pipelines:create"].includes(`${resource}:${action}`),
+    loading: false,
+    failed: false,
+  }),
+}));
+
 import { api } from "@/lib/api";
 const mockGet = api.get as jest.Mock;
 

@@ -9,6 +9,7 @@ import { ExtensibleVocabularySelect } from "@/components/shared/ExtensibleVocabu
 import { NamingProfileSelect } from "@/components/naming/NamingProfileSelect";
 import { SheetImportModal } from "@/components/experiments/SheetImportModal";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { useToast } from "@/components/shared/Toast";
 import { Card } from "@/components/ui/Card";
 import type {
@@ -17,7 +18,6 @@ import type {
   ExperimentTemplate,
   FieldDefaultValue,
   NamingProfile,
-  ProjectListResponse,
   SampleCreateRequest,
 } from "@/lib/types";
 
@@ -25,6 +25,7 @@ export default function NewExperimentPage() {
   const toast = useToast();
   const router = useRouter();
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [templates, setTemplates] = useState<ExperimentTemplate[]>([]);
   const [profiles, setProfiles] = useState<NamingProfile[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -108,12 +109,15 @@ export default function NewExperimentPage() {
   }
 
   useEffect(() => {
+    loadProjectOptions("/api/projects").then((options) => {
+      setProjects(options.projects.map((p) => ({ id: p.id, name: p.name })));
+      setProjectsDenied(options.status === "denied");
+      if (options.status === "failed") toast.error(loadFailureMessage("Projects"));
+    });
     Promise.all([
-      api.get<ProjectListResponse>("/api/projects"),
       api.get<ExperimentTemplate[]>("/api/templates"),
       api.get<NamingProfile[]>("/api/naming-profiles?status=active"),
-    ]).then(([projData, templateData, profileData]) => {
-      setProjects(projData.projects.map((p) => ({ id: p.id, name: p.name })));
+    ]).then(([templateData, profileData]) => {
       setTemplates(templateData);
       setProfiles(profileData);
     }).catch((e) => {
@@ -224,13 +228,15 @@ export default function NewExperimentPage() {
             <select id="project"
               value={form.project_id ?? ""}
               onChange={(e) => setForm({ ...form, project_id: e.target.value ? Number(e.target.value) : null })}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              disabled={projectsDenied}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-500"
             >
               <option value="">No project</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
+            {projectsDenied && <p className="mt-1 text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>}
           </div>
 
           <div>

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.content_access import file_for_content
 from app.api.dependencies import require_permission
 from app.database import get_session
 from app.exceptions import DomainError
@@ -223,7 +224,7 @@ async def reconcile_stuck_files(
 
 @router.get("/stats")
 async def file_stats(
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     session: AsyncSession = Depends(get_session),
 ):
     """Return file counts grouped by source (artifacts vs uploaded) and file type."""
@@ -231,7 +232,6 @@ async def file_stats(
 
     from app.models.file import File
 
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     is_artifact = case(
@@ -271,7 +271,7 @@ async def file_stats(
 
 @router.get("", response_model=FileListResponse)
 async def list_files(
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     file_type: str | None = None,
     experiment_id: int | None = None,
     project_id: int | None = None,
@@ -282,7 +282,6 @@ async def list_files(
     page_size: int = 25,
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     files, total = await FileService.list_files(
@@ -343,10 +342,9 @@ async def data_search(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
-    request: Request,
+    current_user: dict = require_permission("files", "view"),
     session: AsyncSession = Depends(get_session),
 ):
-    current_user = request.state.current_user
     org_id = int(current_user["org_id"])
 
     file = await FileService.get_file(session, file_id, org_id)
@@ -409,16 +407,11 @@ async def file_content(
 ):
     """Serve file bytes directly (same-origin proxy for cross-origin GCS content).
 
-    Accepts either a Bearer session JWT (Authorization header) or a
-    short-lived content token (query param). Content tokens carry org_id
-    but no user identity.
+    Accepts either a Bearer credential (authorized here) or a short-lived
+    content token in the query string (authorized when it was issued). Content
+    tokens carry org_id but no user identity.
     """
-    current_user = request.state.current_user
-    org_id = int(current_user["org_id"])
-
-    file = await FileService.get_file(session, file_id, org_id)
-    if not file:
-        raise HTTPException(404, "File not found")
+    file = await file_for_content(session, request, file_id)
     if file.storage_deleted:
         raise HTTPException(410, "File storage has been deleted")
 

@@ -11,7 +11,8 @@ import { ErrorState } from "@/components/shared/ErrorState";
 import { isAuthenticated } from "@/lib/auth";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
-import type { Experiment, ExperimentListResponse, ExperimentStatus, ProjectListResponse } from "@/lib/types";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
+import type { Experiment, ExperimentListResponse, ExperimentStatus } from "@/lib/types";
 
 import { clickableRow } from "@/lib/a11y";
 import { useToast } from "@/components/shared/Toast";
@@ -28,6 +29,7 @@ export default function ExperimentsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   // Bumped by Retry: the load lives in an effect keyed on the filters, so this
   // is what re-triggers it without changing what the user asked for.
@@ -35,11 +37,10 @@ export default function ExperimentsPage() {
   const pageSize = 25;
 
   useEffect(() => {
-    api.get<ProjectListResponse>("/api/projects").then((data) => {
-      setProjects(data.projects.map((p) => ({ id: p.id, name: p.name })));
-    }).catch((e) => {
-      logError("loading the project filter", e);
-      toast.error(loadFailureMessage("The project filter"));
+    loadProjectOptions("/api/projects").then((options) => {
+      setProjects(options.projects.map((p) => ({ id: p.id, name: p.name })));
+      setProjectsDenied(options.status === "denied");
+      if (options.status === "failed") toast.error(loadFailureMessage("The project filter"));
     });
   }, [router]);
 
@@ -111,13 +112,18 @@ export default function ExperimentsPage() {
           <select aria-label="Filter by project"
             value={projectFilter}
             onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
-            className="border border-gray-300 rounded-md px-3 py-2 text-sm"
+            disabled={projectsDenied}
+            title={projectsDenied ? PROJECTS_DENIED_MESSAGE : undefined}
+            className="border border-gray-300 rounded-md px-3 py-2 text-sm disabled:bg-gray-50 disabled:text-gray-400"
           >
             <option value="">All Projects</option>
             {projects.map((p) => (
               <option key={p.id} value={String(p.id)}>{p.name}</option>
             ))}
           </select>
+          {projectsDenied && (
+            <p className="text-xs text-ink-subtle self-center">{PROJECTS_DENIED_MESSAGE}</p>
+          )}
         </div>
       </div>
 

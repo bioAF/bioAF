@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { ReferenceStatusBadge } from "@/components/references/ReferenceStatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { isAuthenticated, getCurrentUser } from "@/lib/auth";
+import { isAuthenticated } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
 import type { ReferenceDataset, ReferenceDatasetListResponse } from "@/lib/types";
@@ -25,8 +26,8 @@ function formatBytes(bytes: number | null): string {
 
 export default function DataReferencesPage() {
   const router = useRouter();
-  const user = getCurrentUser();
-  const canAdd = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  const { canAccess } = usePermissions();
+  const canAdd = canAccess("references", "upload");
 
   const [references, setReferences] = useState<ReferenceDataset[]>([]);
   const [total, setTotal] = useState(0);

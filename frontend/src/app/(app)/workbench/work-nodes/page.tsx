@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { api, ApiError } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { loadProjectOptions, PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { usePermissions } from "@/hooks/usePermissions";
 import { FileTreeSelector } from "@/components/notebooks/FileTreeSelector";
 import { resolveWorkNodeProfiles } from "@/lib/workNodeProfiles";
@@ -22,7 +23,6 @@ import type {
   WorkNodeLaunchRequest,
   MachineType,
   Project,
-  ProjectListResponse,
   Experiment,
   ExperimentListResponse,
   EnvironmentResponse,
@@ -81,6 +81,7 @@ export default function WorkNodesPage() {
   // Launch form state
   const [launchStep, setLaunchStep] = useState(1);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsDenied, setProjectsDenied] = useState(false);
   const [experiments, setExperiments] = useState<Experiment[]>([]);
   const [scopeType, setScopeType] = useState<"experiment" | "project">("experiment");
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
@@ -178,6 +179,23 @@ export default function WorkNodesPage() {
     }
   }
 
+  /** The launch form's lists. Projects load apart from the rest: a role that may
+   * not list them still launches on an experiment, and the picker says why. */
+  async function loadLaunchOptions() {
+    const [projectOptions, expData, mtData, envData] = await Promise.all([
+      loadProjectOptions(),
+      api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
+      api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
+      api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
+    ]);
+    setProjects(projectOptions.projects);
+    setProjectsDenied(projectOptions.status === "denied");
+    if (projectOptions.status === "failed") toast.error(loadFailureMessage("Projects"));
+    setExperiments(expData.experiments);
+    setMachineTypes(mtData);
+    setEnvironments(envData.environments);
+  }
+
   async function openLaunchDialog() {
     setShowLaunch(true);
     setLaunchStep(1);
@@ -196,16 +214,7 @@ export default function WorkNodesPage() {
     setLaunchError(null);
 
     try {
-      const [projectData, expData, mtData, envData] = await Promise.all([
-        api.get<ProjectListResponse>("/api/projects?page_size=100"),
-        api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
-        api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
-        api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
-      ]);
-      setProjects(projectData.projects);
-      setExperiments(expData.experiments);
-      setMachineTypes(mtData);
-      setEnvironments(envData.environments);
+      await loadLaunchOptions();
     } catch (e) {
       logError("loading the work node form options", e);
       toast.error(loadFailureMessage("Form options"));
@@ -239,16 +248,7 @@ export default function WorkNodesPage() {
     // launch dialog yet this session.
     if (projects.length === 0 || machineTypes.length === 0 || environments.length === 0) {
       try {
-        const [projectData, expData, mtData, envData] = await Promise.all([
-          api.get<ProjectListResponse>("/api/projects?page_size=100"),
-          api.get<ExperimentListResponse>("/api/experiments?page_size=100"),
-          api.get<MachineType[]>("/api/v1/work-nodes/machine-types"),
-          api.get<EnvironmentListResponse>("/api/v1/environments?type=work_node"),
-        ]);
-        setProjects(projectData.projects);
-        setExperiments(expData.experiments);
-        setMachineTypes(mtData);
-        setEnvironments(envData.environments);
+        await loadLaunchOptions();
       } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not recreate the work node.");
     }
@@ -1090,7 +1090,8 @@ export default function WorkNodesPage() {
                     onChange={(e) =>
                       e.target.value ? handleProjectSelect(Number(e.target.value)) : null
                     }
-                    className="border rounded px-3 py-2 text-sm w-full"
+                    disabled={projectsDenied}
+                    className="border rounded px-3 py-2 text-sm w-full disabled:bg-gray-50 disabled:text-gray-500"
                   >
                     <option value="">No project</option>
                     {projects.map((p) => (
@@ -1100,6 +1101,9 @@ export default function WorkNodesPage() {
                       </option>
                     ))}
                   </select>
+                )}
+                {scopeType === "project" && projectsDenied && (
+                  <p className="mt-1 text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>
                 )}
               </section>
 

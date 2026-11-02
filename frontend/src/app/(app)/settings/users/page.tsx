@@ -47,6 +47,7 @@ type PendingAction =
   | { type: "role_change"; user: User; newRole: string }
   | { type: "resend_invite"; user: User }
   | { type: "reset_password_email"; user: User }
+  | { type: "activate"; user: User }
   | { type: "reactivate"; user: User }
   | { type: "delete"; user: User };
 
@@ -156,6 +157,10 @@ function SettingsUsersPageInner() {
           await api.post(`/api/users/${pendingAction.user.id}/admin-reset-password`, { mode: "email" });
           setSuccess(`Password reset email sent to ${pendingAction.user.email}`);
           break;
+        case "activate":
+          await api.post(`/api/users/${pendingAction.user.id}/activate`);
+          setSuccess(`${pendingAction.user.email} activated`);
+          break;
         case "reactivate":
           await api.post(`/api/users/${pendingAction.user.id}/reactivate`);
           setSuccess(`${pendingAction.user.email} reactivated`);
@@ -256,6 +261,12 @@ function SettingsUsersPageInner() {
           message: `Send a password reset email to ${pendingAction.user.email}?`,
           variant: "default",
         };
+      case "activate":
+        return {
+          title: "Activate User",
+          message: `Activate ${pendingAction.user.email} without accepting their invitation? They can sign in once they have a password, so send a password reset if they do not know theirs.`,
+          variant: "default",
+        };
       case "reactivate":
         return {
           title: "Reactivate User",
@@ -308,6 +319,17 @@ function SettingsUsersPageInner() {
             className="px-3 py-1.5 text-sm bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50"
           >
             Resend Invite
+          </button>
+        )}
+        {user.status === "invited" && canAccess("users", "deactivate") && (
+          <button
+            onClick={() => {
+              setPendingAction({ type: "activate", user });
+              setViewingUser(null);
+            }}
+            className="px-3 py-1.5 text-sm bg-white border border-green-300 text-green-700 rounded hover:bg-green-50"
+          >
+            Activate
           </button>
         )}
         <PasswordResetActions
@@ -547,7 +569,8 @@ function SettingsUsersPageInner() {
               : pendingAction.type === "lock" ? "Lock"
                 : pendingAction.type === "delete" ? "Delete"
                   : pendingAction.type === "reactivate" ? "Reactivate"
-                    : "Confirm"
+                    : pendingAction.type === "activate" ? "Activate"
+                      : "Confirm"
           }
           onConfirm={handleConfirmAction}
           onCancel={() => setPendingAction(null)}

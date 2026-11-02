@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { StatusBadge } from "@/components/shared/StatusBadge";
 import { LoadingSpinner } from "@/components/shared/LoadingSpinner";
 import { ErrorState } from "@/components/shared/ErrorState";
-import { getCurrentUser } from "@/lib/auth";
+import { usePermissions } from "@/hooks/usePermissions";
 import { api } from "@/lib/api";
 import { Modal } from "@/components/shared/Modal";
 import { Button } from "@/components/ui/Button";
@@ -39,8 +39,8 @@ function ProjectsPageInner() {
   const [newHypothesis, setNewHypothesis] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const user = getCurrentUser();
-  const canCreate = user?.role_name === "admin" || user?.role_name === "comp_bio";
+  const { canAccess } = usePermissions();
+  const canCreate = canAccess("projects", "create");
 
   useEffect(() => {
     loadProjects();

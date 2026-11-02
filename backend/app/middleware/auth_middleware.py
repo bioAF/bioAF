@@ -4,8 +4,9 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from app.services.auth_service import AuthService
+from app.services.auth_service import CONTENT_TOKEN_PURPOSE, AuthService
 from app.services.api_key_service import KEY_PREFIX as API_KEY_PREFIX
+from app.services.audit_service import current_api_key_id
 
 # Endpoints that don't require authentication
 PUBLIC_PATHS = {
@@ -47,9 +48,18 @@ _PLOT_THUMBNAIL_CONTENT_RE = re.compile(r"^/api/plots/\d+/thumbnail/content$")
 _INTERNAL_CALLBACK_RE = re.compile(r"^/api/internal/")
 
 
+def _content_resource_type(path: str) -> str | None:
+    """The resource type a content path serves, or None for any other path."""
+    if _FILE_CONTENT_RE.match(path):
+        return "file"
+    if _PLOT_THUMBNAIL_CONTENT_RE.match(path):
+        return "plot_thumbnail"
+    return None
+
+
 def _is_file_content_path(path: str) -> bool:
     """Return True for paths that accept content-token query-param auth."""
-    return _FILE_CONTENT_RE.match(path) is not None or _PLOT_THUMBNAIL_CONTENT_RE.match(path) is not None
+    return _content_resource_type(path) is not None
 
 
 _RESOURCE_ID_RE = re.compile(r"/(\d+)/(?:content|thumbnail/content)$")
@@ -79,7 +89,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if auth_header and auth_header.startswith("Bearer "):
                 try:
                     payload = AuthService.validate_token(auth_header.split(" ", 1)[1])
-                    request.state.current_user = payload
+                    if payload.get("purpose") != CONTENT_TOKEN_PURPOSE:
+                        request.state.current_user = payload
                 except Exception:
                     pass
             return await call_next(request)
@@ -93,11 +104,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             try:
                 payload = validate_content_token(request.query_params["token"])
-                # Verify the token is scoped to the requested resource
+                # Verify the token is scoped to the requested resource. A file and
+                # a plot can share a number, so the ID alone proves nothing.
                 resource_id = _extract_resource_id(path)
-                if payload.get("resource_id") != resource_id:
+                if payload.get("resource_id") != resource_id or payload.get("resource_type") != _content_resource_type(
+                    path
+                ):
                     return JSONResponse(status_code=401, content={"detail": "Token not valid for this resource"})
                 request.state.current_user = payload
+                request.state.content_token_verified = True
                 return await call_next(request)
             except (ValueError, Exception):
                 return JSONResponse(status_code=401, content={"detail": "Invalid or expired content token"})
@@ -147,10 +162,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 "scopes": list(key.scopes or []),
                 "api_key_id": key.id,
             }
-            return await call_next(request)
+            attribution = current_api_key_id.set(key.id)
+            try:
+                return await call_next(request)
+            finally:
+                current_api_key_id.reset(attribution)
 
         try:
             payload = AuthService.validate_token(token)
+            # Same signing key, but a content token is never a session.
+            if payload.get("purpose") == CONTENT_TOKEN_PURPOSE:
+                return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
             # JWT callers have no per-key scope envelope; mark explicitly.
             payload.setdefault("scopes", None)
             payload.setdefault("api_key_id", None)

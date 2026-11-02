@@ -1,4 +1,4 @@
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
@@ -540,6 +540,23 @@ class SampleService:
 
         result = await session.execute(query.order_by(Sample.created_at.desc()))
         return list(result.scalars().all())
+
+    @staticmethod
+    async def list_organization_samples(
+        session: AsyncSession, org_id: int, page: int = 1, page_size: int = 100
+    ) -> tuple[list[tuple[Sample, str]], int]:
+        """Every sample in the Organization with its experiment's name."""
+        owned = (Experiment.organization_id == org_id,)
+        total = await session.scalar(select(func.count(Sample.id)).join(Experiment).where(*owned))
+        result = await session.execute(
+            select(Sample, Experiment.name)
+            .join(Experiment, Experiment.id == Sample.experiment_id)
+            .where(*owned)
+            .order_by(Experiment.name, Sample.external_id, Sample.id)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return [(sample, name) for sample, name in result.all()], total or 0
 
     @staticmethod
     async def get_sample_with_files(session: AsyncSession, sample_id: int) -> Sample | None:
