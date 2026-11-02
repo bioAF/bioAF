@@ -14,6 +14,12 @@ from app.exceptions import ValidationError
 CONTENT_TOKEN_PURPOSE = "content_access"
 
 
+# Stored for every invited account until invites took a random password. It is
+# public in this repository's history, so rows may still hold it and no account
+# may ever sign in with it.
+OLD_INVITE_PLACEHOLDER = "placeholder-not-usable"
+
+
 class AuthService:
     @staticmethod
     def hash_password(password: str) -> str:
@@ -21,6 +27,15 @@ class AuthService:
             password.encode("utf-8"),
             bcrypt.gensalt(rounds=settings.bcrypt_rounds),
         ).decode("utf-8")
+
+    @staticmethod
+    def unusable_password_hash() -> str:
+        """A hash of a password nobody knows, for an account with none yet."""
+        return AuthService.hash_password(secrets.token_urlsafe(32))
+
+    @staticmethod
+    def holds_old_invite_placeholder(hashed_password: str) -> bool:
+        return AuthService.verify_password(OLD_INVITE_PLACEHOLDER, hashed_password)
 
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:

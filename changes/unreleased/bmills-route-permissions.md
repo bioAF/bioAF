@@ -17,4 +17,5 @@
 - Add Samples on a project works again. It read a route that does not exist; it now reads a new `GET /api/samples` list, which needs `samples:view`.
 - The project list counts experiments and samples the way project detail does, including samples added through `project_samples`.
 - Invitations can be accepted. The email links to a new `/accept-invite` page, and bulk invites now send that email.
-- Admins can activate an invited user from Settings > Users. A password reset still leaves an invited user invited.
+- Admins can activate an invited user from Settings > Users. A password reset still leaves an invited user invited. An activated user with no password of their own needs a password reset to sign in.
+- Invited accounts no longer share one stored password. Any that still hold it have it replaced when activated or reactivated, and no account can sign in with it.

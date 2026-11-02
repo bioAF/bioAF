@@ -289,3 +289,111 @@ async def test_activate_needs_the_deactivate_grant(client, session, admin_user, 
     assert response.status_code == 403
     await session.refresh(invited_user)
     assert invited_user.status == "invited"
+
+
+# The string the invite path stored for every account. It is public in this
+# repository's history, so no account may ever sign in with it.
+OLD_PLACEHOLDER = "placeholder-not-usable"
+
+
+async def _login(client, email: str, password: str):
+    return await client.post("/api/auth/login", json={"email": email, "password": password})
+
+
+@pytest_asyncio.fixture
+async def old_invitation(session, admin_user) -> User:
+    """An invitation issued before invites stopped sharing one password."""
+    user = User(
+        email="old-invite@test.com",
+        password_hash=AuthService.hash_password(OLD_PLACEHOLDER),
+        role_id=await _role_id(session, admin_user.organization_id),
+        organization_id=admin_user.organization_id,
+        status="invited",
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+@pytest.mark.asyncio
+async def test_a_new_invitation_does_not_hold_the_shared_placeholder(client, session, admin_user, admin_headers):
+    role_id = await _role_id(session, admin_user.organization_id)
+    with patch("app.api.users.EmailService.send_invitation", return_value=True):
+        response = await client.post(
+            "/api/users", json={"email": "fresh@test.com", "role_id": role_id}, headers=admin_headers
+        )
+
+    user = await session.get(User, response.json()["id"])
+    assert not AuthService.verify_password(OLD_PLACEHOLDER, user.password_hash)
+
+
+@pytest.mark.asyncio
+async def test_a_real_invitation_activated_cannot_sign_in_with_the_placeholder(
+    client, session, admin_user, admin_headers
+):
+    role_id = await _role_id(session, admin_user.organization_id)
+    with patch("app.api.users.EmailService.send_invitation", return_value=True):
+        invited = await client.post(
+            "/api/users", json={"email": "act@test.com", "role_id": role_id}, headers=admin_headers
+        )
+
+    activated = await client.post(f"/api/users/{invited.json()['id']}/activate", headers=admin_headers)
+
+    assert activated.status_code == 200
+    assert (await _login(client, "act@test.com", OLD_PLACEHOLDER)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_activating_an_old_invitation_retires_its_placeholder(client, session, admin_headers, old_invitation):
+    response = await client.post(f"/api/users/{old_invitation.id}/activate", headers=admin_headers)
+
+    assert response.status_code == 200
+    await session.refresh(old_invitation)
+    assert not AuthService.verify_password(OLD_PLACEHOLDER, old_invitation.password_hash)
+    assert (await _login(client, old_invitation.email, OLD_PLACEHOLDER)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_deactivate_then_reactivate_retires_the_placeholder(client, session, admin_headers, old_invitation):
+    await client.post(f"/api/users/{old_invitation.id}/deactivate", headers=admin_headers)
+    response = await client.post(f"/api/users/{old_invitation.id}/reactivate", headers=admin_headers)
+
+    assert response.json()["status"] == "active"
+    await session.refresh(old_invitation)
+    assert not AuthService.verify_password(OLD_PLACEHOLDER, old_invitation.password_hash)
+    assert (await _login(client, old_invitation.email, OLD_PLACEHOLDER)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_an_already_active_account_cannot_sign_in_with_the_placeholder(client, session, old_invitation):
+    old_invitation.status = "active"
+    await session.commit()
+
+    assert (await _login(client, old_invitation.email, OLD_PLACEHOLDER)).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_password_set_before_activation_keeps_working(client, session, admin_headers, old_invitation):
+    await client.post(
+        f"/api/users/{old_invitation.id}/admin-reset-password",
+        json={"mode": "temporary", "temporary_password": "tempchosenpass1"},
+        headers=admin_headers,
+    )
+
+    await client.post(f"/api/users/{old_invitation.id}/activate", headers=admin_headers)
+
+    assert (await _login(client, old_invitation.email, "tempchosenpass1")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_an_activated_user_can_still_get_a_password(client, session, admin_headers, old_invitation):
+    await client.post(f"/api/users/{old_invitation.id}/activate", headers=admin_headers)
+
+    await client.post(
+        f"/api/users/{old_invitation.id}/admin-reset-password",
+        json={"mode": "temporary", "temporary_password": "tempchosenpass2"},
+        headers=admin_headers,
+    )
+
+    assert (await _login(client, old_invitation.email, "tempchosenpass2")).status_code == 200

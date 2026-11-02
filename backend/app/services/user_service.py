@@ -8,6 +8,13 @@ from app.services.audit_service import log_action
 
 class UserService:
     @staticmethod
+    def _retire_old_invite_placeholder(user: User) -> None:
+        """Called before an account turns active, which is what makes its stored
+        credential usable. An invitation can reach that point never having set one."""
+        if AuthService.holds_old_invite_placeholder(user.password_hash):
+            user.password_hash = AuthService.unusable_password_hash()
+
+    @staticmethod
     async def get_by_email(session: AsyncSession, email: str) -> User | None:
         result = await session.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
@@ -71,10 +78,9 @@ class UserService:
         name: str | None = None,
     ) -> tuple[User, str]:
         """Invite a user. Returns (user, invite_token)."""
-        placeholder_hash = AuthService.hash_password("placeholder-not-usable")
         user = User(
             email=email,
-            password_hash=placeholder_hash,
+            password_hash=AuthService.unusable_password_hash(),
             role_id=role_id,
             organization_id=organization_id,
             name=name,
@@ -163,7 +169,9 @@ class UserService:
         user: User,
         actor_user_id: int,
     ) -> User:
-        """An admin vouching for an invited user who has not accepted."""
+        """An admin vouching for an invited user who has not accepted. They need a
+        password reset to sign in unless the admin already set them one."""
+        UserService._retire_old_invite_placeholder(user)
         user.status = "active"
         await session.flush()
 
@@ -188,6 +196,7 @@ class UserService:
         actor_user_id: int,
     ) -> User:
         old_status = user.status
+        UserService._retire_old_invite_placeholder(user)
         user.status = "active"
         await session.flush()
 
