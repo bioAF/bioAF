@@ -57,3 +57,11 @@ test("a failure keeps its visible report", async () => {
   await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(expect.stringMatching(/The project filter could not be loaded/)));
   expect(screen.queryByText(/does not include viewing projects/)).not.toBeInTheDocument();
 });
+
+test("a denial message leaves the filters lined up", async () => {
+  givenProjects(() => Promise.reject(Object.assign(new Error("role_missing"), { status: 403 })));
+  render(<LiteraturePage />);
+
+  const message = await screen.findByText(/does not include viewing projects/);
+  expect(screen.getByLabelText("Project").parentElement).not.toContainElement(message);
+});

@@ -297,9 +297,6 @@ export default function LiteratureLibraryPage() {
                 </option>
               ))}
             </select>
-            {projectsDenied && (
-              <p className="mt-1 text-xs text-gray-500 max-w-xs">{PROJECTS_DENIED_MESSAGE}</p>
-            )}
           </div>
           <div>
             <label htmlFor="experiment" className="block text-xs text-gray-600 mb-1">Experiment</label>
@@ -362,6 +359,9 @@ export default function LiteratureLibraryPage() {
           <span className="ml-auto text-sm text-gray-500 self-center">
             {total} papers
           </span>
+          {projectsDenied && (
+            <p className="w-full text-xs text-gray-500">{PROJECTS_DENIED_MESSAGE}</p>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-2 mb-4 text-xs">

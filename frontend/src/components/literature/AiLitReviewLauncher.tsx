@@ -153,14 +153,6 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
               </option>
             ))}
           </select>
-          <div className="w-64">
-            <PickerNotice
-              status={projectOptions.status}
-              deniedMessage={PROJECTS_DENIED_MESSAGE}
-              failedWhat="Projects"
-              onRetry={projectOptions.retry}
-            />
-          </div>
         </div>
         <div>
           <label
@@ -188,6 +180,14 @@ export function AiLitReviewLauncher({ onSubmitted }: Props) {
           disabled={running || !experimentId}>
           {running ? "Running..." : "Run AI Lit Review"}
         </Button>
+        <div className="w-full">
+          <PickerNotice
+            status={projectOptions.status}
+            deniedMessage={PROJECTS_DENIED_MESSAGE}
+            failedWhat="Projects"
+            onRetry={projectOptions.retry}
+          />
+        </div>
       </div>
       {running && (
         <div className="mt-3" data-testid="lit-review-progress">

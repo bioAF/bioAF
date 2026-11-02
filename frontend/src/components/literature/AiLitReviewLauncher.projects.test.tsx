@@ -60,3 +60,11 @@ test("a failure is visible and can be retried", async () => {
   expect(await screen.findByRole("option", { name: "Atlas" })).toBeInTheDocument();
   expect(screen.queryByText(/Projects could not be loaded/)).not.toBeInTheDocument();
 });
+
+test("a denial message leaves the pickers lined up", async () => {
+  givenProjects(() => Promise.reject(Object.assign(new Error("role_missing"), { status: 403 })));
+  render(<AiLitReviewLauncher />);
+
+  const message = await screen.findByText(/does not include viewing projects/);
+  expect(projectFilter().parentElement).not.toContainElement(message);
+});
