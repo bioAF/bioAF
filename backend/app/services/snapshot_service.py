@@ -40,7 +40,8 @@ def _in_a_project(org_id: int) -> ColumnElement[bool]:
     nested = exists().where(
         Experiment.id == AnalysisSnapshot.experiment_id,
         Experiment.organization_id == org_id,
-        Experiment.project_id.is_not(None),
+        Project.id == Experiment.project_id,
+        Project.organization_id == org_id,
     )
     return or_(direct, nested)
 

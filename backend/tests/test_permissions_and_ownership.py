@@ -728,6 +728,24 @@ async def test_a_snapshot_linked_only_to_a_foreign_experiment_gives_no_project_p
     assert (await client.get(f"/api/snapshots/{stale.id}", headers=headers)).status_code == 403
 
 
+@pytest.mark.asyncio
+async def test_a_nested_snapshot_through_a_foreign_project_gives_no_project_path(
+    client, session, admin_user, foreign_records
+):
+    org_id = admin_user.organization_id
+    experiment = Experiment(organization_id=org_id, name="stale link", project_id=foreign_records.project.id)
+    session.add(experiment)
+    await session.flush()
+    stale = _snapshot(org_id, admin_user.id, "stale nested", experiment_id=experiment.id)
+    session.add(stale)
+    await session.commit()
+    headers = await _custom_role_headers(session, org_id, "stale-nested@test.com", [("projects", "view")])
+
+    assert (await client.get(f"/api/snapshots/{stale.id}", headers=headers)).status_code == 403
+    listed = await client.get("/api/snapshots", headers=headers)
+    assert stale.id not in {s["id"] for s in listed.json()["snapshots"]}
+
+
 async def _project_snapshot_view(client, headers, project_id: int) -> tuple[set[int], int, int]:
     """(timeline IDs, list count, detail count) for one project."""
     timeline = await client.get(f"/api/snapshots?project_id={project_id}", headers=headers)
