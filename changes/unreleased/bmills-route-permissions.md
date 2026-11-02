@@ -11,3 +11,10 @@
 - Forms that pick a project say when a role may not list projects, and keep what that role can still do: Associate Paper and custom pipeline launch list experiments without a project, deep links still select their experiment, uploads keep experiment, sample, and global scope, and Add to Project can still create a project. A list that failed to load stays visible as a failure, with Retry where the picker is inline.
 - Add to Project in the dataset browser follows `projects:create` instead of the admin and comp_bio role names.
 - Experiment pickers on Associate Paper, custom pipeline launch, and upload list every experiment instead of the first page.
+
+### Fixes
+
+- Add Samples on a project works again. It read a route that does not exist; it now reads a new `GET /api/samples` list, which needs `samples:view`.
+- The project list counts experiments and samples the way project detail does, including samples added through `project_samples`.
+- Invitations can be accepted. The email links to a new `/accept-invite` page, and bulk invites now send that email.
+- Admins can activate an invited user from Settings > Users. A password reset still leaves an invited user invited.
