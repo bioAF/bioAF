@@ -48,7 +48,6 @@ test("a 403 keeps experiment association, listing experiments without a project"
 
   await waitFor(() => expect(projectSelect()).toBeDisabled());
   expect(screen.getByText(/does not include viewing projects/)).toBeInTheDocument();
-  expect(mockGet).toHaveBeenCalledWith("/api/experiments?page_size=100");
 
   await userEvent.selectOptions(experimentSelect(), await screen.findByRole("option", { name: "Exp One" }));
   await userEvent.click(associate());
@@ -79,6 +78,38 @@ test("a retry that succeeds returns to the project-first picker", async () => {
   expect(await screen.findByRole("option", { name: "Atlas" })).toBeInTheDocument();
   expect(projectSelect()).toBeEnabled();
   await waitFor(() => expect(experimentSelect()).toBeDisabled());
+});
+
+test("a retry that succeeds keeps a chosen experiment", async () => {
+  const projects = jest
+    .fn()
+    .mockRejectedValueOnce(new Error("Backend unavailable"))
+    .mockResolvedValue({ projects: [{ id: 11, name: "Atlas" }] });
+  given(projects);
+  open();
+  await userEvent.selectOptions(experimentSelect(), await screen.findByRole("option", { name: "Exp One" }));
+
+  await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  expect(await screen.findByRole("option", { name: "Atlas" })).toBeInTheDocument();
+  expect((experimentSelect() as HTMLSelectElement).value).toBe("101");
+  await userEvent.click(associate());
+  await waitFor(() => expect(mockAssoc).toHaveBeenCalledWith(5, { scope_type: "experiment", scope_id: 101 }));
+});
+
+test("lists experiments past the first page", async () => {
+  const firstPage = Array.from({ length: 200 }, (_, i) => ({ id: 1000 + i, name: `Exp ${i}` }));
+  mockGet.mockImplementation((url: string) => {
+    if (url.startsWith("/api/projects")) return Promise.reject(denied());
+    return Promise.resolve(
+      url.includes("page=2")
+        ? { experiments: [{ id: 2000, name: "Oldest" }], total: 201 }
+        : { experiments: firstPage, total: 201 },
+    );
+  });
+  open();
+
+  expect(await screen.findByRole("option", { name: "Oldest" })).toBeInTheDocument();
 });
 
 test("a role that may list neither is told so, and nothing can be submitted", async () => {

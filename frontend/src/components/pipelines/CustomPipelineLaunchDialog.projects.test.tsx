@@ -167,6 +167,47 @@ test("a retry that succeeds keeps the chosen experiment and restores its project
   await waitFor(() => expect(experimentSelect().value).toBe("15"));
 });
 
+test("a retry that succeeds keeps a chosen experiment with no project", async () => {
+  const projects = jest
+    .fn()
+    .mockRejectedValueOnce(new Error("Backend unavailable"))
+    .mockResolvedValue({ projects: [atlas] });
+  given(projects);
+  open();
+  await screen.findByRole("option", { name: "Unfiled" });
+  fireEvent.change(experimentSelect(), { target: { value: "16" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  await waitFor(() => expect(projectSelect()).toBeEnabled());
+  await waitFor(() => expect(experimentSelect().value).toBe("16"));
+  expect(projectSelect().value).toBe("");
+  expect(await launch()).toMatchObject({ experiment_id: 16, project_id: null });
+});
+
+test("a retry that fails leaves the chosen experiment alone", async () => {
+  given(() => Promise.reject(new Error("Backend unavailable")));
+  open();
+  await screen.findByRole("option", { name: "Unfiled" });
+  fireEvent.change(experimentSelect(), { target: { value: "16" } });
+
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+  await waitFor(() => expect(mockGet.mock.calls.filter(([u]) => u.startsWith("/api/projects"))).toHaveLength(2));
+  expect(experimentSelect().value).toBe("16");
+});
+
+test("lists experiments past the first page", async () => {
+  const firstPage = Array.from({ length: 200 }, (_, i) => ({ id: 1000 + i, name: `Exp ${i}`, project: null }));
+  given(() => Promise.reject(denied()), {
+    "page=1": () => Promise.resolve({ experiments: firstPage, total: 201 }),
+    "page=2": () => Promise.resolve({ experiments: [{ id: 2000, name: "Oldest", project: null }], total: 201 }),
+  });
+  open();
+
+  expect(await screen.findByRole("option", { name: "Oldest" })).toBeInTheDocument();
+});
+
 test("a role that may list neither is told so", async () => {
   given(() => Promise.reject(denied()), { "/api/experiments?": () => Promise.reject(denied()) });
   open();

@@ -4,6 +4,7 @@ import { Modal } from "@/components/shared/Modal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { logError, loadFailureMessage } from "@/lib/errorReporting";
+import { listAllExperiments } from "@/lib/experimentOptions";
 import { useProjectOptions } from "@/hooks/useProjectOptions";
 import {
   EXPERIMENTS_DENIED_MESSAGE,
@@ -21,7 +22,6 @@ import type {
   CustomPipelineVariable,
   CustomPipelineVersion,
   ExperimentDetail,
-  ExperimentListResponse,
   FileListResponse,
   FileResponse,
 } from "@/lib/types";
@@ -102,7 +102,8 @@ export function CustomPipelineLaunchDialog({
   const projectsUnavailable = projectOptions.unavailable;
   const [experiments, setExperiments] = useState<ExperimentOption[]>([]);
   const [experimentsProblem, setExperimentsProblem] = useState<"denied" | "failed" | null>(null);
-  // A deep-linked experiment can sit past the page of the unfiltered list.
+  // An experiment held apart from the list: one with no project stays selected
+  // after Retry brings the project-first picker back.
   const [linkedExperiment, setLinkedExperiment] = useState<ExperimentOption | null>(null);
   const [files, setFiles] = useState<FileResponse[]>([]);
   const [filesFailed, setFilesFailed] = useState(false);
@@ -185,13 +186,10 @@ export function CustomPipelineLaunchDialog({
     let stale = false;
     void (async () => {
       try {
-        const scope = projectId != null ? `project_id=${projectId}&` : "";
-        const data = await api.get<ExperimentListResponse>(
-          `/api/experiments?${scope}page_size=200`,
-        );
+        const all = await listAllExperiments(projectId ?? undefined);
         if (stale) return;
         setExperiments(
-          data.experiments.map((e) => ({
+          all.map((e) => ({
             id: e.id,
             name: e.name,
             projectId: e.project?.id ?? null,
@@ -200,7 +198,7 @@ export function CustomPipelineLaunchDialog({
         const wanted = pendingExperimentId.current;
         if (wanted != null && projectId != null) {
           pendingExperimentId.current = null;
-          if (data.experiments.some((e) => e.id === wanted)) setExperimentId(wanted);
+          if (all.some((e) => e.id === wanted)) setExperimentId(wanted);
         }
       } catch (e) {
         if (stale) return;
@@ -227,10 +225,26 @@ export function CustomPipelineLaunchDialog({
     [experiments, linkedExperiment],
   );
 
-  // A selection made without a project survives a retry that brings them back:
-  // it resolves to its project the same way a deep link does.
+  // A selection made without a project survives a retry that brings them back.
+  // This runs after the effect above, which clears the selection on the same
+  // change. An experiment with a project resolves the way a deep link does; one
+  // without keeps its place, since no project will ever lead back to it.
+  const experimentToKeep = useRef<ExperimentOption | null>(null);
+  useEffect(() => {
+    const kept = experimentToKeep.current;
+    if (kept == null || projectsStatus !== "loaded") return;
+    experimentToKeep.current = null;
+    if (kept.projectId != null) {
+      pendingExperimentId.current = kept.id;
+      setProjectId(kept.projectId);
+    } else {
+      setLinkedExperiment(kept);
+      setExperimentId(kept.id);
+    }
+  }, [projectsStatus]);
+
   function retryProjects() {
-    pendingExperimentId.current = experimentId;
+    experimentToKeep.current = experimentOptions.find((e) => e.id === experimentId) ?? null;
     projectOptions.retry();
   }
 
@@ -464,7 +478,7 @@ export function CustomPipelineLaunchDialog({
                   onChange={(e) =>
                     setExperimentId(e.target.value ? Number(e.target.value) : null)
                   }
-                  disabled={projectId == null && !projectsUnavailable}
+                  disabled={projectId == null && !projectsUnavailable && linkedExperiment == null}
                   className="w-full border rounded px-3 py-2 text-sm bg-white disabled:bg-gray-100 disabled:text-gray-400"
                 >
                   <option value="">
