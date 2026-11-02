@@ -42,6 +42,24 @@ test("a 403 closes Project scope, says why, and keeps experiment scope", async (
   expect((screen.getByLabelText(/^Experiment/) as HTMLSelectElement).value).toBe("5");
 });
 
+test("a 403 can still reach experiments past the first page", async () => {
+  const firstPage = Array.from({ length: 200 }, (_, i) => ({ id: 1000 + i, name: `Exp ${i}`, code: null, status: "registered" }));
+  mockGet.mockImplementation((url: string) => {
+    if (url.startsWith("/api/projects")) return Promise.reject(Object.assign(new Error("role_missing"), { status: 403 }));
+    if (url.startsWith("/api/experiments?")) {
+      return Promise.resolve(
+        url.includes("page=2")
+          ? { experiments: [{ id: 2000, name: "Oldest", code: null, status: "registered" }], total: 201 }
+          : { experiments: firstPage, total: 201 },
+      );
+    }
+    return Promise.resolve([]);
+  });
+  render(<DataUploadPage />);
+
+  expect(await screen.findByRole("option", { name: "Oldest" })).toBeInTheDocument();
+});
+
 test("a failure is visible, can be retried, and leaves other scopes open", async () => {
   const projects = jest
     .fn()

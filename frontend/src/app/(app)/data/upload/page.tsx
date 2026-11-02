@@ -6,10 +6,10 @@ import { useCapabilities } from "@/hooks/useCapabilities";
 import { useProjectOptions } from "@/hooks/useProjectOptions";
 import { PROJECTS_DENIED_MESSAGE } from "@/lib/projectOptions";
 import { PickerNotice } from "@/components/shared/PickerNotice";
+import { listAllExperiments } from "@/lib/experimentOptions";
 import { suggestFilename, splitExtension, todayDateStr } from "@/lib/fileNaming";
 import { Card } from "@/components/ui/Card";
 import type {
-  ExperimentListResponse,
   FileResponse,
   SampleBrief,
 } from "@/lib/types";
@@ -91,12 +91,10 @@ export default function DataUploadPage() {
     setExperimentId("");
     setSampleId("");
     setSamples([]);
-    const qs = projectId ? `?project_id=${projectId}&page_size=100` : "?page_size=100";
-    api
-      .get<ExperimentListResponse>(`/api/experiments${qs}`)
-      .then((data) =>
+    listAllExperiments(projectId)
+      .then((all) =>
         setExperiments(
-          data.experiments.map((e) => ({ id: e.id, name: e.name, code: e.code ?? null, status: e.status })),
+          all.map((e) => ({ id: e.id, name: e.name, code: e.code ?? null, status: e.status })),
         ),
       )
       .catch(() => setExperiments([]));
