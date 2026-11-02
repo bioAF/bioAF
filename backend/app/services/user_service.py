@@ -158,6 +158,30 @@ class UserService:
         return user
 
     @staticmethod
+    async def activate(
+        session: AsyncSession,
+        user: User,
+        actor_user_id: int,
+    ) -> User:
+        """An admin vouching for an invited user who has not accepted."""
+        user.status = "active"
+        await session.flush()
+
+        await log_action(
+            session,
+            user_id=actor_user_id,
+            entity_type="user",
+            entity_id=user.id,
+            action="activate",
+            details={
+                "status": "active",
+                "target_email": user.email,
+                "description": f"Activated {user.email} without an accepted invitation",
+            },
+        )
+        return user
+
+    @staticmethod
     async def reactivate(
         session: AsyncSession,
         user: User,

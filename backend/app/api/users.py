@@ -16,8 +16,13 @@ from app.services.auth_service import AuthService
 from app.services.email_service import EmailService
 from app.services import role_service
 from app.services.user_service import UserService
+from app.url_utils import public_base_url
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _accept_invite_link(request: Request, invite_token: str) -> str:
+    return f"{public_base_url(request)}/accept-invite?token={invite_token}"
 
 
 async def _get_role_name(session: AsyncSession, role_id: int) -> str:
@@ -83,6 +88,7 @@ async def list_users(
 @router.post("", response_model=UserResponse)
 async def invite_user(
     body: UserInvite,
+    request: Request,
     current_user: dict = require_permission("users", "edit_role"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -103,12 +109,11 @@ async def invite_user(
         name=body.name,
     )
 
-    invite_link = f"/api/users/accept-invite?token={invite_token}"
     from app.models.organization import Organization
 
     result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one()
-    EmailService.send_invitation(body.email, invite_link, org.name)
+    EmailService.send_invitation(body.email, _accept_invite_link(request, invite_token), org.name)
 
     await session.commit()
     return await _user_response_with_role_name(session, user)
@@ -117,6 +122,7 @@ async def invite_user(
 @router.post("/bulk-invite")
 async def bulk_invite(
     body: BulkInvite,
+    request: Request,
     current_user: dict = require_permission("users", "edit_role"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -125,6 +131,10 @@ async def bulk_invite(
     # Checked up front so one bad role invites nobody rather than half the list.
     for role_id in {invite.role_id for invite in body.invites}:
         await owned_role_or_404(session, role_id, org_id)
+
+    from app.models.organization import Organization
+
+    org = (await session.execute(select(Organization).where(Organization.id == org_id))).scalar_one()
 
     results = []
     for invite in body.invites:
@@ -141,6 +151,7 @@ async def bulk_invite(
             actor_user_id=actor_id,
             name=invite.name,
         )
+        EmailService.send_invitation(invite.email, _accept_invite_link(request, invite_token), org.name)
         results.append({"email": invite.email, "status": "invited", "user_id": user.id})
 
     await session.commit()
@@ -260,6 +271,25 @@ async def lock_user(
     return await _user_response_with_role_name(session, user)
 
 
+@router.post("/{user_id}/activate", response_model=UserResponse)
+async def activate_user(
+    user_id: int,
+    current_user: dict = require_permission("users", "deactivate"),
+    session: AsyncSession = Depends(get_session),
+):
+    actor_id = int(current_user["sub"])
+
+    user = await owned_user_or_404(session, user_id, int(current_user["org_id"]))
+
+    if user.status != "invited":
+        raise HTTPException(status_code=400, detail="Only invited users can be activated")
+
+    user = await UserService.activate(session, user, actor_id)
+    await session.commit()
+    await session.refresh(user)
+    return await _user_response_with_role_name(session, user)
+
+
 @router.post("/{user_id}/reactivate", response_model=UserResponse)
 async def reactivate_user(
     user_id: int,
@@ -313,6 +343,7 @@ async def delete_user(
 @router.post("/{user_id}/resend-invite")
 async def resend_invite(
     user_id: int,
+    request: Request,
     current_user: dict = require_permission("users", "invite"),
     session: AsyncSession = Depends(get_session),
 ):
@@ -325,13 +356,12 @@ async def resend_invite(
         raise HTTPException(status_code=400, detail="Can only resend invites to users with invited status")
 
     invite_token = AuthService.generate_invite_token(user.id, user.email)
-    invite_link = f"/api/users/accept-invite?token={invite_token}"
 
     from app.models.organization import Organization
 
     result = await session.execute(select(Organization).where(Organization.id == org_id))
     org = result.scalar_one()
-    EmailService.send_invitation(user.email, invite_link, org.name)
+    EmailService.send_invitation(user.email, _accept_invite_link(request, invite_token), org.name)
 
     await log_action(
         session,
@@ -375,8 +405,6 @@ async def admin_reset_password(
         )
         session.add(verification)
         await session.flush()
-
-        from app.url_utils import public_base_url
 
         reset_link = f"{public_base_url(request)}/reset-password?token={token}"
         sent = EmailService.send_password_reset(user.email, code, reset_link)
