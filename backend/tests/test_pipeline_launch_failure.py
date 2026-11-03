@@ -188,8 +188,14 @@ async def test_custom_provider_rejection_returns_and_commits_the_failed_run(
     assert run.submitted_by_user_id == user_id
 
     links = (
-        await fresh.execute(select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run.id))
-    ).scalars().all()
+        (
+            await fresh.execute(
+                select(PipelineRunInputFile.file_id).where(PipelineRunInputFile.pipeline_run_id == run.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert list(links) == [custom_launch["file_id"]]
 
     audit = (
@@ -298,7 +304,9 @@ async def test_catalog_provider_rejection_commits_the_failed_run_without_advanci
     assert run.started_at is None
     assert run.completed_at is not None
     sample_links = (
-        await fresh.execute(select(func.count()).select_from(PipelineRunSample).where(PipelineRunSample.pipeline_run_id == run.id))
+        await fresh.execute(
+            select(func.count()).select_from(PipelineRunSample).where(PipelineRunSample.pipeline_run_id == run.id)
+        )
     ).scalar_one()
     assert sample_links == 1
     file_links = (
@@ -382,6 +390,165 @@ async def test_launch_does_not_commit_the_callers_unrelated_pending_work(
             session, admin_user.organization_id, admin_user.id, PipelineRunLaunchRequest(**catalog_launch)
         )
 
-    seen = (await fresh.execute(select(func.count()).select_from(Project).where(Project.name == "Uncommitted"))).scalar_one()
+    seen = (
+        await fresh.execute(select(func.count()).select_from(Project).where(Project.name == "Uncommitted"))
+    ).scalar_one()
     assert seen == 0
     await session.rollback()
+
+
+# --- Quota denial (owner decision 2026-11-03) ---
+#
+# A denied launch answers 409, creates no run and submits nothing, but its `quota_exceeded` audit
+# entry is committed in its own transaction (the request's is rolled back), and QUOTA_WARNING is
+# announced only after that commit. Nothing the caller had pending is committed with it.
+
+
+async def _exhausted_quota(session, user_id: int, org_id: int) -> int:
+    from datetime import datetime, timedelta, timezone
+    from decimal import Decimal
+
+    from app.models.user_quota import UserQuota
+
+    quota = UserQuota(
+        user_id=user_id,
+        organization_id=org_id,
+        cpu_hours_monthly_limit=10,
+        cpu_hours_used_current_month=Decimal("10"),
+        quota_reset_at=datetime.now(timezone.utc) + timedelta(days=20),
+    )
+    session.add(quota)
+    await session.commit()
+    return quota.id
+
+
+@pytest.fixture
+def quota_warnings():
+    from app.services.event_types import QUOTA_WARNING
+
+    seen: list[dict] = []
+
+    async def record(payload):
+        seen.append(payload)
+
+    event_bus.subscribe(QUOTA_WARNING, record)
+    return seen
+
+
+async def _quota_audits(fresh) -> list[AuditLog]:
+    return list((await fresh.execute(select(AuditLog).where(AuditLog.action == "quota_exceeded"))).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_custom_quota_denial_commits_its_audit_and_warns_after(
+    client, session, admin_user, admin_token, custom_launch, fresh, events, quota_warnings
+):
+    user_id = admin_user.id
+    quota_id = await _exhausted_quota(session, user_id, admin_user.organization_id)
+    adapter = _accepting_adapter()
+    with patch("app.services.custom_pipeline_service.get_compute_adapter", return_value=adapter):
+        response = await client.post(custom_launch["url"], json=custom_launch["body"], headers=_bearer(admin_token))
+    await wait_for_deferred_events()
+
+    assert response.status_code == 409
+    assert adapter.submit_job.await_count == 0
+    assert (await fresh.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 0
+    audits = await _quota_audits(fresh)
+    assert [(a.user_id, a.entity_id) for a in audits] == [(user_id, quota_id)]
+    assert [w["entity_id"] for w in quota_warnings] == [quota_id]
+    assert events[PIPELINE_STARTED] == [] and events[PIPELINE_FAILED] == []
+
+
+@pytest.mark.asyncio
+async def test_catalog_quota_denial_commits_its_audit_and_warns_after(
+    client, session, admin_user, admin_token, catalog_launch, fresh, quota_warnings
+):
+    quota_id = await _exhausted_quota(session, admin_user.id, admin_user.organization_id)
+    adapter = _accepting_adapter()
+    with patch("app.services.pipeline_run_service.get_compute_adapter", return_value=adapter):
+        response = await client.post("/api/pipeline-runs", json=catalog_launch, headers=_bearer(admin_token))
+    await wait_for_deferred_events()
+
+    assert response.status_code == 409
+    assert adapter.submit_job.await_count == 0
+    assert (await fresh.execute(select(func.count()).select_from(PipelineRun))).scalar_one() == 0
+    assert [a.entity_id for a in await _quota_audits(fresh)] == [quota_id]
+    assert [w["entity_id"] for w in quota_warnings] == [quota_id]
+
+
+@pytest.mark.asyncio
+async def test_quota_denial_does_not_commit_the_callers_unrelated_pending_work(
+    session, admin_user, catalog_launch, fresh, quota_warnings
+):
+    from app.exceptions import ConflictError
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+    from app.services.pipeline_run_service import PipelineRunService
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    await _exhausted_quota(session, user_id, org_id)
+    session.add(Project(organization_id=org_id, name="Pending Elsewhere", owner_user_id=user_id))
+    await session.flush()
+
+    with pytest.raises(ConflictError):
+        await PipelineRunService.launch_run(session, org_id, user_id, PipelineRunLaunchRequest(**catalog_launch))
+    await wait_for_deferred_events()
+
+    pending = (
+        await fresh.execute(select(func.count()).select_from(Project).where(Project.name == "Pending Elsewhere"))
+    ).scalar_one()
+    assert pending == 0
+    assert len(await _quota_audits(fresh)) == 1
+    assert len(quota_warnings) == 1
+    await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_quota_denial_whose_audit_cannot_commit_still_denies_and_does_not_warn(
+    session, admin_user, catalog_launch, fresh, quota_warnings
+):
+    from app.exceptions import ConflictError
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+    from app.services.pipeline_run_service import PipelineRunService
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    await _exhausted_quota(session, user_id, org_id)
+
+    real_commit = AsyncSession.commit
+
+    async def failing_commit(self):
+        if self is not session:
+            raise RuntimeError("database unavailable")
+        return await real_commit(self)
+
+    with patch.object(AsyncSession, "commit", failing_commit), pytest.raises(ConflictError):
+        await PipelineRunService.launch_run(session, org_id, user_id, PipelineRunLaunchRequest(**catalog_launch))
+    await wait_for_deferred_events()
+
+    assert await _quota_audits(fresh) == []
+    assert quota_warnings == []
+    await session.rollback()
+
+
+@pytest.mark.asyncio
+async def test_quota_denial_keeps_the_requests_api_key_attribution(session, admin_user, catalog_launch, fresh):
+    """The denial audit is written on its own session but still names the key behind the request.
+
+    The public key scopes cannot reach a launch route today, so this holds the service boundary.
+    """
+    from app.exceptions import ConflictError
+    from app.schemas.pipeline_run import PipelineRunLaunchRequest
+    from app.services.audit_service import current_api_key_id
+    from app.services.pipeline_run_service import PipelineRunService
+
+    org_id, user_id = admin_user.organization_id, admin_user.id
+    await _exhausted_quota(session, user_id, org_id)
+
+    token = current_api_key_id.set(4242)
+    try:
+        with pytest.raises(ConflictError):
+            await PipelineRunService.launch_run(session, org_id, user_id, PipelineRunLaunchRequest(**catalog_launch))
+    finally:
+        current_api_key_id.reset(token)
+    await session.rollback()
+
+    assert [(a.user_id, a.api_key_id) for a in await _quota_audits(fresh)] == [(user_id, 4242)]

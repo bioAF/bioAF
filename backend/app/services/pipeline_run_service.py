@@ -786,7 +786,7 @@ class PipelineRunService:
         samples = PipelineRunService._samples_with_inputs(pipeline, contract, samples, data.drop_samples_without_files)
 
         # 4. Check quota
-        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0)
+        allowed, message = await QuotaService.check_quota(session, user_id, estimated_hours=2.0, isolate_denial=True)
         if not allowed:
             raise ConflictError(f"Quota exceeded: {message}")
 

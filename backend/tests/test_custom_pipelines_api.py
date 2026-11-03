@@ -760,9 +760,9 @@ async def test_launch_invalid_version(
 
 
 async def _pipeline_with_version(client, token, name: str, env_version_id: int) -> tuple[int, int]:
-    pipeline_id = (
-        await client.post("/api/v1/custom-pipelines", json={"name": name}, headers=_bearer(token))
-    ).json()["id"]
+    pipeline_id = (await client.post("/api/v1/custom-pipelines", json={"name": name}, headers=_bearer(token))).json()[
+        "id"
+    ]
     version_id = (
         await client.post(
             f"/api/v1/custom-pipelines/{pipeline_id}/versions",

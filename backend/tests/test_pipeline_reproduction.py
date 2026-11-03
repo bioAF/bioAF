@@ -22,7 +22,6 @@ from app.models.organization import Organization
 from app.models.pipeline_run import PipelineRun, PipelineRunSample
 from app.models.sample import Sample, sample_files
 from app.models.user import User
-from app.services.auth_service import AuthService
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_STARTED
@@ -174,9 +173,7 @@ async def test_reproducing_a_run_in_the_callers_organization_launches_it(
 
 
 @pytest.mark.asyncio
-async def test_reproduce_service_refuses_a_run_outside_the_stated_organization(
-    session, admin_user, other_org, compute
-):
+async def test_reproduce_service_refuses_a_run_outside_the_stated_organization(session, admin_user, other_org, compute):
     """Non-HTTP callers cannot skip the boundary: the service takes the Organization and enforces it."""
     foreign = await _launchable_run(session, other_org.id, other_org.user.id)
 
