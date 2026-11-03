@@ -887,6 +887,7 @@ class PipelineRunService:
             project_id=data.project_id,
             submitted_by_user_id=user_id,
             pipeline_name=pipeline.name,
+            pipeline_key=pipeline.pipeline_key,
             pipeline_version=pipeline.version,
             parameters_json=merged_params,
             reference_genome=data.reference_genome,
@@ -1385,11 +1386,10 @@ class PipelineRunService:
         if not original:
             raise NotFoundError("Original run not found")
 
+        pipeline_key = await PipelineRunService._reproducible_catalog_key(session, original, org_id)
+
         # Reconstruct launch request from original
         sample_ids = [s.id for s in original.samples] if original.samples else None
-
-        # Find the pipeline_key from catalog
-        pipeline_key = original.pipeline_name
 
         data = PipelineRunLaunchRequest(
             pipeline_key=pipeline_key,
@@ -1412,6 +1412,41 @@ class PipelineRunService:
         )
 
         return new_run
+
+    @staticmethod
+    async def _reproducible_catalog_key(session: AsyncSession, original: PipelineRun, org_id: int) -> str:
+        """The catalog key to relaunch ``original`` with, or a refusal before anything is created.
+
+        The stored key when there is one, and never a fallback from it. A row recorded before the
+        key was stored names its pipeline only by ``pipeline_name``, which is the display name; it
+        is accepted only when that is exactly a catalog key in this Organization (every nf-core
+        entry, whose name and key are the same), never matched as a display name. The launch path
+        runs the catalog's current version, so a run made on another version is refused rather than
+        silently relaunched on different code.
+        """
+        if original.pipeline_key:
+            key = original.pipeline_key
+            pipeline = await PipelineCatalogService.get_pipeline(session, org_id, key)
+            if pipeline is None:
+                raise ValidationError(
+                    f"This run cannot be reproduced: the pipeline it used ({key}) is no longer installed."
+                )
+        else:
+            key = original.pipeline_name
+            pipeline = await PipelineCatalogService.get_pipeline(session, org_id, key)
+            if pipeline is None:
+                raise ValidationError(
+                    f"This run cannot be reproduced automatically: it was recorded before bioAF stored "
+                    f"which catalog pipeline a run used, and '{original.pipeline_name}' does not name one. "
+                    "Launch it again from the pipeline catalog."
+                )
+
+        if original.pipeline_version != pipeline.version:
+            raise ValidationError(
+                f"This run cannot be reproduced exactly: it used {key} version "
+                f"{original.pipeline_version or 'unknown'}, and version {pipeline.version} is installed now."
+            )
+        return key
 
     @staticmethod
     async def _resolve_input_files(session: AsyncSession, run) -> list[dict]:

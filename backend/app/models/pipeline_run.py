@@ -17,6 +17,9 @@ class PipelineRun(Base):
     submitted_by_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     pipeline_name: Mapped[str] = mapped_column(String(255), nullable=False)
     pipeline_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # The catalog key a catalog launch used (pipeline_name is the display name). Null for custom
+    # runs and for catalog runs recorded before the key was stored; no backfill.
+    pipeline_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     parameters_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     input_files_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     output_files_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

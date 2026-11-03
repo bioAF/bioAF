@@ -64,8 +64,24 @@ def compute():
         yield adapter
 
 
-async def _launchable_run(session, org_id: int, user_id: int, *, key: str = "nf-core/scrnaseq") -> PipelineRun:
-    """A completed catalog run whose samples still have their reads: reproducible as it stands."""
+_UNSET = object()
+
+
+async def _launchable_run(
+    session,
+    org_id: int,
+    user_id: int,
+    *,
+    key: str = "nf-core/scrnaseq",
+    name: str | None = None,
+    stored_key: object = None,
+    version: object = _UNSET,
+) -> PipelineRun:
+    """A completed catalog run whose samples still have their reads: reproducible as it stands.
+
+    By default it is a historical row: no stored ``pipeline_key``, and a ``pipeline_name`` equal to
+    the catalog key, which is what every nf-core run recorded before the key was stored looks like.
+    """
     await PipelineCatalogService.initialize_builtin_pipelines(session, org_id)
     experiment = Experiment(organization_id=org_id, name="Repro Exp", owner_user_id=user_id, status="fastq_uploaded")
     session.add(experiment)
@@ -89,8 +105,9 @@ async def _launchable_run(session, org_id: int, user_id: int, *, key: str = "nf-
         organization_id=org_id,
         experiment_id=experiment.id,
         submitted_by_user_id=user_id,
-        pipeline_name=key,
-        pipeline_version=pipeline.version,
+        pipeline_name=name if name is not None else key,
+        pipeline_key=stored_key,
+        pipeline_version=pipeline.version if version is _UNSET else version,
         parameters_json={"aligner": "cellranger"},
         status="completed",
     )
@@ -181,3 +198,108 @@ async def test_reproduce_service_refuses_a_run_outside_the_stated_organization(s
         await PipelineRunService.reproduce_run(session, foreign.id, admin_user.organization_id, admin_user.id)
 
     assert compute.submit_job.await_count == 0
+
+
+# --- Catalog identity (owner decisions 2026-11-03) ---
+#
+# A run stores the catalog key it launched, and reproduction uses that key; the display name is
+# never used to find a pipeline. A run recorded before the key was stored is reproducible only when
+# its name is exactly a catalog key. The installed version must still be the one the run used.
+
+
+async def _assert_refused_without_effects(response, session, compute, runs_before: int) -> None:
+    assert response.status_code == 400, response.text
+    session.expire_all()
+    assert await _count(session, PipelineRun) == runs_before
+    assert compute.submit_job.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_launch_records_the_catalog_key(client, session, admin_user, admin_token, compute):
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id)
+    body = {"pipeline_key": "nf-core/scrnaseq", "experiment_id": original.experiment_id}
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        response = await client.post("/api/pipeline-runs", json=body, headers=_bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    session.expire_all()
+    assert (await session.get(PipelineRun, response.json()["id"])).pipeline_key == "nf-core/scrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_run_whose_name_differs_from_its_key_reproduces_through_the_key(
+    client, session, admin_user, admin_token, compute
+):
+    original = await _launchable_run(
+        session,
+        admin_user.organization_id,
+        admin_user.id,
+        key="bioaf-system-test",
+        name="bioAF System Test",
+        stored_key="bioaf-system-test",
+    )
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.call_args.args[0]["pipeline_name"] == "bioaf-system-test"
+    session.expire_all()
+    assert (await session.get(PipelineRun, response.json()["id"])).pipeline_key == "bioaf-system-test"
+
+
+@pytest.mark.asyncio
+async def test_a_historical_run_named_by_its_exact_key_still_reproduces(
+    client, session, admin_user, admin_token, compute
+):
+    original = await _launchable_run(session, admin_user.organization_id, admin_user.id)
+    assert original.pipeline_key is None
+
+    with patch("app.services.experiment_service.ExperimentService.update_status", new_callable=AsyncMock):
+        response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    assert response.status_code == 200, response.text
+    assert compute.submit_job.call_args.args[0]["pipeline_name"] == "nf-core/scrnaseq"
+
+
+@pytest.mark.asyncio
+async def test_a_historical_run_named_by_display_name_is_refused(client, session, admin_user, admin_token, compute):
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, key="bioaf-system-test", name="bioAF System Test"
+    )
+    runs_before = await _count(session, PipelineRun)
+
+    response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
+    assert "cannot be reproduced" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_stored_key_that_no_longer_resolves_does_not_fall_back_to_the_name(
+    client, session, admin_user, admin_token, compute
+):
+    """The name here is a real catalog key; using it would launch a different pipeline."""
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, name="nf-core/scrnaseq", stored_key="nf-core/retired"
+    )
+    runs_before = await _count(session, PipelineRun)
+
+    response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
+
+
+@pytest.mark.asyncio
+async def test_a_run_from_a_different_pipeline_version_is_refused(client, session, admin_user, admin_token, compute):
+    original = await _launchable_run(
+        session, admin_user.organization_id, admin_user.id, stored_key="nf-core/scrnaseq", version="2.6.0"
+    )
+    runs_before = await _count(session, PipelineRun)
+
+    response = await client.post(f"/api/pipeline-runs/{original.id}/reproduce", headers=_bearer(admin_token))
+
+    await _assert_refused_without_effects(response, session, compute, runs_before)
+    detail = response.json()["detail"]
+    assert "2.6.0" in detail and "2.7.1" in detail
