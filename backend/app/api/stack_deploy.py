@@ -17,22 +17,22 @@ import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
-from typing import Literal
+from typing import AsyncGenerator, Literal
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.api.terraform_streaming import ClosingStreamingResponse, client_event
 from app.database import async_session_factory, get_session
-from app.exceptions import DomainError
+from app.exceptions import DomainError, NotFoundError, ValidationError
 from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.cluster_quota_service import ClusterQuotaService
-from app.services.audit_service import log_action
+from app.services.component_service import KUBERNETES_COMPONENTS, ComponentService
 from app.services.terraform_cloud import AwsTerraformCloud, GcpTerraformCloud, get_terraform_cloud
-from app.services.notebook_image_service import build_notebook_image, cancel_build
+from app.services.notebook_image_service import cancel_build
 from app.services import infra_update_service
 from app.services.stack_deployment import (
     StackStatus,
@@ -43,12 +43,8 @@ from app.services.stack_deployment import (
     sync_storage_config,
     teardown_stack,
 )
-from app.services.terraform_executor import TerraformExecutor
-
-# Components that require the bioaf-scrna notebook image
-_NOTEBOOK_COMPONENTS = {"rstudio", "jupyterhub"}
-# Components that require the cellxgene image
-_CELLXGENE_COMPONENTS = {"cellxgene"}
+from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.terraform_stream import owned_event_stream
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
@@ -79,6 +75,42 @@ def _safe_stack_error_message(exc: DomainError) -> str:
         if msg == known:
             return known
     return "Stack operation failed. See server logs."
+
+
+async def _stack_event_stream(
+    session: AsyncSession,
+    events: AsyncGenerator[TerraformProgressEvent, None],
+) -> AsyncGenerator[str, None]:
+    """Serve a stack operation over SSE as the owner of ``session``."""
+    async with owned_event_stream(session, events) as stream:
+        try:
+            async for raw_event in stream:
+                event = client_event(raw_event)
+                payload: dict = {
+                    "event_type": event.event_type,
+                    "message": event.message,
+                    "resource_address": event.resource_address,
+                    "resources_completed": event.resources_completed,
+                    "resources_total": event.resources_total,
+                }
+                if event.extra:
+                    payload["extra"] = event.extra
+                yield f"data: {json.dumps(payload)}\n\n"
+        except DomainError as exc:
+            logger.exception("Stack SSE stream failed")
+            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
+            yield f"data: {error_data}\n\n"
+
+
+def _stack_sse_response(
+    session: AsyncSession,
+    events: AsyncGenerator[TerraformProgressEvent, None],
+) -> ClosingStreamingResponse:
+    return ClosingStreamingResponse(
+        _stack_event_stream(session, events),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 router = APIRouter(tags=["stack_deploy"])
@@ -187,77 +219,6 @@ class NotebookImageBuildStatus(BaseModel):
 
 
 # -----------------------------------------------------------------------
-# Component catalog for the stack-based view
-# -----------------------------------------------------------------------
-
-KUBERNETES_COMPONENTS: list[dict] = [
-    {
-        "key": "nextflow",
-        "name": "Nextflow",
-        "category": "pipeline_orchestration",
-        "description": "Pipeline orchestration using Nextflow with native Kubernetes executor. Supports nf-core workflows.",
-        "cost_estimate": "$0 (uses Kubernetes compute)",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": False,
-    },
-    {
-        "key": "snakemake",
-        "name": "Snakemake",
-        "category": "pipeline_orchestration",
-        "description": "Pipeline orchestration using Snakemake with Kubernetes executor support.",
-        "cost_estimate": "$0 (uses Kubernetes compute)",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": False,
-    },
-    {
-        "key": "jupyterhub",
-        "name": "JupyterHub",
-        "category": "analysis",
-        "description": "Managed Jupyter notebook environment on Kubernetes with pre-built scRNA-seq kernels.",
-        "cost_estimate": "$50-$200/month",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": True,
-    },
-    {
-        "key": "rstudio",
-        "name": "RStudio",
-        "category": "analysis",
-        "description": "Managed RStudio environment on Kubernetes with Seurat and Bioconductor pre-installed.",
-        "cost_estimate": "$50-$200/month",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": True,
-    },
-    {
-        "key": "cellxgene",
-        "name": "cellxgene",
-        "category": "visualization",
-        "description": "Interactive single-cell data explorer for h5ad files.",
-        "cost_estimate": "$20-$50/month",
-        "dependencies": [],
-        "configurable": False,
-    },
-    {
-        "key": "qc_dashboard",
-        "name": "QC Dashboard",
-        "category": "visualization",
-        "description": "Auto-generated quality control dashboards after pipeline runs.",
-        "cost_estimate": "$10-$30/month",
-        "dependencies": ["nextflow"],
-        "configurable": False,
-    },
-    {
-        "key": "meilisearch",
-        "name": "Meilisearch",
-        "category": "search",
-        "description": "Full-text search over protocols, metadata, and pipeline logs.",
-        "cost_estimate": "$20-$50/month",
-        "dependencies": [],
-        "configurable": False,
-    },
-]
-
-
-# -----------------------------------------------------------------------
 # Stack deploy / teardown / status endpoints
 # -----------------------------------------------------------------------
 
@@ -273,31 +234,7 @@ async def stack_deploy_endpoint(
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
     stack_type = body.stack_type if body else "kubernetes"
 
-    async def event_generator():
-        try:
-            async for event in deploy_stack(session, stack_type, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, deploy_stack(session, stack_type, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/deploy-background")
@@ -340,19 +277,21 @@ async def stack_deploy_background_endpoint(
         """Drain the deploy_stack generator in the background with its own session."""
         async with async_session_factory() as bg_session:
             try:
-                async for _event in deploy_stack(
+                async with owned_event_stream(
                     bg_session,
-                    stack_type,
-                    user_id,
-                    org_id=org_id,
-                    compute_region=compute_region,
-                    compute_zone=compute_zone,
-                ):
-                    await bg_session.commit()
-                await bg_session.commit()
+                    deploy_stack(
+                        bg_session,
+                        stack_type,
+                        user_id,
+                        org_id=org_id,
+                        compute_region=compute_region,
+                        compute_zone=compute_zone,
+                    ),
+                ) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background deploy failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_deploy())
 
@@ -380,12 +319,11 @@ async def stack_teardown_background_endpoint(
     async def _run_teardown():
         async with async_session_factory() as bg_session:
             try:
-                async for _event in teardown_stack(bg_session, user_id, org_id=org_id):
-                    await bg_session.commit()
-                await bg_session.commit()
+                async with owned_event_stream(bg_session, teardown_stack(bg_session, user_id, org_id=org_id)) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background teardown failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_teardown())
 
@@ -417,12 +355,13 @@ async def stack_destroy_storage_background_endpoint(
     async def _run_destroy_storage():
         async with async_session_factory() as bg_session:
             try:
-                async for _event in destroy_storage(bg_session, user_id, org_id=org_id):
-                    await bg_session.commit()
-                await bg_session.commit()
+                async with owned_event_stream(
+                    bg_session, destroy_storage(bg_session, user_id, org_id=org_id)
+                ) as events:
+                    async for _event in events:
+                        await bg_session.commit()
             except Exception:
                 logger.exception("Background storage destroy failed")
-                await bg_session.rollback()
 
     asyncio.get_event_loop().create_task(_run_destroy_storage())
 
@@ -503,31 +442,7 @@ async def stack_teardown_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    async def event_generator():
-        try:
-            async for event in teardown_stack(session, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, teardown_stack(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/destroy-storage")
@@ -549,31 +464,7 @@ async def stack_destroy_storage_endpoint(
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"]) if current_user.get("org_id") else None
 
-    async def event_generator():
-        try:
-            async for event in destroy_storage(session, user_id, org_id=org_id):
-                payload: dict = {
-                    "event_type": event.event_type,
-                    "message": event.message,
-                    "resource_address": event.resource_address,
-                    "resources_completed": event.resources_completed,
-                    "resources_total": event.resources_total,
-                }
-                if event.extra:
-                    payload["extra"] = event.extra
-                yield f"data: {json.dumps(payload)}\n\n"
-        except DomainError as exc:
-            logger.exception("Stack SSE stream failed")
-            error_data = json.dumps({"event_type": "stack_error", "message": _safe_stack_error_message(exc)})
-            yield f"data: {error_data}\n\n"
-        finally:
-            await session.commit()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return _stack_sse_response(session, destroy_storage(session, user_id, org_id=org_id))
 
 
 @router.post("/api/v1/infrastructure/stack/sync-storage-config")
@@ -858,123 +749,24 @@ async def stack_component_toggle(
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
     """Toggle a component's enabled state with dependency enforcement."""
-    # Block toggling kubernetes_cluster directly (use stack teardown)
-    if component_key == "kubernetes_cluster":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot toggle kubernetes_cluster directly. Use stack deploy/teardown.",
+    try:
+        result = await ComponentService.toggle_stack_component(
+            session,
+            component_key,
+            user_id=int(current_user["sub"]),
+            force_rebuild=force_rebuild,
         )
-
-    # Find component definition
-    comp_def = None
-    for c in KUBERNETES_COMPONENTS:
-        if c["key"] == component_key:
-            comp_def = c
-            break
-
-    if comp_def is None:
-        raise HTTPException(status_code=404, detail=f"Component '{component_key}' not found")
-
-    # Get current state
-    row = (
-        await session.execute(
-            text("SELECT enabled, status FROM component_states WHERE component_key = :key").bindparams(
-                key=component_key
-            )
-        )
-    ).fetchone()
-
-    currently_enabled = row[0] if row else False
-
-    if not currently_enabled:
-        # Enabling: check dependencies
-        if comp_def["dependencies"]:
-            dep_rows = (
-                await session.execute(
-                    text(
-                        "SELECT component_key, enabled FROM component_states WHERE component_key = ANY(:keys)"
-                    ).bindparams(keys=comp_def["dependencies"])
-                )
-            ).fetchall()
-            enabled_deps = {r[0] for r in dep_rows if r[1]}
-            missing = [d for d in comp_def["dependencies"] if d not in enabled_deps]
-            if missing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dependency not met: {', '.join(missing)} must be enabled first",
-                )
-
-        # Enable
-        new_enabled = True
-        new_status = "enabled"
-
-        # Notebook components need the bioaf-scrna image
-        if component_key in _NOTEBOOK_COMPONENTS:
-            scrna_image = await PlatformConfigService.get(session, "bioaf_scrna_image")
-            build_status = await PlatformConfigService.get(session, "notebook_image_build_status")
-
-            needs_build = force_rebuild or not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
-            if needs_build:
-                try:
-                    await build_notebook_image(session)
-                    new_status = "provisioning"
-                except Exception as exc:
-                    logger.warning("Failed to start notebook image build: %s", exc)
-                    new_status = "build_failed"
-
-        # Cellxgene needs its own image
-        if component_key in _CELLXGENE_COMPONENTS:
-            from app.services.cellxgene_image_service import build_cellxgene_image
-
-            cxg_image = await PlatformConfigService.get(session, "cellxgene_image")
-            cxg_build_status = await PlatformConfigService.get(session, "cellxgene_image_build_status")
-
-            needs_build = force_rebuild or not cxg_image or cxg_image == "null" or cxg_build_status not in ("SUCCESS",)
-            if needs_build:
-                try:
-                    await build_cellxgene_image(session)
-                    new_status = "provisioning"
-                except Exception as exc:
-                    logger.warning("Failed to start cellxgene image build: %s", exc)
-                    new_status = "build_failed"
-
-        await session.execute(
-            text("""
-            UPDATE component_states SET enabled = true, status = :status
-            WHERE component_key = :key
-            """).bindparams(key=component_key, status=new_status)
-        )
-    else:
-        # Disable
-        await session.execute(
-            text("""
-            UPDATE component_states SET enabled = false, status = 'disabled'
-            WHERE component_key = :key
-            """).bindparams(key=component_key)
-        )
-        new_enabled = False
-        new_status = "disabled"
-
-    user_id = int(current_user["sub"])
-    await log_action(
-        session,
-        user_id=user_id,
-        entity_type="component",
-        entity_id=0,
-        action="enable" if new_enabled else "disable",
-        details={
-            "component_key": component_key,
-            "component_name": comp_def["name"],
-            "status": new_status,
-        },
-    )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     await session.commit()
 
     return ComponentToggleResponse(
-        component_key=component_key,
-        enabled=new_enabled,
-        status=new_status,
+        component_key=result.component_key,
+        enabled=result.enabled,
+        status=result.status,
     )
 
 
@@ -1144,9 +936,10 @@ async def _run_apply_background(run_id: int, user_id: int) -> None:
     """Run TerraformExecutor.run_apply in the background with its own session."""
     async with async_session_factory() as bg_session:
         try:
-            async for _event in TerraformExecutor.run_apply(bg_session, run_id, user_id):
-                pass
-            await bg_session.commit()
+            async with owned_event_stream(
+                bg_session, TerraformExecutor.run_apply(bg_session, run_id, user_id)
+            ) as events:
+                async for _event in events:
+                    pass
         except Exception:
             logger.exception("Background terraform apply failed for run %d", run_id)
-            await bg_session.rollback()

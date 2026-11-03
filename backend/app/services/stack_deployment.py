@@ -9,8 +9,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable, Callable
+from contextlib import aclosing
+from dataclasses import dataclass, field
+from functools import partial
 from typing import AsyncGenerator
 
+import anyio
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +24,22 @@ from app.exceptions import ConflictError, StateError, ValidationError
 from app.services.activity_feed_service import ActivityFeedService
 from app.services.audit_service import log_action
 from app.services.component_queue import process_queued_components
+from app.services.deployment_outputs import (
+    COMPUTE_AWS_OUTPUTS,
+    COMPUTE_OUTPUTS,
+    COMPUTE_TEARDOWN_CLEARED_KEYS,
+    IMAGE_BUILD_OUTPUTS,
+    STORAGE_BUCKETS_TO_EMPTY,
+    STORAGE_DEPLOY_OUTPUTS,
+    STORAGE_DESTROY_CLEARED_KEYS,
+    STORAGE_SYNC_OUTPUTS,
+    BlankOutputs,
+    persist_outputs,
+)
 from app.services.orphaned_resource_service import OrphanedResourceService
-from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.stack_progress import StackProgress, reduce_progress
+from app.services.terraform_executor import RUN_INTERRUPTED_MESSAGE, TerraformExecutor, TerraformProgressEvent
+from app.services.terraform_stream import INTERRUPTED_EVENT, OperationOutcome, record_whole
 from app.adapters.work_nodes.gce_capacity import AllZonesExhaustedError
 
 logger = logging.getLogger("bioaf.stack_deployment")
@@ -236,6 +255,10 @@ async def _run_module(
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
     """Run plan + apply for a Terraform module, yielding progress events.
 
+    Commits the finished plan so pollers can see it; the apply only flushes. An
+    interrupted plan is flushed too, and the session owner commits it, so this
+    never commits work the caller left pending.
+
     This is the real implementation. Tests mock this function.
     """
     try:
@@ -243,17 +266,8 @@ async def _run_module(
     except asyncio.CancelledError:
         # Connection dropped during plan -- mark any active run as failed
         logger.warning("Plan cancelled for module %s (client disconnected)", module_name)
-        await session.execute(
-            text("""
-            UPDATE terraform_runs
-            SET status = 'failed',
-                error_message = 'Operation cancelled (client disconnected)',
-                completed_at = now()
-            WHERE status IN ('planning', 'applying')
-              AND module_name = :mod
-            """).bindparams(mod=module_name)
-        )
-        await session.commit()
+        await _mark_plan_interrupted(session, module_name)
+        yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
         return
     await session.commit()
 
@@ -264,16 +278,216 @@ async def _run_module(
         )
         return
 
-    async for event in TerraformExecutor.run_apply(session, run.id, user_id):
-        yield event
+    async with aclosing(TerraformExecutor.run_apply(session, run.id, user_id)) as events:
+        async for event in events:
+            yield event
+
+
+async def _mark_plan_interrupted(session: AsyncSession, module_name: str) -> None:
+    """Fail the module's active run, if the interrupted transaction allows it."""
+    with anyio.CancelScope(shield=True):
+        try:
+            await session.execute(
+                text("""
+                UPDATE terraform_runs
+                SET status = 'failed',
+                    error_message = :message,
+                    completed_at = now()
+                WHERE status IN ('planning', 'applying')
+                  AND module_name = :mod
+                """).bindparams(mod=module_name, message=RUN_INTERRUPTED_MESSAGE)
+            )
+            await session.flush()
+        except Exception:
+            logger.warning("Could not record the interrupted plan for %s", module_name, exc_info=True)
 
 
 async def _run_destroy(
     session: AsyncSession, user_id: int, module_name: str
 ) -> AsyncGenerator[TerraformProgressEvent, None]:
     """Run destroy for a Terraform module. Tests mock this function."""
-    async for event in TerraformExecutor.run_destroy(session, user_id, module_name):
-        yield event
+    async with aclosing(TerraformExecutor.run_destroy(session, user_id, module_name)) as events:
+        async for event in events:
+            yield event
+
+
+@dataclass
+class _PhaseRun:
+    """Where one deploy phase started, and what it ended with."""
+
+    progress: StackProgress
+    outcome: OperationOutcome = field(default_factory=OperationOutcome)
+
+
+async def _deploy_phase(
+    session: AsyncSession,
+    user_id: int,
+    module_name: str,
+    phase: _PhaseRun,
+    *,
+    tag_deploy_phase: bool,
+    complete_message: str,
+    after_apply: Callable[[dict], Awaitable[None]],
+) -> AsyncGenerator[TerraformProgressEvent, None]:
+    """Run one module, reporting stack totals and filling in ``phase``.
+
+    ``apply_complete`` runs the module's post-hook and becomes ``phase_complete``,
+    so the frontend does not treat a module finishing as the end of the stack. An
+    interruption is left for deploy_stack to report once restoration has run.
+    """
+    phase_tagged = not tag_deploy_phase
+    async with aclosing(_run_module(session, user_id, module_name)) as events:
+        async for event in events:
+            phase.outcome.observe(event)
+            if event.event_type == INTERRUPTED_EVENT:
+                continue
+            if not phase_tagged:
+                await _tag_deploy_phase(session, module_name)
+                phase_tagged = True
+
+            phase.progress, shown = reduce_progress(phase.progress, module_name, event)
+            if event.event_type == "apply_complete":
+                # The apply succeeded: record it whole. If that is cancelled the
+                # outcome stays uncertain, which a status check or config sync resolves.
+                await record_whole(session, partial(after_apply, event.extra.get("outputs", {})))
+                yield TerraformProgressEvent(
+                    event_type="phase_complete",
+                    message=complete_message,
+                    resources_completed=phase.progress.completed,
+                    resources_total=phase.progress.planned,
+                )
+            else:
+                yield shown
+
+
+async def _tag_deploy_phase(session: AsyncSession, module_name: str) -> None:
+    await session.execute(
+        text("""
+        UPDATE terraform_runs SET deploy_phase = :phase
+        WHERE module_name = :phase
+          AND status IN ('planning', 'applying', 'awaiting_confirmation')
+        """).bindparams(phase=module_name)
+    )
+    await session.flush()
+
+
+async def _after_storage_apply(session: AsyncSession, user_id: int, org_id: int | None, outputs: dict) -> None:
+    await persist_outputs(session, outputs, STORAGE_DEPLOY_OUTPUTS, BlankOutputs.SKIP)
+    await _set_config(session, "storage_deployed", "true")
+    # Storage is now usable; drain queued components that only
+    # need the working bucket (notebook + cellxgene image builds
+    # can start now while the cluster is still being built).
+    await process_queued_components(session)
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="infrastructure",
+        entity_id=0,
+        action="deploy_storage",
+        details={"module": "storage", "status": "completed"},
+    )
+    if org_id is not None:
+        await ActivityFeedService.add_event(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            event_type="infrastructure.storage_deployed",
+            summary="Storage infrastructure deployed (GCS buckets, Pub/Sub)",
+            entity_type="infrastructure",
+            entity_id=0,
+            metadata={"module": "storage"},
+        )
+    await session.flush()
+
+
+async def _after_image_build_apply(session: AsyncSession, user_id: int, outputs: dict) -> None:
+    await persist_outputs(session, outputs, IMAGE_BUILD_OUTPUTS, BlankOutputs.WRITE_NULL)
+    await _set_config(session, "aws_image_build_deployed", "true")
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="infrastructure",
+        entity_id=0,
+        action="deploy_image_build",
+        details={"module": "image_build", "status": "completed"},
+    )
+    await session.flush()
+
+
+async def _after_compute_apply(
+    session: AsyncSession,
+    user_id: int,
+    org_id: int | None,
+    cloud_provider: str,
+    outputs: dict,
+) -> None:
+    await _set_config(session, "compute_stack", "kubernetes")
+    await _set_config(session, "compute_deployed", "true")
+    await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.WRITE_NULL)
+    if cloud_provider == "aws":
+        await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.WRITE_NULL)
+
+    # Update kubernetes_cluster component state
+    await session.execute(
+        text("""
+        UPDATE component_states
+        SET enabled = true, status = 'running'
+        WHERE component_key = 'kubernetes_cluster'
+        """)
+    )
+
+    # Compute is now usable; flip any cluster-only queued components
+    # (nextflow, snakemake, qc_dashboard, meilisearch) to enabled, and
+    # flip image-bound components whose images are already built.
+    await process_queued_components(session)
+    await log_action(
+        session,
+        user_id=user_id,
+        entity_type="infrastructure",
+        entity_id=0,
+        action="deploy_compute",
+        details={"module": "compute", "stack_type": "kubernetes", "status": "completed"},
+    )
+    if org_id is not None:
+        await ActivityFeedService.add_event(
+            session,
+            org_id=org_id,
+            user_id=user_id,
+            event_type="infrastructure.compute_deployed",
+            summary="Kubernetes cluster and node pools deployed",
+            entity_type="infrastructure",
+            entity_id=0,
+            metadata={"module": "compute", "stack_type": "kubernetes"},
+        )
+    await session.flush()
+
+
+async def _record_failed_compute_orphans(session: AsyncSession) -> None:
+    """Log the expected cluster and its service accounts as orphaned."""
+    project_id = await _read_config(session, "gcp_project_id")
+    region = await _read_config(session, "gcp_region") or "us-central1"
+    org_slug = await _read_config(session, "org_slug")
+    suffix = await _read_config(session, "deploy_suffix")
+    if suffix and suffix != "null" and org_slug and org_slug != "null":
+        cluster_name = f"bioaf-{org_slug}-{suffix}"
+        pid = project_id if project_id != "null" else ""
+        await OrphanedResourceService.log_resource(
+            session,
+            resource_type="gke_cluster",
+            resource_name=cluster_name,
+            gcp_project_id=pid,
+            gcp_zone=region,
+            stack_uid=suffix,
+        )
+        # The compute module also creates a service account
+        await OrphanedResourceService.log_resource(
+            session,
+            resource_type="service_account",
+            resource_name="bioaf-notebook-runner",
+            gcp_project_id=pid,
+            stack_uid=suffix,
+        )
+        await session.flush()
 
 
 async def deploy_stack(
@@ -317,13 +531,7 @@ async def deploy_stack(
         raise ValidationError(f"Unsupported stack type: {stack_type}")
 
     storage_deployed = await _read_config(session, "storage_deployed")
-    storage_failed = False
-    compute_failed = False
-    # Track per-phase counts to build an accurate cumulative progress bar.
-    storage_completed = 0
-    storage_planned = 0
-    compute_completed = 0
-    compute_planned = 0
+    progress = StackProgress()
 
     # Generate a fresh deploy suffix for each module. This short hex
     # string is appended to GCP resource names so that redeploys after
@@ -338,80 +546,30 @@ async def deploy_stack(
             event_type="progress",
             message="Deploying storage infrastructure...",
         )
-        storage_phase_tagged = False
-        async for event in _run_module(session, user_id, "storage"):
-            if not storage_phase_tagged:
-                await session.execute(
-                    text("""
-                    UPDATE terraform_runs SET deploy_phase = 'storage'
-                    WHERE module_name = 'storage'
-                      AND status IN ('planning', 'applying', 'awaiting_confirmation')
-                    """)
-                )
-                await session.flush()
-                storage_phase_tagged = True
-            if event.event_type == "apply_error":
-                storage_failed = True
+        storage = _PhaseRun(progress)
+        async with aclosing(
+            _deploy_phase(
+                session,
+                user_id,
+                "storage",
+                storage,
+                tag_deploy_phase=True,
+                complete_message="Storage deployment complete",
+                after_apply=partial(_after_storage_apply, session, user_id, org_id),
+            )
+        ) as events:
+            async for event in events:
                 yield event
-            elif event.event_type == "apply_complete":
-                # Storage post-apply hook -- remap to phase_complete so
-                # the frontend does not treat this as the final event.
-                outputs = event.extra.get("outputs", {})
-                for config_key in [
-                    "ingest_bucket_name",
-                    "raw_bucket_name",
-                    "working_bucket_name",
-                    "results_bucket_name",
-                    "references_bucket_name",
-                    "literature_bucket_name",
-                    "config_backups_bucket_name",
-                    "pubsub_topic_name",
-                    "pubsub_subscription_name",
-                ]:
-                    output_val = outputs.get(config_key, {}).get("value", "")
-                    if output_val:
-                        await _set_config(session, config_key, output_val)
-                await _set_config(session, "storage_deployed", "true")
-                # Storage is now usable; drain queued components that only
-                # need the working bucket (notebook + cellxgene image builds
-                # can start now while the cluster is still being built).
-                await process_queued_components(session)
-                await log_action(
-                    session,
-                    user_id=user_id,
-                    entity_type="infrastructure",
-                    entity_id=0,
-                    action="deploy_storage",
-                    details={"module": "storage", "status": "completed"},
-                )
-                if org_id is not None:
-                    await ActivityFeedService.add_event(
-                        session,
-                        org_id=org_id,
-                        user_id=user_id,
-                        event_type="infrastructure.storage_deployed",
-                        summary="Storage infrastructure deployed (GCS buckets, Pub/Sub)",
-                        entity_type="infrastructure",
-                        entity_id=0,
-                        metadata={"module": "storage"},
-                    )
-                await session.flush()
-                storage_completed = event.resources_completed
-                storage_planned = event.resources_total
-                yield TerraformProgressEvent(
-                    event_type="phase_complete",
-                    message="Storage deployment complete",
-                    resources_completed=storage_completed,
-                    resources_total=storage_planned,
-                )
-            else:
-                yield event
+        progress = storage.progress
 
-        if storage_failed:
+        if storage.outcome.failed:
             yield TerraformProgressEvent(
                 event_type="stack_error",
                 message="Stack deployment failed during storage module",
             )
+            return
+        if not storage.outcome.succeeded:
+            yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
             return
 
     # Step 1b (AWS only): deploy the image-build infrastructure (CodeBuild project
@@ -423,43 +581,34 @@ async def deploy_stack(
     if cloud_provider == "aws":
         already = await _read_config(session, "aws_codebuild_project")
         if not already or already == "null":
-            image_build_failed = False
             yield TerraformProgressEvent(
                 event_type="progress",
                 message="Deploying image build infrastructure...",
             )
-            async for event in _run_module(session, user_id, "image_build"):
-                if event.event_type == "apply_error":
-                    image_build_failed = True
+            image_build = _PhaseRun(progress)
+            async with aclosing(
+                _deploy_phase(
+                    session,
+                    user_id,
+                    "image_build",
+                    image_build,
+                    tag_deploy_phase=False,
+                    complete_message="Image build infrastructure deployed",
+                    after_apply=partial(_after_image_build_apply, session, user_id),
+                )
+            ) as events:
+                async for event in events:
                     yield event
-                elif event.event_type == "apply_complete":
-                    outputs = event.extra.get("outputs", {})
-                    project = outputs.get("codebuild_project_name", {}).get("value", "")
-                    await _set_config(session, "aws_codebuild_project", project or "null")
-                    await _set_config(session, "aws_image_build_deployed", "true")
-                    await log_action(
-                        session,
-                        user_id=user_id,
-                        entity_type="infrastructure",
-                        entity_id=0,
-                        action="deploy_image_build",
-                        details={"module": "image_build", "status": "completed"},
-                    )
-                    await session.flush()
-                    yield TerraformProgressEvent(
-                        event_type="phase_complete",
-                        message="Image build infrastructure deployed",
-                        resources_completed=event.resources_completed,
-                        resources_total=event.resources_total,
-                    )
-                else:
-                    yield event
+            progress = image_build.progress
 
-            if image_build_failed:
+            if image_build.outcome.failed:
                 yield TerraformProgressEvent(
                     event_type="stack_error",
                     message="Stack deployment failed during image build module",
                 )
+                return
+            if not image_build.outcome.succeeded:
+                yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
                 return
 
     # Step 2: Deploy compute
@@ -468,230 +617,114 @@ async def deploy_stack(
     # Restore defaults after deploy completes (success or failure).
     original_region = None
     original_zone = None
-    # The region/zone override writes gcp_region/gcp_zone and is GCP-specific (the
-    # GKE module reads them). On AWS the compute module uses the install's
-    # aws_region; a per-deploy region override is not wired yet, so skip this.
-    if cloud_provider == "gcp":
-        if compute_region:
-            original_region = await _read_config(session, "gcp_region")
-            await _set_config(session, "gcp_region", compute_region)
-            if not compute_zone:
-                from app.gcp_zones import default_zone
+    compute = _PhaseRun(progress)
+    interrupted = False
+    try:
+        # The region/zone override writes gcp_region/gcp_zone and is GCP-specific (the
+        # GKE module reads them). On AWS the compute module uses the install's
+        # aws_region; a per-deploy region override is not wired yet, so skip this.
+        if cloud_provider == "gcp":
+            if compute_region:
+                original_region = await _read_config(session, "gcp_region")
+                await _set_config(session, "gcp_region", compute_region)
+                if not compute_zone:
+                    from app.gcp_zones import default_zone
 
-                compute_zone = default_zone(compute_region)
-        if compute_zone:
-            original_zone = await _read_config(session, "gcp_zone")
-            await _set_config(session, "gcp_zone", compute_zone)
+                    compute_zone = default_zone(compute_region)
+            if compute_zone:
+                original_zone = await _read_config(session, "gcp_zone")
+                await _set_config(session, "gcp_zone", compute_zone)
 
-    new_suffix = secrets.token_hex(3)
-    await _set_config(session, "deploy_suffix", new_suffix)
-    # On AWS, pin a stable compute_stack_uid so a retry after a failed deploy
-    # RESUMES the same-named resources instead of destroying + recreating them
-    # under a fresh suffix (which is what bit a failed EKS deploy: the retry's new
-    # suffix made terraform plan a full destroy of the half-built cluster). The
-    # storage path already pins storage_stack_uid for the same reason. This is an
-    # AWS-only divergence on purpose: GCP intentionally regenerates the suffix each
-    # deploy to dodge soft-deleted-resource name collisions on redeploy (GCS/IAM
-    # soft-delete for ~30d), whereas AWS names are immediately reusable, so pinning
-    # is both safe and correct there. GCP is untouched (it never sets
-    # compute_stack_uid, so it keeps falling back to the regenerated deploy_suffix).
-    if cloud_provider == "aws":
-        existing_compute_uid = await _read_config(session, "compute_stack_uid")
-        if not existing_compute_uid or existing_compute_uid == "null":
-            await _set_config(session, "compute_stack_uid", new_suffix)
-    await session.flush()
-
-    # Pre-flight: probe regional zones for e2-medium capacity. The GKE
-    # default node pool that gets created (and immediately removed) at
-    # cluster bootstrap has no autoscaling and no location_policy, so a
-    # per-zone stockout hangs CREATE_CLUSTER for ~70 minutes. By picking
-    # one healthy zone here and pinning the cluster's node_locations to
-    # it, we contain the failure surface to a single zone we have just
-    # observed to have capacity. The real node pools override
-    # node_locations per-pool, so the cluster stays regional.
-    #
-    # This is GCP-specific (GCE capacity + the GKE default-pool failure mode).
-    # The EKS module places node groups across two AZs with no throwaway default
-    # pool, so AWS skips the probe entirely.
-    if cloud_provider == "gcp":
-        yield TerraformProgressEvent(
-            event_type="progress",
-            message="Checking GCE zone capacity for cluster bootstrap...",
-        )
-        try:
-            selected_zone = await _select_default_pool_zone(session, compute_region)
-        except AllZonesExhaustedError as exc:
-            logger.warning("Zone capacity probe found no available zone: %s", exc)
-            yield TerraformProgressEvent(
-                event_type="stack_error",
-                message=(
-                    "GCE capacity probe found no zone in the region with capacity for "
-                    "cluster bootstrap. Wait a few minutes for capacity to free up and "
-                    f"redeploy. Details: {exc}"
-                ),
-            )
-            return
-
-        await _set_config(session, "gke_default_pool_zone", selected_zone)
+        new_suffix = secrets.token_hex(3)
+        await _set_config(session, "deploy_suffix", new_suffix)
+        # On AWS, pin a stable compute_stack_uid so a retry after a failed deploy
+        # RESUMES the same-named resources instead of destroying + recreating them
+        # under a fresh suffix (which is what bit a failed EKS deploy: the retry's new
+        # suffix made terraform plan a full destroy of the half-built cluster). The
+        # storage path already pins storage_stack_uid for the same reason. This is an
+        # AWS-only divergence on purpose: GCP intentionally regenerates the suffix each
+        # deploy to dodge soft-deleted-resource name collisions on redeploy (GCS/IAM
+        # soft-delete for ~30d), whereas AWS names are immediately reusable, so pinning
+        # is both safe and correct there. GCP is untouched (it never sets
+        # compute_stack_uid, so it keeps falling back to the regenerated deploy_suffix).
+        if cloud_provider == "aws":
+            existing_compute_uid = await _read_config(session, "compute_stack_uid")
+            if not existing_compute_uid or existing_compute_uid == "null":
+                await _set_config(session, "compute_stack_uid", new_suffix)
         await session.flush()
+
+        # Pre-flight: probe regional zones for e2-medium capacity. The GKE
+        # default node pool that gets created (and immediately removed) at
+        # cluster bootstrap has no autoscaling and no location_policy, so a
+        # per-zone stockout hangs CREATE_CLUSTER for ~70 minutes. By picking
+        # one healthy zone here and pinning the cluster's node_locations to
+        # it, we contain the failure surface to a single zone we have just
+        # observed to have capacity. The real node pools override
+        # node_locations per-pool, so the cluster stays regional.
+        #
+        # This is GCP-specific (GCE capacity + the GKE default-pool failure mode).
+        # The EKS module places node groups across two AZs with no throwaway default
+        # pool, so AWS skips the probe entirely.
+        if cloud_provider == "gcp":
+            yield TerraformProgressEvent(
+                event_type="progress",
+                message="Checking GCE zone capacity for cluster bootstrap...",
+            )
+            try:
+                selected_zone = await _select_default_pool_zone(session, compute_region)
+            except AllZonesExhaustedError as exc:
+                logger.warning("Zone capacity probe found no available zone: %s", exc)
+                yield TerraformProgressEvent(
+                    event_type="stack_error",
+                    message=(
+                        "GCE capacity probe found no zone in the region with capacity for "
+                        "cluster bootstrap. Wait a few minutes for capacity to free up and "
+                        f"redeploy. Details: {exc}"
+                    ),
+                )
+                return
+
+            await _set_config(session, "gke_default_pool_zone", selected_zone)
+            await session.flush()
+            yield TerraformProgressEvent(
+                event_type="progress",
+                message=f"Selected zone {selected_zone} for cluster bootstrap (has capacity).",
+            )
+
         yield TerraformProgressEvent(
             event_type="progress",
-            message=f"Selected zone {selected_zone} for cluster bootstrap (has capacity).",
+            message="Deploying compute infrastructure...",
         )
-
-    yield TerraformProgressEvent(
-        event_type="progress",
-        message="Deploying compute infrastructure...",
-    )
-    compute_phase_tagged = False
-    async for event in _run_module(session, user_id, "compute"):
-        if not compute_phase_tagged:
-            await session.execute(
-                text("""
-                UPDATE terraform_runs SET deploy_phase = 'compute'
-                WHERE module_name = 'compute'
-                  AND status IN ('planning', 'applying', 'awaiting_confirmation')
-                """)
-            )
-            await session.flush()
-            compute_phase_tagged = True
-        if event.event_type == "apply_error":
-            compute_failed = True
-            yield event
-        elif event.event_type == "apply_complete":
-            # Compute post-apply hook: store cluster config.
-            # Remap to phase_complete -- stack_complete is yielded below.
-            outputs = event.extra.get("outputs", {})
-            cluster_name = outputs.get("cluster_name", {}).get("value", "")
-            cluster_endpoint = outputs.get("cluster_endpoint", {}).get("value", "")
-            cluster_ca_cert = outputs.get("cluster_ca_cert", {}).get("value", "")
-            notebook_runner_sa = outputs.get("notebook_runner_sa_email", {}).get("value", "")
-            cellxgene_runner_sa = outputs.get("cellxgene_runner_sa_email", {}).get("value", "")
-
-            await _set_config(session, "compute_stack", "kubernetes")
-            await _set_config(session, "compute_deployed", "true")
-            await _set_config(session, "gke_cluster_name", cluster_name or "null")
-            await _set_config(session, "gke_cluster_endpoint", cluster_endpoint or "null")
-            await _set_config(session, "gke_cluster_ca_cert", cluster_ca_cert or "null")
-            await _set_config(session, "notebook_runner_sa_email", notebook_runner_sa or "null")
-            await _set_config(session, "cellxgene_runner_sa_email", cellxgene_runner_sa or "null")
-
-            # AWS (EKS) outputs the same cluster_* keys (reused above), plus the
-            # IRSA role ARNs + OIDC issuer the AWS pod-identity / cluster-auth
-            # seams need. These keys are additive and never written on GCP.
-            if cloud_provider == "aws":
-                pipeline_runner_arn = outputs.get("pipeline_runner_role_arn", {}).get("value", "")
-                oidc_provider_arn = outputs.get("oidc_provider_arn", {}).get("value", "")
-                oidc_provider_url = outputs.get("oidc_provider_url", {}).get("value", "")
-                cluster_autoscaler_arn = outputs.get("cluster_autoscaler_role_arn", {}).get("value", "")
-                await _set_config(session, "pipeline_runner_role_arn", pipeline_runner_arn or "null")
-                await _set_config(session, "notebook_runner_role_arn", notebook_runner_sa or "null")
-                await _set_config(session, "cellxgene_runner_role_arn", cellxgene_runner_sa or "null")
-                await _set_config(session, "eks_oidc_provider_arn", oidc_provider_arn or "null")
-                await _set_config(session, "eks_oidc_provider_url", oidc_provider_url or "null")
-                # IRSA role for the in-cluster Cluster Autoscaler; the CA workload
-                # is installed below (post-compute) using this ARN.
-                await _set_config(session, "cluster_autoscaler_role_arn", cluster_autoscaler_arn or "null")
-                # Work-node (EC2) networking + instance profile the EC2 work-node
-                # provider launches into (cleanup item 8b). Additive; GCP unaffected.
-                work_node_subnet = outputs.get("work_node_subnet_id", {}).get("value", "")
-                work_node_sg = outputs.get("work_node_security_group_id", {}).get("value", "")
-                work_node_profile = outputs.get("work_node_instance_profile", {}).get("value", "")
-                await _set_config(session, "aws_work_node_subnet_id", work_node_subnet or "null")
-                await _set_config(session, "aws_work_node_security_group_id", work_node_sg or "null")
-                await _set_config(session, "aws_work_node_instance_profile", work_node_profile or "null")
-
-            # Update kubernetes_cluster component state
-            await session.execute(
-                text("""
-                UPDATE component_states
-                SET enabled = true, status = 'running'
-                WHERE component_key = 'kubernetes_cluster'
-                """)
-            )
-
-            # Compute is now usable; flip any cluster-only queued components
-            # (nextflow, snakemake, qc_dashboard, meilisearch) to enabled, and
-            # flip image-bound components whose images are already built.
-            await process_queued_components(session)
-            await log_action(
+        async with aclosing(
+            _deploy_phase(
                 session,
-                user_id=user_id,
-                entity_type="infrastructure",
-                entity_id=0,
-                action="deploy_compute",
-                details={"module": "compute", "stack_type": "kubernetes", "status": "completed"},
+                user_id,
+                "compute",
+                compute,
+                tag_deploy_phase=True,
+                complete_message="Compute deployment complete",
+                after_apply=partial(_after_compute_apply, session, user_id, org_id, cloud_provider),
             )
-            if org_id is not None:
-                await ActivityFeedService.add_event(
-                    session,
-                    org_id=org_id,
-                    user_id=user_id,
-                    event_type="infrastructure.compute_deployed",
-                    summary="Kubernetes cluster and node pools deployed",
-                    entity_type="infrastructure",
-                    entity_id=0,
-                    metadata={"module": "compute", "stack_type": "kubernetes"},
-                )
-            await session.flush()
-            compute_completed = event.resources_completed
-            compute_planned = event.resources_total
-            yield TerraformProgressEvent(
-                event_type="phase_complete",
-                message="Compute deployment complete",
-                resources_completed=storage_completed + compute_completed,
-                resources_total=storage_planned + compute_planned,
-            )
-        else:
-            # Re-emit with accumulated totals so the progress bar
-            # reflects the full stack, not just the current module.
-            if event.event_type == "resource_complete":
-                compute_completed += 1
-            if event.resources_total:
-                compute_planned = event.resources_total
-            yield TerraformProgressEvent(
-                event_type=event.event_type,
-                message=event.message,
-                resource_address=event.resource_address,
-                resources_completed=storage_completed + compute_completed,
-                resources_total=storage_planned + compute_planned,
-                log_line=event.log_line,
-                extra=event.extra,
-            )
+        ) as events:
+            async for event in events:
+                yield event
+    except asyncio.CancelledError:
+        logger.warning("Compute deploy interrupted")
+        interrupted = True
+    finally:
+        # Restore on every exit, including cancellation and closure. This is a
+        # flush: an owner that rolls back an unexpected error discards it, and an
+        # override an earlier commit persisted then stays (deferred D2 work).
+        await _restore_compute_location(session, original_region, original_zone)
 
-    # Restore default region/zone if we overrode them for compute
-    if original_region is not None:
-        await _set_config(session, "gcp_region", original_region)
-    if original_zone is not None:
-        await _set_config(session, "gcp_zone", original_zone)
+    progress = compute.progress
 
-    if compute_failed:
-        # Log the expected cluster and its service accounts as orphaned
-        project_id = await _read_config(session, "gcp_project_id")
-        region = await _read_config(session, "gcp_region") or "us-central1"
-        org_slug = await _read_config(session, "org_slug")
-        suffix = await _read_config(session, "deploy_suffix")
-        if suffix and suffix != "null" and org_slug and org_slug != "null":
-            cluster_name = f"bioaf-{org_slug}-{suffix}"
-            pid = project_id if project_id != "null" else ""
-            await OrphanedResourceService.log_resource(
-                session,
-                resource_type="gke_cluster",
-                resource_name=cluster_name,
-                gcp_project_id=pid,
-                gcp_zone=region,
-                stack_uid=suffix,
-            )
-            # The compute module also creates a service account
-            await OrphanedResourceService.log_resource(
-                session,
-                resource_type="service_account",
-                resource_name="bioaf-notebook-runner",
-                gcp_project_id=pid,
-                stack_uid=suffix,
-            )
-            await session.flush()
+    if interrupted or not (compute.outcome.succeeded or compute.outcome.failed):
+        yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
+        return
 
+    if compute.outcome.failed:
+        await _record_failed_compute_orphans(session)
         yield TerraformProgressEvent(
             event_type="stack_error",
             message="Stack deployment failed during compute module. Storage buckets preserved.",
@@ -731,9 +764,25 @@ async def deploy_stack(
     yield TerraformProgressEvent(
         event_type="stack_complete",
         message="Stack deployment complete",
-        resources_completed=storage_completed + compute_completed,
-        resources_total=storage_planned + compute_planned,
+        resources_completed=progress.completed,
+        resources_total=progress.planned,
     )
+
+
+async def _restore_compute_location(
+    session: AsyncSession,
+    original_region: str | None,
+    original_zone: str | None,
+) -> None:
+    """Put back the default region/zone after a compute override."""
+    with anyio.CancelScope(shield=True):
+        try:
+            if original_region is not None:
+                await _set_config(session, "gcp_region", original_region)
+            if original_zone is not None:
+                await _set_config(session, "gcp_zone", original_zone)
+        except Exception:
+            logger.exception("Could not restore the default compute location")
 
 
 async def _ensure_aws_cluster_autoscaler(session: AsyncSession) -> str:
@@ -787,13 +836,14 @@ async def teardown_stack(
         message="Tearing down compute infrastructure...",
     )
 
-    teardown_failed = False
-    async for event in _run_destroy(session, user_id, "compute"):
-        yield event
-        if event.event_type == "apply_error":
-            teardown_failed = True
+    outcome = OperationOutcome()
+    async with aclosing(_run_destroy(session, user_id, "compute")) as events:
+        async for event in events:
+            outcome.observe(event)
+            if event.event_type != INTERRUPTED_EVENT:
+                yield event
 
-    if teardown_failed:
+    if outcome.failed:
         # Log the cluster and its service accounts as orphaned
         project_id = await _read_config(session, "gcp_project_id")
         region = await _read_config(session, "gcp_region") or "us-central1"
@@ -824,11 +874,15 @@ async def teardown_stack(
         )
         return
 
+    if not outcome.succeeded:
+        # The cluster may or may not still exist, so keep what identifies it.
+        yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
+        return
+
     # Clear GKE config
     await _set_config(session, "compute_deployed", "false")
-    await _set_config(session, "gke_cluster_name", "null")
-    await _set_config(session, "gke_cluster_endpoint", "null")
-    await _set_config(session, "gke_cluster_ca_cert", "null")
+    for key in COMPUTE_TEARDOWN_CLEARED_KEYS:
+        await _set_config(session, key, "null")
 
     # Update kubernetes_cluster component state
     await session.execute(
@@ -864,17 +918,6 @@ async def teardown_stack(
         event_type="stack_complete",
         message="Teardown complete",
     )
-
-
-_BUCKET_CONFIG_KEYS = [
-    "ingest_bucket_name",
-    "raw_bucket_name",
-    "working_bucket_name",
-    "results_bucket_name",
-    "references_bucket_name",
-    "literature_bucket_name",
-    "config_backups_bucket_name",
-]
 
 
 async def _empty_gcs_bucket(session: AsyncSession, bucket_name: str) -> int:
@@ -920,7 +963,7 @@ async def destroy_storage(
 
     # Step 1: Empty all GCS buckets so terraform destroy can remove them
     # (buckets have force_destroy=false and cannot be deleted while non-empty)
-    for config_key in _BUCKET_CONFIG_KEYS:
+    for config_key in STORAGE_BUCKETS_TO_EMPTY:
         bucket_name = await _read_config(session, config_key)
         if not bucket_name or bucket_name == "null":
             continue
@@ -961,16 +1004,20 @@ async def destroy_storage(
             event_type="progress",
             message="Destroying image build infrastructure...",
         )
-        ib_destroy_failed = False
-        async for event in _run_destroy(session, user_id, "image_build"):
-            yield event
-            if event.event_type == "apply_error":
-                ib_destroy_failed = True
-        if ib_destroy_failed:
+        image_build_outcome = OperationOutcome()
+        async with aclosing(_run_destroy(session, user_id, "image_build")) as events:
+            async for event in events:
+                image_build_outcome.observe(event)
+                if event.event_type != INTERRUPTED_EVENT:
+                    yield event
+        if image_build_outcome.failed:
             yield TerraformProgressEvent(
                 event_type="stack_error",
                 message="Image build destroy failed",
             )
+            return
+        if not image_build_outcome.succeeded:
+            yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
             return
         await _set_config(session, "aws_codebuild_project", "null")
         await _set_config(session, "aws_image_build_deployed", "false")
@@ -982,31 +1029,27 @@ async def destroy_storage(
         message="Destroying storage infrastructure...",
     )
 
-    destroy_failed = False
-    async for event in _run_destroy(session, user_id, "storage"):
-        yield event
-        if event.event_type == "apply_error":
-            destroy_failed = True
+    outcome = OperationOutcome()
+    async with aclosing(_run_destroy(session, user_id, "storage")) as events:
+        async for event in events:
+            outcome.observe(event)
+            if event.event_type != INTERRUPTED_EVENT:
+                yield event
 
-    if destroy_failed:
+    if outcome.failed:
         yield TerraformProgressEvent(
             event_type="stack_error",
             message="Storage destroy failed",
         )
         return
 
+    if not outcome.succeeded:
+        yield TerraformProgressEvent(event_type=INTERRUPTED_EVENT)
+        return
+
     # Clear all storage-related resource names from platform_config.
     # Next deploy generates a fresh suffix automatically.
-    for key in [
-        "storage_deployed",
-        "ingest_bucket_name",
-        "raw_bucket_name",
-        "working_bucket_name",
-        "results_bucket_name",
-        "config_backups_bucket_name",
-        "pubsub_topic_name",
-        "pubsub_subscription_name",
-    ]:
+    for key in STORAGE_DESTROY_CLEARED_KEYS:
         await _set_config(session, key, "null")
 
     await log_action(
@@ -1036,17 +1079,6 @@ async def destroy_storage(
     )
 
 
-_STORAGE_BUCKET_OUTPUT_KEYS = [
-    "ingest_bucket_name",
-    "raw_bucket_name",
-    "working_bucket_name",
-    "results_bucket_name",
-    "references_bucket_name",
-    "literature_bucket_name",
-    "config_backups_bucket_name",
-]
-
-
 async def sync_storage_config(session: AsyncSession) -> dict[str, str]:
     """Re-read the storage Terraform outputs and write bucket names to platform_config.
 
@@ -1055,27 +1087,9 @@ async def sync_storage_config(session: AsyncSession) -> dict[str, str]:
     for all keys that were successfully populated.
     """
     outputs = await TerraformExecutor.read_module_outputs(session, "storage")
-    populated: dict[str, str] = {}
-    for key in _STORAGE_BUCKET_OUTPUT_KEYS:
-        bucket_name = outputs.get(key, {}).get("value", "")
-        if bucket_name:
-            await _set_config(session, key, bucket_name)
-            populated[key] = bucket_name
+    populated = await persist_outputs(session, outputs, STORAGE_SYNC_OUTPUTS, BlankOutputs.SKIP)
     await session.flush()
     return populated
-
-
-_COMPUTE_OUTPUT_MAP = {
-    "cluster_name": "gke_cluster_name",
-    "cluster_endpoint": "gke_cluster_endpoint",
-    "cluster_ca_cert": "gke_cluster_ca_cert",
-    # Per-workload Workload Identity runner SA emails. Persisted here (not only
-    # in the full-deploy hook) so the "Check for Infrastructure Updates" path
-    # records a newly added runner SA -- e.g. cellxgene -- in platform_config;
-    # the adapters read these to annotate their runner KSA.
-    "notebook_runner_sa_email": "notebook_runner_sa_email",
-    "cellxgene_runner_sa_email": "cellxgene_runner_sa_email",
-}
 
 
 async def sync_compute_config(session: AsyncSession) -> dict[str, str]:
@@ -1085,12 +1099,11 @@ async def sync_compute_config(session: AsyncSession) -> dict[str, str]:
     silently, leaving gke_cluster_endpoint as 'null'. Returns a dict of
     {config_key: value} for all keys that were successfully populated.
     """
+    from app.platform.cloud_provider import get_cloud_provider
+
     outputs = await TerraformExecutor.read_module_outputs(session, "compute")
-    populated: dict[str, str] = {}
-    for tf_key, config_key in _COMPUTE_OUTPUT_MAP.items():
-        value = outputs.get(tf_key, {}).get("value", "")
-        if value:
-            await _set_config(session, config_key, value)
-            populated[config_key] = value
+    populated = await persist_outputs(session, outputs, COMPUTE_OUTPUTS, BlankOutputs.SKIP)
+    if await get_cloud_provider(session) == "aws":
+        populated |= await persist_outputs(session, outputs, COMPUTE_AWS_OUTPUTS, BlankOutputs.SKIP)
     await session.flush()
     return populated

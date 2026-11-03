@@ -20,12 +20,13 @@ import logging
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field
+from contextlib import aclosing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, AsyncIterator, cast
+from typing import TYPE_CHECKING, AsyncGenerator, cast
 
+import anyio
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,16 @@ from app.services.audit_service import log_action
 from app.services.event_bus import event_bus
 from app.services.event_types import TERRAFORM_APPLY_FAILURE
 from app.services.plan_parser import TerraformPlanParser
+from app.services.terraform_stream import (
+    INTERRUPTED_EVENT,
+    StreamProgress,
+    TerraformProgressEvent,
+    diagnostics_message,
+    read_exit,
+    record_whole,
+    stop_process,
+    stream_terraform_output,
+)
 
 if TYPE_CHECKING:
     from app.services.terraform_cloud import TerraformCloud
@@ -53,20 +64,11 @@ _tf_lock = asyncio.Lock()
 # Maps run_id -> asyncio.subprocess.Process.
 # Resets on container restart, which is the desired behavior: any
 # "applying" run left in the DB after restart has a dead process.
+# An entry outlives its run when Terraform's exit could not be confirmed.
 _active_processes: dict[int, asyncio.subprocess.Process] = {}
 
-
-@dataclass
-class TerraformProgressEvent:
-    """A single SSE event emitted during terraform apply."""
-
-    event_type: str  # "resource_complete" | "apply_complete" | "apply_error" | "progress"
-    message: str = ""
-    resource_address: str = ""
-    resources_completed: int = 0
-    resources_total: int = 0
-    log_line: str = ""
-    extra: dict = field(default_factory=dict)
+# Recorded on a run, so polling consumers keep their existing "failed" status.
+RUN_INTERRUPTED_MESSAGE = "Operation cancelled (client disconnected)"
 
 
 class TerraformExecutor:
@@ -162,7 +164,7 @@ class TerraformExecutor:
         run_id: int,
         user_id: int,
         targets: list[str] | None = None,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Apply an approved plan, yielding progress events.
 
         Yields TerraformProgressEvent objects as Terraform processes each resource.
@@ -184,31 +186,86 @@ class TerraformExecutor:
         run.status = "applying"
         await session.flush()
 
-        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
         module_name = run.module_name or "foundation"
-        resources_total = run.resources_planned or 0
-        resources_completed = 0
+        progress = StreamProgress(resources_total=run.resources_planned or 0)
         # Set on a real apply failure (non-zero exit or exception), NOT on a
         # client-disconnect cancellation, so the failure notification fires only
         # for genuine deploy failures.
         apply_failed = False
-
-        # Emit the full resource list from the plan so the frontend can
-        # show all resources upfront with "Queued" status.
-        if run.plan_json and run.plan_json.get("resources"):
-            planned_addrs = [r["address"] for r in run.plan_json["resources"] if not r["address"].startswith("data.")]
-            yield TerraformProgressEvent(
-                event_type="planned_resources",
-                message="Resources planned",
-                resources_completed=0,
-                resources_total=resources_total,
-                extra={"addresses": planned_addrs},
-            )
-
-        env, cleanup = await cloud.build_provider_env(config)
-        log_lines: list[str] = []
+        interrupted = False
+        failure_message: str | None = None
         process = None
+        cleanup = None
+
+        async def classify(entry: dict, line: str) -> TerraformProgressEvent | None:
+            entry_type = entry.get("type", "")
+
+            if entry_type == "apply_complete" and "hook" in entry:
+                addr = entry["hook"].get("resource", {}).get("addr", "")
+
+                # Data source reads emit apply_complete but are not
+                # counted in the plan total.  Show them as progress
+                # events instead of inflating resources_completed.
+                if addr.startswith("data."):
+                    return TerraformProgressEvent(
+                        event_type="progress",
+                        message=f"Read: {addr}",
+                        resources_completed=progress.resources_completed,
+                        resources_total=progress.resources_total,
+                        log_line=line,
+                    )
+
+                await TerraformExecutor._record_resource(session, run, progress, addr)
+                return TerraformProgressEvent(
+                    event_type="resource_complete",
+                    resource_address=addr,
+                    message=f"Applied: {addr}",
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
+                    log_line=line,
+                )
+
+            if entry_type == "apply_start" and "hook" in entry:
+                addr = entry["hook"].get("resource", {}).get("addr", "")
+                if addr.startswith("data."):
+                    return None
+                return TerraformProgressEvent(
+                    event_type="progress",
+                    resource_address=addr,
+                    message=entry.get("@message", f"Creating: {addr}"),
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
+                    log_line=line,
+                )
+
+            if "@message" in entry:
+                return TerraformProgressEvent(
+                    event_type="progress",
+                    message=entry["@message"],
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
+                    log_line=line,
+                )
+            return None
+
         try:
+            cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
+            env, cleanup = await cloud.build_provider_env(config)
+
+            # Emit the full resource list from the plan so the frontend can
+            # show all resources upfront with "Queued" status.
+            if run.plan_json and run.plan_json.get("resources"):
+                planned_addrs = [
+                    r["address"] for r in run.plan_json["resources"] if not r["address"].startswith("data.")
+                ]
+                yield TerraformProgressEvent(
+                    event_type="planned_resources",
+                    message="Resources planned",
+                    resources_completed=0,
+                    resources_total=progress.resources_total,
+                    extra={"addresses": planned_addrs},
+                )
+
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
             tfvars = cloud.write_tfvars(work_dir, module_name, config)
             if not run.tfvars_json:
@@ -224,97 +281,21 @@ class TerraformExecutor:
             )
             _active_processes[run_id] = process
 
-            while True:
-                try:
-                    line_bytes = await asyncio.wait_for(process.stdout.readline(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield TerraformProgressEvent(
-                        event_type="heartbeat",
-                        message="Terraform operation in progress...",
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                    )
-                    continue
+            async with aclosing(
+                stream_terraform_output(
+                    process,
+                    heartbeat_message="Terraform operation in progress...",
+                    progress=progress,
+                    classify=classify,
+                )
+            ) as events:
+                async for event in events:
+                    yield event
 
-                if not line_bytes:
-                    break
+            exit_result = await read_exit(process)
+            run.apply_log = "\n".join(progress.log_lines)
 
-                line = line_bytes.decode().rstrip()
-                if not line:
-                    continue
-                log_lines.append(line)
-
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                entry_type = entry.get("type", "")
-
-                if entry_type == "apply_complete" and "hook" in entry:
-                    hook = entry["hook"]
-                    resource = hook.get("resource", {})
-                    addr = resource.get("addr", "")
-
-                    # Data source reads emit apply_complete but are not
-                    # counted in the plan total.  Show them as progress
-                    # events instead of inflating resources_completed.
-                    if addr.startswith("data."):
-                        yield TerraformProgressEvent(
-                            event_type="progress",
-                            message=f"Read: {addr}",
-                            resources_completed=resources_completed,
-                            resources_total=resources_total,
-                            log_line=line,
-                        )
-                        continue
-
-                    resources_completed += 1
-                    run.resources_completed = resources_completed
-                    if run.completed_resources is None:
-                        run.completed_resources = []
-                    run.completed_resources = [*run.completed_resources, addr]
-                    await session.flush()
-                    yield TerraformProgressEvent(
-                        event_type="resource_complete",
-                        resource_address=addr,
-                        message=f"Applied: {addr}",
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                        log_line=line,
-                    )
-
-                elif entry_type == "apply_start" and "hook" in entry:
-                    hook = entry["hook"]
-                    resource = hook.get("resource", {})
-                    addr = resource.get("addr", "")
-                    if not addr.startswith("data."):
-                        yield TerraformProgressEvent(
-                            event_type="progress",
-                            resource_address=addr,
-                            message=entry.get("@message", f"Creating: {addr}"),
-                            resources_completed=resources_completed,
-                            resources_total=resources_total,
-                            log_line=line,
-                        )
-
-                elif "@message" in entry:
-                    yield TerraformProgressEvent(
-                        event_type="progress",
-                        message=entry["@message"],
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                        log_line=line,
-                    )
-
-            stderr_output = ""
-            if process.stderr:
-                stderr_output = (await process.stderr.read()).decode()
-            return_code = await process.wait()
-
-            run.apply_log = "\n".join(log_lines)
-
-            if return_code == 0:
+            if exit_result.return_code == 0:
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
                 tf_outputs: dict = {}
@@ -335,70 +316,48 @@ class TerraformExecutor:
                 yield TerraformProgressEvent(
                     event_type="apply_complete",
                     message="Apply complete",
-                    resources_completed=resources_completed,
-                    resources_total=resources_total,
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
                     extra={"outputs": tf_outputs},
                 )
             else:
                 run.status = "failed"
                 run.completed_at = datetime.now(timezone.utc)
-
-                # TF in JSON mode writes diagnostic errors to stdout, not
-                # stderr.  Extract them so callers see the real error.
-                diagnostics: list[str] = []
-                for log_line in log_lines:
-                    try:
-                        entry = json.loads(log_line)
-                        if entry.get("type") == "diagnostic":
-                            diag = entry.get("diagnostic", {})
-                            detail = diag.get("detail") or diag.get("summary", "")
-                            if detail:
-                                diagnostics.append(detail)
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
-
-                run.error_message = "; ".join(diagnostics) or stderr_output or "Terraform apply failed"
+                run.error_message = (
+                    diagnostics_message(progress.log_lines) or exit_result.stderr or "Terraform apply failed"
+                )
                 apply_failed = True
                 logger.error("Terraform apply failed for run %s: %s", run_id, run.error_message)
                 yield TerraformProgressEvent(
                     event_type="apply_error",
                     message=run.error_message,
-                    resources_completed=resources_completed,
-                    resources_total=resources_total,
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
                 )
 
-        except asyncio.CancelledError:
-            logger.warning("Terraform apply cancelled for run %s", run_id)
-            if process and process.returncode is None:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=10)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    process.kill()
-            run.status = "failed"
-            run.error_message = "Operation cancelled (client disconnected)"
-            run.completed_at = datetime.now(timezone.utc)
-            run.apply_log = "\n".join(log_lines) if log_lines else None
-            await session.flush()
-            return
+        except (asyncio.CancelledError, GeneratorExit) as exc:
+            logger.warning("Terraform apply interrupted for run %s", run_id)
+            interrupted = True
+            if isinstance(exc, GeneratorExit):
+                raise
         except Exception as exc:
+            if cleanup is None:
+                # Provider setup failed: nothing ran, and the caller handles it.
+                raise
             logger.error("Terraform apply failed: %s", exc)
             run.status = "failed"
             run.error_message = str(exc)
             run.completed_at = datetime.now(timezone.utc)
             apply_failed = True
-            yield TerraformProgressEvent(
-                event_type="apply_error",
-                message=str(exc),
-                resources_completed=resources_completed,
-                resources_total=resources_total,
-            )
+            failure_message = str(exc)
         finally:
-            _active_processes.pop(run_id, None)
-            await cleanup()
-            if run.status == "failed":
-                await TerraformExecutor._auto_cleanup_lock(session, module_name)
-            await session.flush()
+            with anyio.CancelScope(shield=True):
+                exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
+                if cleanup is not None:
+                    await cleanup()
+                await TerraformExecutor._release_and_flush(
+                    session, run, module_name, exit_confirmed, guarded=interrupted or failure_message is not None
+                )
             if apply_failed:
                 # Notify admins of a real deploy failure. Terraform runs are
                 # global (single org); fire-and-forget so the stream is not
@@ -420,6 +379,17 @@ class TerraformExecutor:
                     )
                 )
 
+        if interrupted:
+            yield TerraformExecutor._interrupted_event(progress)
+            return
+        if failure_message is not None:
+            yield TerraformProgressEvent(
+                event_type="apply_error",
+                message=failure_message,
+                resources_completed=progress.resources_completed,
+                resources_total=progress.resources_total,
+            )
+
         await log_action(
             session,
             user_id=user_id,
@@ -434,7 +404,7 @@ class TerraformExecutor:
         session: AsyncSession,
         user_id: int,
         org_id: int | None = None,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Bootstrap the remote-state bucket via the foundation module.
 
         Steps:
@@ -456,10 +426,32 @@ class TerraformExecutor:
             message="Starting foundation bootstrap...",
         )
 
-        env, cleanup = await cloud.build_provider_env(config)
+        progress = StreamProgress()
+        run: TerraformRun | None = None
+        process = None
+        cleanup = None
         work_dir = None
+        interrupted = False
+        failure_message: str | None = None
+
+        async def classify(entry: dict, _line: str) -> TerraformProgressEvent | None:
+            # Unlike apply and destroy, bootstrap counts every apply_complete hook
+            # (data sources included) and reports nothing else from the stream.
+            if entry.get("type") != "apply_complete" or "hook" not in entry:
+                return None
+            addr = entry["hook"].get("resource", {}).get("addr", "")
+            progress.resources_completed += 1
+            run.resources_completed = progress.resources_completed
+            return TerraformProgressEvent(
+                event_type="resource_complete",
+                resource_address=addr,
+                message=f"Applied: {addr}",
+                resources_completed=progress.resources_completed,
+                resources_total=progress.resources_total,
+            )
 
         try:
+            env, cleanup = await cloud.build_provider_env(config)
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, "foundation", cloud.modules_dir())
             cloud.write_tfvars(work_dir, "foundation", config)
 
@@ -469,7 +461,7 @@ class TerraformExecutor:
             yield TerraformProgressEvent(event_type="progress", message="Running terraform plan...")
             plan_json = await TerraformExecutor._run_plan_capture(work_dir, env)
             parsed = TerraformPlanParser.parse(plan_json)
-            resources_total = parsed["total"]
+            progress.resources_total = parsed["total"]
 
             # Create a run record for audit trail
             run = TerraformRun(
@@ -478,18 +470,18 @@ class TerraformExecutor:
                 module_name="foundation",
                 status="applying",
                 plan_json=parsed,
-                resources_planned=resources_total,
+                resources_planned=progress.resources_total,
             )
             session.add(run)
             await session.flush()
 
             yield TerraformProgressEvent(
                 event_type="progress",
-                message=f"Applying {resources_total} resource(s)...",
-                resources_total=resources_total,
+                message=f"Applying {progress.resources_total} resource(s)...",
+                resources_total=progress.resources_total,
             )
 
-            bootstrap_process = await asyncio.create_subprocess_exec(
+            process = await asyncio.create_subprocess_exec(
                 "terraform",
                 "apply",
                 "-auto-approve",
@@ -501,70 +493,25 @@ class TerraformExecutor:
                 stderr=asyncio.subprocess.PIPE,
                 env={**TerraformExecutor._base_env(), **env},
             )
+            _active_processes[run.id] = process
 
-            resources_completed = 0
-            bootstrap_log_lines: list[str] = []
-            while True:
-                try:
-                    line_bytes = await asyncio.wait_for(bootstrap_process.stdout.readline(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield TerraformProgressEvent(
-                        event_type="heartbeat",
-                        message="Bootstrap in progress...",
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                    )
-                    continue
+            async with aclosing(
+                stream_terraform_output(
+                    process,
+                    heartbeat_message="Bootstrap in progress...",
+                    progress=progress,
+                    classify=classify,
+                )
+            ) as events:
+                async for event in events:
+                    yield event
 
-                if not line_bytes:
-                    break
+            exit_result = await read_exit(process)
 
-                line = line_bytes.decode().rstrip()
-                if not line:
-                    continue
-                bootstrap_log_lines.append(line)
-
-                try:
-                    entry = json.loads(line)
-                    if entry.get("type") == "apply_complete" and "hook" in entry:
-                        resources_completed += 1
-                        hook = entry["hook"]
-                        resource = hook.get("resource", {})
-                        run.resources_completed = resources_completed
-                        yield TerraformProgressEvent(
-                            event_type="resource_complete",
-                            resource_address=resource.get("addr", ""),
-                            message=f"Applied: {resource.get('addr', '')}",
-                            resources_completed=resources_completed,
-                            resources_total=resources_total,
-                        )
-                except json.JSONDecodeError:
-                    pass
-
-            bootstrap_stderr = ""
-            if bootstrap_process.stderr:
-                bootstrap_stderr = (await bootstrap_process.stderr.read()).decode()
-            bootstrap_rc = await bootstrap_process.wait()
-
-            if bootstrap_rc != 0:
+            if exit_result.return_code != 0:
                 run.status = "failed"
                 run.completed_at = datetime.now(timezone.utc)
-
-                # Terraform in JSON mode writes diagnostic errors to stdout,
-                # not stderr. Extract them so callers see the real error.
-                diagnostics: list[str] = []
-                for log_line in bootstrap_log_lines:
-                    try:
-                        entry = json.loads(log_line)
-                        if entry.get("type") == "diagnostic":
-                            diag = entry.get("diagnostic", {})
-                            detail = diag.get("detail") or diag.get("summary", "")
-                            if detail:
-                                diagnostics.append(detail)
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
-
-                run.error_message = "; ".join(diagnostics) or bootstrap_stderr or "Apply failed"
+                run.error_message = diagnostics_message(progress.log_lines) or exit_result.stderr or "Apply failed"
                 logger.error("Foundation bootstrap failed for run %s: %s", run.id, run.error_message)
                 await session.flush()
                 yield TerraformProgressEvent(
@@ -594,16 +541,44 @@ class TerraformExecutor:
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
-            # Update platform_config
-            from app.adapters.registry import get_storage_adapter
-            from app.platform.platform_config_service import PlatformConfigService
+            # Record the bootstrap as one unit: an initialized flag without its
+            # state bucket would block a retry with nothing to resume from.
+            async def record_bootstrap() -> None:
+                from app.platform.platform_config_service import PlatformConfigService
 
-            for key, value in [
-                ("terraform_initialized", "true"),
-                ("terraform_state_bucket", bucket_name),
-                ("backups_bucket_name", backups_bucket),
-            ]:
-                await PlatformConfigService.set(session, key, value)
+                for key, value in [
+                    ("terraform_initialized", "true"),
+                    ("terraform_state_bucket", bucket_name),
+                    ("backups_bucket_name", backups_bucket),
+                ]:
+                    await PlatformConfigService.set(session, key, value)
+
+                await log_action(
+                    session,
+                    user_id=user_id,
+                    entity_type="terraform",
+                    entity_id=run.id,
+                    action="bootstrap",
+                    details={"status": "completed", "module_name": "foundation", "state_bucket": bucket_name},
+                )
+
+                if org_id is not None:
+                    await ActivityFeedService.add_event(
+                        session,
+                        org_id=org_id,
+                        user_id=user_id,
+                        event_type="infrastructure.bootstrap_completed",
+                        summary=f"Terraform state bucket created: {bucket_name}",
+                        entity_type="terraform",
+                        entity_id=run.id,
+                        metadata={"state_bucket": bucket_name},
+                    )
+                await session.flush()
+
+            await record_whole(session, record_bootstrap)
+
+            # Outside the savepoint, so a rollback there cannot expire the run.
+            from app.adapters.registry import get_storage_adapter
 
             run.status = "completed"
             # Bucket-root state URL with no trailing slash; build_uri mints the
@@ -614,53 +589,47 @@ class TerraformExecutor:
             run.completed_at = datetime.now(timezone.utc)
             await session.flush()
 
-            await log_action(
-                session,
-                user_id=user_id,
-                entity_type="terraform",
-                entity_id=run.id,
-                action="bootstrap",
-                details={"status": "completed", "module_name": "foundation", "state_bucket": bucket_name},
-            )
-
-            if org_id is not None:
-                await ActivityFeedService.add_event(
-                    session,
-                    org_id=org_id,
-                    user_id=user_id,
-                    event_type="infrastructure.bootstrap_completed",
-                    summary=f"Terraform state bucket created: {bucket_name}",
-                    entity_type="terraform",
-                    entity_id=run.id,
-                    metadata={"state_bucket": bucket_name},
-                )
-
-            await session.flush()
-
             yield TerraformProgressEvent(
                 event_type="apply_complete",
                 message=f"Bootstrap complete. State bucket: {bucket_name}",
-                resources_completed=resources_completed,
-                resources_total=resources_total,
+                resources_completed=progress.resources_completed,
+                resources_total=progress.resources_total,
             )
 
+        except (asyncio.CancelledError, GeneratorExit) as exc:
+            logger.warning("Foundation bootstrap interrupted")
+            interrupted = True
+            if isinstance(exc, GeneratorExit):
+                raise
         except Exception as exc:
+            if cleanup is None:
+                raise
             logger.error("Bootstrap failed: %s", exc)
-            yield TerraformProgressEvent(event_type="apply_error", message=str(exc))
+            failure_message = str(exc)
         finally:
-            await cleanup()
-            if work_dir and work_dir.exists():
+            with anyio.CancelScope(shield=True):
+                exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
+                if cleanup is not None:
+                    await cleanup()
+                if run is not None and interrupted:
+                    await TerraformExecutor._flush_interruption(session)
+            if exit_confirmed and work_dir and work_dir.exists():
                 try:
                     shutil.rmtree(str(work_dir))
                 except Exception:
                     pass
+
+        if interrupted:
+            yield TerraformExecutor._interrupted_event(progress)
+        elif failure_message is not None:
+            yield TerraformProgressEvent(event_type="apply_error", message=failure_message)
 
     @staticmethod
     async def run_destroy(
         session: AsyncSession,
         user_id: int,
         module_name: str,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Destroy all resources for a module via `terraform destroy`.
 
         Creates a TerraformRun record, runs `terraform destroy -auto-approve -json`,
@@ -677,14 +646,47 @@ class TerraformExecutor:
         session.add(run)
         await session.flush()
 
-        cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
-        resources_completed = 0
-        resources_total = 0
-
-        env, cleanup = await cloud.build_provider_env(config)
-        log_lines: list[str] = []
+        progress = StreamProgress()
+        interrupted = False
+        failure_message: str | None = None
         process = None
+        cleanup = None
+
+        async def classify(entry: dict, line: str) -> TerraformProgressEvent | None:
+            entry_type = entry.get("type", "")
+
+            if entry_type == "planned_change":
+                progress.resources_total += 1
+
+            if entry_type == "apply_complete" and "hook" in entry:
+                addr = entry["hook"].get("resource", {}).get("addr", "")
+                if addr.startswith("data."):
+                    return None
+
+                await TerraformExecutor._record_resource(session, run, progress, addr)
+                return TerraformProgressEvent(
+                    event_type="resource_complete",
+                    resource_address=addr,
+                    message=f"Destroyed: {addr}",
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
+                    log_line=line,
+                )
+
+            if "@message" in entry:
+                return TerraformProgressEvent(
+                    event_type="progress",
+                    message=entry["@message"],
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
+                    log_line=line,
+                )
+            return None
+
         try:
+            cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
+            env, cleanup = await cloud.build_provider_env(config)
+
             work_dir = await asyncio.to_thread(TerraformExecutor._prepare_work_dir, module_name, cloud.modules_dir())
             tfvars = cloud.write_tfvars(work_dir, module_name, config)
             run.tfvars_json = tfvars
@@ -703,126 +705,72 @@ class TerraformExecutor:
             )
             _active_processes[run.id] = process
 
-            while True:
-                try:
-                    line_bytes = await asyncio.wait_for(process.stdout.readline(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield TerraformProgressEvent(
-                        event_type="heartbeat",
-                        message="Destroy operation in progress...",
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                    )
-                    continue
+            async with aclosing(
+                stream_terraform_output(
+                    process,
+                    heartbeat_message="Destroy operation in progress...",
+                    progress=progress,
+                    classify=classify,
+                )
+            ) as events:
+                async for event in events:
+                    yield event
 
-                if not line_bytes:
-                    break
+            exit_result = await read_exit(process)
+            run.apply_log = "\n".join(progress.log_lines)
 
-                line = line_bytes.decode().rstrip()
-                if not line:
-                    continue
-                log_lines.append(line)
-
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                entry_type = entry.get("type", "")
-
-                if entry_type == "planned_change":
-                    resources_total += 1
-
-                if entry_type == "apply_complete" and "hook" in entry:
-                    hook = entry["hook"]
-                    resource = hook.get("resource", {})
-                    addr = resource.get("addr", "")
-
-                    if addr.startswith("data."):
-                        continue
-
-                    resources_completed += 1
-                    run.resources_completed = resources_completed
-                    if run.completed_resources is None:
-                        run.completed_resources = []
-                    run.completed_resources = [*run.completed_resources, addr]
-                    await session.flush()
-                    yield TerraformProgressEvent(
-                        event_type="resource_complete",
-                        resource_address=addr,
-                        message=f"Destroyed: {addr}",
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                        log_line=line,
-                    )
-
-                elif "@message" in entry:
-                    yield TerraformProgressEvent(
-                        event_type="progress",
-                        message=entry["@message"],
-                        resources_completed=resources_completed,
-                        resources_total=resources_total,
-                        log_line=line,
-                    )
-
-            stderr_output = ""
-            if process.stderr:
-                stderr_output = (await process.stderr.read()).decode()
-            return_code = await process.wait()
-
-            run.apply_log = "\n".join(log_lines)
-
-            if return_code == 0:
+            if exit_result.return_code == 0:
                 run.status = "completed"
                 run.completed_at = datetime.now(timezone.utc)
                 yield TerraformProgressEvent(
                     event_type="apply_complete",
                     message="Destroy complete",
-                    resources_completed=resources_completed,
-                    resources_total=resources_total,
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
                 )
             else:
                 run.status = "failed"
-                run.error_message = stderr_output or "Terraform destroy failed"
+                run.error_message = exit_result.stderr or "Terraform destroy failed"
                 run.completed_at = datetime.now(timezone.utc)
                 yield TerraformProgressEvent(
                     event_type="apply_error",
                     message=run.error_message,
-                    resources_completed=resources_completed,
-                    resources_total=resources_total,
+                    resources_completed=progress.resources_completed,
+                    resources_total=progress.resources_total,
                 )
 
-        except asyncio.CancelledError:
-            logger.warning("Terraform destroy cancelled for run %s", run.id)
-            if process and process.returncode is None:
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=10)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    process.kill()
-            run.status = "failed"
-            run.error_message = "Operation cancelled (client disconnected)"
-            run.completed_at = datetime.now(timezone.utc)
-            run.apply_log = "\n".join(log_lines) if log_lines else None
-            await session.flush()
-            return
+        except (asyncio.CancelledError, GeneratorExit) as exc:
+            logger.warning("Terraform destroy interrupted for run %s", run.id)
+            interrupted = True
+            if isinstance(exc, GeneratorExit):
+                raise
         except Exception as exc:
+            if cleanup is None:
+                raise
             logger.error("Terraform destroy failed: %s", exc)
             run.status = "failed"
             run.error_message = str(exc)
             run.completed_at = datetime.now(timezone.utc)
+            failure_message = str(exc)
+        finally:
+            with anyio.CancelScope(shield=True):
+                exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
+                if cleanup is not None:
+                    await cleanup()
+                await TerraformExecutor._release_and_flush(
+                    session, run, module_name, exit_confirmed, guarded=interrupted or failure_message is not None
+                )
+
+        if interrupted:
+            yield TerraformExecutor._interrupted_event(progress)
+            return
+        if failure_message is not None:
             yield TerraformProgressEvent(
                 event_type="apply_error",
-                message=str(exc),
-                resources_completed=resources_completed,
-                resources_total=resources_total,
+                message=failure_message,
+                resources_completed=progress.resources_completed,
+                resources_total=progress.resources_total,
             )
-        finally:
-            _active_processes.pop(run.id, None)
-            await cleanup()
-            if run.status == "failed":
-                await TerraformExecutor._auto_cleanup_lock(session, module_name)
-            await session.flush()
 
         await log_action(
             session,
@@ -877,6 +825,84 @@ class TerraformExecutor:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _record_resource(session: AsyncSession, run: TerraformRun, progress: StreamProgress, addr: str) -> None:
+        """Count a finished resource on the run, flushed so pollers can read it."""
+        progress.resources_completed += 1
+        run.resources_completed = progress.resources_completed
+        run.completed_resources = [*(run.completed_resources or []), addr]
+        await session.flush()
+
+    @staticmethod
+    def _interrupted_event(progress: StreamProgress) -> TerraformProgressEvent:
+        return TerraformProgressEvent(
+            event_type=INTERRUPTED_EVENT,
+            resources_completed=progress.resources_completed,
+            resources_total=progress.resources_total,
+        )
+
+    @staticmethod
+    async def _settle_run(
+        run: TerraformRun | None,
+        process: asyncio.subprocess.Process | None,
+        progress: StreamProgress,
+        interrupted: bool,
+    ) -> bool:
+        """Stop Terraform and record how the run ended. Returns whether it exited.
+
+        Every exit path of every operation comes through here, so nothing can
+        release a lock or delete a work directory under a live process. An
+        interrupted or unstoppable run is marked failed, which lock cleanup and
+        polling consumers rely on; a run that already finished keeps its outcome.
+        ``run`` is None when bootstrap stops before creating one.
+        """
+        exit_confirmed = process is None or await stop_process(process)
+        if run is None:
+            return exit_confirmed
+
+        if (interrupted or not exit_confirmed) and run.status == "applying":
+            run.status = "failed"
+            run.error_message = RUN_INTERRUPTED_MESSAGE
+            run.completed_at = datetime.now(timezone.utc)
+            run.apply_log = "\n".join(progress.log_lines) if progress.log_lines else None
+
+        if exit_confirmed:
+            _active_processes.pop(run.id, None)
+        else:
+            logger.error("Terraform did not exit for run %s; keeping its lock and work directory", run.id)
+        return exit_confirmed
+
+    @staticmethod
+    async def _release_and_flush(
+        session: AsyncSession,
+        run: TerraformRun,
+        module_name: str,
+        exit_confirmed: bool,
+        *,
+        guarded: bool,
+    ) -> None:
+        """Release a failed run's lock, once Terraform is gone, and flush the outcome.
+
+        When the operation was already interrupted or failing (``guarded``), a
+        cleanup error is logged instead of raised: it must not replace the outcome
+        the caller is about to receive. The stale-run recovery settles the row.
+        """
+        try:
+            if run.status == "failed" and exit_confirmed:
+                await TerraformExecutor._auto_cleanup_lock(session, module_name)
+            await session.flush()
+        except Exception:
+            if not guarded:
+                raise
+            logger.warning("Could not record the outcome of run %s", run.id, exc_info=True)
+
+    @staticmethod
+    async def _flush_interruption(session: AsyncSession) -> None:
+        try:
+            await session.flush()
+        except Exception:
+            logger.warning("Could not record an interrupted bootstrap", exc_info=True)
 
     @staticmethod
     def _base_env() -> dict:
@@ -1167,7 +1193,8 @@ class TerraformExecutor:
         )
         active_rows = result.fetchall()
 
-        runs_to_fail: list[tuple[int, str | None]] = []
+        # (run_id, module_name, whether the lock may be released)
+        runs_to_fail: list[tuple[int, str | None, bool]] = []
         for run_id, module_name, started_at in cast("Sequence[tuple[int, str | None, datetime]]", active_rows):
             process = _active_processes.get(run_id)
 
@@ -1180,9 +1207,12 @@ class TerraformExecutor:
                         run_id,
                         SAFETY_TIMEOUT_HOURS,
                     )
-                    process.terminate()
-                    _active_processes.pop(run_id, None)
-                    runs_to_fail.append((run_id, module_name))
+                    exit_confirmed = await stop_process(process)
+                    if exit_confirmed:
+                        _active_processes.pop(run_id, None)
+                    else:
+                        logger.error("Run %d did not exit; keeping its lock", run_id)
+                    runs_to_fail.append((run_id, module_name, exit_confirmed))
                 else:
                     # Still within limits, leave it alone
                     continue
@@ -1190,7 +1220,7 @@ class TerraformExecutor:
                 # No live process -- container restarted or process exited
                 # without proper cleanup
                 _active_processes.pop(run_id, None)
-                runs_to_fail.append((run_id, module_name))
+                runs_to_fail.append((run_id, module_name, True))
 
         if runs_to_fail:
             cloud, config = await TerraformExecutor._resolve_cloud_and_config(session)
@@ -1200,9 +1230,9 @@ class TerraformExecutor:
             credentials = None
             creds_loaded = False
 
-            for run_id, module_name in runs_to_fail:
+            for run_id, module_name, release_lock in runs_to_fail:
                 lock_path = cloud.lock_object_path(module_name) if module_name else None
-                if state_bucket and lock_path:
+                if release_lock and state_bucket and lock_path:
                     if not creds_loaded:
                         credentials = await TerraformExecutor._load_gcs_credentials(session)
                         creds_loaded = True
@@ -1247,17 +1277,22 @@ class TerraformExecutor:
         module_name = run.module_name or "foundation"
         lock_path = cloud.lock_object_path(module_name)
 
-        if state_bucket and lock_path:
-            credentials = await TerraformExecutor._load_gcs_credentials(session)
-            await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path, credentials)
+        # Stop the process first if it's still running in this container: the
+        # lock protects state for as long as Terraform can still write it.
+        process = _active_processes.get(run_id)
+        exit_confirmed = process is None or await stop_process(process)
 
-        # Kill the process if it's still running in this container
-        process = _active_processes.pop(run_id, None)
-        if process and process.returncode is None:
-            process.terminate()
-
-        run.status = "cancelled"
-        run.error_message = "Abandoned by user"
+        if exit_confirmed:
+            _active_processes.pop(run_id, None)
+            if state_bucket and lock_path:
+                credentials = await TerraformExecutor._load_gcs_credentials(session)
+                await TerraformExecutor._delete_gcs_lock_file(state_bucket, lock_path, credentials)
+            run.status = "cancelled"
+            run.error_message = "Abandoned by user"
+        else:
+            logger.error("Run %d did not exit when abandoned; keeping its lock", run_id)
+            run.status = "failed"
+            run.error_message = "Abandoned by user, but Terraform did not exit. The state lock was kept."
         run.completed_at = datetime.now(timezone.utc)
         await session.flush()
 

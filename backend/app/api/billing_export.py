@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import aclosing
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.credentials import get_credentials_provider
 from app.api.dependencies import require_permission
+from app.api.terraform_streaming import ClosingStreamingResponse, client_event
 from app.database import get_session
 from app.adapters.credentials.credential_injector import load_gcp_credentials
 from app.platform.platform_config_service import PlatformConfigService
@@ -258,7 +260,7 @@ def _sse_event(event: TerraformProgressEvent) -> str:
 async def billing_export_teardown(
     current_user: dict = require_permission("cost_center", "view"),
     session: AsyncSession = Depends(get_session),
-) -> StreamingResponse:
+) -> ClosingStreamingResponse:
     """Destroy the BigQuery billing export dataset via Terraform.
 
     Streams SSE progress events. On success, clears billing export
@@ -283,10 +285,11 @@ async def billing_export_teardown(
     async def event_generator():
         completed = False
         try:
-            async for event in gen:
-                if event.event_type == "apply_complete":
-                    completed = True
-                yield _sse_event(event)
+            async with aclosing(gen) as events:
+                async for event in events:
+                    if event.event_type == "apply_complete":
+                        completed = True
+                    yield _sse_event(client_event(event))
         except Exception as exc:
             logger.error("Billing export apply error: %s", exc, exc_info=True)
             error_event = TerraformProgressEvent(
@@ -295,16 +298,17 @@ async def billing_export_teardown(
             )
             yield _sse_event(error_event)
         finally:
-            if completed:
-                for key in (
-                    "billing_export_configured",
-                    "billing_export_dataset",
-                    "billing_export_table",
-                ):
-                    await PlatformConfigService.set(session, key, None)
-            await session.commit()
+            with anyio.CancelScope(shield=True):
+                if completed:
+                    for key in (
+                        "billing_export_configured",
+                        "billing_export_dataset",
+                        "billing_export_table",
+                    ):
+                        await PlatformConfigService.set(session, key, None)
+                await session.commit()
 
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
