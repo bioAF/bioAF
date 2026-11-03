@@ -354,7 +354,9 @@ class TerraformExecutor:
                 exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
                 if cleanup is not None:
                     await cleanup()
-                await TerraformExecutor._release_and_flush(session, run, module_name, exit_confirmed, interrupted)
+                await TerraformExecutor._release_and_flush(
+                    session, run, module_name, exit_confirmed, guarded=interrupted or failure_message is not None
+                )
             if apply_failed:
                 # Notify admins of a real deploy failure. Terraform runs are
                 # global (single org); fire-and-forget so the stream is not
@@ -538,48 +540,50 @@ class TerraformExecutor:
                 except (json.JSONDecodeError, AttributeError):
                     pass
 
-            # Update platform_config
-            from app.adapters.registry import get_storage_adapter
-            from app.platform.platform_config_service import PlatformConfigService
+            # Record the bootstrap as one unit: an initialized flag without its
+            # state bucket would block a retry with nothing to resume from.
+            with anyio.CancelScope(shield=True):
+                from app.adapters.registry import get_storage_adapter
+                from app.platform.platform_config_service import PlatformConfigService
 
-            for key, value in [
-                ("terraform_initialized", "true"),
-                ("terraform_state_bucket", bucket_name),
-                ("backups_bucket_name", backups_bucket),
-            ]:
-                await PlatformConfigService.set(session, key, value)
+                for key, value in [
+                    ("terraform_initialized", "true"),
+                    ("terraform_state_bucket", bucket_name),
+                    ("backups_bucket_name", backups_bucket),
+                ]:
+                    await PlatformConfigService.set(session, key, value)
 
-            run.status = "completed"
-            # Bucket-root state URL with no trailing slash; build_uri mints the
-            # backend scheme, rstrip drops the slash it adds for an empty key.
-            run.terraform_state_url = (
-                get_storage_adapter().build_uri(bucket_name, "").rstrip("/") if bucket_name else ""
-            )
-            run.completed_at = datetime.now(timezone.utc)
-            await session.flush()
+                run.status = "completed"
+                # Bucket-root state URL with no trailing slash; build_uri mints the
+                # backend scheme, rstrip drops the slash it adds for an empty key.
+                run.terraform_state_url = (
+                    get_storage_adapter().build_uri(bucket_name, "").rstrip("/") if bucket_name else ""
+                )
+                run.completed_at = datetime.now(timezone.utc)
+                await session.flush()
 
-            await log_action(
-                session,
-                user_id=user_id,
-                entity_type="terraform",
-                entity_id=run.id,
-                action="bootstrap",
-                details={"status": "completed", "module_name": "foundation", "state_bucket": bucket_name},
-            )
-
-            if org_id is not None:
-                await ActivityFeedService.add_event(
+                await log_action(
                     session,
-                    org_id=org_id,
                     user_id=user_id,
-                    event_type="infrastructure.bootstrap_completed",
-                    summary=f"Terraform state bucket created: {bucket_name}",
                     entity_type="terraform",
                     entity_id=run.id,
-                    metadata={"state_bucket": bucket_name},
+                    action="bootstrap",
+                    details={"status": "completed", "module_name": "foundation", "state_bucket": bucket_name},
                 )
 
-            await session.flush()
+                if org_id is not None:
+                    await ActivityFeedService.add_event(
+                        session,
+                        org_id=org_id,
+                        user_id=user_id,
+                        event_type="infrastructure.bootstrap_completed",
+                        summary=f"Terraform state bucket created: {bucket_name}",
+                        entity_type="terraform",
+                        entity_id=run.id,
+                        metadata={"state_bucket": bucket_name},
+                    )
+
+                await session.flush()
 
             yield TerraformProgressEvent(
                 event_type="apply_complete",
@@ -749,7 +753,9 @@ class TerraformExecutor:
                 exit_confirmed = await TerraformExecutor._settle_run(run, process, progress, interrupted)
                 if cleanup is not None:
                     await cleanup()
-                await TerraformExecutor._release_and_flush(session, run, module_name, exit_confirmed, interrupted)
+                await TerraformExecutor._release_and_flush(
+                    session, run, module_name, exit_confirmed, guarded=interrupted or failure_message is not None
+                )
 
         if interrupted:
             yield TerraformExecutor._interrupted_event(progress)
@@ -869,21 +875,23 @@ class TerraformExecutor:
         run: TerraformRun,
         module_name: str,
         exit_confirmed: bool,
-        interrupted: bool,
+        *,
+        guarded: bool,
     ) -> None:
         """Release a failed run's lock, once Terraform is gone, and flush the outcome.
 
-        An interruption can leave the transaction unusable. That must not replace
-        the caller's outcome: the stale-run recovery settles the row instead.
+        When the operation was already interrupted or failing (``guarded``), a
+        cleanup error is logged instead of raised: it must not replace the outcome
+        the caller is about to receive. The stale-run recovery settles the row.
         """
         try:
             if run.status == "failed" and exit_confirmed:
                 await TerraformExecutor._auto_cleanup_lock(session, module_name)
             await session.flush()
         except Exception:
-            if not interrupted:
+            if not guarded:
                 raise
-            logger.warning("Could not record the interruption of run %s", run.id, exc_info=True)
+            logger.warning("Could not record the outcome of run %s", run.id, exc_info=True)
 
     @staticmethod
     async def _flush_interruption(session: AsyncSession) -> None:

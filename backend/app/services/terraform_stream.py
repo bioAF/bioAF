@@ -243,4 +243,6 @@ async def owned_event_stream(
             await session.rollback()
         raise
     else:
-        await session.commit()
+        # A disconnect can land while this commit is in flight.
+        with anyio.CancelScope(shield=True):
+            await session.commit()

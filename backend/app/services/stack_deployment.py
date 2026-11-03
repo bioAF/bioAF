@@ -347,7 +347,7 @@ async def _deploy_phase(
 
             phase.progress, shown = reduce_progress(phase.progress, module_name, event)
             if event.event_type == "apply_complete":
-                await after_apply(event.extra.get("outputs", {}))
+                await _run_post_hook(session, after_apply, event.extra.get("outputs", {}))
                 yield TerraformProgressEvent(
                     event_type="phase_complete",
                     message=complete_message,
@@ -356,6 +356,29 @@ async def _deploy_phase(
                 )
             else:
                 yield shown
+
+
+async def _run_post_hook(
+    session: AsyncSession,
+    after_apply: Callable[[dict], Awaitable[None]],
+    outputs: dict,
+) -> None:
+    """Record a confirmed apply whole or not at all.
+
+    The apply succeeded, so the hook is shielded from a client disconnect and
+    finishes. A task cancellation can still land inside it; the savepoint then
+    discards the partial writes, leaving the outcome uncertain, which a status
+    check or config sync can resolve, rather than half recorded.
+    """
+    savepoint = await session.begin_nested()
+    try:
+        with anyio.CancelScope(shield=True):
+            await after_apply(outputs)
+    except BaseException:
+        with anyio.CancelScope(shield=True):
+            await savepoint.rollback()
+        raise
+    await savepoint.commit()
 
 
 async def _tag_deploy_phase(session: AsyncSession, module_name: str) -> None:
@@ -710,8 +733,9 @@ async def deploy_stack(
         logger.warning("Compute deploy interrupted")
         interrupted = True
     finally:
-        # Every exit restores the override, including cancellation and closure,
-        # so a global default never stays pointed at a one-off compute location.
+        # Restore on every exit, including cancellation and closure. This is a
+        # flush: an owner that rolls back an unexpected error discards it, and an
+        # override an earlier commit persisted then stays (deferred D2 work).
         await _restore_compute_location(session, original_region, original_zone)
 
     progress = compute.progress

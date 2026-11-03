@@ -392,3 +392,22 @@ async def test_owner_commits_inside_a_cancelled_scope():
                 await asyncio.sleep(1)
 
     assert closed == ["closed", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_owner_finishes_a_drained_commit_inside_a_cancelled_scope():
+    session, closed = _session(), []
+
+    async def commit():
+        await asyncio.sleep(0)
+        closed.append("commit")
+
+    session.commit.side_effect = commit
+
+    with anyio.CancelScope() as scope:
+        async with owned_event_stream(session, _events(closed)) as events:
+            async for _ in events:
+                pass
+            scope.cancel()
+
+    assert closed == ["closed", "commit"]

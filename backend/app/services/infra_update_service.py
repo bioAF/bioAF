@@ -372,6 +372,7 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
         return False
 
     async with async_session_factory() as s:  # type: ignore[misc]
+        applying = False
         try:
             run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
             # The target may have already been applied (or turned destructive)
@@ -383,6 +384,7 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 return False
             run.status = "applying"
             await s.flush()
+            applying = True
             interrupted = False
             async with aclosing(TerraformExecutor.run_apply(s, run.id, user_id, targets=[target])) as events:
                 async for event in events:
@@ -405,7 +407,11 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
             await s.commit()
             return applied
         except asyncio.CancelledError:
-            await commit_interruption(s)
+            if applying:
+                await commit_interruption(s)
+            else:
+                # Nothing ran yet: leave no half-planned run behind.
+                await s.rollback()
             raise
         except Exception:
             logger.exception("Infrastructure update apply failed for target %s", target)

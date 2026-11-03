@@ -453,3 +453,28 @@ async def test_cancellation_inside_the_compute_hook_is_not_success(session, user
     assert events[-1].event_type == "interrupted"
     assert not any(e.event_type == "stack_complete" for e in events)
     assert await _committed(db_engine, "gcp_region") == "us-central1"
+
+
+@pytest.mark.asyncio
+async def test_cancellation_inside_a_hook_never_commits_half_of_it(session, user_id, db_engine):
+    """A confirmed apply's post-hook is recorded whole or not at all."""
+    await _gcp(session, storage_deployed="false")
+
+    async def cancel_midway(_session):
+        raise asyncio.CancelledError
+
+    with (
+        patch("app.services.stack_deployment._run_module", side_effect=_script({})),
+        patch("app.services.stack_deployment.process_queued_components", side_effect=cancel_midway),
+    ):
+        # Outside compute, cancellation propagates to the owner after it commits.
+        with pytest.raises(asyncio.CancelledError):
+            async with owned_event_stream(session, deploy_stack(session, "kubernetes", user_id=user_id)) as stream:
+                async for _ in stream:
+                    pass
+
+    storage = await _committed(db_engine, "storage_deployed")
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as other:
+        audits = (await other.execute(text("SELECT COUNT(*) FROM audit_log WHERE action = 'deploy_storage'"))).scalar()
+    assert (storage, audits) in {("false", 0), ("true", 1)}

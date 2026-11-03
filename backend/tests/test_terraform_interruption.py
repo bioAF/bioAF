@@ -528,3 +528,23 @@ async def test_safety_ceiling_with_unconfirmed_exit_keeps_the_lock(session, user
     assert harness.journal == []
     assert (await _run_row(session)).status == "failed"
     assert _active_processes[run.id] is process
+
+
+@pytest.mark.asyncio
+async def test_lock_cleanup_failure_does_not_hide_the_original_failure(session, user_id, harness):
+    process = harness.fake()
+
+    async def explode():
+        raise RuntimeError("stream broke")
+
+    async def lock_fails(*_args, **_kwargs):
+        raise RuntimeError("cannot reach state bucket")
+
+    process.stdout.readline = explode
+    gen = await _operation(session, user_id, "apply")
+
+    with patch.object(TerraformExecutor, "_auto_cleanup_lock", side_effect=lock_fails):
+        events = [event async for event in gen]
+
+    assert events[-1].event_type == "apply_error"
+    assert events[-1].message == "stream broke"

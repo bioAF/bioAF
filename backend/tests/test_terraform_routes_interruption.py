@@ -432,3 +432,59 @@ async def test_disconnect_while_suspended_at_a_yield_still_closes():
     await ClosingStreamingResponse(body(), media_type="text/event-stream")(_scope(), receive, send)
 
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_apply_sse_rolls_back_an_unexpected_error(client, admin_token, admin_user, session, db_engine):
+    from app.models.component import TerraformRun
+
+    run = TerraformRun(
+        triggered_by_user_id=admin_user.id, action="plan", module_name="storage", status="awaiting_confirmation"
+    )
+    session.add(run)
+    await session.commit()
+
+    async def explode(session, run_id, user_id):
+        await session.execute(text("UPDATE terraform_runs SET status = 'completed'"))
+        yield _event("progress")
+        raise RuntimeError("unexpected")
+
+    with patch("app.api.terraform_executor.TerraformExecutor.run_apply", side_effect=explode):
+        response = await client.post(f"/api/v1/infrastructure/terraform/apply/{run.id}", headers=_auth(admin_token))
+
+    assert _sse_payloads(response.text)[-1] == {
+        "event_type": "apply_error",
+        "message": "Apply failed unexpectedly",
+        "resource_address": "",
+        "resources_completed": 0,
+        "resources_total": 0,
+        "log_line": "",
+    }
+    assert await _committed_status(db_engine) == ["awaiting_confirmation"]
+
+
+@pytest.mark.asyncio
+async def test_infra_update_plan_cancellation_leaves_no_active_run(admin_user, session, db_engine):
+    from app.services import infra_update_service
+
+    planning = asyncio.Event()
+
+    async def plan(s, user_id, module_name):
+        await s.execute(
+            text(
+                "INSERT INTO terraform_runs (triggered_by_user_id, action, module_name, status) "
+                "VALUES (:u, 'plan', :m, 'planning')"
+            ).bindparams(u=user_id, m=module_name)
+        )
+        await s.flush()
+        planning.set()
+        await asyncio.sleep(3600)
+
+    with patch.object(infra_update_service.TerraformExecutor, "run_plan", side_effect=plan):
+        task = asyncio.create_task(infra_update_service._apply_one_target("storage", "a.one", admin_user.id))
+        await asyncio.wait_for(planning.wait(), 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert "planning" not in await _committed_status(db_engine)

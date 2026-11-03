@@ -127,6 +127,8 @@ async def bootstrap_foundation(
                     yield _sse_event(client_event(event))
             except Exception as exc:
                 logger.error("Bootstrap foundation stream error: %s", exc, exc_info=True)
+                # Unexpected: discard partial work, unlike a reported outcome.
+                await session.rollback()
                 error_event = TerraformProgressEvent(
                     event_type="apply_error",
                     message="Apply failed unexpectedly",
@@ -233,6 +235,8 @@ async def apply_plan(
                     yield _sse_event(client_event(event))
             except Exception as exc:
                 logger.error("Terraform apply stream error for run %d: %s", run_id, exc, exc_info=True)
+                # Unexpected: discard partial work, unlike a reported outcome.
+                await session.rollback()
                 error_event = TerraformProgressEvent(
                     event_type="apply_error",
                     message="Apply failed unexpectedly",
