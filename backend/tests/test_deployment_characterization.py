@@ -21,7 +21,7 @@ from app.models.audit_log import AuditLog
 from app.services.bootstrap_roles import seed_builtin_roles
 from app.services.terraform_executor import TerraformProgressEvent
 
-NOTEBOOK_BUILD = "app.api.stack_deploy.build_notebook_image"
+NOTEBOOK_BUILD = "app.services.component_service.build_notebook_image"
 CELLXGENE_BUILD = "app.services.cellxgene_image_service.build_cellxgene_image"
 TOGGLE_URL = "/api/v1/infrastructure/stack/components/{key}/toggle"
 

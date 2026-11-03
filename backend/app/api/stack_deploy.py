@@ -26,13 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies import require_permission
 from app.api.terraform_streaming import ClosingStreamingResponse, client_event
 from app.database import async_session_factory, get_session
-from app.exceptions import DomainError
+from app.exceptions import DomainError, NotFoundError, ValidationError
 from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.cluster_quota_service import ClusterQuotaService
-from app.services.audit_service import log_action
+from app.services.component_service import KUBERNETES_COMPONENTS, ComponentService
 from app.services.terraform_cloud import AwsTerraformCloud, GcpTerraformCloud, get_terraform_cloud
-from app.services.notebook_image_service import build_notebook_image, cancel_build
+from app.services.notebook_image_service import cancel_build
 from app.services import infra_update_service
 from app.services.stack_deployment import (
     StackStatus,
@@ -45,11 +45,6 @@ from app.services.stack_deployment import (
 )
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
 from app.services.terraform_stream import owned_event_stream
-
-# Components that require the bioaf-scrna notebook image
-_NOTEBOOK_COMPONENTS = {"rstudio", "jupyterhub"}
-# Components that require the cellxgene image
-_CELLXGENE_COMPONENTS = {"cellxgene"}
 
 logger = logging.getLogger("bioaf.stack_deploy_api")
 
@@ -221,77 +216,6 @@ class NotebookImageBuildStatus(BaseModel):
     build_id: str | None
     build_status: str | None
     image_uri: str | None
-
-
-# -----------------------------------------------------------------------
-# Component catalog for the stack-based view
-# -----------------------------------------------------------------------
-
-KUBERNETES_COMPONENTS: list[dict] = [
-    {
-        "key": "nextflow",
-        "name": "Nextflow",
-        "category": "pipeline_orchestration",
-        "description": "Pipeline orchestration using Nextflow with native Kubernetes executor. Supports nf-core workflows.",
-        "cost_estimate": "$0 (uses Kubernetes compute)",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": False,
-    },
-    {
-        "key": "snakemake",
-        "name": "Snakemake",
-        "category": "pipeline_orchestration",
-        "description": "Pipeline orchestration using Snakemake with Kubernetes executor support.",
-        "cost_estimate": "$0 (uses Kubernetes compute)",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": False,
-    },
-    {
-        "key": "jupyterhub",
-        "name": "JupyterHub",
-        "category": "analysis",
-        "description": "Managed Jupyter notebook environment on Kubernetes with pre-built scRNA-seq kernels.",
-        "cost_estimate": "$50-$200/month",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": True,
-    },
-    {
-        "key": "rstudio",
-        "name": "RStudio",
-        "category": "analysis",
-        "description": "Managed RStudio environment on Kubernetes with Seurat and Bioconductor pre-installed.",
-        "cost_estimate": "$50-$200/month",
-        "dependencies": ["kubernetes_cluster"],
-        "configurable": True,
-    },
-    {
-        "key": "cellxgene",
-        "name": "cellxgene",
-        "category": "visualization",
-        "description": "Interactive single-cell data explorer for h5ad files.",
-        "cost_estimate": "$20-$50/month",
-        "dependencies": [],
-        "configurable": False,
-    },
-    {
-        "key": "qc_dashboard",
-        "name": "QC Dashboard",
-        "category": "visualization",
-        "description": "Auto-generated quality control dashboards after pipeline runs.",
-        "cost_estimate": "$10-$30/month",
-        "dependencies": ["nextflow"],
-        "configurable": False,
-    },
-    {
-        "key": "meilisearch",
-        "name": "Meilisearch",
-        "category": "search",
-        "description": "Full-text search over protocols, metadata, and pipeline logs.",
-        "cost_estimate": "$20-$50/month",
-        "dependencies": [],
-        "configurable": False,
-    },
-]
 
 
 # -----------------------------------------------------------------------
@@ -825,123 +749,24 @@ async def stack_component_toggle(
     session: AsyncSession = Depends(get_session),
 ) -> ComponentToggleResponse:
     """Toggle a component's enabled state with dependency enforcement."""
-    # Block toggling kubernetes_cluster directly (use stack teardown)
-    if component_key == "kubernetes_cluster":
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot toggle kubernetes_cluster directly. Use stack deploy/teardown.",
+    try:
+        result = await ComponentService.toggle_stack_component(
+            session,
+            component_key,
+            user_id=int(current_user["sub"]),
+            force_rebuild=force_rebuild,
         )
-
-    # Find component definition
-    comp_def = None
-    for c in KUBERNETES_COMPONENTS:
-        if c["key"] == component_key:
-            comp_def = c
-            break
-
-    if comp_def is None:
-        raise HTTPException(status_code=404, detail=f"Component '{component_key}' not found")
-
-    # Get current state
-    row = (
-        await session.execute(
-            text("SELECT enabled, status FROM component_states WHERE component_key = :key").bindparams(
-                key=component_key
-            )
-        )
-    ).fetchone()
-
-    currently_enabled = row[0] if row else False
-
-    if not currently_enabled:
-        # Enabling: check dependencies
-        if comp_def["dependencies"]:
-            dep_rows = (
-                await session.execute(
-                    text(
-                        "SELECT component_key, enabled FROM component_states WHERE component_key = ANY(:keys)"
-                    ).bindparams(keys=comp_def["dependencies"])
-                )
-            ).fetchall()
-            enabled_deps = {r[0] for r in dep_rows if r[1]}
-            missing = [d for d in comp_def["dependencies"] if d not in enabled_deps]
-            if missing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dependency not met: {', '.join(missing)} must be enabled first",
-                )
-
-        # Enable
-        new_enabled = True
-        new_status = "enabled"
-
-        # Notebook components need the bioaf-scrna image
-        if component_key in _NOTEBOOK_COMPONENTS:
-            scrna_image = await PlatformConfigService.get(session, "bioaf_scrna_image")
-            build_status = await PlatformConfigService.get(session, "notebook_image_build_status")
-
-            needs_build = force_rebuild or not scrna_image or scrna_image == "null" or build_status not in ("SUCCESS",)
-            if needs_build:
-                try:
-                    await build_notebook_image(session)
-                    new_status = "provisioning"
-                except Exception as exc:
-                    logger.warning("Failed to start notebook image build: %s", exc)
-                    new_status = "build_failed"
-
-        # Cellxgene needs its own image
-        if component_key in _CELLXGENE_COMPONENTS:
-            from app.services.cellxgene_image_service import build_cellxgene_image
-
-            cxg_image = await PlatformConfigService.get(session, "cellxgene_image")
-            cxg_build_status = await PlatformConfigService.get(session, "cellxgene_image_build_status")
-
-            needs_build = force_rebuild or not cxg_image or cxg_image == "null" or cxg_build_status not in ("SUCCESS",)
-            if needs_build:
-                try:
-                    await build_cellxgene_image(session)
-                    new_status = "provisioning"
-                except Exception as exc:
-                    logger.warning("Failed to start cellxgene image build: %s", exc)
-                    new_status = "build_failed"
-
-        await session.execute(
-            text("""
-            UPDATE component_states SET enabled = true, status = :status
-            WHERE component_key = :key
-            """).bindparams(key=component_key, status=new_status)
-        )
-    else:
-        # Disable
-        await session.execute(
-            text("""
-            UPDATE component_states SET enabled = false, status = 'disabled'
-            WHERE component_key = :key
-            """).bindparams(key=component_key)
-        )
-        new_enabled = False
-        new_status = "disabled"
-
-    user_id = int(current_user["sub"])
-    await log_action(
-        session,
-        user_id=user_id,
-        entity_type="component",
-        entity_id=0,
-        action="enable" if new_enabled else "disable",
-        details={
-            "component_key": component_key,
-            "component_name": comp_def["name"],
-            "status": new_status,
-        },
-    )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     await session.commit()
 
     return ComponentToggleResponse(
-        component_key=component_key,
-        enabled=new_enabled,
-        status=new_status,
+        component_key=result.component_key,
+        enabled=result.enabled,
+        status=result.status,
     )
 
 

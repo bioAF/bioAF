@@ -23,6 +23,7 @@ from app.services.gcs_storage import BucketMetrics, GcsStorageService
 
 logger = logging.getLogger("bioaf.storage_deploy_api")
 
+
 async def _store_storage_outputs(session: AsyncSession) -> None:
     """Read Terraform outputs for the storage module and store them in platform_config."""
     from app.services.terraform_executor import TerraformExecutor

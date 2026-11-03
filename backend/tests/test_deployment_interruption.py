@@ -339,6 +339,8 @@ async def test_closing_the_outer_stream_stops_terraform_and_owner_commits(sessio
     assert await _terminal_state(db_engine) == "failed"
     assert await _committed(db_engine, "gcp_region") == "us-central1"
     assert await _orphan_count(session) == 0
+    phase = (await session.execute(text("SELECT deploy_phase FROM terraform_runs"))).scalar_one()
+    assert phase == "compute"
 
 
 @pytest.mark.asyncio
