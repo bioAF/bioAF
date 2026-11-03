@@ -18,8 +18,9 @@ from app.models.pipeline_run_input_file import PipelineRunInputFile
 from app.models.sample import Sample
 from app.schemas.pipeline_run import PipelineRunLaunchRequest
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
 from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
+from app.services.launch_outcome import mark_submission_failed
+from app.services.post_commit_events import defer_event
 from app.services.pipeline_catalog_service import PipelineCatalogService
 from app.services.quota_service import QuotaService
 from app.services.sample_sheet_service import SampleSheetService
@@ -964,23 +965,25 @@ class PipelineRunService:
             for field, value in field_updates.get(sample.id, {}).items():
                 setattr(sample, field, value)
 
-        # 9. Submit job via the compute adapter (BAL)
+        # 9. Submit job via the compute adapter (BAL). A provider that raises is treated as
+        # having refused the job; see launch_outcome for the case where it had in fact accepted it.
+        job_spec = {
+            "run_id": run.id,
+            "pipeline_name": pipeline.pipeline_key,
+            "pipeline_source": pipeline.source_url,
+            "pipeline_version": pipeline.version,
+            "parameters": merged_params,
+            "sample_sheet": sample_sheet_csv,
+            "experiment_id": data.experiment_id,
+            "work_dir": run.work_dir,
+            "resume_from_run_id": data.resume_from_run_id,
+            "input_files": [s.external_id or str(s.id) for s in samples],
+        }
         try:
-            compute_adapter = get_compute_adapter()
-            job_spec = {
-                "run_id": run.id,
-                "pipeline_name": pipeline.pipeline_key,
-                "pipeline_source": pipeline.source_url,
-                "pipeline_version": pipeline.version,
-                "parameters": merged_params,
-                "sample_sheet": sample_sheet_csv,
-                "experiment_id": data.experiment_id,
-                "work_dir": run.work_dir,
-                "resume_from_run_id": data.resume_from_run_id,
-                "input_files": [s.external_id or str(s.id) for s in samples],
-            }
-            job_result = await compute_adapter.submit_job(job_spec)
-
+            job_result = await get_compute_adapter().submit_job(job_spec)
+        except Exception as e:
+            mark_submission_failed(run, e, logger)
+        else:
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             run.slurm_job_id = job_result.job_id
@@ -998,66 +1001,59 @@ class PipelineRunService:
             if job_result.estimated_cost:
                 run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
 
-            import asyncio
-
-            asyncio.create_task(
-                event_bus.emit(
-                    PIPELINE_STARTED,
-                    {
-                        "event_type": PIPELINE_STARTED,
-                        "org_id": org_id,
-                        "user_id": user_id,
-                        "target_user_id": user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{pipeline.name}' started",
-                        "message": f"Run {run.id} submitted for experiment {data.experiment_id}",
-                        "summary": f"Pipeline '{pipeline.name}' run {run.id} started",
-                    },
-                )
+        submitted = run.status == "running"
+        # Announced once the caller commits the run; dropped if it never does.
+        if submitted:
+            defer_event(
+                session,
+                PIPELINE_STARTED,
+                {
+                    "event_type": PIPELINE_STARTED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{pipeline.name}' started",
+                    "message": f"Run {run.id} submitted for experiment {data.experiment_id}",
+                    "summary": f"Pipeline '{pipeline.name}' run {run.id} started",
+                },
             )
-
-        except Exception as e:
-            run.status = "failed"
-            run.error_message = str(e)
-            logger.error("Pipeline launch failed for run %d: %s", run.id, e)
-
-            import asyncio
-
-            asyncio.create_task(
-                event_bus.emit(
-                    PIPELINE_FAILED,
-                    {
-                        "event_type": PIPELINE_FAILED,
-                        "org_id": org_id,
-                        "user_id": user_id,
-                        "target_user_id": user_id,
-                        "entity_type": "pipeline_run",
-                        "entity_id": run.id,
-                        "title": f"Pipeline '{pipeline.name}' failed to launch",
-                        "message": str(e),
-                        "severity": "critical",
-                        "summary": f"Pipeline run {run.id} failed to launch",
-                    },
-                )
+        else:
+            defer_event(
+                session,
+                PIPELINE_FAILED,
+                {
+                    "event_type": PIPELINE_FAILED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Pipeline '{pipeline.name}' failed to launch",
+                    "message": run.error_message,
+                    "severity": "critical",
+                    "summary": f"Pipeline run {run.id} failed to launch",
+                },
             )
 
         await session.flush()
 
-        # 11. Update experiment status to "processing"
-        try:
-            from app.services.experiment_service import ExperimentService
+        # 11. Advance the experiment to "processing", only for a run the provider accepted
+        if submitted:
+            try:
+                from app.services.experiment_service import ExperimentService
 
-            await ExperimentService.update_status(
-                session,
-                data.experiment_id,
-                org_id,
-                user_id,
-                "processing",
-            )
-        except Exception as e:
-            # Status transition may not be valid from current state: that's OK
-            logger.warning("Could not update experiment status: %s", e)
+                await ExperimentService.update_status(
+                    session,
+                    data.experiment_id,
+                    org_id,
+                    user_id,
+                    "processing",
+                )
+            except Exception as e:
+                # Status transition may not be valid from current state: that's OK
+                logger.warning("Could not update experiment status: %s", e)
 
         # 12. Write audit log
         launch_details: dict[str, object] = {

@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -30,8 +29,9 @@ from app.schemas.custom_pipeline import (
     CustomPipelineVersionCreateRequest,
 )
 from app.services.audit_service import log_action
-from app.services.event_bus import event_bus
-from app.services.event_types import PIPELINE_STARTED
+from app.services.event_types import PIPELINE_FAILED, PIPELINE_STARTED
+from app.services.launch_outcome import mark_submission_failed
+from app.services.post_commit_events import defer_event
 from app.services.quota_service import QuotaService
 
 logger = logging.getLogger("bioaf.custom_pipeline")
@@ -782,9 +782,16 @@ class CustomPipelineService:
             "project_id": data.project_id,
         }
 
+        # A provider that raises is treated as having refused the job. That is not always true:
+        # an error after the API accepted it (a timeout reading the response, say) leaves a job
+        # running with this run marked failed. Nothing reconciles that today; see the module notes
+        # in launch_outcome.
         try:
-            compute_adapter = get_compute_adapter()
-            job_result = await compute_adapter.submit_job(job_spec)
+            job_result = await get_compute_adapter().submit_job(job_spec)
+        except Exception as e:
+            mark_submission_failed(run, e, logger)
+            await session.flush()
+        else:
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             run.k8s_job_name = job_result.job_id
@@ -800,16 +807,12 @@ class CustomPipelineService:
             if job_result.estimated_cost:
                 run.cost_estimate = job_result.estimated_cost.estimated_cost_usd
             await session.flush()
-        except Exception as e:
-            run.status = "failed"
-            run.error_message = str(e)
-            await session.flush()
-            logger.error("Custom pipeline launch failed for run %d: %s", run.id, e)
-            raise
 
-        # 16. Emit events + audit log
-        asyncio.create_task(
-            event_bus.emit(
+        # 16. Audit, and announce the outcome once the caller commits it
+        submitted = run.status == "running"
+        if submitted:
+            defer_event(
+                session,
                 PIPELINE_STARTED,
                 {
                     "event_type": PIPELINE_STARTED,
@@ -823,7 +826,23 @@ class CustomPipelineService:
                     "summary": f"Custom pipeline '{pipeline.name}' run {run.id} started",
                 },
             )
-        )
+        else:
+            defer_event(
+                session,
+                PIPELINE_FAILED,
+                {
+                    "event_type": PIPELINE_FAILED,
+                    "org_id": org_id,
+                    "user_id": user_id,
+                    "target_user_id": user_id,
+                    "entity_type": "pipeline_run",
+                    "entity_id": run.id,
+                    "title": f"Custom pipeline '{pipeline.name}' failed to launch",
+                    "message": run.error_message,
+                    "severity": "critical",
+                    "summary": f"Custom pipeline run {run.id} failed to launch",
+                },
+            )
 
         await log_action(
             session,
@@ -842,8 +861,8 @@ class CustomPipelineService:
             },
         )
 
-        # 17. Advance experiment status if applicable
-        if data.experiment_id is not None and experiment is not None:
+        # 17. Advance experiment status, only for a run the provider accepted
+        if submitted and data.experiment_id is not None and experiment is not None:
             try:
                 from app.services.experiment_service import ExperimentService
 
