@@ -245,7 +245,7 @@ async def reproduce_run(
     org_id = int(current_user["org_id"])
 
     new_run = await PipelineRunService.reproduce_run(
-        session, run_id, user_id, drop_samples_without_files=drop_samples_without_files
+        session, run_id, org_id, user_id, drop_samples_without_files=drop_samples_without_files
     )
     await session.commit()
     new_run = await PipelineRunService.get_run(session, new_run.id, org_id)

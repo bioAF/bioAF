@@ -1369,6 +1369,7 @@ class PipelineRunService:
     async def reproduce_run(
         session: AsyncSession,
         original_run_id: int,
+        org_id: int,
         user_id: int,
         drop_samples_without_files: bool = False,
     ) -> PipelineRun:
@@ -1378,8 +1379,13 @@ class PipelineRunService:
         subject to the same per-sample file requirement: a sample that has since
         lost its files raises SamplesMissingFilesError unless the caller opts to
         drop the offending samples.
+
+        ``org_id`` is the caller's Organization, and the only one this launches
+        in. The original is looked up inside it, so a run in another Organization
+        is not found, before anything is reconstructed or launched; the original
+        row's own Organization never authorizes anything.
         """
-        original = await PipelineRunService.get_run_model(session, original_run_id)
+        original = await PipelineRunService.get_run(session, original_run_id, org_id)
         if not original:
             raise NotFoundError("Original run not found")
 
@@ -1398,12 +1404,7 @@ class PipelineRunService:
             drop_samples_without_files=drop_samples_without_files,
         )
 
-        new_run = await PipelineRunService.launch_run(
-            session,
-            original.organization_id,
-            user_id,
-            data,
-        )
+        new_run = await PipelineRunService.launch_run(session, org_id, user_id, data)
 
         await log_action(
             session,
