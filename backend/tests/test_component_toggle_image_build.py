@@ -50,7 +50,7 @@ async def seed_deployed_stack(session, admin_user):
 async def test_toggle_rstudio_triggers_image_build(client, session, admin_token, admin_user, seed_deployed_stack):
     """Enabling RStudio triggers notebook image build when image is not set."""
     with patch(
-        "app.api.stack_deploy.build_notebook_image",
+        "app.services.component_service.build_notebook_image",
         new_callable=AsyncMock,
         return_value="build-789",
     ) as mock_build:
@@ -84,7 +84,7 @@ async def test_toggle_rstudio_skips_build_when_image_exists_and_build_succeeded(
     await session.commit()
 
     with patch(
-        "app.api.stack_deploy.build_notebook_image",
+        "app.services.component_service.build_notebook_image",
         new_callable=AsyncMock,
     ) as mock_build:
         response = await client.post(
@@ -117,7 +117,7 @@ async def test_toggle_rstudio_rebuilds_when_image_exists_but_build_failed(
     await session.commit()
 
     with patch(
-        "app.api.stack_deploy.build_notebook_image",
+        "app.services.component_service.build_notebook_image",
         new_callable=AsyncMock,
         return_value="rebuild-123",
     ) as mock_build:
@@ -147,7 +147,7 @@ async def test_toggle_rstudio_rebuilds_when_no_build_status(
     await session.commit()
 
     with patch(
-        "app.api.stack_deploy.build_notebook_image",
+        "app.services.component_service.build_notebook_image",
         new_callable=AsyncMock,
         return_value="rebuild-456",
     ) as mock_build:
@@ -167,7 +167,7 @@ async def test_toggle_cellxgene_triggers_own_build(client, session, admin_token,
     """Enabling cellxgene triggers its own image build, not the notebook one."""
     with (
         patch(
-            "app.api.stack_deploy.build_notebook_image",
+            "app.services.component_service.build_notebook_image",
             new_callable=AsyncMock,
         ) as mock_notebook_build,
         patch(
@@ -194,7 +194,7 @@ async def test_toggle_rstudio_still_enables_on_build_failure(
 ):
     """If image build fails, component shows build_failed status."""
     with patch(
-        "app.api.stack_deploy.build_notebook_image",
+        "app.services.component_service.build_notebook_image",
         new_callable=AsyncMock,
         side_effect=ValueError("GCP project not configured"),
     ):

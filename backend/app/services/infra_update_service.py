@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from contextlib import aclosing
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import StateError
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_executor import TerraformExecutor
+from app.services.terraform_stream import INTERRUPTED_EVENT, commit_interruption
 
 logger = logging.getLogger("bioaf.infra_update_service")
 
@@ -370,6 +372,7 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
         return False
 
     async with async_session_factory() as s:  # type: ignore[misc]
+        applying = False
         try:
             run = await TerraformExecutor.run_plan(s, user_id, module_name=module)
             # The target may have already been applied (or turned destructive)
@@ -381,8 +384,15 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
                 return False
             run.status = "applying"
             await s.flush()
-            async for _event in TerraformExecutor.run_apply(s, run.id, user_id, targets=[target]):
-                pass
+            applying = True
+            interrupted = False
+            async with aclosing(TerraformExecutor.run_apply(s, run.id, user_id, targets=[target])) as events:
+                async for event in events:
+                    interrupted = interrupted or event.event_type == INTERRUPTED_EVENT
+            if interrupted:
+                # run_apply absorbed the cancellation. Raise it again so the batch
+                # does not start another Terraform process.
+                raise asyncio.CancelledError
             if run.status == "failed" and _is_benign_apply_error(run.error_message):
                 logger.info(
                     "Infrastructure update: skipping no-op update for %s (%s)",
@@ -396,6 +406,13 @@ async def _apply_one_target(module: str, target: str, user_id: int) -> bool:
             applied = run.status == "completed"
             await s.commit()
             return applied
+        except asyncio.CancelledError:
+            if applying:
+                await commit_interruption(s)
+            else:
+                # Nothing ran yet: leave no half-planned run behind.
+                await s.rollback()
+            raise
         except Exception:
             logger.exception("Infrastructure update apply failed for target %s", target)
             await s.rollback()

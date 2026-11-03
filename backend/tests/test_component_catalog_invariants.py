@@ -6,12 +6,12 @@ the contract: every key any runtime path writes to `component_states` must
 exist in `COMPONENT_CATALOG`. The catalog is the source of truth.
 """
 
-from app.api.stack_deploy import (
+from app.services.component_service import (
     _CELLXGENE_COMPONENTS,
     _NOTEBOOK_COMPONENTS,
+    COMPONENT_CATALOG,
     KUBERNETES_COMPONENTS,
 )
-from app.services.component_service import COMPONENT_CATALOG
 
 
 def test_notebook_image_target_keys_exist_in_catalog():

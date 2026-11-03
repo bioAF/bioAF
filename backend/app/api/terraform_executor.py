@@ -14,21 +14,21 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import require_permission
+from app.api.terraform_streaming import INTERRUPTED_MESSAGE, ClosingStreamingResponse, client_event
 from app.database import get_session
 from app.models.component import TerraformRun
 from app.platform.cloud_provider import get_cloud_provider
 from app.platform.platform_config_service import PlatformConfigService
 from app.services.terraform_cloud import get_terraform_cloud
 from app.services.terraform_executor import TerraformExecutor, TerraformProgressEvent
+from app.services.terraform_stream import INTERRUPTED_EVENT, owned_event_stream
 
 logger = logging.getLogger("bioaf.terraform_api")
 
@@ -93,22 +93,6 @@ def _sse_event(event: TerraformProgressEvent) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-async def _stream_events(
-    gen: AsyncIterator[TerraformProgressEvent],
-) -> AsyncIterator[str]:
-    """Wrap an async event generator into SSE-formatted strings."""
-    try:
-        async for event in gen:
-            yield _sse_event(event)
-    except Exception as exc:
-        logger.error("Terraform event stream error: %s", exc, exc_info=True)
-        error_event = TerraformProgressEvent(
-            event_type="apply_error",
-            message="Apply failed unexpectedly",
-        )
-        yield _sse_event(error_event)
-
-
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -118,7 +102,7 @@ async def _stream_events(
 async def bootstrap_foundation(
     current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
-) -> StreamingResponse:
+) -> ClosingStreamingResponse:
     """Bootstrap the GCS Terraform state bucket. Streams SSE progress events."""
     user_id = int(current_user["sub"])
     org_id = int(current_user["org_id"])
@@ -137,20 +121,21 @@ async def bootstrap_foundation(
     gen = TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id)
 
     async def event_generator():
-        try:
-            async for event in gen:
-                yield _sse_event(event)
-        except Exception as exc:
-            logger.error("Bootstrap foundation stream error: %s", exc, exc_info=True)
-            error_event = TerraformProgressEvent(
-                event_type="apply_error",
-                message="Apply failed unexpectedly",
-            )
-            yield _sse_event(error_event)
-        finally:
-            await session.commit()
+        async with owned_event_stream(session, gen) as events:
+            try:
+                async for event in events:
+                    yield _sse_event(client_event(event))
+            except Exception as exc:
+                logger.error("Bootstrap foundation stream error: %s", exc, exc_info=True)
+                # Unexpected: discard partial work, unlike a reported outcome.
+                await session.rollback()
+                error_event = TerraformProgressEvent(
+                    event_type="apply_error",
+                    message="Apply failed unexpectedly",
+                )
+                yield _sse_event(error_event)
 
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
@@ -183,14 +168,18 @@ async def terraform_init(
     # Consume the SSE generator to completion
     last_error = None
     try:
-        async for event in TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id):
-            if event.event_type == "apply_error":
-                last_error = event.message
+        async with owned_event_stream(
+            session,
+            TerraformExecutor.bootstrap_foundation(session=session, user_id=user_id, org_id=org_id),
+        ) as events:
+            async for event in events:
+                if event.event_type == "apply_error":
+                    last_error = event.message
+                elif event.event_type == INTERRUPTED_EVENT:
+                    last_error = INTERRUPTED_MESSAGE
     except Exception as exc:
         logger.error("Terraform init failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    await session.commit()
 
     if last_error:
         raise HTTPException(status_code=500, detail=last_error)
@@ -222,7 +211,7 @@ async def apply_plan(
     run_id: int,
     current_user: dict = require_permission("infrastructure", "create"),
     session: AsyncSession = Depends(get_session),
-) -> StreamingResponse:
+) -> ClosingStreamingResponse:
     """Apply an approved plan. Streams SSE progress events."""
     user_id = int(current_user["sub"])
 
@@ -240,20 +229,21 @@ async def apply_plan(
     gen = TerraformExecutor.run_apply(session=session, run_id=run_id, user_id=user_id)
 
     async def event_generator():
-        try:
-            async for event in gen:
-                yield _sse_event(event)
-        except Exception as exc:
-            logger.error("Terraform apply stream error for run %d: %s", run_id, exc, exc_info=True)
-            error_event = TerraformProgressEvent(
-                event_type="apply_error",
-                message="Apply failed unexpectedly",
-            )
-            yield _sse_event(error_event)
-        finally:
-            await session.commit()
+        async with owned_event_stream(session, gen) as events:
+            try:
+                async for event in events:
+                    yield _sse_event(client_event(event))
+            except Exception as exc:
+                logger.error("Terraform apply stream error for run %d: %s", run_id, exc, exc_info=True)
+                # Unexpected: discard partial work, unlike a reported outcome.
+                await session.rollback()
+                error_event = TerraformProgressEvent(
+                    event_type="apply_error",
+                    message="Apply failed unexpectedly",
+                )
+                yield _sse_event(error_event)
 
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},

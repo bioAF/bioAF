@@ -11,7 +11,7 @@ from app.schemas.component import (
     ComponentStateResponse,
 )
 from app.platform.platform_config_service import PlatformConfigService
-from app.services.component_service import COMPONENT_CATALOG, ComponentService
+from app.services.component_service import COMPONENT_CATALOG, KUBERNETES_COMPONENTS, ComponentService
 
 router = APIRouter(prefix="/api/components", tags=["components"])
 
@@ -57,8 +57,6 @@ async def select_batch(
     # Infrastructure > Components page renders; that is the contract the
     # wizard's picker is built on.
     if compute_stack == "kubernetes":
-        from app.api.stack_deploy import KUBERNETES_COMPONENTS
-
         allowed = {c["key"] for c in KUBERNETES_COMPONENTS}
     else:
         # SLURM components are not yet shippable from the wizard.
