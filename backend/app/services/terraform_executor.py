@@ -24,7 +24,7 @@ from contextlib import aclosing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, AsyncIterator, cast
+from typing import TYPE_CHECKING, AsyncGenerator, cast
 
 import anyio
 from sqlalchemy import select, text
@@ -163,7 +163,7 @@ class TerraformExecutor:
         run_id: int,
         user_id: int,
         targets: list[str] | None = None,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Apply an approved plan, yielding progress events.
 
         Yields TerraformProgressEvent objects as Terraform processes each resource.
@@ -401,7 +401,7 @@ class TerraformExecutor:
         session: AsyncSession,
         user_id: int,
         org_id: int | None = None,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Bootstrap the remote-state bucket via the foundation module.
 
         Steps:
@@ -621,7 +621,7 @@ class TerraformExecutor:
         session: AsyncSession,
         user_id: int,
         module_name: str,
-    ) -> AsyncIterator[TerraformProgressEvent]:
+    ) -> AsyncGenerator[TerraformProgressEvent, None]:
         """Destroy all resources for a module via `terraform destroy`.
 
         Creates a TerraformRun record, runs `terraform destroy -auto-approve -json`,
