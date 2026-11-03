@@ -43,6 +43,7 @@ from app.services.terraform_stream import (
     TerraformProgressEvent,
     diagnostics_message,
     read_exit,
+    record_whole,
     stop_process,
     stream_terraform_output,
 )
@@ -542,8 +543,7 @@ class TerraformExecutor:
 
             # Record the bootstrap as one unit: an initialized flag without its
             # state bucket would block a retry with nothing to resume from.
-            with anyio.CancelScope(shield=True):
-                from app.adapters.registry import get_storage_adapter
+            async def record_bootstrap() -> None:
                 from app.platform.platform_config_service import PlatformConfigService
 
                 for key, value in [
@@ -552,15 +552,6 @@ class TerraformExecutor:
                     ("backups_bucket_name", backups_bucket),
                 ]:
                     await PlatformConfigService.set(session, key, value)
-
-                run.status = "completed"
-                # Bucket-root state URL with no trailing slash; build_uri mints the
-                # backend scheme, rstrip drops the slash it adds for an empty key.
-                run.terraform_state_url = (
-                    get_storage_adapter().build_uri(bucket_name, "").rstrip("/") if bucket_name else ""
-                )
-                run.completed_at = datetime.now(timezone.utc)
-                await session.flush()
 
                 await log_action(
                     session,
@@ -582,8 +573,21 @@ class TerraformExecutor:
                         entity_id=run.id,
                         metadata={"state_bucket": bucket_name},
                     )
-
                 await session.flush()
+
+            await record_whole(session, record_bootstrap)
+
+            # Outside the savepoint, so a rollback there cannot expire the run.
+            from app.adapters.registry import get_storage_adapter
+
+            run.status = "completed"
+            # Bucket-root state URL with no trailing slash; build_uri mints the
+            # backend scheme, rstrip drops the slash it adds for an empty key.
+            run.terraform_state_url = (
+                get_storage_adapter().build_uri(bucket_name, "").rstrip("/") if bucket_name else ""
+            )
+            run.completed_at = datetime.now(timezone.utc)
+            await session.flush()
 
             yield TerraformProgressEvent(
                 event_type="apply_complete",

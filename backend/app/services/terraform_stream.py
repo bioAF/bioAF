@@ -210,6 +210,26 @@ async def _wait_for_exit(process: asyncio.subprocess.Process, seconds: float) ->
         pass
 
 
+async def record_whole(session: AsyncSession, record: Callable[[], Awaitable[None]]) -> None:
+    """Run ``record`` so its writes land together or not at all.
+
+    The shield lets it finish through a client disconnect. A direct task
+    cancellation is not stopped by a shield, so the savepoint discards partial
+    writes; otherwise the owner's commit-on-interruption would persist them.
+    ``record`` must not modify ORM objects the caller reads afterwards: a
+    savepoint rollback expires them, and reloading needs IO.
+    """
+    savepoint = await session.begin_nested()
+    try:
+        with anyio.CancelScope(shield=True):
+            await record()
+    except BaseException:
+        with anyio.CancelScope(shield=True):
+            await savepoint.rollback()
+        raise
+    await savepoint.commit()
+
+
 async def commit_interruption(session: AsyncSession) -> None:
     """Commit an interruption outcome if the transaction survived it."""
     with anyio.CancelScope(shield=True):

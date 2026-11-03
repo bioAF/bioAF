@@ -548,3 +548,39 @@ async def test_lock_cleanup_failure_does_not_hide_the_original_failure(session, 
 
     assert events[-1].event_type == "apply_error"
     assert events[-1].message == "stream broke"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_task_cancellation_never_commits_half_its_configuration(
+    session, user_id, bootstrap_harness, db_engine
+):
+    """Direct task cancellation, not an anyio scope: shielding alone does not stop it."""
+    from app.platform.platform_config_service import PlatformConfigService
+    from app.services.terraform_stream import owned_event_stream
+
+    await _seed_config(session, initialized=False)
+    process = bootstrap_harness.fake()
+    process.exit(0)
+    real_set = PlatformConfigService.set
+
+    async def cancel_on_second_write(sess, key, value):
+        if key == "terraform_state_bucket":
+            raise asyncio.CancelledError
+        await real_set(sess, key, value)
+
+    events = []
+    with patch.object(PlatformConfigService, "set", side_effect=cancel_on_second_write):
+        async with owned_event_stream(session, TerraformExecutor.bootstrap_foundation(session, user_id)) as stream:
+            async for event in stream:
+                events.append(event)
+
+    factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as other:
+        initialized = (
+            await other.execute(text("SELECT value FROM platform_config WHERE key = 'terraform_initialized'"))
+        ).scalar_one()
+        audits = (await other.execute(text("SELECT COUNT(*) FROM audit_log WHERE action = 'bootstrap'"))).scalar()
+    assert events[-1].event_type == "interrupted"
+    assert initialized == "false"
+    assert audits == 0
+    assert await _committed_status(db_engine) == "failed"

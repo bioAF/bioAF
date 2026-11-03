@@ -39,7 +39,7 @@ from app.services.deployment_outputs import (
 from app.services.orphaned_resource_service import OrphanedResourceService
 from app.services.stack_progress import StackProgress, reduce_progress
 from app.services.terraform_executor import RUN_INTERRUPTED_MESSAGE, TerraformExecutor, TerraformProgressEvent
-from app.services.terraform_stream import INTERRUPTED_EVENT, OperationOutcome
+from app.services.terraform_stream import INTERRUPTED_EVENT, OperationOutcome, record_whole
 from app.adapters.work_nodes.gce_capacity import AllZonesExhaustedError
 
 logger = logging.getLogger("bioaf.stack_deployment")
@@ -347,7 +347,9 @@ async def _deploy_phase(
 
             phase.progress, shown = reduce_progress(phase.progress, module_name, event)
             if event.event_type == "apply_complete":
-                await _run_post_hook(session, after_apply, event.extra.get("outputs", {}))
+                # The apply succeeded: record it whole. If that is cancelled the
+                # outcome stays uncertain, which a status check or config sync resolves.
+                await record_whole(session, partial(after_apply, event.extra.get("outputs", {})))
                 yield TerraformProgressEvent(
                     event_type="phase_complete",
                     message=complete_message,
@@ -356,29 +358,6 @@ async def _deploy_phase(
                 )
             else:
                 yield shown
-
-
-async def _run_post_hook(
-    session: AsyncSession,
-    after_apply: Callable[[dict], Awaitable[None]],
-    outputs: dict,
-) -> None:
-    """Record a confirmed apply whole or not at all.
-
-    The apply succeeded, so the hook is shielded from a client disconnect and
-    finishes. A task cancellation can still land inside it; the savepoint then
-    discards the partial writes, leaving the outcome uncertain, which a status
-    check or config sync can resolve, rather than half recorded.
-    """
-    savepoint = await session.begin_nested()
-    try:
-        with anyio.CancelScope(shield=True):
-            await after_apply(outputs)
-    except BaseException:
-        with anyio.CancelScope(shield=True):
-            await savepoint.rollback()
-        raise
-    await savepoint.commit()
 
 
 async def _tag_deploy_phase(session: AsyncSession, module_name: str) -> None:
